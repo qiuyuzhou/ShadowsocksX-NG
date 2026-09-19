@@ -11,6 +11,8 @@
 - **Active target**: The persisted server configuration or configuration group selected for proxying. When a group is active, the group UUID remains the target even when `sslocal` chooses an individual descendant server.
 - **Enabled**: A local eligibility state on a server configuration or configuration group. A node is effectively enabled only when it and every group ancestor are enabled.
 - **Proxy mode**: The user-facing way traffic is routed through the local proxy, such as PAC, global, manual, or an external PAC configuration.
+- **HTTP proxy mode**: A local proxy mode that accepts HTTP/HTTPS proxy requests directly through the Shadowsocks runtime; it does not require a separate adapter process.
+- **Legacy Privoxy adapter**: The frozen implementation's HTTP(S)-to-local-SOCKS5 bridge. It is a Legacy-only dependency and is not migrated into 2.0.
 - **Legacy configuration**: The server list and preferences persisted by the frozen implementation in `Legacy/`.
 - **Runtime configuration file**: The derived JSON document used by the external tunnel service for the active target; it is not the user-managed server configuration or subscription document.
 - **Sensitive information**: Server passwords, plugin options that contain credentials, and subscription URLs containing tokens or other access credentials.
