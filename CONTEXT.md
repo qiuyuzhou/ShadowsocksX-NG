@@ -2,20 +2,38 @@
 
 ## Vocabulary
 
-- **Server configuration**: The user-visible connection data for one Shadowsocks server. It is a leaf in the configuration tree.
-- **Configuration group**: A named, ordered container that may contain server configurations and nested configuration groups.
-- **Manual group**: A configuration group whose membership is edited by the user.
-- **Subscription**: A remote configuration source identified by a subscription URL and refreshed over time.
-- **Subscription group**: The fixed configuration group owned by one subscription. Refreshing a subscription updates this group and must not change manual groups.
-- **Active target**: The server configuration or configuration group currently selected for proxying.
+- **Configuration catalog**: The non-user-visible root of the 2.0 configuration tree. Its ordered top-level children may be server configurations or configuration groups.
+- **Server configuration**: The user-visible connection data for one Shadowsocks server. It is a leaf with an opaque, persistent UUID and a source owner.
+- **Configuration group**: A named, ordered container that may contain server configurations and nested configuration groups. A node has at most one parent, and group membership forms an acyclic tree.
+- **Manual group**: A configuration group owned by the user. It may contain only manually owned nodes; deleting it recursively deletes its descendants, with a second confirmation when it is non-empty.
+- **Subscription**: A remote configuration source with a persistent opaque UUID and a fixed subscription-group identity. Its URL is a mutable endpoint/credential reference; editing the URL keeps the source identity, while deleting and creating a subscription establishes a new source identity.
+- **Subscription group**: The fixed, source-owned configuration subtree provided by one subscription. Users cannot move or structurally edit its nodes. A subscription node's user-visible name/remark is one remote-derived value from `remarks`, falling back to the server address when absent; it has no local alias or note override. Local enablement remains a separate eligibility state.
+- **Active target**: The persisted server configuration or configuration group selected for proxying. When a group is active, the group UUID remains the target even when `sslocal` chooses an individual descendant server.
+- **Enabled**: A local eligibility state on a server configuration or configuration group. A node is effectively enabled only when it and every group ancestor are enabled.
 - **Proxy mode**: The user-facing way traffic is routed through the local proxy, such as PAC, global, manual, or an external PAC configuration.
 - **Legacy configuration**: The server list and preferences persisted by the frozen implementation in `Legacy/`.
+- **Runtime configuration file**: The derived JSON document used by the external tunnel service for the active target; it is not the user-managed server configuration or subscription document.
+- **Sensitive information**: Server passwords, plugin options that contain credentials, and subscription URLs containing tokens or other access credentials.
+- **Credential exposure boundary**: This product reduces accidental disclosure and exposure to other user accounts, but does not guarantee protection against a compromised same-user process, root access, or APFS snapshots and backups; it does not promise secure erasure.
+- **Credential reference**: A non-secret association from a server configuration or subscription to its durable credential; the credential value is kept outside the configuration tree and resolved only when the external service needs a runtime configuration.
 
 ## Relationships and invariants
 
-- A configuration group may be nested to arbitrary supported depth, but its tree must remain acyclic.
-- A server configuration has a stable identity independent of its display name and position.
-- Activating a server selects that one server; activating a group selects the valid descendant server configurations as a set for the external proxy service.
-- A subscription owns its subscription group and its refreshed members; manual groups remain user-owned.
+- Top-level catalog children may be server configurations or groups; there is no artificial user-visible “uncategorized” group.
+- Server and group identities are opaque, persistent UUIDs independent of display name, position, or parent; IDs are not reused for another logical node.
+- Each group stores an explicit child order. A node cannot be shared by multiple groups, and group edges must remain acyclic.
+- Manual and subscription ownership form separate subtrees; a manual group cannot adopt subscription-owned nodes, and subscription-owned nodes cannot be moved into manual groups.
+- New manual servers always receive a new UUID rather than being deduplicated by endpoint or serialized content; Legacy migration preserves an available legacy UUID.
+- Effective enablement excludes a disabled group and its subtree or a disabled server leaf from activation.
+- Activating a server selects that one server. Activating a group recursively expands effectively enabled server leaves in explicit child order and passes them to the external proxy service; an empty result or an invalid enabled leaf rejects activation atomically.
+- The active target remains the selected node ID and is not silently replaced by a descendant chosen by `sslocal`. If it is deleted, disabled, empty, or invalid, the target is cleared and proxying stops rather than falling back silently.
+- After a committed edit to the active target's subtree, the target is re-expanded immediately: a valid non-empty result updates the runtime atomically; an empty or invalid result clears the target and stops proxying without fallback.
+- Manual nodes may move between the catalog root and manual groups, carrying their subtree and child order without changing identity or ownership; cross-source moves, shared parents, and cycles are rejected.
+- Empty groups may persist and remain editable, but cannot be activated. Deleting a non-empty manual group recursively deletes its descendants and requires a second confirmation.
+- A subscription owns its subscription group and its refreshed members; manual groups remain user-owned. Remote connection fields, membership, structure, order, and `remarks` are authoritative; only local enablement may be retained as a per-node overlay for a matched subscription identity.
+- Subscription server and nested-group identities use provider-supplied stable IDs scoped to that subscription. When a remote record has no stable ID, continuity is allowed only for an exactly matching canonical record; endpoint, name, or path heuristics must not merge identities.
+- Subscription-owned nodes and nested groups permit no local connection-field, name/remark, membership, parent, or order override. A matched remote node or group may retain only its local `enabled` state; new records default to enabled, and removed records lose their overlays rather than leaving tombstones.
+- Each subscription refresh is a complete, validated snapshot committed atomically. A valid empty snapshot replaces the remote subtree with an empty group; transport, HTTP/authentication, decoding, schema, duplicate-ID, cycle, or record-validation failures leave the last successful snapshot, local enablement, active target, and runtime state unchanged while marking the source stale. An initial failed refresh leaves an empty group with an error state.
+- Editing a subscription URL keeps the subscription, fixed group, and remote identity namespace; the last successful snapshot remains available until the new URL succeeds. To isolate a different source, delete the old subscription and create a new one. Deleting a subscription removes its source, fixed group, remote members, and local overlays after explicit confirmation; an active target is cleared and proxying stops without fallback.
 - Legacy server configurations migrate into a separate manual group, preserving stable server identities where the legacy data provides them.
 - The GUI is the user-facing manager; the Shadowsocks tunnel service is an external runtime boundary rather than part of the GUI's domain model.
