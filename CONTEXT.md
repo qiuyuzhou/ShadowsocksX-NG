@@ -14,6 +14,7 @@
 - **HTTP proxy mode**: A local proxy mode that accepts HTTP/HTTPS proxy requests directly through the Shadowsocks runtime; it does not require a separate adapter process.
 - **Legacy Privoxy adapter**: The frozen implementation's HTTP(S)-to-local-SOCKS5 bridge. It is a Legacy-only dependency and is not migrated into 2.0.
 - **Listen scope**: A user-facing two-state choice of whether the locally provided proxy endpoints — the PAC HTTP endpoint and the external tunnel service's inbound listeners — bind to loopback only or to the host's network-facing address. The host-facing scope intentionally exposes an unauthenticated local proxy to other devices on the network, so users can share the PAC URL or proxy address to machines other than this one.
+- **Proxy runtime**: The per-user background host process, independent of the GUI's lifetime, that hosts the locally provided proxy endpoints: it runs the external tunnel service and serves the PAC HTTP endpoint.
 - **Legacy configuration**: The server list and preferences persisted by the frozen implementation in `Legacy/`.
 - **Runtime configuration file**: The derived JSON document used by the external tunnel service for the active target; it is not the user-managed server configuration or subscription document.
 - **Sensitive information**: Server passwords, plugin options that contain credentials, and subscription URLs containing tokens or other access credentials.
@@ -40,4 +41,5 @@
 - Editing a subscription URL keeps the subscription, fixed group, and remote identity namespace; the last successful snapshot remains available until the new URL succeeds. To isolate a different source, delete the old subscription and create a new one. Deleting a subscription removes its source, fixed group, remote members, and local overlays after explicit confirmation; an active target is cleared and proxying stops without fallback.
 - Legacy server configurations migrate into a separate manual group, preserving stable server identities where the legacy data provides them.
 - The PAC HTTP endpoint and the external tunnel service's inbound listeners follow one shared listen scope, so a PAC URL or proxy address shared to another machine always points at a reachable proxy; loopback is the default scope.
+- The PAC HTTP endpoint and the external tunnel service start and stop together inside the proxy runtime: both are reachable exactly while proxying is on, and neither depends on the GUI being open. The GUI writes the system proxy configuration and gates that write on endpoint health.
 - The GUI is the user-facing manager; the Shadowsocks tunnel service is an external runtime boundary rather than part of the GUI's domain model.
