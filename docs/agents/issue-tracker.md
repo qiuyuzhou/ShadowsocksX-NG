@@ -11,7 +11,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
 
-Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
+**Always pass `--repo qiuyuzhou/ShadowsocksX-NG` explicitly on every `gh` command** (`view`/`edit`/`comment`/`close`/`create`/`api` alike). This clone has an `upstream` remote pointing at the original `shadowsocks/ShadowsocksX-NG`, and `gh`'s automatic inference can resolve there — writes to the upstream repo are forbidden. (An unqualified `gh issue comment` once posted a wayfinder resolution onto an upstream issue by mistake.)
 
 ## Pull requests as a triage surface
 
