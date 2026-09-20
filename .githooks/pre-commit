@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # Pre-commit 提交门槛（启用：git config core.hooksPath .githooks，
-# 约定与工具安装见 ShadowsocksX-NG2/AGENTS.md）：
+# 约定见 ShadowsocksX-NG2/AGENTS.md，工具安装与版本见 ShadowsocksX-NG2/README.md）：
 #   1. 对暂存的 ShadowsocksX-NG2/ 下 .swift 文件先 `swift format` 格式化，
 #      格式化结果直接写回暂存区（只改暂存区、不动工作区，部分暂存安全）；
 #   2. 再用 SwiftLint 检查暂存内容：error 级违规拒绝提交，warning 仅提示。
@@ -32,7 +32,7 @@ done > "$STAGED_LIST"
 
 for tool in swift swiftlint; do
 	if ! command -v "$tool" >/dev/null 2>&1; then
-		echo "pre-commit: 缺少 ${tool}，无法执行提交检查（安装步骤见 ShadowsocksX-NG2/AGENTS.md）" >&2
+		echo "pre-commit: 缺少 ${tool}，无法执行提交检查（安装步骤见 ShadowsocksX-NG2/README.md）" >&2
 		exit 1
 	fi
 done

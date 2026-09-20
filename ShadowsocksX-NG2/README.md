@@ -49,6 +49,12 @@ Scripts/packaging-gate.sh \
   .build/DerivedData/Build/Products/Debug/ShadowsocksX-NG2.app
 ```
 
+## 代码风格工具
+
+- `swift format` 随 Xcode/Swift 工具链提供，无需单独安装（基线：Apple Swift 6.4）；SwiftLint 需 `brew install swiftlint`（基线 0.65.0）。工具缺失时，含本目录 Swift 文件的提交会被 pre-commit 钩子拒绝而不是放行。
+- 配置文件：`.swift-format` 是 Swift 6.4 工具链默认规则的快照（固定成文件，工具链升级不漂移）；`.swiftlint.yml` 默认规则起步，只声明排除项。
+- 提交门槛的行为约定、钩子启用与手动执行命令见 [`AGENTS.md`](AGENTS.md)。
+
 ## 依赖升级
 
 升级任一外部二进制是显式供应链动作：人工复验新 release（下载归档、静态观测哈希/架构/签名，不执行），随后在一次 PR 中同时改 `Vendor/<name>/manifest.json` 的 release/asset/url/archiveSHA256 与对应测试锚点。不接受 `latest`，不在仓库内构建，不做应用内更新通道（升级仅随 app 发版）。
