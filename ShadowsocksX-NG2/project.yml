@@ -57,7 +57,8 @@ targets:
         PRODUCT_NAME: ShadowsocksX-NG2
         CODE_SIGN_IDENTITY: "Developer ID Application"
         MARKETING_VERSION: "2.0.0"
-        CURRENT_PROJECT_VERSION: 1
+        # 必须 > 旧版 1.x 已发布构建的 CFBundleVersion（始终为 1），保证 build 号严格递增。
+        CURRENT_PROJECT_VERSION: 2
     info:
       path: App/Info.plist
       properties:
