@@ -1,0 +1,61 @@
+name: ShadowsocksX-NG2
+options:
+  createIntermediateGroups: true
+  developmentLanguage: zh-Hans
+  deploymentTarget:
+    macOS: "15.0"
+settings:
+  base:
+    ARCHS: arm64
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: S878RH3PA8
+    ENABLE_HARDENED_RUNTIME: YES
+  configs:
+    Release:
+      # 发布基线：签名 entitlements 必须只来自项目 entitlements 文件（保持最小）。
+      CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+targets:
+  ShadowsocksX-NG2:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG
+        PRODUCT_NAME: ShadowsocksX-NG2
+        CODE_SIGN_IDENTITY: "Developer ID Application"
+        MARKETING_VERSION: "2.0.0"
+        CURRENT_PROJECT_VERSION: 1
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSMinimumSystemVersion: "15.0"
+        LSUIElement: true
+        NSPrincipalClass: NSApplication
+        LSApplicationCategoryType: public.app-category.utilities
+    entitlements:
+      path: App/ShadowsocksX-NG2.entitlements
+      properties: {}
+    scheme:
+      testTargets:
+        - ShadowsocksX-NG2Tests
+  ShadowsocksX-NG2Tests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG.Tests
+        # 必须与宿主 app 同 Team 签名：Hardened Runtime 的 library validation 拒绝
+        # 加载不同 Team ID 的非平台库，ad-hoc（"-"）签名的 xctest 包无法注入。
+        CODE_SIGN_IDENTITY: "Apple Development"
+    info:
+      path: Tests/Info.plist
+      properties: {}
+    dependencies:
+      - target: ShadowsocksX-NG2
