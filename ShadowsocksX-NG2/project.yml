@@ -21,6 +21,8 @@ targets:
     platform: macOS
     sources:
       - path: App
+      # 领域核心：配置目录树、凭据引用与持久化（spec #21 D3/D5）
+      - path: Domain
       # 外部二进制（Vendor/<name>/manifest.json 固定 tag+URL+SHA-256）。必须先跑
       # Scripts/fetch-external-binaries.sh 再 xcodegen generate：文件在生成时必须已存在，
       # 否则 Copy Files 阶段会被静默丢弃。构建内的 preBuildScripts 只做增量复验，

@@ -7,3 +7,9 @@ excluded:
   # 冻结目录：Legacy/ 只读，不 format / lint（本配置位于 ShadowsocksX-NG2/ 内，
   # 常规调用天然扫不到它；此条保证带 --config 从仓库根调用时也明确排除）
   - ../Legacy
+disabled_rules:
+  # 与 .swift-format 基线冲突：multiElementCollectionTrailingCommas=true 要求
+  # 多元素集合字面量带尾逗号（触发案例：Domain/CredentialStore.swift 的
+  # Keychain 查询字典），而本规则默认对其告警；pre-commit 先 format 再 lint，
+  # 不关掉则每次提交必然出现同样的 warning。
+  - trailing_comma

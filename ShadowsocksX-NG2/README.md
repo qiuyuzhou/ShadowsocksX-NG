@@ -10,6 +10,7 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
 
 - `project.yml` — XcodeGen 工程定义，唯一事实来源。`.xcodeproj` 与 `App/Info.plist`、`*.entitlements`、`Tests/Info.plist` 都是生成物（已 gitignore），改工程结构一律改 `project.yml` 后重新生成。
 - `App/` — app target 源码（SwiftUI 菜单栏 app，LSUIElement）。
+- `Domain/` — 领域核心（配置目录树、凭据引用与持久化，spec #21 D3/D5），与 UI 无关。
 - `Tests/` — 单元测试 target，随 `ShadowsocksX-NG2` scheme 运行。
 - `Vendor/<name>/manifest.json` — 外部二进制的固定供应链清单（tag + 资产 URL + 归档 SHA-256 + bundle 内位置 + 签名 identifier）；二进制本体与 `.fetched.sha256` 戳是构建缓存，不入库。
 - `Scripts/` — 供应链脚本（见下节）与打包门槛断言。
@@ -52,7 +53,7 @@ Scripts/packaging-gate.sh \
 ## 代码风格工具
 
 - `swift format` 随 Xcode/Swift 工具链提供，无需单独安装（基线：Apple Swift 6.4）；SwiftLint 需 `brew install swiftlint`（基线 0.65.0）。工具缺失时，含本目录 Swift 文件的提交会被 pre-commit 钩子拒绝而不是放行。
-- 配置文件：`.swift-format` 是 Swift 6.4 工具链默认规则的快照（固定成文件，工具链升级不漂移）；`.swiftlint.yml` 默认规则起步，只声明排除项。
+- 配置文件：`.swift-format` 是 Swift 6.4 工具链默认规则的快照（固定成文件，工具链升级不漂移）；`.swiftlint.yml` 默认规则起步，只声明排除项与个别和 format 基线冲突的关闭项（文件内有触发案例注释）。
 - 提交门槛的行为约定、钩子启用与手动执行命令见 [`AGENTS.md`](AGENTS.md)。
 
 ## 依赖升级

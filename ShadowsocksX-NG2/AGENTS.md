@@ -14,7 +14,7 @@
 - 手动执行（在本目录内运行配置才自动加载；`swift format` 作用于目录需 `-r`）：
 
   ```bash
-  swift format format --in-place -r App Tests
+  swift format format --in-place -r App Tests Domain
   swiftlint lint
   ```
 
