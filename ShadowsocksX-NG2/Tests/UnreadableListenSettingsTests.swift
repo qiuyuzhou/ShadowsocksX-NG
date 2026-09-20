@@ -1,0 +1,101 @@
+import XCTest
+
+@testable import ShadowsocksX_NG2
+
+/// 监听设置不可读时的控制器行为（spec #21 D8「任何路径不静默改端口」，
+/// issue #30）：占位出厂端口不得部署——停止运行时并点名呈现启动失败。
+@MainActor
+final class UnreadableListenSettingsTests: XCTestCase {
+  private var runtime: ProxyRuntimeFixture.TemporaryV2!
+  private var catalogFileURL: URL!
+  private var activationFileURL: URL!
+  private var credentials: InMemoryCredentialStore!
+  private var agent: ProxyRuntimeFixture.FakeLaunchAgent!
+  private var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
+
+  override func setUpWithError() throws {
+    try super.setUpWithError()
+    runtime = ProxyRuntimeFixture.makeTemporaryV2()
+    catalogFileURL = runtime.directory.appendingPathComponent("catalog.json")
+    activationFileURL = runtime.directory.appendingPathComponent("activation.json")
+    credentials = InMemoryCredentialStore()
+    agent = ProxyRuntimeFixture.FakeLaunchAgent()
+    systemProxy = ProxyRuntimeFixture.FakeSystemProxy()
+  }
+
+  override func tearDownWithError() throws {
+    try? FileManager.default.removeItem(at: runtime.directory)
+    try super.tearDownWithError()
+  }
+
+  private func makeController(
+    agentStatus: LaunchAgentStatus,
+    listenUnreadable: ListenSettingsStoreError
+  ) -> ProxyRuntimeController {
+    agent.setStatus(agentStatus)
+    return ProxyRuntimeController(
+      catalogFileStore: CatalogFileStore(fileURL: catalogFileURL),
+      activationFileStore: ActivationStateFileStore(fileURL: activationFileURL),
+      runtimeFileStore: RuntimeFileStore(fileURL: runtime.contract),
+      credentials: credentials,
+      plugins: ActivationFixture.plugins,
+      listenRestore: RestoredListenSettings(
+        settings: SslocalListenSettings(), unreadableError: listenUnreadable),
+      agent: agent,
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      systemProxy: systemProxy,
+      sendSignal: { _, _ in 0 })
+  }
+
+  /// 建一个含单台服务器的目录并落盘（服务器密码进内存凭据存储）。
+  private func makeSeededCatalog() throws -> NodeID {
+    var catalog = ConfigurationCatalog()
+    let server = try ActivationFixture.addPlainServer(
+      "香港 01", in: &catalog, credentials: credentials)
+    try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
+    return server
+  }
+
+  func testEnableWithUnreadableListenSettingsRefusesDeploymentAndNamesReason() async throws {
+    let server = try makeSeededCatalog()
+    let controller = makeController(
+      agentStatus: .notRegistered,
+      listenUnreadable: .invalidPorts([
+        .duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 1086)
+      ]))
+
+    await controller.activate(server)
+    await controller.setProxyEnabled(true)
+
+    guard case .launchFailed(let detail) = controller.state else {
+      return XCTFail("应呈现启动失败，实际 \(controller.state)")
+    }
+    XCTAssertTrue(
+      detail.contains("端口配置无法读取") && detail.contains("1086"),
+      "失败必须点名监听设置不可读及原因：\(detail)")
+    XCTAssertEqual(agent.registerCount, 0, "占位出厂端口不得部署")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
+    XCTAssertTrue(systemProxy.applied.isEmpty, "占位端口不得写系统代理")
+  }
+
+  func testResyncWithUnreadableListenSettingsStopsRunningAgentInsteadOfRedeploying() async throws {
+    let server = try makeSeededCatalog()
+    try ActivationStateFileStore(fileURL: activationFileURL).save(activeTargetID: server)
+    try RuntimeFileStore(fileURL: runtime.contract).write(ProxyRuntimeFixture.makeDocument())
+    let controller = makeController(
+      agentStatus: .registered,
+      listenUnreadable: .corrupt(detail: "test"))
+
+    await controller.resyncOnLaunch()
+
+    guard case .launchFailed(let detail) = controller.state else {
+      return XCTFail("应呈现启动失败，实际 \(controller.state)")
+    }
+    XCTAssertTrue(detail.contains("端口配置无法读取"), "必须点名监听设置不可读：\(detail)")
+    XCTAssertEqual(
+      agent.unregisterCount, 1, "存续的上一会话 agent 必须停下，不得以占位端口重部署")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
+    XCTAssertTrue(systemProxy.applied.isEmpty)
+    XCTAssertNil(controller.pacURL)
+  }
+}

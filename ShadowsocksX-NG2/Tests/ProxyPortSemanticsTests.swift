@@ -1,0 +1,199 @@
+import Darwin
+import XCTest
+
+@testable import ShadowsocksX_NG2
+
+/// 端口语义（spec #21 D8，issue #30）主缝测试：出厂默认、占用校验、建议端口
+/// 算法与点名错误。bind 探测覆盖真实回环 socket；lsof 输出解析为纯函数夹具。
+final class ProxyPortSemanticsTests: XCTestCase {
+  // MARK: 出厂默认（D8：沿用 Legacy，任何路径不静默改端口）
+
+  func testFactoryDefaultsInheritLegacyPortsAndValidateClean() {
+    let settings = SslocalListenSettings()
+
+    XCTAssertEqual(settings.socksPort, 1086)
+    XCTAssertEqual(settings.httpPort, 1087)
+    XCTAssertEqual(settings.pacPort, 1089)
+    XCTAssertTrue(settings.portValidationErrors().isEmpty)
+  }
+
+  // MARK: 配置校验与点名错误
+
+  func testOutOfRangePortsAreRejectedNamingEndpointAndPort() {
+    var settings = SslocalListenSettings()
+    settings.socksPort = 0
+    settings.pacPort = 65536
+
+    XCTAssertEqual(
+      settings.portValidationErrors(),
+      [
+        .portOutOfRange(endpoint: .socks, port: 0),
+        .portOutOfRange(endpoint: .pac, port: 65536),
+      ])
+  }
+
+  func testDuplicateConfiguredPortsAreRejectedNamingBothEndpoints() {
+    let settings = SslocalListenSettings(
+      socksPort: 1086,
+      httpProxyEnabled: false,
+      httpPort: 1086,
+      pacPort: 1089)
+
+    XCTAssertEqual(
+      settings.portValidationErrors(),
+      [.duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 1086)],
+      "HTTP 停用时其配置端口仍参与互异校验，避免日后重新启用时才暴露冲突")
+  }
+
+  func testPresentedReasonsNameEndpointAndPort() {
+    XCTAssertEqual(
+      PortSettingError.portOutOfRange(endpoint: .http, port: 70000).presentedReason,
+      "HTTP 端口 70000 无效，必须是 1–65535 之间的整数")
+    XCTAssertEqual(
+      PortSettingError.duplicatePort(endpoint: .pac, otherEndpoint: .socks, port: 1086)
+        .presentedReason,
+      "PAC 端口与 SOCKS5 端口冲突（都是 1086），请为每个端点配置不同的端口")
+  }
+
+  // MARK: 建议端口算法（D8：32768–65535 高位段，空闲且与另两端点配置值互异）
+
+  func testSuggestionScansHighRangeAscendingSkippingExcludedAndOccupied() {
+    var probed: [Int] = []
+    let suggested = PortSuggestion.firstFree(
+      excluding: [32768],
+      isFree: { port in
+        probed.append(port)
+        return port != 32769
+      })
+
+    XCTAssertEqual(suggested, 32770)
+    XCTAssertEqual(probed, [32769, 32770], "被排除的 32768 不探测；占用端口跳过")
+  }
+
+  func testSuggestionReturnsNilWhenWholeRangeExhausted() {
+    XCTAssertNil(PortSuggestion.firstFree(excluding: [], isFree: { _ in false }))
+  }
+
+  func testSuggestedPortForEndpointExcludesOtherTwoConfiguredValues() {
+    let settings = SslocalListenSettings(
+      socksPort: 40000, httpProxyEnabled: false, httpPort: 40001, pacPort: 1089)
+    var probed: [Int] = []
+    let suggested = settings.suggestedPort(for: .pac) { port in
+      probed.append(port)
+      return port == 40002
+    }
+
+    XCTAssertEqual(suggested, 40002)
+    XCTAssertFalse(probed.contains(40000))
+    XCTAssertFalse(probed.contains(40001), "另两端点的配置值无论启用与否都排除")
+  }
+
+  // MARK: 占用探测（设置区即时校验的 I/O 缝；激活仍以 runtime 实际绑定的
+  // 健康门禁为准，本探测只是编辑期尽力而为的提示）
+
+  func testBindProbeReportsOccupiedThenFreeOnRealLoopbackSocket() throws {
+    let held = try ListenerFixture()
+    let port = held.port
+    let probe = SystemPortOccupancyProbe()
+
+    guard case .occupied = probe.occupancy(port: port, bindAddress: "127.0.0.1") else {
+      return XCTFail("已被本测试进程监听的端口必须判为占用")
+    }
+
+    held.close()
+
+    guard case .free = probe.occupancy(port: port, bindAddress: "127.0.0.1") else {
+      return XCTFail("关闭监听后同一端口必须判为空闲")
+    }
+  }
+
+  func testBindProbeReportsUnknownForUnresolvableAddress() {
+    let outcome = SystemPortOccupancyProbe().occupancy(port: 1086, bindAddress: "not-an-ip")
+
+    guard case .unknown = outcome else {
+      return XCTFail("地址不可解析时不得冒充空闲或占用，实际 \(outcome)")
+    }
+  }
+
+  func testOccupierNameParsedFromLsofOutputFixture() {
+    let output = """
+      COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+      sslocal 12345 qiu    7u  IPv4  0xabcd      0t0  TCP 127.0.0.1:1086 (LISTEN)
+      TestApp 12346 qiu    8u  IPv4  0xabce      0t0  TCP 127.0.0.1:1086 (LISTEN)
+      """
+    XCTAssertEqual(SystemPortOccupancyProbe.occupierProcessName(fromLsofOutput: output), "sslocal")
+    XCTAssertNil(SystemPortOccupancyProbe.occupierProcessName(fromLsofOutput: "  \n"))
+    XCTAssertNil(
+      SystemPortOccupancyProbe.occupierProcessName(fromLsofOutput: "COMMAND PID USER FD"),
+      "只有表头（无占用进程）时解析为 nil")
+  }
+
+  // MARK: PAC 端口变更失效提示（D8；UI 面在 #33 接线）
+
+  func testPACPortChangeProducesInvalidationNoticeNamingBothPorts() {
+    let notice = PortChangeNotice.pacInvalidation(
+      from: SslocalListenSettings(), to: SslocalListenSettings(pacPort: 8080))
+
+    XCTAssertEqual(
+      notice,
+      "PAC 端口将从 1089 改为 8080，已分享的 PAC URL 将失效，保存后需要重新分享")
+  }
+
+  func testChangesNotTouchingPACPortProduceNoNotice() {
+    XCTAssertNil(
+      PortChangeNotice.pacInvalidation(
+        from: SslocalListenSettings(), to: SslocalListenSettings(socksPort: 2086)))
+    XCTAssertNil(
+      PortChangeNotice.pacInvalidation(
+        from: SslocalListenSettings(), to: SslocalListenSettings()))
+  }
+}
+
+/// 测试专用回环监听器：占用一个内核分配端口，供占用探测断言真实占用。
+private final class ListenerFixture {
+  let descriptor: Int32
+  let port: Int
+
+  init() throws {
+    let listenerFD = socket(AF_INET, SOCK_STREAM, 0)
+    guard listenerFD >= 0 else { throw POSIXError(.ENOTSOCK) }
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = 0
+    address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+    let bindResult = withUnsafePointer(to: &address) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        bind(listenerFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+      }
+    }
+    guard bindResult == 0 else {
+      let error = errno
+      Darwin.close(listenerFD)
+      throw POSIXError(POSIXErrorCode(rawValue: error)!)
+    }
+    guard listen(listenerFD, 1) == 0 else {
+      let error = errno
+      Darwin.close(listenerFD)
+      throw POSIXError(POSIXErrorCode(rawValue: error)!)
+    }
+    var bound = sockaddr_in()
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let nameResult = withUnsafeMutablePointer(to: &bound) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        getsockname(listenerFD, $0, &length)
+      }
+    }
+    guard nameResult == 0 else {
+      let error = errno
+      Darwin.close(listenerFD)
+      throw POSIXError(POSIXErrorCode(rawValue: error)!)
+    }
+    descriptor = listenerFD
+    port = Int(CFSwapInt16BigToHost(bound.sin_port))
+  }
+
+  func close() {
+    Darwin.close(descriptor)
+  }
+}

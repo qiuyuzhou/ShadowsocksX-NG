@@ -47,6 +47,9 @@ final class ProxyRuntimeController: ObservableObject {
   private let credentials: CredentialStoring
   private let plugins: ManagedPluginProviding
   private let listen: SslocalListenSettings
+  /// 监听设置不可读时的点名原因（D8「任何路径不静默改端口」）；非 nil 时
+  /// `listen` 只是占位出厂默认，禁止部署（见 `deploy`）。
+  private let listenUnreadableReason: String?
   private let agent: LaunchAgentControlling
   private let probe: EndpointProbing
   private let pacProbe: PACHealthProbing
@@ -71,7 +74,7 @@ final class ProxyRuntimeController: ObservableObject {
     runtimeFileStore: RuntimeFileStore = RuntimeFileStore(),
     credentials: CredentialStoring = KeychainCredentialStore(),
     plugins: ManagedPluginProviding = NoManagedPluginProvider(),
-    listen: SslocalListenSettings = SslocalListenSettings(),
+    listenRestore: RestoredListenSettings = ListenSettingsFileStore.restored(),
     agent: LaunchAgentControlling = SMAppLaunchAgentService(),
     probe: EndpointProbing = SystemEndpointProbe(),
     pacProbe: PACHealthProbing = SystemPACHealthProbe(),
@@ -87,7 +90,8 @@ final class ProxyRuntimeController: ObservableObject {
     self.runtimeFileStore = runtimeFileStore
     self.credentials = credentials
     self.plugins = plugins
-    self.listen = listen
+    self.listen = listenRestore.settings
+    listenUnreadableReason = listenRestore.unreadableError?.presentedReason
     self.agent = agent
     self.probe = probe
     self.pacProbe = pacProbe
@@ -275,11 +279,32 @@ final class ProxyRuntimeController: ObservableObject {
 
   /// 把「运行定义档」意图推到运行时：计划动作 → 顺序执行 → 端点健康呈现。
   private func deploy(_ document: SslocalRuntimeDocument) async {
+    if let reason = listenUnreadableReason {
+      await refuseDeployForUnreadableListenSettings(reason)
+      return
+    }
     pacURL = nil
     lastDocument = document
     if await execute(.run(document), document: document) {
       state = .starting
       await presentLaunchHealth(document)
+    }
+  }
+
+  /// D8「任何路径不静默改端口」：监听设置不可读时以占位出厂端口部署等于
+  /// 系统擅自改端口——停止运行时并点名呈现，等用户在设置区修复（#33 接线）。
+  private func refuseDeployForUnreadableListenSettings(_ reason: String) async {
+    RuntimeLog.emit(.activationFailed(reason: reason))
+    let restoreError = restoreSystemProxyError()
+    _ = await execute(.stop, document: nil)
+    pacURL = nil
+    lastDocument = nil
+    let detail =
+      "本地代理端口配置无法读取（\(reason)），已停止代理以避免静默改用出厂端口；请在设置区修复端口后重新启动"
+    if let restoreError {
+      state = .launchFailed(detail: "\(detail)；\(systemProxyDetail(restoreError))")
+    } else {
+      state = .launchFailed(detail: detail)
     }
   }
 

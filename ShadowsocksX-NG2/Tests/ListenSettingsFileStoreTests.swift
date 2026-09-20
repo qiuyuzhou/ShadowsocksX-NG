@@ -1,0 +1,111 @@
+import XCTest
+
+@testable import ShadowsocksX_NG2
+
+/// 监听设置持久化（spec #21 D8，issue #30）：用户改过的端口必须跨启动保留
+/// 且任何读取路径不得静默改写——文件缺失回落出厂默认，损坏或端口无效一律
+/// 点名报错交由上层呈现，绝不静默修正。
+final class ListenSettingsFileStoreTests: XCTestCase {
+  private var directory: URL!
+  private var store: ListenSettingsFileStore!
+
+  override func setUpWithError() throws {
+    try super.setUpWithError()
+    directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("ssxng-tests-\(UUID().uuidString)", isDirectory: true)
+    store = ListenSettingsFileStore(
+      fileURL: directory.appendingPathComponent("listen-settings.json"))
+  }
+
+  override func tearDownWithError() throws {
+    try? FileManager.default.removeItem(at: directory)
+    try super.tearDownWithError()
+  }
+
+  private func permissions(of url: URL) throws -> Int {
+    let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+    return try XCTUnwrap(attributes[.posixPermissions] as? Int)
+  }
+
+  private func writeRaw(_ text: String) throws {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try Data(text.utf8).write(to: store.fileURL)
+  }
+
+  func testLoadWithoutFileReturnsFactoryDefaultsAndCreatesNothing() throws {
+    let settings = try store.load()
+
+    XCTAssertEqual(settings, SslocalListenSettings(), "文件缺失即出厂状态，非静默改端口")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
+  }
+
+  func testSaveAndLoadRoundTripPreservesUserPortsAndScope() throws {
+    var settings = SslocalListenSettings()
+    settings.scope = .host(advertisedAddress: "192.168.2.89")
+    settings.socksPort = 2086
+    settings.httpProxyEnabled = false
+    settings.httpPort = 2087
+    settings.pacPort = 2089
+    settings.udpRelayEnabled = true
+
+    try store.save(settings)
+
+    XCTAssertEqual(try store.load(), settings)
+    XCTAssertEqual(try permissions(of: directory), 0o700)
+    XCTAssertEqual(try permissions(of: store.fileURL), 0o600)
+  }
+
+  func testSaveRejectsInvalidPortsWithoutTouchingExistingFile() throws {
+    try store.save(SslocalListenSettings())
+
+    var invalid = SslocalListenSettings()
+    invalid.socksPort = 70000
+    XCTAssertThrowsError(try store.save(invalid)) { error in
+      XCTAssertEqual(
+        error as? ListenSettingsStoreError,
+        .invalidPorts([.portOutOfRange(endpoint: .socks, port: 70000)]))
+    }
+    XCTAssertEqual(
+      try store.load(),
+      SslocalListenSettings(),
+      "被拒绝的保存不得改动已落盘的用户配置")
+  }
+
+  func testLoadReportsCorruptFileInsteadOfSilentlyRewritingPorts() throws {
+    try writeRaw("{not json")
+
+    XCTAssertThrowsError(try store.load()) { error in
+      guard case .corrupt = error as? ListenSettingsStoreError else {
+        return XCTFail("损坏文件必须点名报错，实际 \(error)")
+      }
+    }
+  }
+
+  func testLoadDistinguishesReadFailureFromCorruption() throws {
+    try writeRaw("{}")
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o000], ofItemAtPath: store.fileURL.path)
+    defer {
+      try? FileManager.default.setAttributes(
+        [.posixPermissions: 0o600], ofItemAtPath: store.fileURL.path)
+    }
+
+    XCTAssertThrowsError(try store.load()) { error in
+      guard case .ioFailure = error as? ListenSettingsStoreError else {
+        return XCTFail("读取失败必须与损坏区分，实际 \(error)")
+      }
+    }
+  }
+
+  func testLoadRejectsPersistedDuplicatePorts() throws {
+    try writeRaw(
+      #"{"scopeKind":"loopback","advertisedAddress":null,"socksPort":1086,"#
+        + #""httpProxyEnabled":true,"httpPort":1086,"pacPort":1089,"udpRelayEnabled":false}"#)
+
+    XCTAssertThrowsError(try store.load()) { error in
+      XCTAssertEqual(
+        error as? ListenSettingsStoreError,
+        .invalidPorts([.duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 1086)]))
+    }
+  }
+}

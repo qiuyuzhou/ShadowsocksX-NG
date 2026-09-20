@@ -80,7 +80,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       runtimeFileStore: RuntimeFileStore(fileURL: runtime.contract),
       credentials: credentials,
       plugins: ActivationFixture.plugins,
-      listen: listen,
+      listenRestore: RestoredListenSettings(settings: listen, unreadableError: nil),
       agent: agent,
       probe: probe,
       pacProbe: pacProbe,
