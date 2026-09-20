@@ -3,8 +3,8 @@ import Foundation
 /// 运行时日志基线（spec #21 D5）：事件是封闭枚举，脱敏由构造保证——永不
 /// 携带密码、插件参数、Keychain 值、完整订阅 URL、URL token 或运行时 JSON
 /// 内容；服务器地址与备注默认不进普通日志（端点探测失败点名的 host:port
-/// 是本机监听端点，属 D8 要求呈现的事实字段，不受此限）。日志落盘与诊断
-/// 导出由 #33 在本事件流上接出。
+/// 是本机监听端点，属 D8 要求呈现的事实字段，不受此限）。日志查看与诊断
+/// 导出由 #34 在本事件流上接出。
 enum RuntimeLogEvent: CustomStringConvertible, Sendable {
   /// 契约文件已原子写入（只携带数量元数据，非内容）。
   case contractWritten(serverCount: Int)
@@ -34,6 +34,8 @@ enum RuntimeLogEvent: CustomStringConvertible, Sendable {
   case endpointProbeFailed(host: String, port: Int, detail: String)
   /// 激活失败或活动目标清除（原因枚举已点名且不含秘密）。
   case activationFailed(reason: String)
+  /// 用户显式触发的脱敏诊断导出已完成（不携带导出路径）。
+  case diagnosticsExported
 
   var description: String {
     switch self {
@@ -79,8 +81,17 @@ enum RuntimeLogEvent: CustomStringConvertible, Sendable {
       return "endpoint \(host):\(port) not ready: \(detail)"
     case .activationFailed(let reason):
       return "activation failed: \(reason)"
+    case .diagnosticsExported:
+      return "diagnostics report exported (redacted)"
     }
   }
+}
+
+/// 事件接收缝（issue #34）：GUI 进程把渲染后的事件文本接入 RuntimeEventStore
+/// （内存环形缓冲），供主窗口日志查看器实时呈现与诊断导出取用；wrapper 进程
+/// 不注册，仅走 stderr → agent.log 收敛。
+protocol RuntimeEventSink: Sendable {
+  func append(text: String, timestamp: Date)
 }
 
 /// 敏感信息脱敏工具（D5「敏感信息」定义的读取面）。
@@ -102,10 +113,36 @@ enum Redactor {
 }
 
 /// 事件发射缝：wrapper 与 GUI 共用 stderr 行式输出（wrapper 侧由 launchd/
-/// agent.log 收敛，GUI 侧进系统日志）。
+/// agent.log 收敛，GUI 侧进系统日志）；GUI 启动时另注册接收缝接入事件缓冲。
 enum RuntimeLog {
+  private static let sinkHolder = SinkHolder()
+
+  /// 注册/替换事件接收缝；传 nil 恢复纯 stderr（测试隔离用）。
+  static func setSink(_ sink: (any RuntimeEventSink)?) {
+    sinkHolder.set(sink)
+  }
+
   static func emit(_ event: RuntimeLogEvent) {
     let line = "ssxng: \(event.description)\n"
     FileHandle.standardError.write(Data(line.utf8))
+    sinkHolder.current?.append(text: event.description, timestamp: Date())
+  }
+
+  /// 可变静态的锁保护持有者：emit 可能来自任意线程。
+  private final class SinkHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sink: (any RuntimeEventSink)?
+
+    var current: (any RuntimeEventSink)? {
+      lock.lock()
+      defer { lock.unlock() }
+      return sink
+    }
+
+    func set(_ value: (any RuntimeEventSink)?) {
+      lock.lock()
+      defer { lock.unlock() }
+      sink = value
+    }
   }
 }

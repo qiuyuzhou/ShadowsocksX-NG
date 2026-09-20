@@ -1,0 +1,56 @@
+import Foundation
+
+/// GUI 侧运行事件环形缓冲（spec #21 D5，issue #34）：收集 `RuntimeLog.emit`
+/// 的事件供主窗口日志查看器实时呈现与诊断导出取用。事件文本来自封闭枚举的
+/// 渲染，构造上不含敏感值；容量封顶只留最近事件（够诊断即可，不做复杂轮转）。
+/// wrapper 进程不使用本存储（其 stderr 已收敛进 agent.log）。
+final class RuntimeEventStore: RuntimeEventSink, @unchecked Sendable {
+  struct Entry: Equatable, Identifiable {
+    let id: Int
+    let timestamp: Date
+    let text: String
+
+    /// 查看器与导出共用的行格式；固定 POSIX locale 保证报障对照不随用户
+    /// 区域漂移。
+    var renderedLine: String {
+      "\(Self.timestampFormatter.string(from: timestamp))  \(text)"
+    }
+
+    /// DateFormatter 在现代 Foundation 中线程安全；本格式器只被读取。
+    static let timestampFormatter: DateFormatter = {
+      let formatter = DateFormatter()
+      formatter.locale = Locale(identifier: "en_US_POSIX")
+      formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+      return formatter
+    }()
+  }
+
+  /// 进程级共享实例：GUI 启动时注册为 RuntimeLog 的接收缝。
+  static let shared = RuntimeEventStore()
+
+  private let lock = NSLock()
+  private var entries: [Entry] = []
+  private var nextID = 0
+  private let capacity: Int
+
+  init(capacity: Int = 500) {
+    self.capacity = max(1, capacity)
+  }
+
+  /// 当前缓冲快照（旧→新）。
+  var snapshot: [Entry] {
+    lock.lock()
+    defer { lock.unlock() }
+    return entries
+  }
+
+  func append(text: String, timestamp: Date = Date()) {
+    lock.lock()
+    defer { lock.unlock() }
+    entries.append(Entry(id: nextID, timestamp: timestamp, text: text))
+    nextID += 1
+    if entries.count > capacity {
+      entries.removeFirst(entries.count - capacity)
+    }
+  }
+}

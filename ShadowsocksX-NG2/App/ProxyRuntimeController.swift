@@ -102,6 +102,16 @@ final class ProxyRuntimeController: ObservableObject {
     ]
   }
 
+  /// 诊断只读面（issue #34）：当前监听设置；监听地址在导出中只以回环/非回环
+  /// 两态呈现（D7）。
+  var listenSettings: SslocalListenSettings { listen }
+
+  /// 运行时契约的脱敏摘要（数量与协议元数据，D5）；契约缺失或无效返回 nil。
+  /// 诊断导出不读契约内容，只携带此摘要。
+  func runtimeDocumentSummary() -> String? {
+    runtimeFileStore.loadDocument().map { Redactor.documentSummary($0) }
+  }
+
   /// 无活动目标时启用代理的点名原因（无静默回退族的呈现面）。
   private static let noActiveTargetReason = "尚未激活任何服务器或分组，请先在主窗口激活后再启动代理"
 

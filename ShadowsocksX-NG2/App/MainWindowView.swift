@@ -1,12 +1,20 @@
 import SwiftUI
 
-/// 主窗口（spec #21 D11，issue #32）：NavigationSplitView 服务器分区。侧栏是
-/// 配置目录分组树（订阅子树只读、仅启用开关），详情区按选中形态呈现服务器
-/// 表单或分组编辑。所有编辑类操作只在主窗口。
+/// 主窗口（spec #21 D11，issue #32/#34）：NavigationSplitView 分区。侧栏顶部
+/// 分区切换「服务器 / 诊断」；服务器分区是配置目录分组树（订阅子树只读、仅
+/// 启用开关）与详情编辑；诊断分区是日志查看与脱敏导出（D11「诊断收进主窗
+/// 口」）。所有编辑类操作只在主窗口。
 struct MainWindowView: View {
+  enum Pane: Hashable {
+    case servers
+    case diagnostics
+  }
+
   @ObservedObject var viewModel: CatalogViewModel
   @ObservedObject var proxyController: ProxyRuntimeController
+  let eventStore: RuntimeEventStore
 
+  @State private var pane: Pane = .servers
   @State private var renameTarget: NodeID?
   @State private var renameText = ""
   @State private var newGroupParent: NodeID?
@@ -81,9 +89,32 @@ struct MainWindowView: View {
     }
   }
 
-  // MARK: - 侧栏树
+  // MARK: - 侧栏（分区切换 + 树 / 诊断摘要）
 
   private var sidebar: some View {
+    VStack(spacing: 0) {
+      Picker("分区", selection: $pane) {
+        Text("服务器").tag(Pane.servers)
+        Text("诊断").tag(Pane.diagnostics)
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .padding(.horizontal, 8)
+      .padding(.vertical, 6)
+      if pane == .servers {
+        serverSidebar
+      } else {
+        diagnosticsSidebar
+      }
+    }
+  }
+
+  /// 诊断分区侧栏：代理状态摘要与脱敏说明（详情与导出入口在右侧日志区）。
+  private var diagnosticsSidebar: some View {
+    DiagnosticsSummarySidebar(proxyController: proxyController)
+  }
+
+  private var serverSidebar: some View {
     List(selection: $viewModel.selectedNodeID) {
       OutlineGroup(viewModel.sidebarNodes(), children: \.children) { node in
         SidebarRow(
@@ -151,7 +182,10 @@ struct MainWindowView: View {
 
   @ViewBuilder
   private var detailPane: some View {
-    if let id = viewModel.selectedNodeID, let entry = viewModel.entry(for: id) {
+    if pane == .diagnostics {
+      DiagnosticsView(
+        viewModel: viewModel, proxyController: proxyController, eventStore: eventStore)
+    } else if let id = viewModel.selectedNodeID, let entry = viewModel.entry(for: id) {
       switch entry.kind {
       case .server:
         ServerDetailView(

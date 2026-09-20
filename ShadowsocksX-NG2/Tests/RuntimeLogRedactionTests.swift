@@ -80,6 +80,7 @@ final class RuntimeLogRedactionTests: XCTestCase {
           node: NodeID(rawValue: "leaf-1"),
           reason: .pluginNotProvided(program: "simple-obfs")
         ).presentedReason),
+      .diagnosticsExported,
     ]
 
     let joined = events.map(\.description).joined(separator: "\n")
