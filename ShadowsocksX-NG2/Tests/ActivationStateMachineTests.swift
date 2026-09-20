@@ -37,10 +37,10 @@ final class ActivationStateMachineTests: XCTestCase {
     XCTAssertEqual(entry.password, "SECRET-密码", "密码在派生时从凭据存储解析")
     XCTAssertNil(entry.plugin, "无插件时 plugin 字段整体省略")
     XCTAssertNil(entry.pluginOpts)
-    XCTAssertEqual(configuration.document.localAddress, "127.0.0.1")
-    XCTAssertEqual(configuration.document.localPort, 1086)
-    XCTAssertEqual(configuration.document.inboundProtocol, "socks")
-    XCTAssertEqual(configuration.document.mode, "tcp_only")
+    XCTAssertEqual(configuration.document.socksAddress, "127.0.0.1")
+    XCTAssertEqual(configuration.document.socksPort, 1086)
+    XCTAssertEqual(configuration.document.socksLocal?.inboundProtocol, "socks")
+    XCTAssertEqual(configuration.document.socksMode, "tcp_only")
   }
 
   func testActivateGroupExpandsEnabledLeavesInExplicitOrderAndKeepsGroupIdentity() throws {

@@ -35,7 +35,7 @@ final class RealSslocalSmokeTests: XCTestCase {
   /// 绑定回环临时端口拿到空闲端口号后释放。
   private func grabEphemeralLoopbackPort() throws -> Int {
     let socketFD = socket(AF_INET, SOCK_STREAM, 0)
-    try XCTUnwrap(socketFD >= 0 ? socketFD : nil, "创建 socket 失败")
+    guard socketFD >= 0 else { throw POSIXError(.ENOTSOCK) }
     defer { close(socketFD) }
 
     var address = sockaddr_in()
@@ -61,7 +61,7 @@ final class RealSslocalSmokeTests: XCTestCase {
     return Int(CFSwapInt16BigToHost(boundAddress.sin_port))
   }
 
-  private func launchWrapper(localPort: Int) throws -> Process {
+  private func launchWrapper(socksPort: Int, httpPort: Int, pacPort: Int) throws -> Process {
     let document = SslocalRuntimeDocument(
       servers: [
         SslocalServerDocument(
@@ -74,10 +74,8 @@ final class RealSslocalSmokeTests: XCTestCase {
           plugin: nil,
           pluginOpts: nil)
       ],
-      localAddress: "127.0.0.1",
-      localPort: localPort,
-      inboundProtocol: "socks",
-      mode: "tcp_only")
+      listen: SslocalListenSettings(
+        socksPort: socksPort, httpProxyEnabled: true, httpPort: httpPort, pacPort: pacPort))
     try document.jsonData().write(to: contractURL)
 
     let wrapperURL = Bundle.main.bundleURL.appendingPathComponent(
@@ -96,7 +94,7 @@ final class RealSslocalSmokeTests: XCTestCase {
   /// 对本地 SOCKS 端口做完整握手，返回 CONNECT 应答首字节（版本, 应答码）。
   private func performSocksHandshake(port: Int) throws -> (version: UInt8, reply: UInt8)? {
     let socketFD = socket(AF_INET, SOCK_STREAM, 0)
-    try XCTUnwrap(socketFD >= 0 ? socketFD : nil, "创建 socket 失败")
+    guard socketFD >= 0 else { throw POSIXError(.ENOTSOCK) }
     defer { close(socketFD) }
 
     var address = sockaddr_in()
@@ -146,24 +144,36 @@ final class RealSslocalSmokeTests: XCTestCase {
     return bytes
   }
 
-  func testRealSslocalBindsSOCKSPortAndCompletesHandshake() throws {
-    let port = try grabEphemeralLoopbackPort()
-    let wrapper = try launchWrapper(localPort: port)
+  func testRealSslocalBindsSOCKSAndHTTPPortsAndCompletesHandshake() throws {
+    var ports = Set<Int>()
+    while ports.count < 3 {
+      ports.insert(try grabEphemeralLoopbackPort())
+    }
+    let selectedPorts = Array(ports)
+    let socksPort = selectedPorts[0]
+    let httpPort = selectedPorts[1]
+    let pacPort = selectedPorts[2]
+    let wrapper = try launchWrapper(
+      socksPort: socksPort, httpPort: httpPort, pacPort: pacPort)
 
-    // 端口就绪（sslocal 实际完成绑定；同时验证我们的配置格式被上游接受）。
-    var reachable = false
+    // 两个端口同时就绪：验证 locals[] 被官方 sslocal 接受并实际绑定。
+    var socksReachable = false
+    var httpReachable = false
     let deadline = Date().addingTimeInterval(15)
-    while !reachable && Date() < deadline {
-      reachable =
-        EndpointHealthProbe.probe(host: "127.0.0.1", port: port, timeout: 1) == .reachable
-      if !reachable {
+    while (!socksReachable || !httpReachable) && Date() < deadline {
+      socksReachable =
+        EndpointHealthProbe.probe(host: "127.0.0.1", port: socksPort, timeout: 1) == .reachable
+      httpReachable =
+        EndpointHealthProbe.probe(host: "127.0.0.1", port: httpPort, timeout: 1) == .reachable
+      if !socksReachable || !httpReachable {
         Thread.sleep(forTimeInterval: 0.2)
       }
     }
-    XCTAssertTrue(reachable, "15 秒内本地 SOCKS 端口应完成监听绑定")
+    XCTAssertTrue(socksReachable, "15 秒内本地 SOCKS 端口应完成监听绑定")
+    XCTAssertTrue(httpReachable, "15 秒内本地 HTTP 端口应完成监听绑定")
 
     // 完整 SOCKS5 握手。
-    let handshake = try performSocksHandshake(port: port)
+    let handshake = try performSocksHandshake(port: socksPort)
     let reply = try XCTUnwrap(handshake, "连接成功建立后应能完成握手")
     XCTAssertEqual(reply.version, 0x05, "应答版本应为 SOCKS5")
     // 远端不可达允许失败应答码；关键在于 sslocal 按协议给出 CONNECT 应答。

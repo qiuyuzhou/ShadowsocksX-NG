@@ -62,7 +62,12 @@ final class ProxyRuntimeControllerTests: XCTestCase {
 
   private func makeController(
     probe: EndpointProbing,
-    agentStatus: LaunchAgentStatus = .notRegistered
+    agentStatus: LaunchAgentStatus = .notRegistered,
+    listen: SslocalListenSettings = ActivationFixture.listen,
+    pacProbe: PACHealthProbing = ProxyRuntimeFixture.FakePACProbe(),
+    firewallChecker: FirewallStatusChecking = ProxyRuntimeFixture.FakeFirewallChecker(),
+    firewallExecutableURLs: [URL] = [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
+    firewallPollIntervalNanoseconds: UInt64 = 1_000_000
   ) -> ProxyRuntimeController {
     agent.setStatus(agentStatus)
     return ProxyRuntimeController(
@@ -71,9 +76,13 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       runtimeFileStore: RuntimeFileStore(fileURL: runtime.contract),
       credentials: credentials,
       plugins: ActivationFixture.plugins,
-      listen: ActivationFixture.listen,
+      listen: listen,
       agent: agent,
       probe: probe,
+      pacProbe: pacProbe,
+      firewallChecker: firewallChecker,
+      firewallExecutableURLs: firewallExecutableURLs,
+      firewallPollIntervalNanoseconds: firewallPollIntervalNanoseconds,
       sendSignal: { [signals] pid, number in signals!.send(pid, number) })
   }
 
@@ -106,7 +115,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let onDisk = try XCTUnwrap(
       RuntimeFileStore(fileURL: runtime.contract).loadDocument())
     XCTAssertEqual(onDisk.servers.count, 1)
-    XCTAssertEqual(onDisk.localPort, ActivationFixture.listen.localPort)
+    XCTAssertEqual(onDisk.socksPort, ActivationFixture.listen.socksPort)
     XCTAssertEqual(onDisk.servers.first?.password, "pw-香港 01", "凭据已解析进文档")
   }
 
@@ -139,6 +148,71 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(agent.unregisterCount, 1)
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path), "显式停止后清理契约")
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.pidFile.path))
+  }
+
+  func testLoopbackScopeNeverQueriesApplicationFirewallAndPublishesPACURL() async throws {
+    let seeded = try makeSeededCatalog()
+    let firewall = ProxyRuntimeFixture.FakeFirewallChecker(.blocked)
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(), firewallChecker: firewall)
+
+    await controller.activate(seeded.server)
+    await controller.setProxyEnabled(true)
+
+    XCTAssertEqual(controller.state, .running)
+    XCTAssertTrue(firewall.checkedURLs.isEmpty, "回环态与应用防火墙零交互")
+    XCTAssertEqual(controller.pacURL?.absoluteString, "http://127.0.0.1:1089/v1/proxy.pac")
+  }
+
+  func testHostScopeBlockedByFirewallPresentsTargetedRepairAndKeepsPACURL() async throws {
+    let seeded = try makeSeededCatalog()
+    let firewall = ProxyRuntimeFixture.FakeFirewallChecker(.blocked)
+    let listen = SslocalListenSettings(
+      scope: .host(advertisedAddress: "192.168.2.89"),
+      socksPort: 1086,
+      httpProxyEnabled: true,
+      httpPort: 1087,
+      pacPort: 1089)
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      listen: listen,
+      firewallChecker: firewall)
+
+    await controller.activate(seeded.server)
+    await controller.setProxyEnabled(true)
+
+    guard case .firewallBlocked(let detail) = controller.state else {
+      XCTFail("主机态被拒应呈现防火墙状态，实际 \(controller.state)")
+      return
+    }
+    XCTAssertTrue(detail.contains("sslocal"))
+    XCTAssertTrue(detail.contains("系统设置") && detail.contains("防火墙") && detail.contains("允许传入连接"))
+    XCTAssertEqual(firewall.checkedURLs.map(\.lastPathComponent), ["sslocal"])
+    XCTAssertEqual(controller.pacURL?.absoluteString, "http://192.168.2.89:1089/v1/proxy.pac")
+  }
+
+  func testHostScopeDetectsFirewallRefusalAfterInitialHealthyPresentation() async throws {
+    let seeded = try makeSeededCatalog()
+    let firewall = ProxyRuntimeFixture.FakeFirewallChecker(outcomes: [.permitted, .blocked])
+    let listen = SslocalListenSettings(scope: .host(advertisedAddress: "192.168.2.89"))
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      listen: listen,
+      firewallChecker: firewall)
+
+    await controller.activate(seeded.server)
+    await controller.setProxyEnabled(true)
+
+    let deadline = Date().addingTimeInterval(1)
+    while controller.state == .running && Date() < deadline {
+      try await Task.sleep(nanoseconds: 5_000_000)
+    }
+    guard case .firewallBlocked(let detail) = controller.state else {
+      XCTFail("稍后发生的拒绝也必须被检测，实际 \(controller.state)")
+      return
+    }
+    XCTAssertTrue(detail.contains("sslocal") && detail.contains("允许传入连接"))
+    XCTAssertGreaterThanOrEqual(firewall.checkedURLs.count, 2)
   }
 
   // MARK: 目录重展开消费（D3/D5）

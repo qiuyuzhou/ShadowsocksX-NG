@@ -12,7 +12,7 @@ struct SystemEndpointProbe: EndpointProbing {
   }
 }
 
-/// 代理运行时控制器（spec #21 D2/D5，issue #27）：把激活状态机的产出接到
+/// 代理运行时控制器（spec #21 D2/D5/D7/D9，issue #27/#28）：把激活状态机的产出接到
 /// 「GUI → LaunchAgent → wrapper → sslocal」链路。决策全部在纯域
 /// `ProxyRuntimePlan`，本类按序执行动作并负责健康呈现；GUI 退出不影响任何
 /// 一侧（agent 由 launchd 持有，构造上成立）。
@@ -22,6 +22,8 @@ final class ProxyRuntimeController: ObservableObject {
     case off
     case starting
     case running
+    /// 代理在本机运行，但主机地址态的入站被 macOS 防火墙拒绝。
+    case firewallBlocked(detail: String)
     /// 启动失败：携带点名端点与端口的事实（D8；端口语义细节 #30 接线）。
     case launchFailed(detail: String)
     /// 激活失败或活动目标清除（无静默回退族的呈现面）。
@@ -33,6 +35,7 @@ final class ProxyRuntimeController: ObservableObject {
   }
 
   @Published private(set) var state: ProxyState = .off
+  @Published private(set) var pacURL: URL?
   private(set) var machine: ActivationStateMachine
 
   private var catalog: ConfigurationCatalog
@@ -44,10 +47,15 @@ final class ProxyRuntimeController: ObservableObject {
   private let listen: SslocalListenSettings
   private let agent: LaunchAgentControlling
   private let probe: EndpointProbing
+  private let pacProbe: PACHealthProbing
+  private let firewallChecker: FirewallStatusChecking
+  private let firewallExecutableURLs: [URL]
+  private let firewallPollIntervalNanoseconds: UInt64
   /// 信号发送缝（默认 kill），单测观测 SIGUSR1 投递。
   private let sendSignal: @Sendable (Int32, Int32) -> Int32
   /// 并发流代际：停止请求可使进行中的启动探测立即失效。
   private var flowGeneration = 0
+  private var firewallObservationTask: Task<Void, Never>?
 
   init(
     catalogFileStore: CatalogFileStore = CatalogFileStore(
@@ -60,6 +68,10 @@ final class ProxyRuntimeController: ObservableObject {
     listen: SslocalListenSettings = SslocalListenSettings(),
     agent: LaunchAgentControlling = SMAppLaunchAgentService(),
     probe: EndpointProbing = SystemEndpointProbe(),
+    pacProbe: PACHealthProbing = SystemPACHealthProbe(),
+    firewallChecker: FirewallStatusChecking = SocketFilterFirewallChecker(),
+    firewallExecutableURLs: [URL]? = nil,
+    firewallPollIntervalNanoseconds: UInt64 = 2_000_000_000,
     sendSignal: @escaping @Sendable (Int32, Int32) -> Int32 = { kill($0, $1) }
   ) {
     self.catalogFileStore = catalogFileStore
@@ -70,6 +82,10 @@ final class ProxyRuntimeController: ObservableObject {
     self.listen = listen
     self.agent = agent
     self.probe = probe
+    self.pacProbe = pacProbe
+    self.firewallChecker = firewallChecker
+    self.firewallExecutableURLs = firewallExecutableURLs ?? Self.defaultFirewallExecutableURLs
+    self.firewallPollIntervalNanoseconds = firewallPollIntervalNanoseconds
     self.sendSignal = sendSignal
     catalog = (try? catalogFileStore.load()) ?? ConfigurationCatalog()
     let persistedTarget = try? activationFileStore.loadActiveTargetID()
@@ -77,6 +93,14 @@ final class ProxyRuntimeController: ObservableObject {
   }
 
   var isActiveTargetPresent: Bool { machine.activeTargetID != nil }
+
+  private static var defaultFirewallExecutableURLs: [URL] {
+    let bundle = Bundle.main.bundleURL
+    return [
+      bundle.appendingPathComponent("Contents/MacOS/ShadowsocksX-NG2Agent"),
+      bundle.appendingPathComponent("Contents/Helpers/sslocal"),
+    ]
+  }
 
   /// 无活动目标时启用代理的点名原因（无静默回退族的呈现面）。
   private static let noActiveTargetReason = "尚未激活任何服务器或分组，请先在主窗口激活后再启动代理"
@@ -113,6 +137,7 @@ final class ProxyRuntimeController: ObservableObject {
     } else {
       await execute(.stop, document: nil)
       state = .off
+      pacURL = nil
     }
   }
 
@@ -147,6 +172,7 @@ final class ProxyRuntimeController: ObservableObject {
         runtimeFileStore.deleteRuntimeFiles()
         RuntimeLog.emit(.runtimeFilesDeleted)
         state = .off
+        pacURL = nil
       }
     case .clearedAndStopped(let failure):
       await handleCleared(failure)
@@ -154,6 +180,7 @@ final class ProxyRuntimeController: ObservableObject {
       // 无活动目标：只剩清理残留（计划层只在已注册时注销）。
       await execute(.stop, document: nil)
       state = .off
+      pacURL = nil
     }
   }
 
@@ -182,6 +209,7 @@ final class ProxyRuntimeController: ObservableObject {
 
   /// 把「运行定义档」意图推到运行时：计划动作 → 顺序执行 → 端点健康呈现。
   private func deploy(_ document: SslocalRuntimeDocument) async {
+    pacURL = nil
     if await execute(.run(document), document: document) {
       state = .starting
       await presentLaunchHealth(document)
@@ -197,12 +225,14 @@ final class ProxyRuntimeController: ObservableObject {
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
     }
     await execute(.stop, document: nil)
+    pacURL = nil
     state = .activationFailed(reason: failure.presentedReason)
   }
 
   /// 按计划顺序执行动作；返回 false 表示中途失败、状态已呈现（后续动作与
   /// 健康探测都不应继续）。
   private func execute(_ intent: RuntimeIntent, document: SslocalRuntimeDocument?) async -> Bool {
+    cancelFirewallObservation()
     flowGeneration += 1
     let actions = ProxyRuntimePlan.actions(
       intent: intent,
@@ -271,37 +301,114 @@ final class ProxyRuntimeController: ObservableObject {
     }
     return true
   }
+}
 
-  /// 启动健康呈现（D2/D8）：以 TCP 连接确认 sslocal 实际绑定；超时即呈现
-  /// 「启动失败」，点名端点与端口（端口语义细节 #30 接线，这里给原始事实）。
+extension ProxyRuntimeController {
+  /// 启动健康呈现（D2/D7/D8）：先确认 sslocal TCP 绑定，再 GET PAC endpoint；
+  /// 主机态额外查询应用防火墙拒绝记录。任一端点超时都点名呈现。
   private func presentLaunchHealth(_ document: SslocalRuntimeDocument) async {
     let generation = flowGeneration
     let deadline = Date().addingTimeInterval(15)
     var outcome = EndpointHealthProbe.Outcome.timedOut
+    var pacOutcome = PACHealthOutcome.failed(detail: "尚未探测")
     while Date() < deadline {
       if generation != flowGeneration { return }
       outcome = await probeAsync(
-        host: document.localAddress, port: document.localPort, timeout: 1.5)
+        host: document.socksAddress, port: document.socksPort, timeout: 1.5)
       if outcome == .reachable {
-        state = .running
-        return
+        guard let healthURL = document.pac.healthURL else {
+          state = .launchFailed(detail: "PAC URL 无效")
+          return
+        }
+        pacOutcome = await pacProbe.probe(url: healthURL, timeout: 1.5)
+        if pacOutcome == .reachable {
+          guard generation == flowGeneration else { return }
+          pacURL = document.pac.publicURL
+          await presentFirewallStatus(for: document)
+          return
+        }
       }
       try? await Task.sleep(nanoseconds: 200_000_000)
     }
     if generation != flowGeneration { return }
+    if outcome == .reachable {
+      let detail: String
+      switch pacOutcome {
+      case .reachable:
+        detail = "未知错误"
+      case .failed(let reason):
+        detail = reason
+      }
+      state = .launchFailed(
+        detail: "PAC 端点 \(document.pac.healthURL?.absoluteString ?? "") 未就绪（\(detail)）")
+      return
+    }
     let detail: String
     switch outcome {
-    case .reachable:
-      detail = "已连通"
-    case .refused(let reason):
-      detail = reason
-    case .timedOut:
-      detail = "连接超时"
+    case .reachable: detail = "已连通"
+    case .refused(let reason): detail = reason
+    case .timedOut: detail = "连接超时"
     }
     RuntimeLog.emit(
-      .endpointProbeFailed(host: document.localAddress, port: document.localPort, detail: detail))
+      .endpointProbeFailed(host: document.socksAddress, port: document.socksPort, detail: detail))
     state = .launchFailed(
-      detail: "本地代理端点 \(document.localAddress):\(document.localPort) 未就绪（\(detail)）")
+      detail: "本地代理端点 \(document.socksAddress):\(document.socksPort) 未就绪（\(detail)）")
+  }
+
+  private func presentFirewallStatus(for document: SslocalRuntimeDocument) async {
+    guard document.pac.listenScope == .host else {
+      state = .running
+      return
+    }
+    if let blocked = await blockedFirewallExecutable() {
+      presentFirewallBlocked(blocked)
+      return
+    }
+    state = .running
+    observeFirewall(generation: flowGeneration)
+  }
+
+  private func blockedFirewallExecutable() async -> URL? {
+    for executableURL in firewallExecutableURLs {
+      let status = await firewallStatus(for: executableURL)
+      if status == .blocked { return executableURL }
+    }
+    return nil
+  }
+
+  private func presentFirewallBlocked(_ executableURL: URL) {
+    let name = executableURL.lastPathComponent
+    state = .firewallBlocked(
+      detail:
+        "macOS 防火墙已阻止 \(name) 接受传入连接。请前往“系统设置”→“网络”→“防火墙”→“选项”，将 \(name) 设为“允许传入连接”，或移除该条目后重启代理。")
+  }
+
+  private func observeFirewall(generation: Int) {
+    firewallObservationTask?.cancel()
+    let interval = firewallPollIntervalNanoseconds
+    firewallObservationTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(nanoseconds: interval)
+        guard !Task.isCancelled, let self, generation == flowGeneration else { return }
+        if let blocked = await blockedFirewallExecutable() {
+          presentFirewallBlocked(blocked)
+          firewallObservationTask = nil
+          return
+        }
+      }
+    }
+  }
+
+  private func cancelFirewallObservation() {
+    firewallObservationTask?.cancel()
+    firewallObservationTask = nil
+  }
+
+  private func firewallStatus(for executableURL: URL) async -> FirewallBlockStatus {
+    let checker = firewallChecker
+    return await Task.detached(priority: .utility) {
+      checker.status(for: executableURL)
+    }.value
   }
 
   private func probeAsync(host: String, port: Int, timeout: TimeInterval) async

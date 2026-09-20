@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 
 @testable import ShadowsocksX_NG2
@@ -24,6 +25,32 @@ enum ProxyRuntimeFixture {
       pidFile: directory.appendingPathComponent("agent.pid"))
   }
 
+  static func unusedLoopbackPort() throws -> Int {
+    let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { throw POSIXError(.ENOTSOCK) }
+    defer { close(descriptor) }
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_port = 0
+    address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+    let result = withUnsafePointer(to: &address) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+      }
+    }
+    guard result == 0 else { throw POSIXError(.EADDRINUSE) }
+    var bound = sockaddr_in()
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let nameResult = withUnsafeMutablePointer(to: &bound) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        getsockname(descriptor, $0, &length)
+      }
+    }
+    guard nameResult == 0 else { throw POSIXError(.EINVAL) }
+    return Int(CFSwapInt16BigToHost(bound.sin_port))
+  }
+
   static func makeDocument(
     serverAddress: String = "203.0.113.7",
     password: String = "resolved-password",
@@ -31,9 +58,14 @@ enum ProxyRuntimeFixture {
     localAddress: String = "127.0.0.1",
     localPort: Int = 1086,
     inboundProtocol: String = "socks",
-    mode: String = "tcp_only"
+    mode: String = "tcp_only",
+    pacPort: Int = 1089
   ) -> SslocalRuntimeDocument {
-    SslocalRuntimeDocument(
+    precondition(inboundProtocol == "socks")
+    let scope: ListenScope =
+      localAddress == "127.0.0.1"
+      ? .loopback : .host(advertisedAddress: localAddress)
+    return SslocalRuntimeDocument(
       servers: [
         SslocalServerDocument(
           id: "server-1",
@@ -46,11 +78,13 @@ enum ProxyRuntimeFixture {
           pluginOpts: pluginOpts
         )
       ],
-      localAddress: localAddress,
-      localPort: localPort,
-      inboundProtocol: inboundProtocol,
-      mode: mode
-    )
+      listen: SslocalListenSettings(
+        scope: scope,
+        socksPort: localPort,
+        httpProxyEnabled: false,
+        httpPort: 1087,
+        pacPort: pacPort,
+        udpRelayEnabled: mode == "tcp_and_udp"))
   }
 
   /// LaunchAgent 注册态可编程替身，记录全部调用。
@@ -88,7 +122,7 @@ enum ProxyRuntimeFixture {
   }
 
   /// 探测替身：按预设序列返回，序列耗尽后停留在最后一项。
-  final class FakeProbe: EndpointProbing {
+  final class FakeProbe: EndpointProbing, @unchecked Sendable {
     private let lock = NSLock()
     private var outcomes: [EndpointHealthProbe.Outcome]
     private(set) var callCount = 0
@@ -113,6 +147,53 @@ enum ProxyRuntimeFixture {
       if outcomes.count > 1 {
         outcomes.removeFirst()
       }
+      return outcome
+    }
+  }
+
+  final class FakePACProbe: PACHealthProbing, @unchecked Sendable {
+    private let lock = NSLock()
+    private let outcome: PACHealthOutcome
+    private(set) var callCount = 0
+
+    init(_ outcome: PACHealthOutcome = .reachable) {
+      self.outcome = outcome
+    }
+
+    func probe(url: URL, timeout: TimeInterval) async -> PACHealthOutcome {
+      lock.lock()
+      callCount += 1
+      lock.unlock()
+      return outcome
+    }
+  }
+
+  final class FakeFirewallChecker: FirewallStatusChecking, @unchecked Sendable {
+    private let lock = NSLock()
+    private var outcomes: [FirewallBlockStatus]
+    private var recordedURLs: [URL] = []
+
+    var checkedURLs: [URL] {
+      lock.lock()
+      defer { lock.unlock() }
+      return recordedURLs
+    }
+
+    init(_ result: FirewallBlockStatus = .permitted) {
+      outcomes = [result]
+    }
+
+    init(outcomes: [FirewallBlockStatus]) {
+      precondition(!outcomes.isEmpty)
+      self.outcomes = outcomes
+    }
+
+    func status(for executableURL: URL) -> FirewallBlockStatus {
+      lock.lock()
+      defer { lock.unlock() }
+      recordedURLs.append(executableURL)
+      let outcome = outcomes[0]
+      if outcomes.count > 1 { outcomes.removeFirst() }
       return outcome
     }
   }

@@ -51,7 +51,7 @@ final class RuntimeFileStoreTests: XCTestCase {
 
     XCTAssertEqual(try permissions(of: runtime.contract), 0o600, "替换后仍 0600")
     let document = try XCTUnwrap(store.loadDocument())
-    XCTAssertEqual(document.localPort, 2086, "内容已被原子替换")
+    XCTAssertEqual(document.socksPort, 2086, "内容已被原子替换")
   }
 
   func testWriteLeavesNoTemporaryFilesBehind() throws {
@@ -87,8 +87,7 @@ final class RuntimeFileStoreTests: XCTestCase {
   func testLoadDocumentReturnsNilForStructurallyInvalidDocument() throws {
     try store.write(
       SslocalRuntimeDocument(
-        servers: [], localAddress: "127.0.0.1", localPort: 1086, inboundProtocol: "socks",
-        mode: "tcp_only"))
+        servers: [], listen: SslocalListenSettings(httpProxyEnabled: false)))
 
     XCTAssertNil(try store.loadDocument(), "空 servers 属结构性无效（读取侧防御）")
   }
@@ -122,8 +121,9 @@ final class RuntimeFileStoreTests: XCTestCase {
       servers: [SslocalServerDocument]
     ) -> SslocalRuntimeDocument {
       SslocalRuntimeDocument(
-        servers: servers, localAddress: "127.0.0.1", localPort: localPort,
-        inboundProtocol: "socks", mode: "tcp_only")
+        servers: servers,
+        listen: SslocalListenSettings(
+          socksPort: localPort, httpProxyEnabled: false, pacPort: 1089))
     }
     func server(
       id: String = "s", address: String = "203.0.113.7", port: Int = 8388,

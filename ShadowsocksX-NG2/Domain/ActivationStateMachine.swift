@@ -100,10 +100,7 @@ struct ActivationStateMachine: Equatable, Sendable {
         targetID: target,
         document: SslocalRuntimeDocument(
           servers: servers,
-          localAddress: listen.localAddress,
-          localPort: listen.localPort,
-          inboundProtocol: listen.inboundProtocol,
-          mode: listen.mode)))
+          listen: listen)))
   }
 
   /// 目标→根路径上第一个禁用节点；全部启用返回 `nil`。

@@ -23,6 +23,9 @@ enum RuntimeLogEvent: CustomStringConvertible, Sendable {
   case sslocalSpawnFailed
   case sslocalExitedUnexpectedly(status: Int32)
   case sslocalStopRequested
+  case pacStarted(port: Int)
+  case pacStartFailed(port: Int, detail: String)
+  case pacStopped
   case contractMissing
   case contractInvalidRemoved
   case reloadForwarded
@@ -58,6 +61,12 @@ enum RuntimeLogEvent: CustomStringConvertible, Sendable {
       return "sslocal exited unexpectedly (status=\(status))"
     case .sslocalStopRequested:
       return "sslocal stop requested"
+    case .pacStarted(let port):
+      return "PAC endpoint started (port=\(port))"
+    case .pacStartFailed(let port, let detail):
+      return "PAC endpoint failed (port=\(port)): \(detail)"
+    case .pacStopped:
+      return "PAC endpoint stopped"
     case .contractMissing:
       return "contract missing"
     case .contractInvalidRemoved:
@@ -87,7 +96,8 @@ enum Redactor {
 
   /// 运行时文档只允许暴露数量与模式元数据。
   static func documentSummary(_ document: SslocalRuntimeDocument) -> String {
-    "servers=\(document.servers.count) mode=\(document.mode)"
+    let protocols = document.locals.map(\.inboundProtocol).joined(separator: ",")
+    return "servers=\(document.servers.count) protocols=\(protocols) mode=\(document.socksMode)"
   }
 }
 

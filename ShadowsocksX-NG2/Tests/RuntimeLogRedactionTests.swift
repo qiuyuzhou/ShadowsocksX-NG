@@ -31,10 +31,10 @@ final class RuntimeLogRedactionTests: XCTestCase {
     XCTAssertFalse(text.contains("{"), "日志不得携带 JSON 文档内容", file: file, line: line)
   }
 
-  func testDocumentSummaryExposesOnlyCountsAndMode() {
+  func testDocumentSummaryExposesOnlyCountsProtocolsAndMode() {
     let summary = Redactor.documentSummary(poisoned)
 
-    XCTAssertEqual(summary, "servers=1 mode=tcp_only")
+    XCTAssertEqual(summary, "servers=1 protocols=socks mode=tcp_only")
     assertNoSecrets(summary)
   }
 
@@ -67,6 +67,9 @@ final class RuntimeLogRedactionTests: XCTestCase {
       .sslocalSpawnFailed,
       .sslocalExitedUnexpectedly(status: 78),
       .sslocalStopRequested,
+      .pacStarted(port: 1089),
+      .pacStartFailed(port: 1089, detail: "Address already in use"),
+      .pacStopped,
       .contractMissing,
       .contractInvalidRemoved,
       .reloadForwarded,

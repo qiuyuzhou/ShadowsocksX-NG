@@ -1,8 +1,8 @@
 import Foundation
 
-// 代理运行时 wrapper（spec #21 D2/D5，issue #27）：LaunchAgent 常驻进程，
-// 读取跨进程契约 `v2/sslocal-active.json`，以绝对配置路径启动官方 sslocal
-// 并监管其生命周期。
+// 代理运行时 wrapper（spec #21 D2/D5/D7，issue #27/#28）：LaunchAgent
+// 常驻进程，读取跨进程契约 `v2/sslocal-active.json`，承载 PAC HTTP endpoint，
+// 并以绝对配置路径启动官方 sslocal、监管二者生命周期。
 //
 // 协议要点：
 // - 显式停止（GUI 注销 → launchd SIGTERM 本进程）：SIGTERM 转发 sslocal 并
@@ -84,9 +84,21 @@ private func supervise() -> Int32 {
       RuntimeLog.emit(.sslocalSpawnFailed)
       return 0
     }
+
+    let pacServer = PACServer(configuration: document.pac)
+    do {
+      try pacServer.start()
+      RuntimeLog.emit(.pacStarted(port: document.pac.port))
+    } catch {
+      RuntimeLog.emit(
+        .pacStartFailed(port: document.pac.port, detail: String(describing: error)))
+      stopUnsupervisedChild(child)
+      return 0
+    }
+
     let listen = document.listenFingerprint
 
-    switch superviseChild(child, listen: listen, flags: flags) {
+    switch superviseChild(child, pacServer: pacServer, listen: listen, flags: flags) {
     case .stoppedCleanly:
       return 0
     case .childLost:
@@ -95,6 +107,18 @@ private func supervise() -> Int32 {
       continue
     }
   }
+}
+
+/// PAC 尚未启动时的启动失败收敛；此时还没有 DispatchSource 收割子进程。
+private func stopUnsupervisedChild(_ child: Process) {
+  RuntimeLog.emit(.sslocalStopRequested)
+  child.terminate()
+  let deadline = Date().addingTimeInterval(10)
+  while child.isRunning && Date() < deadline {
+    Thread.sleep(forTimeInterval: 0.05)
+  }
+  if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+  child.waitUntilExit()
 }
 
 private enum SupervisionOutcome {
@@ -108,6 +132,7 @@ private enum SupervisionOutcome {
 
 private func superviseChild(
   _ child: Process,
+  pacServer: PACServer,
   listen: SslocalListenFingerprint,
   flags: SignalFlags
 ) -> SupervisionOutcome {
@@ -126,30 +151,33 @@ private func superviseChild(
     flags.wait()
     if flags.consumeStop() {
       RuntimeLog.emit(.sslocalStopRequested)
-      stopChild(child, exitStatus: exitStatus, exitSource: exitSource, flags: flags)
-      return .stoppedCleanly
+      return stopCleanly(
+        child: child, pacServer: pacServer, exitStatus: exitStatus, exitSource: exitSource,
+        flags: flags)
     }
     if let status = exitStatus.load() {
-      RuntimeLog.emit(.sslocalExitedUnexpectedly(status: status))
-      exitSource.cancel()
-      return .childLost
+      return handleUnexpectedExit(status, pacServer: pacServer, exitSource: exitSource)
     }
     guard flags.consumeReload() else { continue }
 
     switch loadContract() {
     case .missing:
       RuntimeLog.emit(.contractMissing)
-      stopChild(child, exitStatus: exitStatus, exitSource: exitSource, flags: flags)
-      return .stoppedCleanly
+      return stopCleanly(
+        child: child, pacServer: pacServer, exitStatus: exitStatus, exitSource: exitSource,
+        flags: flags)
     case .invalid:
       try? FileManager.default.removeItem(at: contractURL)
       RuntimeLog.emit(.contractInvalidRemoved)
-      stopChild(child, exitStatus: exitStatus, exitSource: exitSource, flags: flags)
-      return .stoppedCleanly
+      return stopCleanly(
+        child: child, pacServer: pacServer, exitStatus: exitStatus, exitSource: exitSource,
+        flags: flags)
     case .loaded(let reloaded):
       if reloaded.listenFingerprint != listen {
         RuntimeLog.emit(.reloadRestarted)
-        stopChild(child, exitStatus: exitStatus, exitSource: exitSource, flags: flags)
+        stopRuntime(
+          child: child, pacServer: pacServer, exitStatus: exitStatus, exitSource: exitSource,
+          flags: flags)
         if flags.consumeStop() {
           return .stoppedCleanly
         }
@@ -160,6 +188,43 @@ private func superviseChild(
       kill(child.processIdentifier, SIGUSR1)
     }
   }
+}
+
+private func stopCleanly(
+  child: Process,
+  pacServer: PACServer,
+  exitStatus: ExitStatusBox,
+  exitSource: DispatchSourceProcess,
+  flags: SignalFlags
+) -> SupervisionOutcome {
+  stopRuntime(
+    child: child, pacServer: pacServer, exitStatus: exitStatus, exitSource: exitSource, flags: flags
+  )
+  return .stoppedCleanly
+}
+
+private func handleUnexpectedExit(
+  _ status: Int32,
+  pacServer: PACServer,
+  exitSource: DispatchSourceProcess
+) -> SupervisionOutcome {
+  pacServer.stop()
+  RuntimeLog.emit(.pacStopped)
+  RuntimeLog.emit(.sslocalExitedUnexpectedly(status: status))
+  exitSource.cancel()
+  return .childLost
+}
+
+private func stopRuntime(
+  child: Process,
+  pacServer: PACServer,
+  exitStatus: ExitStatusBox,
+  exitSource: DispatchSourceProcess,
+  flags: SignalFlags
+) {
+  pacServer.stop()
+  RuntimeLog.emit(.pacStopped)
+  stopChild(child, exitStatus: exitStatus, exitSource: exitSource, flags: flags)
 }
 
 private func stopChild(

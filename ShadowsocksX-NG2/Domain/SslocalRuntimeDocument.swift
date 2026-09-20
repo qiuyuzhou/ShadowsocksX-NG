@@ -1,22 +1,120 @@
+import Darwin
 import Foundation
 
-/// sslocal 运行时文档（spec #21 D5）：激活派生出的完整 JSON 契约文档，字段名与
-/// shadowsocks-rust v1.25.0 对齐（docs/research/wayfinder-issue-2.md §2.2）。
-/// 密码与插件参数已在此解析为明文——只供 #27 落盘运行时文件，永不入日志。
-struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
-  let servers: [SslocalServerDocument]
+/// 用户可见监听范围。主机地址态把对外公布地址与通配绑定地址绑定在同一个值
+/// 对象中，避免 PAC 内容与实际监听范围各自漂移（spec #21 D7，issue #28）。
+enum ListenScope: Equatable, Sendable {
+  case loopback
+  case host(advertisedAddress: String)
+
+  var kind: ListenScopeKind {
+    switch self {
+    case .loopback: .loopback
+    case .host: .host
+    }
+  }
+
+  var bindAddress: String {
+    switch self {
+    case .loopback: "127.0.0.1"
+    case .host: "0.0.0.0"
+    }
+  }
+
+  var advertisedAddress: String {
+    switch self {
+    case .loopback: "127.0.0.1"
+    case .host(let address): address
+    }
+  }
+}
+
+enum ListenScopeKind: String, Codable, Equatable, Sendable {
+  case loopback
+  case host
+}
+
+/// `sslocal` 的一个本地入站。上游 v1.25.0 通过 `locals[]` 同时承载 SOCKS5
+/// 与 HTTP；HTTP 直接由 shadowsocks-rust 提供，不经过 Legacy Privoxy。
+struct SslocalLocalDocument: Codable, Equatable, Sendable {
+  let inboundProtocol: String
   let localAddress: String
   let localPort: Int
-  /// 本地入站协议（sslocal `protocol` 字段；HTTP 入站与监听范围由 #28 接线）。
-  let inboundProtocol: String
-  /// tcp_only / tcp_and_udp；TCP/UDP 自动选择由上游 PingBalancer 负责（D2）。
   let mode: String
 
   enum CodingKeys: String, CodingKey {
-    case servers, mode
+    case mode
+    case inboundProtocol = "protocol"
     case localAddress = "local_address"
     case localPort = "local_port"
-    case inboundProtocol = "protocol"
+  }
+}
+
+/// wrapper 自有的 PAC 契约。字段收在 `x_shadowsocksx_ng_pac` 下，上游
+/// sslocal 会忽略该扩展；wrapper 与 GUI 仍从同一原子文件读取同一份事实。
+struct PACRuntimeDocument: Codable, Equatable, Sendable {
+  /// #28 固定的是 API 版本路由；逐 snapshot generation URL 与 ownership/cache
+  /// 事务属于系统代理工单 #29，不能在此提前改变对外 URL 契约。
+  static let versionedEndpointPath = "/v1/proxy.pac"
+
+  let listenScope: ListenScopeKind
+  let bindAddress: String
+  let advertisedAddress: String
+  let port: Int
+  let socksPort: Int
+  let endpointPath: String
+
+  enum CodingKeys: String, CodingKey {
+    case port
+    case listenScope = "listen_scope"
+    case bindAddress = "bind_address"
+    case advertisedAddress = "advertised_address"
+    case socksPort = "socks_port"
+    case endpointPath = "endpoint_path"
+  }
+
+  var javaScript: String {
+    let chain =
+      "SOCKS5 \(advertisedAddress):\(socksPort); SOCKS \(advertisedAddress):\(socksPort); DIRECT"
+    return "function FindProxyForURL(url, host) { return \"\(chain)\"; }\n"
+  }
+
+  /// 给用户复制/系统代理写入的 URL；主机态必须使用可路由的 LAN 地址。
+  var publicURL: URL? {
+    makeURL(host: advertisedAddress)
+  }
+
+  /// GUI 健康检查固定走本机回环，避免把防火墙本机执法盲区误写成远端验证。
+  var healthURL: URL? {
+    makeURL(host: "127.0.0.1")
+  }
+
+  private func makeURL(host: String) -> URL? {
+    var components = URLComponents()
+    components.scheme = "http"
+    components.host = host
+    components.port = port
+    components.path = endpointPath
+    return components.url
+  }
+}
+
+/// sslocal 运行时文档（spec #21 D5/D7）：激活派生出的完整 JSON 契约文档。
+/// 密码与插件参数已在此解析为明文——只供运行时落盘，永不入日志。
+struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
+  let servers: [SslocalServerDocument]
+  let locals: [SslocalLocalDocument]
+  let pac: PACRuntimeDocument
+
+  enum CodingKeys: String, CodingKey {
+    case servers, locals
+    case pac = "x_shadowsocksx_ng_pac"
+  }
+
+  init(servers: [SslocalServerDocument], listen: SslocalListenSettings) {
+    self.servers = servers
+    locals = listen.locals
+    pac = listen.pac
   }
 
   func jsonData() throws -> Data {
@@ -49,30 +147,58 @@ struct SslocalServerDocument: Codable, Equatable, Sendable {
   }
 }
 
-/// sslocal 监听字段：用户设置的透传（端口语义 #30、监听范围与 HTTP 入站 #28
-/// 各自接线，本层不解释）。出厂值沿用 Legacy 基线（D8）：回环 127.0.0.1、SOCKS5 1086。
+/// 三个本地端点与单一监听范围的派生设置。HTTP 入站可独立关闭，但启用时与
+/// SOCKS、PAC 共用同一范围；默认端口沿用 Legacy 的 1086/1087/1089。
 struct SslocalListenSettings: Equatable, Sendable {
-  var localAddress: String = "127.0.0.1"
-  var localPort: Int = 1086
-  var inboundProtocol: String = "socks"
+  var scope: ListenScope = .loopback
+  var socksPort: Int = 1086
+  var httpProxyEnabled: Bool = true
+  var httpPort: Int = 1087
+  var pacPort: Int = 1089
   var udpRelayEnabled: Bool = false
 
-  /// 上游 `mode` 字段取值。
+  var bindAddress: String { scope.bindAddress }
+  var advertisedAddress: String { scope.advertisedAddress }
   var mode: String { udpRelayEnabled ? "tcp_and_udp" : "tcp_only" }
+
+  var locals: [SslocalLocalDocument] {
+    var result = [
+      SslocalLocalDocument(
+        inboundProtocol: "socks",
+        localAddress: bindAddress,
+        localPort: socksPort,
+        mode: mode)
+    ]
+    if httpProxyEnabled {
+      result.append(
+        SslocalLocalDocument(
+          inboundProtocol: "http",
+          localAddress: bindAddress,
+          localPort: httpPort,
+          mode: "tcp_only"))
+    }
+    return result
+  }
+
+  var pac: PACRuntimeDocument {
+    PACRuntimeDocument(
+      listenScope: scope.kind,
+      bindAddress: bindAddress,
+      advertisedAddress: advertisedAddress,
+      port: pacPort,
+      socksPort: socksPort,
+      endpointPath: PACRuntimeDocument.versionedEndpointPath)
+  }
 }
 
-/// 监听指纹（spec #21 D5 变更协议）：SIGUSR1 只能热重载 `servers`，这四个
-/// 字段变化必须由 wrapper 走优雅重启。服务器列表变化不影响指纹。
+/// 监听指纹（spec #21 D5/D7）：服务器列表变化可热重载；任一本地入站或 PAC
+/// endpoint 变化都必须由 wrapper 走优雅重启。
 struct SslocalListenFingerprint: Equatable, Sendable {
-  let localAddress: String
-  let localPort: Int
-  let inboundProtocol: String
-  let mode: String
+  let locals: [SslocalLocalDocument]
+  let pac: PACRuntimeDocument
 }
 
 extension SslocalRuntimeDocument {
-  /// 读取侧单缝（GUI 与 wrapper 共用同一判定，防跨进程漂移）：解码成功且
-  /// 结构有效才返回文档；否则按「文件无效」处理。
   static func decodeValidated(_ data: Data) -> SslocalRuntimeDocument? {
     guard
       let document = try? JSONDecoder().decode(SslocalRuntimeDocument.self, from: data),
@@ -81,21 +207,63 @@ extension SslocalRuntimeDocument {
     return document
   }
 
-  /// 监听指纹，供 wrapper 判定「结构性变化」。
   var listenFingerprint: SslocalListenFingerprint {
-    SslocalListenFingerprint(
-      localAddress: localAddress,
-      localPort: localPort,
-      inboundProtocol: inboundProtocol,
-      mode: mode)
+    SslocalListenFingerprint(locals: locals, pac: pac)
   }
 
-  /// 读取侧防御校验（wrapper 与 GUI 共用）：契约可解码但结构性无效时按
-  /// 「文件无效」处理——停止并清理，避免把上游必然拒绝的配置反复交给 sslocal
-  /// 造成 KeepAlive 重启循环。写入侧文档由激活状态机派生，天然满足。
+  var socksLocal: SslocalLocalDocument? {
+    locals.first { $0.inboundProtocol == "socks" }
+  }
+
+  var socksAddress: String { socksLocal?.localAddress ?? "" }
+  var socksPort: Int { socksLocal?.localPort ?? 0 }
+  var socksMode: String { socksLocal?.mode ?? "" }
+
+  /// wrapper 读取侧防御校验：端口、协议与共享范围必须一致；无效文件按 D5
+  /// 停止并清理，不能交给 KeepAlive 无限重放。
   var isWellFormed: Bool {
-    guard (1...65535).contains(localPort), !localAddress.isEmpty else { return false }
     guard !servers.isEmpty else { return false }
+    guard
+      (1...65535).contains(pac.port),
+      pac.endpointPath == PACRuntimeDocument.versionedEndpointPath,
+      !pac.advertisedAddress.isEmpty
+    else { return false }
+
+    let expectedBind = pac.listenScope == .loopback ? "127.0.0.1" : "0.0.0.0"
+    guard pac.bindAddress == expectedBind else {
+      return false
+    }
+    switch pac.listenScope {
+    case .loopback:
+      guard pac.advertisedAddress == "127.0.0.1" else { return false }
+    case .host:
+      guard
+        isIPv4Address(pac.advertisedAddress),
+        pac.advertisedAddress != "0.0.0.0",
+        pac.advertisedAddress != "127.0.0.1"
+      else {
+        return false
+      }
+    }
+
+    let socks = locals.filter { $0.inboundProtocol == "socks" }
+    let http = locals.filter { $0.inboundProtocol == "http" }
+    guard socks.count == 1, http.count <= 1, locals.count == socks.count + http.count else {
+      return false
+    }
+    guard socks[0].localPort == pac.socksPort else { return false }
+    guard http.allSatisfy({ $0.mode == "tcp_only" }) else { return false }
+
+    let localPorts = locals.map(\.localPort)
+    guard Set(localPorts + [pac.port]).count == localPorts.count + 1 else { return false }
+    guard
+      locals.allSatisfy({ local in
+        local.localAddress == expectedBind
+          && (1...65535).contains(local.localPort)
+          && (local.mode == "tcp_only" || local.mode == "tcp_and_udp")
+      })
+    else { return false }
+
     return servers.allSatisfy { server in
       (1...65535).contains(server.serverPort)
         && !server.id.isEmpty
@@ -103,4 +271,9 @@ extension SslocalRuntimeDocument {
         && !server.method.isEmpty
     }
   }
+}
+
+private func isIPv4Address(_ value: String) -> Bool {
+  var address = in_addr()
+  return value.withCString { inet_pton(AF_INET, $0, &address) == 1 }
 }

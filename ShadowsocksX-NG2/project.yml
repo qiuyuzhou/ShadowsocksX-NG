@@ -98,6 +98,7 @@ targets:
       # 与日志事件基线（spec #21 D5）。
       - path: Domain/RuntimePaths.swift
       - path: Domain/SslocalRuntimeDocument.swift
+      - path: Domain/PACServer.swift
       - path: Domain/RuntimeLog.swift
     settings:
       base:

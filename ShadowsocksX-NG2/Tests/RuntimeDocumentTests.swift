@@ -27,11 +27,7 @@ final class RuntimeDocumentTests: XCTestCase {
           plugin: plugin,
           pluginOpts: pluginOpts
         )
-      ],
-      localAddress: "127.0.0.1",
-      localPort: 1086,
-      inboundProtocol: "socks",
-      mode: "tcp_only"
+      ], listen: SslocalListenSettings()
     )
   }
 
@@ -41,10 +37,17 @@ final class RuntimeDocumentTests: XCTestCase {
     let dictionary = try encodedDictionary(
       makeDocument(plugin: "/bundle/plugins/x", pluginOpts: "obfs=http"))
 
-    XCTAssertEqual(dictionary["local_address"] as? String, "127.0.0.1")
-    XCTAssertEqual(dictionary["local_port"] as? Int, 1086)
-    XCTAssertEqual(dictionary["protocol"] as? String, "socks")
-    XCTAssertEqual(dictionary["mode"] as? String, "tcp_only")
+    let locals = try XCTUnwrap(dictionary["locals"] as? [[String: Any]])
+    XCTAssertEqual(locals.count, 2)
+    XCTAssertEqual(locals[0]["local_address"] as? String, "127.0.0.1")
+    XCTAssertEqual(locals[0]["local_port"] as? Int, 1086)
+    XCTAssertEqual(locals[0]["protocol"] as? String, "socks")
+    XCTAssertEqual(locals[0]["mode"] as? String, "tcp_only")
+    XCTAssertEqual(locals[1]["local_port"] as? Int, 1087)
+    XCTAssertEqual(locals[1]["protocol"] as? String, "http")
+    let pac = try XCTUnwrap(dictionary["x_shadowsocksx_ng_pac"] as? [String: Any])
+    XCTAssertEqual(pac["listen_scope"] as? String, "loopback")
+    XCTAssertEqual(pac["port"] as? Int, 1089)
     let servers = try XCTUnwrap(dictionary["servers"] as? [[String: Any]])
     XCTAssertEqual(servers.count, 1)
     let server = servers[0]
@@ -75,12 +78,62 @@ final class RuntimeDocumentTests: XCTestCase {
   // MARK: 监听设置透传
 
   func testListenSettingsMapUDPRelayToUpstreamMode() {
-    let tcpOnly = SslocalListenSettings(
-      localAddress: "127.0.0.1", localPort: 1086, inboundProtocol: "socks", udpRelayEnabled: false)
-    let tcpAndUDP = SslocalListenSettings(
-      localAddress: "127.0.0.1", localPort: 1086, inboundProtocol: "socks", udpRelayEnabled: true)
+    let tcpOnly = SslocalListenSettings(udpRelayEnabled: false)
+    let tcpAndUDP = SslocalListenSettings(udpRelayEnabled: true)
 
     XCTAssertEqual(tcpOnly.mode, "tcp_only")
     XCTAssertEqual(tcpAndUDP.mode, "tcp_and_udp")
+  }
+
+  func testLoopbackScopeDerivesPACAndBothSslocalInbounds() {
+    let listen = SslocalListenSettings(
+      scope: .loopback,
+      socksPort: 1086,
+      httpProxyEnabled: true,
+      httpPort: 1087,
+      pacPort: 1089,
+      udpRelayEnabled: true)
+
+    XCTAssertEqual(listen.bindAddress, "127.0.0.1")
+    XCTAssertEqual(listen.advertisedAddress, "127.0.0.1")
+    XCTAssertEqual(
+      listen.locals,
+      [
+        SslocalLocalDocument(
+          inboundProtocol: "socks", localAddress: "127.0.0.1", localPort: 1086,
+          mode: "tcp_and_udp"),
+        SslocalLocalDocument(
+          inboundProtocol: "http", localAddress: "127.0.0.1", localPort: 1087,
+          mode: "tcp_only"),
+      ])
+    XCTAssertEqual(listen.pac.port, 1089)
+    XCTAssertEqual(listen.pac.endpointPath, "/v1/proxy.pac")
+  }
+
+  func testHostScopeUsesWildcardBindingsAndAdvertisedNetworkAddress() {
+    let listen = SslocalListenSettings(
+      scope: .host(advertisedAddress: "192.168.2.89"),
+      socksPort: 1086,
+      httpProxyEnabled: true,
+      httpPort: 1087,
+      pacPort: 1089)
+
+    XCTAssertEqual(listen.bindAddress, "0.0.0.0")
+    XCTAssertEqual(listen.advertisedAddress, "192.168.2.89")
+    XCTAssertEqual(Set(listen.locals.map(\.localAddress)), ["0.0.0.0"])
+    XCTAssertEqual(listen.pac.advertisedAddress, "192.168.2.89")
+    XCTAssertEqual(
+      listen.pac.javaScript,
+      "function FindProxyForURL(url, host) { return \"SOCKS5 192.168.2.89:1086; SOCKS 192.168.2.89:1086; DIRECT\"; }\n"
+    )
+  }
+
+  func testHTTPInboundCanBeDisabledWithoutChangingPACSOCKSTarget() {
+    let listen = SslocalListenSettings(
+      scope: .loopback, socksPort: 2086, httpProxyEnabled: false, httpPort: 2087,
+      pacPort: 2089)
+
+    XCTAssertEqual(listen.locals.map(\.inboundProtocol), ["socks"])
+    XCTAssertTrue(listen.pac.javaScript.contains("127.0.0.1:2086"))
   }
 }
