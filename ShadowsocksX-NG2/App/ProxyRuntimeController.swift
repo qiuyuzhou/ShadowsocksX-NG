@@ -96,7 +96,7 @@ final class ProxyRuntimeController: ObservableObject {
     self.firewallExecutableURLs = firewallExecutableURLs ?? Self.defaultFirewallExecutableURLs
     self.firewallPollIntervalNanoseconds = firewallPollIntervalNanoseconds
     self.sendSignal = sendSignal
-    catalog = (try? catalogFileStore.load()) ?? ConfigurationCatalog()
+    catalog = (try? catalogFileStore.load().catalog) ?? ConfigurationCatalog()
     let persistedTarget = try? activationFileStore.loadActiveTargetID()
     machine = ActivationStateMachine(activeTargetID: persistedTarget)
     self.proxyMode = proxyMode
@@ -554,7 +554,7 @@ extension ProxyRuntimeController {
   // MARK: - 目录同步
 
   private func reloadCatalog() {
-    catalog = (try? catalogFileStore.load()) ?? catalog
+    catalog = (try? catalogFileStore.load().catalog) ?? catalog
   }
 
   private func reexpand() -> ActivationEffect? {

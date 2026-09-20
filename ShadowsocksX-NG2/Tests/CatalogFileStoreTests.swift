@@ -23,10 +23,11 @@ final class CatalogFileStoreTests: XCTestCase {
 
   // MARK: 缺失与损坏
 
-  func testMissingFileLoadsAsFreshEmptyCatalog() throws {
-    let catalog = try store.load()
+  func testMissingFileLoadsAsFreshEmptyDocument() throws {
+    let document = try store.load()
 
-    XCTAssertEqual(catalog, ConfigurationCatalog(), "文件缺失按全新安装处理")
+    XCTAssertEqual(document.catalog, ConfigurationCatalog(), "文件缺失按全新安装处理")
+    XCTAssertTrue(document.subscriptions.isEmpty, "缺失文件无订阅记录")
   }
 
   func testBrokenJSONLoadsAsCorrupt() throws {
@@ -121,13 +122,13 @@ final class CatalogFileStoreTests: XCTestCase {
   func testRoundTripIsLosslessAndKeepsIdentity() throws {
     let original = try Self.makeRichCatalog()
 
-    try store.save(original)
+    try store.save(CatalogDocument(catalog: original))
     let loaded = try store.load()
 
-    XCTAssertEqual(loaded, original, "结构、顺序、启停、字段与订阅夹具全部无损")
+    XCTAssertEqual(loaded.catalog, original, "结构、顺序、启停、字段与订阅夹具全部无损")
 
     let serverID = NodeID(rawValue: "manual:server")
-    let server = try XCTUnwrap(loaded.entry(for: serverID))
+    let server = try XCTUnwrap(loaded.catalog.entry(for: serverID))
     XCTAssertEqual(server.id, serverID, "身份跨持久化稳定")
     guard case .server(let fields) = server.kind else { return XCTFail("目标应是服务器叶子") }
     XCTAssertEqual(fields.pluginProgram, "v2ray-plugin", "插件程序引用原样保留")
@@ -137,14 +138,14 @@ final class CatalogFileStoreTests: XCTestCase {
   func testSecondSaveReplacesContent() throws {
     var catalog = ConfigurationCatalog()
     let first = try catalog.addTestServer("first")
-    try store.save(catalog)
+    try store.save(CatalogDocument(catalog: catalog))
 
     try catalog.remove(first)
     let second = try catalog.addTestServer("second")
-    try store.save(catalog)
+    try store.save(CatalogDocument(catalog: catalog))
 
-    XCTAssertEqual(try store.load(), catalog)
-    XCTAssertFalse(try store.load().contains(first), "旧内容被整体替换而非追加")
+    XCTAssertEqual(try store.load().catalog, catalog)
+    XCTAssertFalse(try store.load().catalog.contains(first), "旧内容被整体替换而非追加")
   }
 
   // MARK: 权限与敏感信息
@@ -153,7 +154,7 @@ final class CatalogFileStoreTests: XCTestCase {
     var catalog = ConfigurationCatalog()
     _ = try catalog.addTestServer("leaf")
 
-    try store.save(catalog)
+    try store.save(CatalogDocument(catalog: catalog))
 
     let fileAttributes = try FileManager.default.attributesOfItem(atPath: store.fileURL.path)
     XCTAssertEqual(fileAttributes[.posixPermissions] as? Int, 0o600, "文件权限 0600")
@@ -179,7 +180,7 @@ final class CatalogFileStoreTests: XCTestCase {
     try credentials.save("TOPSECRET-密码", for: passwordRef)
     try credentials.save("obfs-local;obfs=http", for: optionsRef)
 
-    try store.save(catalog)
+    try store.save(CatalogDocument(catalog: catalog))
 
     let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
     XCTAssertFalse(raw.contains("TOPSECRET-密码"), "密码明文不得进入持久化文件")
@@ -212,5 +213,86 @@ final class CatalogFileStoreTests: XCTestCase {
     try catalog.addGroup("空组", id: NodeID(rawValue: "manual:empty"))
     try catalog.move(server, to: group, index: 0)
     return catalog
+  }
+
+  // MARK: 订阅记录文档（v2，issue #35）
+
+  func testSubscriptionRecordRoundTripsWithStatus() throws {
+    let catalog = try CatalogFixtures.makeSubscriptionFixture(prefix: "sub2").catalog
+    let record = SubscriptionRecord(
+      id: NodeID(rawValue: "sub2:source"),
+      groupID: NodeID(rawValue: "sub2:group"),
+      urlRef: CredentialReference(rawValue: "ref-sub-url"),
+      status: .failed(at: Date(timeIntervalSince1970: 1_789_000_000), reason: "HTTP 503"))
+
+    try store.save(CatalogDocument(catalog: catalog, subscriptions: [record]))
+    let loaded = try store.load()
+
+    XCTAssertEqual(loaded.subscriptions, [record], "订阅记录与刷新状态无损")
+    XCTAssertEqual(loaded.catalog, catalog)
+    XCTAssertFalse(
+      try String(contentsOf: store.fileURL, encoding: .utf8).contains("https://"),
+      "订阅 URL 明文不得落盘（D5：只存凭据引用）")
+  }
+
+  func testV1PayloadLoadsWithEmptySubscriptions() throws {
+    let payload = """
+      {"version": 1, "rootChildren": [], "entries": []}
+      """
+    try payload.write(to: store.fileURL, atomically: true, encoding: .utf8)
+
+    let loaded = try store.load()
+
+    XCTAssertTrue(loaded.subscriptions.isEmpty, "v1 文档无订阅记录")
+    XCTAssertTrue(loaded.catalog.isEmpty)
+  }
+
+  /// 订阅记录 JSON 用真编码器生成：枚举 Codable 形状是实现细节，不在测试里手写。
+  private func subscriptionJSON(
+    id: String, groupID: String, urlRef: String = "ref-sub-url"
+  ) throws -> String {
+    let record = SubscriptionRecord(
+      id: NodeID(rawValue: id),
+      groupID: NodeID(rawValue: groupID),
+      urlRef: CredentialReference(rawValue: urlRef),
+      status: .never)
+    return String(data: try JSONEncoder().encode(record), encoding: .utf8)!
+  }
+
+  func testSubscriptionGroupMissingLoadsAsCorrupt() throws {
+    let recordJSON = try subscriptionJSON(id: "sub-x", groupID: "ghost")
+    let payload =
+      """
+      {"version": 2, "rootChildren": [], "entries": [], "subscriptions": [\(recordJSON)]}
+      """
+    try payload.write(to: store.fileURL, atomically: true, encoding: .utf8)
+
+    XCTAssertThrowsError(try store.load()) { error in
+      guard
+        case CatalogFileStore.PersistenceError.corrupt? = error
+          as? CatalogFileStore.PersistenceError
+      else {
+        return XCTFail("固定分组缺失应报 corrupt，实际 \(error)")
+      }
+    }
+  }
+
+  func testDuplicateSubscriptionIDLoadsAsCorrupt() throws {
+    let first = try subscriptionJSON(id: "sub-x", groupID: "g1", urlRef: "ref-u")
+    let second = try subscriptionJSON(id: "sub-x", groupID: "g1", urlRef: "ref-v")
+    let payload =
+      """
+      {"version": 2, "rootChildren": [], "entries": [], "subscriptions": [\(first), \(second)]}
+      """
+    try payload.write(to: store.fileURL, atomically: true, encoding: .utf8)
+
+    XCTAssertThrowsError(try store.load()) { error in
+      guard
+        case CatalogFileStore.PersistenceError.corrupt? = error
+          as? CatalogFileStore.PersistenceError
+      else {
+        return XCTFail("重复订阅身份应报 corrupt，实际 \(error)")
+      }
+    }
   }
 }

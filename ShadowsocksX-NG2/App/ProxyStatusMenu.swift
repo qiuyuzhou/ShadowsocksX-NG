@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 /// 状态菜单的代理控制区（spec #21 D11 白名单中本票的子集）：头部状态摘要、
-/// 代理开关与「启动失败」呈现。模式选择、活动目标级联等项由后续工单接入。
+/// 代理开关、「立即更新全部订阅」（issue #35）与「启动失败」呈现。模式选择、
+/// 活动目标级联等项由后续工单接入。
 struct ProxyStatusMenu: View {
   private struct Presentation {
     let isOn: Bool
@@ -12,6 +13,7 @@ struct ProxyStatusMenu: View {
 
   @Environment(\.openWindow) private var openWindow
   @ObservedObject var controller: ProxyRuntimeController
+  @ObservedObject var catalogViewModel: CatalogViewModel
 
   var body: some View {
     let presentation = presentation
@@ -35,6 +37,13 @@ struct ProxyStatusMenu: View {
         NSPasteboard.general.setString(pacURL.absoluteString, forType: .string)
       }
     }
+
+    Divider()
+
+    Button("立即更新全部订阅") {
+      Task { await catalogViewModel.refreshAllSubscriptions() }
+    }
+    .disabled(catalogViewModel.subscriptions.isEmpty)
 
     Divider()
 

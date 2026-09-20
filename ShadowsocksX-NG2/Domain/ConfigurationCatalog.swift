@@ -250,3 +250,101 @@ extension ConfigurationCatalog {
     entries[parent]?.kind = .group(fields)
   }
 }
+
+// MARK: - 订阅子树（spec #21 D4，issue #35：快照原子提交与递归清除）
+
+extension ConfigurationCatalog {
+  /// 订阅固定分组子树的全量条目（含固定分组自身）；不存在或不是分组即抛错。
+  func subscriptionSubtree(of groupID: NodeID) throws -> [CatalogEntry] {
+    guard let entry = entries[groupID], case .group = entry.kind else {
+      throw CatalogError.notAGroup(groupID)
+    }
+    var collected: [CatalogEntry] = []
+    var pending = [groupID]
+    while let current = pending.popLast() {
+      guard let currentEntry = entries[current] else { continue }
+      if case .group(let fields) = currentEntry.kind {
+        pending.append(contentsOf: fields.children)
+      }
+      collected.append(currentEntry)
+    }
+    return collected
+  }
+
+  /// 订阅快照原子应用（CONTEXT.md 刷新契约）：以快照整体重建固定分组子树；
+  /// `enabled` 仅按节点身份精确匹配延续（无稳定 ID 的记录由解析器保证只有
+  /// 完全相同内容才得同身份）；固定分组自身身份与 `enabled` 保持不变，名称
+  /// 跟随远端（扩展缺失时由调用方给 URL host 兜底）。返回被移除的旧服务器
+  /// 叶子（供调用方清理凭据）。
+  @discardableResult
+  mutating func applySubscriptionSnapshot(
+    _ snapshot: CatalogSubscriptionSnapshot, into groupID: NodeID
+  ) throws -> [CatalogEntry] {
+    guard let fixed = entries[groupID], case .group = fixed.kind else {
+      throw CatalogError.notAGroup(groupID)
+    }
+    guard fixed.source == .subscription else {
+      throw CatalogError.crossSourcePlacement(node: .subscription, container: fixed.source)
+    }
+
+    // 先整树摘除旧成员（固定分组本身保留），收集 overlay 与被移除的服务器。
+    var removedServers: [CatalogEntry] = []
+    var oldEnabled: [NodeID: Bool] = [:]
+    let oldSubtree = try subscriptionSubtree(of: groupID)
+    for entry in oldSubtree {
+      oldEnabled[entry.id] = entry.enabled
+      if case .server = entry.kind { removedServers.append(entry) }
+    }
+    for entry in oldSubtree where entry.id != groupID {
+      entries[entry.id] = nil
+    }
+    setChildren([], of: groupID)
+
+    // 远端权威重建：名称、结构、顺序、字段全按快照；本地只回填 enabled。
+    var fixedFields = GroupFields(name: snapshot.name, children: [])
+    try insertSnapshotChildren(of: snapshot.root, into: &fixedFields, overlay: oldEnabled)
+    entries[groupID]?.kind = .group(fixedFields)
+    return removedServers
+  }
+
+  /// 递归挂载快照分组：嵌套分组与服务器叶子以快照身份按序重建，并产出父
+  /// 分组的显子序。身份已由解析器按订阅作用域限定，与既有节点冲突即程序错误。
+  private mutating func insertSnapshotChildren(
+    of group: CatalogSubscriptionSnapshot.Group,
+    into fields: inout GroupFields,
+    overlay: [NodeID: Bool]
+  ) throws {
+    var childIDs: [NodeID] = []
+    for child in group.children {
+      switch child {
+      case .server(let leaf):
+        guard entries[leaf.id] == nil else { throw CatalogError.duplicateID(leaf.id) }
+        entries[leaf.id] = CatalogEntry(
+          id: leaf.id, source: .subscription,
+          enabled: overlay[leaf.id] ?? true, kind: .server(leaf.fields))
+        childIDs.append(leaf.id)
+      case .group(let nested):
+        guard entries[nested.id] == nil else { throw CatalogError.duplicateID(nested.id) }
+        var nestedFields = GroupFields(name: nested.name, children: [])
+        try insertSnapshotChildren(of: nested, into: &nestedFields, overlay: overlay)
+        entries[nested.id] = CatalogEntry(
+          id: nested.id, source: .subscription,
+          enabled: overlay[nested.id] ?? true, kind: .group(nestedFields))
+        childIDs.append(nested.id)
+      }
+    }
+    fields.children = childIDs
+  }
+
+  /// 删除订阅：固定分组整棵子树连同固定分组本身一并移除（递归清除，不留
+  /// 墓碑）。返回被删条目（含凭据引用，供调用方清理 Keychain 秘密）。
+  @discardableResult
+  mutating func removeSubscriptionSubtree(of groupID: NodeID) throws -> [CatalogEntry] {
+    let subtree = try subscriptionSubtree(of: groupID)
+    for entry in subtree {
+      entries[entry.id] = nil
+    }
+    removeFromSiblings(groupID)
+    return subtree
+  }
+}

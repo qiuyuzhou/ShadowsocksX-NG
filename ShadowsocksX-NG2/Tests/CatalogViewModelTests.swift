@@ -41,7 +41,7 @@ final class CatalogViewModelTests: XCTestCase {
 
   private func makeSubscriptionCatalog() throws {
     let fixture = try CatalogFixtures.makeSubscriptionFixture()
-    try CatalogFileStore(fileURL: fileURL).save(fixture.catalog)
+    try CatalogFileStore(fileURL: fileURL).save(CatalogDocument(catalog: fixture.catalog))
     viewModel = makeViewModel()
   }
 
@@ -207,7 +207,7 @@ final class CatalogViewModelTests: XCTestCase {
     let commitCount = await commitCounter.count
     XCTAssertEqual(commitCount, 1)
     // 持久化到磁盘可读回。
-    let reloaded = try CatalogFileStore(fileURL: fileURL).load()
+    let reloaded = try CatalogFileStore(fileURL: fileURL).load().catalog
     XCTAssertFalse(try XCTUnwrap(reloaded.entry(for: server)).enabled)
     XCTAssertTrue(try reloaded.isEffectivelyEnabled(fixture.serverIDs[1]), "兄弟节点不受影响")
   }
@@ -236,7 +236,7 @@ final class CatalogViewModelTests: XCTestCase {
     var fields = CatalogFixtures.serverFields(remark: "无凭据")
     fields.passwordRef = CredentialReference.fresh()
     try catalog.addServer(fields)
-    try CatalogFileStore(fileURL: fileURL).save(catalog)
+    try CatalogFileStore(fileURL: fileURL).save(CatalogDocument(catalog: catalog))
     viewModel = makeViewModel()
     let id = try XCTUnwrap(viewModel.catalog.rootChildren.first)
     await expectThrowsAsync { try viewModel.ssUri(for: id) }

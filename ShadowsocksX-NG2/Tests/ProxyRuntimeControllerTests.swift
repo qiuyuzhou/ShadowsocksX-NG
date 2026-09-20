@@ -58,7 +58,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     var catalog = ConfigurationCatalog()
     let server = try ActivationFixture.addPlainServer(
       "香港 01", in: &catalog, credentials: credentials)
-    try CatalogFileStore(fileURL: catalogFileURL).save(catalog)
+    try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
     return (catalog, server)
   }
 
@@ -296,7 +296,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     try Data("\(ProcessInfo.processInfo.processIdentifier)".utf8).write(to: runtime.pidFile)
 
     // 修改服务器备注（文档内容随之变化），提交目录变更。
-    var catalog = try CatalogFileStore(fileURL: catalogFileURL).load()
+    var catalog = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
     var fields = try ActivationFixture.serverFields(of: seeded.server, in: catalog)
     fields = ServerFields(
       address: fields.address,
@@ -307,7 +307,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       pluginProgram: fields.pluginProgram,
       pluginOptionsRef: fields.pluginOptionsRef)
     try catalog.updateServer(seeded.server, with: fields)
-    try CatalogFileStore(fileURL: catalogFileURL).save(catalog)
+    try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
 
     await controller.catalogDidCommit()
 
@@ -328,9 +328,9 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     await controller.setProxyEnabled(true)
 
     // 删除活动目标 → 重展开失败 → 清除并停止。
-    var catalog = try CatalogFileStore(fileURL: catalogFileURL).load()
+    var catalog = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
     try catalog.remove(seeded.server)
-    try CatalogFileStore(fileURL: catalogFileURL).save(catalog)
+    try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
 
     await controller.catalogDidCommit()
 

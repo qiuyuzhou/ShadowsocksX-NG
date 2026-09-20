@@ -1,34 +1,54 @@
 import Foundation
 import SwiftUI
 
-/// 主窗口服务器分区的视图模型（issue #32）：把 ConfigurationCatalog 领域语义
-/// 接到树操作、详情表单、添加三入口与分享。所有变更走「副本变更 → 落盘 →
-/// 发布 → postCommit 重展开」，失败即整体不变更；凭据读写只在模型层出现。
+/// 主窗口视图模型（issue #32/#35）：把 ConfigurationCatalog 领域语义接到树
+/// 操作、详情表单、添加三入口、分享与订阅生命周期。所有变更走「副本变更 →
+/// 落盘 → 发布 → postCommit 重展开」，失败即整体不变更；凭据读写只在模型层
+/// 出现。
 @MainActor
 final class CatalogViewModel: ObservableObject {
   @Published private(set) var catalog: ConfigurationCatalog
+  @Published private(set) var subscriptions: [SubscriptionRecord] = []
+  /// 正在刷新的订阅（并发守卫：同一订阅不重入，issue #35）。
+  @Published private(set) var inFlightRefreshIDs: Set<NodeID> = []
   @Published var selectedNodeID: NodeID?
   /// 需要弹窗呈现的错误（领域拒绝、导入失败、凭据失败）。
   @Published var presentedError: String?
 
   private let fileStore: CatalogFileStore
-  private let credentials: CredentialStoring
+  /// 订阅扩展（CatalogViewModel+Subscriptions）同样经此读写凭据。
+  let credentials: CredentialStoring
   private let plugins: ManagedPluginProviding
+  /// 订阅获取缝（默认 URLSession 实现；测试注入夹具，issue #35）。
+  var subscriptionFetcher: SubscriptionFetching
   /// 目录提交后的运行时重展开（生产接线 `ProxyRuntimeController.catalogDidCommit`）。
   var postCommit: (() async -> Void)?
 
   init(
     fileStore: CatalogFileStore = CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL()),
     credentials: CredentialStoring = KeychainCredentialStore(),
-    plugins: ManagedPluginProviding = NoManagedPluginProvider()
+    plugins: ManagedPluginProviding = NoManagedPluginProvider(),
+    subscriptionFetcher: SubscriptionFetching = HTTPSSubscriptionFetcher()
   ) {
     self.fileStore = fileStore
     self.credentials = credentials
     self.plugins = plugins
-    catalog = (try? fileStore.load()) ?? ConfigurationCatalog()
+    self.subscriptionFetcher = subscriptionFetcher
+    let loaded = (try? fileStore.load()) ?? CatalogDocument()
+    catalog = loaded.catalog
+    subscriptions = loaded.subscriptions
   }
 
   // MARK: - 查询面
+
+  /// 订阅刷新并发守卫的写入口（扩展文件使用；保持集合只对外可读）。
+  func setSubscriptionRefreshInFlight(_ id: NodeID, _ inFlight: Bool) {
+    if inFlight {
+      inFlightRefreshIDs.insert(id)
+    } else {
+      inFlightRefreshIDs.remove(id)
+    }
+  }
 
   func entry(for id: NodeID) -> CatalogEntry? { catalog.entry(for: id) }
 
@@ -243,10 +263,23 @@ final class CatalogViewModel: ObservableObject {
   private func commit<T>(
     _ mutate: (inout ConfigurationCatalog) throws -> T
   ) async throws -> T {
-    var working = catalog
-    let result = try mutate(&working)
-    try fileStore.save(working)
-    catalog = working
+    try await commitDocument { catalog, _ in
+      try mutate(&catalog)
+    }
+  }
+
+  /// 目录 + 订阅记录同文档提交（订阅刷新/创建/删除共用）：任一步失败则已
+  /// 发布状态不动，成功才依次发布并触发运行时重展开。
+  func commitDocument<T>(
+    _ mutate: (inout ConfigurationCatalog, inout [SubscriptionRecord]) throws -> T
+  ) async throws -> T {
+    var workingCatalog = catalog
+    var workingSubscriptions = subscriptions
+    let result = try mutate(&workingCatalog, &workingSubscriptions)
+    try fileStore.save(
+      CatalogDocument(catalog: workingCatalog, subscriptions: workingSubscriptions))
+    catalog = workingCatalog
+    subscriptions = workingSubscriptions
     await postCommit?()
     return result
   }

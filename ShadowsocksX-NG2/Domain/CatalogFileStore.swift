@@ -2,7 +2,8 @@ import Foundation
 
 /// 配置树磁盘持久化（spec #21 D5）：落盘 `~/Library/Application Support/
 /// ShadowsocksX-NG/v2/catalog.json`，`v2/` 权限 0700、文件 0600；写临时文件
-/// （创建即 0600）后原子替换。文件只含结构化目录与凭据引用，永不落秘密明文。
+/// （创建即 0600）后原子替换。文件只含结构化目录、凭据引用与订阅元数据
+/// （URL 仍是凭据引用），永不落秘密明文。
 struct CatalogFileStore {
   enum PersistenceError: Error, Equatable {
     /// 文件存在但不是本模型可接受的目录文档：JSON 损坏、版本未知、结构不一致。
@@ -11,7 +12,9 @@ struct CatalogFileStore {
     case ioFailure(detail: String)
   }
 
-  private static let currentVersion = 1
+  /// v2 起携带订阅记录；v1（无订阅字段）仍可读取以兼容存量开发数据。
+  private static let supportedVersions: Set<Int> = [1, 2]
+  private static let currentVersion = 2
   private static let jsonEncoder: JSONEncoder = {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -27,10 +30,10 @@ struct CatalogFileStore {
     return support.appendingPathComponent("ShadowsocksX-NG/v2/catalog.json")
   }
 
-  /// 文件缺失 → 全新空目录；存在但损坏/版本未知/结构不一致 → `.corrupt`。
-  func load() throws -> ConfigurationCatalog {
+  /// 文件缺失 → 全新空文档；存在但损坏/版本未知/结构不一致 → `.corrupt`。
+  func load() throws -> CatalogDocument {
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
-      return ConfigurationCatalog()
+      return CatalogDocument()
     }
     let data: Data
     do {
@@ -42,12 +45,12 @@ struct CatalogFileStore {
   }
 
   /// 整体重写并原子替换；失败时保留原文件。目录按 D5 基线强制 0700（含自愈）。
-  func save(_ catalog: ConfigurationCatalog) throws {
+  func save(_ document: CatalogDocument) throws {
     let payload = CatalogFilePayload(
       version: Self.currentVersion,
-      rootChildren: catalog.rootChildren,
-      entries: catalog.entries.values.sorted { $0.id.rawValue < $1.id.rawValue }
-    )
+      rootChildren: document.catalog.rootChildren,
+      entries: document.catalog.entries.values.sorted { $0.id.rawValue < $1.id.rawValue },
+      subscriptions: document.subscriptions)
     let data: Data
     do {
       data = try Self.jsonEncoder.encode(payload)
@@ -61,14 +64,14 @@ struct CatalogFileStore {
     }
   }
 
-  private func decode(_ data: Data) throws -> ConfigurationCatalog {
+  private func decode(_ data: Data) throws -> CatalogDocument {
     let payload: CatalogFilePayload
     do {
       payload = try JSONDecoder().decode(CatalogFilePayload.self, from: data)
     } catch {
       throw PersistenceError.corrupt(detail: String(describing: error))
     }
-    guard payload.version == Self.currentVersion else {
+    guard Self.supportedVersions.contains(payload.version) else {
       throw PersistenceError.corrupt(detail: "unsupported version \(payload.version)")
     }
     var entries: [NodeID: CatalogEntry] = [:]
@@ -78,18 +81,39 @@ struct CatalogFileStore {
       }
       entries[entry.id] = entry
     }
+    let catalog: ConfigurationCatalog
     do {
-      return try ConfigurationCatalog.validated(
+      catalog = try ConfigurationCatalog.validated(
         rootChildren: payload.rootChildren, entries: entries)
     } catch let error as CatalogError {
       throw PersistenceError.corrupt(detail: String(describing: error))
     }
+    let subscriptions = payload.subscriptions ?? []
+    var seen = Set<NodeID>()
+    for record in subscriptions {
+      guard seen.insert(record.id).inserted else {
+        throw PersistenceError.corrupt(detail: "duplicate subscription \(record.id.rawValue)")
+      }
+    }
+    // 订阅固定分组必须存在于目录且来源正确；缺失即文档不一致。
+    for record in subscriptions {
+      guard
+        let entry = catalog.entry(for: record.groupID), case .group = entry.kind,
+        entry.source == .subscription
+      else {
+        throw PersistenceError.corrupt(
+          detail: "subscription group missing \(record.groupID.rawValue)")
+      }
+    }
+    return CatalogDocument(catalog: catalog, subscriptions: subscriptions)
   }
 }
 
-/// 落盘文档形态：版本号 + 根子序 + 全量节点表（顺序语义在根序与分组显子序中）。
+/// 落盘文档形态：版本号 + 根子序 + 全量节点表（顺序语义在根序与分组显子序中）
+/// + 订阅记录（v2 起携带；v1 缺省为空）。
 private struct CatalogFilePayload: Codable {
   var version: Int
   var rootChildren: [NodeID]
   var entries: [CatalogEntry]
+  var subscriptions: [SubscriptionRecord]?
 }

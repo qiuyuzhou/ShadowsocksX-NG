@@ -14,8 +14,14 @@ struct ShadowsocksXNG2App: App {
 
   var body: some Scene {
     MenuBarExtra("ShadowsocksX-NG 2.0", systemImage: "network") {
-      ProxyStatusMenu(controller: proxyController)
-        .task { await proxyController.resyncOnLaunch() }
+      ProxyStatusMenu(controller: proxyController, catalogViewModel: catalogViewModel)
+        .task {
+          // postCommit 在应用启动即接线（不只主窗口打开时）：菜单栏「立即更新
+          // 全部订阅」（issue #35）等未开窗路径的目录提交同样立即重展开运行时。
+          let controller = proxyController
+          catalogViewModel.postCommit = { await controller.catalogDidCommit() }
+          await proxyController.resyncOnLaunch()
+        }
     }
     .menuBarExtraStyle(.menu)
 

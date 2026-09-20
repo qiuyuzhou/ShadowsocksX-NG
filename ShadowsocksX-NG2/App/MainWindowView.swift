@@ -1,12 +1,14 @@
 import SwiftUI
 
-/// 主窗口（spec #21 D11，issue #32/#34）：NavigationSplitView 分区。侧栏顶部
-/// 分区切换「服务器 / 诊断」；服务器分区是配置目录分组树（订阅子树只读、仅
-/// 启用开关）与详情编辑；诊断分区是日志查看与脱敏导出（D11「诊断收进主窗
-/// 口」）。所有编辑类操作只在主窗口。
+/// 主窗口（spec #21 D11，issue #32/#34/#35）：NavigationSplitView 分区。侧栏
+/// 顶部分区切换「服务器 / 订阅 / 诊断」；服务器分区是配置目录分组树（订阅子
+/// 树只读、仅启用开关）与详情编辑；订阅分区是订阅卡片与刷新/编辑/删除；诊断
+/// 分区是日志查看与脱敏导出（D11「诊断收进主窗口」）。编辑类操作只在主窗口
+/// （菜单栏仅保留 D11 白名单内的「立即更新全部订阅」快速动作）。
 struct MainWindowView: View {
   enum Pane: Hashable {
     case servers
+    case subscriptions
     case diagnostics
   }
 
@@ -95,15 +97,19 @@ struct MainWindowView: View {
     VStack(spacing: 0) {
       Picker("分区", selection: $pane) {
         Text("服务器").tag(Pane.servers)
+        Text("订阅").tag(Pane.subscriptions)
         Text("诊断").tag(Pane.diagnostics)
       }
       .pickerStyle(.segmented)
       .labelsHidden()
       .padding(.horizontal, 8)
       .padding(.vertical, 6)
-      if pane == .servers {
+      switch pane {
+      case .servers:
         serverSidebar
-      } else {
+      case .subscriptions:
+        subscriptionsSidebar
+      case .diagnostics:
         diagnosticsSidebar
       }
     }
@@ -112,6 +118,20 @@ struct MainWindowView: View {
   /// 诊断分区侧栏：代理状态摘要与脱敏说明（详情与导出入口在右侧日志区）。
   private var diagnosticsSidebar: some View {
     DiagnosticsSummarySidebar(proxyController: proxyController)
+  }
+
+  /// 订阅分区侧栏：订阅摘要说明（卡片与操作全在右侧详情区）。
+  private var subscriptionsSidebar: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("订阅")
+        .font(.headline)
+      Text("每个订阅是一张卡片：远端 SIP-008 文档经解析校验后原子提交；刷新失败保留最后一次成功内容。远端名称、结构与成员权威，本地仅保留启用开关。")
+        .font(.callout)
+        .foregroundStyle(.secondary)
+      Spacer()
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var serverSidebar: some View {
@@ -182,21 +202,26 @@ struct MainWindowView: View {
 
   @ViewBuilder
   private var detailPane: some View {
-    if pane == .diagnostics {
+    switch pane {
+    case .diagnostics:
       DiagnosticsView(
         viewModel: viewModel, proxyController: proxyController, eventStore: eventStore)
-    } else if let id = viewModel.selectedNodeID, let entry = viewModel.entry(for: id) {
-      switch entry.kind {
-      case .server:
-        ServerDetailView(
-          viewModel: viewModel, serverID: id, proxyController: proxyController)
-      case .group:
-        GroupDetailView(viewModel: viewModel, groupID: id, proxyController: proxyController)
+    case .subscriptions:
+      SubscriptionsView(viewModel: viewModel)
+    case .servers:
+      if let id = viewModel.selectedNodeID, let entry = viewModel.entry(for: id) {
+        switch entry.kind {
+        case .server:
+          ServerDetailView(
+            viewModel: viewModel, serverID: id, proxyController: proxyController)
+        case .group:
+          GroupDetailView(viewModel: viewModel, groupID: id, proxyController: proxyController)
+        }
+      } else {
+        ContentUnavailableView(
+          "未选择节点", systemImage: "sidebar.left",
+          description: Text("在左侧选择服务器或分组查看与编辑详情"))
       }
-    } else {
-      ContentUnavailableView(
-        "未选择节点", systemImage: "sidebar.left",
-        description: Text("在左侧选择服务器或分组查看与编辑详情"))
     }
   }
 
