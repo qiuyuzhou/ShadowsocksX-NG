@@ -21,6 +21,34 @@ targets:
     platform: macOS
     sources:
       - path: App
+      # 外部二进制（Vendor/<name>/manifest.json 固定 tag+URL+SHA-256）。必须先跑
+      # Scripts/fetch-external-binaries.sh 再 xcodegen generate：文件在生成时必须已存在，
+      # 否则 Copy Files 阶段会被静默丢弃。构建内的 preBuildScripts 只做增量复验，
+      # 哈希或清单漂移会在构建时失败。
+      - path: Vendor/sslocal/sslocal
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Helpers
+      - path: Vendor/v2ray-plugin/v2ray-plugin
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Helpers/Plugins
+    preBuildScripts:
+      - name: Fetch & verify external binaries
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          "$SRCROOT/Scripts/fetch-external-binaries.sh"
+    postBuildScripts:
+      # 必须在 app 自身签名之前逐二进制 DevID 重签；Xcode 在所有脚本阶段之后
+      # 完成 app 外层签名，封存重签后的嵌套代码。
+      - name: Sign embedded helpers
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          "$SRCROOT/Scripts/sign-embedded-helpers.sh"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG

@@ -99,3 +99,11 @@ ShadowsocksX-NG2/*.xcodeproj
 ShadowsocksX-NG2/App/Info.plist
 ShadowsocksX-NG2/App/ShadowsocksX-NG2.entitlements
 ShadowsocksX-NG2/Tests/Info.plist
+
+####
+# NG2 external binary cache (fetched & hash-verified by
+# ShadowsocksX-NG2/Scripts/fetch-external-binaries.sh; manifests are committed)
+ShadowsocksX-NG2/Vendor/sslocal/sslocal
+ShadowsocksX-NG2/Vendor/sslocal/.fetched.sha256
+ShadowsocksX-NG2/Vendor/v2ray-plugin/v2ray-plugin
+ShadowsocksX-NG2/Vendor/v2ray-plugin/.fetched.sha256
