@@ -1,0 +1,330 @@
+import Foundation
+
+// 代理运行时 wrapper（spec #21 D2/D5，issue #27）：LaunchAgent 常驻进程，
+// 读取跨进程契约 `v2/sslocal-active.json`，以绝对配置路径启动官方 sslocal
+// 并监管其生命周期。
+//
+// 协议要点：
+// - 显式停止（GUI 注销 → launchd SIGTERM 本进程）：SIGTERM 转发 sslocal 并
+//   等待其退出，随后本进程以 0 退出；KeepAlive={SuccessfulExit:false} 不会
+//   重启干净退出。
+// - 崩溃恢复：sslocal 意外退出 → 本进程非零退出 → KeepAlive 重启并重放最后
+//   有效快照（异常路径不触碰契约文件，D5）。
+// - 变更协议：SIGUSR1 到达后重读契约；仅 `servers` 变化 → 转发 SIGUSR1 给
+//   sslocal（上游热重载服务器列表）；监听地址/端口/协议/mode 结构性变化 →
+//   优雅重启。
+// - 契约缺失 → 干净退出（等待 GUI 重新写入并注册）；契约无效 → 普通 unlink
+//   清理后干净退出，避免把上游必然拒绝的配置反复交给 sslocal。
+//
+// 测试缝（生产走默认值）：`SSXNG_CONTRACT_PATH`、`SSXNG_SSLOCAL_PATH`、
+// `SSXNG_V2_DIR`（pid 文件与收敛日志的替代目录，测试隔离用）。
+
+private let environment = ProcessInfo.processInfo.environment
+
+private let contractURL: URL =
+  environment["SSXNG_CONTRACT_PATH"].map { URL(fileURLWithPath: $0) }
+  ?? RuntimePaths.runtimeFileURL()
+
+private let sslocalURL: URL =
+  environment["SSXNG_SSLOCAL_PATH"].map { URL(fileURLWithPath: $0) }
+  ?? Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/sslocal")
+
+private let v2DirectoryOverride: URL? = environment["SSXNG_V2_DIR"].map {
+  URL(fileURLWithPath: $0, isDirectory: true)
+}
+
+private let pidFileURL: URL =
+  v2DirectoryOverride?.appendingPathComponent("agent.pid") ?? RuntimePaths.agentPIDFileURL()
+
+// 顶层脚本是按源码顺序执行的：队列必须先于下方任何函数调用完成初始化。
+private let signalsQueue = DispatchQueue(label: "com.qiuyuzhou.ShadowsocksX-NG.agent.signals")
+
+// wrapper 与 sslocal 的输出收敛到应用支持目录内的 0600 日志；launchd 统一日
+// 志不承载代理细节。
+redirectStandardStreams(
+  to: v2DirectoryOverride?.appendingPathComponent("agent.log") ?? RuntimePaths.agentLogURL())
+
+FileManager.default.createFile(
+  atPath: pidFileURL.path,
+  contents: Data("\(getpid())\n".utf8),
+  attributes: [.posixPermissions: 0o600])
+
+let exitStatus = supervise()
+try? FileManager.default.removeItem(at: pidFileURL)
+exit(exitStatus)
+
+// MARK: - 监管循环
+
+private func supervise() -> Int32 {
+  let flags = SignalFlags()
+  let stopSource = observeSignal(SIGTERM, flags: flags) { flags.requestStop() }
+  let interruptSource = observeSignal(SIGINT, flags: flags) { flags.requestStop() }
+  let reloadSource = observeSignal(SIGUSR1, flags: flags) { flags.requestReload() }
+  defer {
+    stopSource.cancel()
+    interruptSource.cancel()
+    reloadSource.cancel()
+  }
+
+  while true {
+    let document: SslocalRuntimeDocument
+    switch loadContract() {
+    case .missing:
+      RuntimeLog.emit(.contractMissing)
+      return 0
+    case .invalid:
+      try? FileManager.default.removeItem(at: contractURL)
+      RuntimeLog.emit(.contractInvalidRemoved)
+      return 0
+    case .loaded(let loaded):
+      document = loaded
+    }
+
+    guard let child = spawnSslocal() else {
+      RuntimeLog.emit(.sslocalSpawnFailed)
+      return 0
+    }
+    let listen = document.listenFingerprint
+
+    switch superviseChild(child, listen: listen, flags: flags) {
+    case .stoppedCleanly:
+      return 0
+    case .childLost:
+      return 1
+    case .restart:
+      continue
+    }
+  }
+}
+
+private enum SupervisionOutcome {
+  /// 显式停止或契约缺失/无效：干净退出，launchd 不再重启。
+  case stoppedCleanly
+  /// 子进程意外退出：非零退出，交 KeepAlive 重放最后有效快照。
+  case childLost
+  /// 契约监听结构变化：重读文件并重新拉起。
+  case restart
+}
+
+private func superviseChild(
+  _ child: Process,
+  listen: SslocalListenFingerprint,
+  flags: SignalFlags
+) -> SupervisionOutcome {
+  let exitStatus = ExitStatusBox()
+  // 单一收割点：waitUntilExit 只在这里调用，其余路径等 box 出值。
+  let exitSource = DispatchSource.makeProcessSource(
+    identifier: child.processIdentifier, eventMask: .exit, queue: signalsQueue)
+  exitSource.setEventHandler {
+    child.waitUntilExit()
+    exitStatus.store(child.terminationStatus)
+    flags.wake()
+  }
+  exitSource.resume()
+
+  while true {
+    flags.wait()
+    if flags.consumeStop() {
+      RuntimeLog.emit(.sslocalStopRequested)
+      stopChild(child, exitStatus: exitStatus, exitSource: exitSource, flags: flags)
+      return .stoppedCleanly
+    }
+    if let status = exitStatus.load() {
+      RuntimeLog.emit(.sslocalExitedUnexpectedly(status: status))
+      exitSource.cancel()
+      return .childLost
+    }
+    guard flags.consumeReload() else { continue }
+
+    switch loadContract() {
+    case .missing:
+      RuntimeLog.emit(.contractMissing)
+      stopChild(child, exitStatus: exitStatus, exitSource: exitSource, flags: flags)
+      return .stoppedCleanly
+    case .invalid:
+      try? FileManager.default.removeItem(at: contractURL)
+      RuntimeLog.emit(.contractInvalidRemoved)
+      stopChild(child, exitStatus: exitStatus, exitSource: exitSource, flags: flags)
+      return .stoppedCleanly
+    case .loaded(let reloaded):
+      if reloaded.listenFingerprint != listen {
+        RuntimeLog.emit(.reloadRestarted)
+        stopChild(child, exitStatus: exitStatus, exitSource: exitSource, flags: flags)
+        if flags.consumeStop() {
+          return .stoppedCleanly
+        }
+        flags.rearmIfPending()
+        return .restart
+      }
+      RuntimeLog.emit(.reloadForwarded)
+      kill(child.processIdentifier, SIGUSR1)
+    }
+  }
+}
+
+private func stopChild(
+  _ child: Process,
+  exitStatus: ExitStatusBox,
+  exitSource: DispatchSourceProcess,
+  flags: SignalFlags
+) {
+  kill(child.processIdentifier, SIGTERM)
+  let gracefulDeadline = DispatchTime.now() + 10
+  while exitStatus.load() == nil {
+    if flags.wait(timeout: gracefulDeadline) == .timedOut {
+      kill(child.processIdentifier, SIGKILL)
+      _ = flags.wait(timeout: DispatchTime.now() + 5)
+    }
+  }
+  exitSource.cancel()
+  flags.rearmIfPending()
+}
+
+// MARK: - 信号与共享状态
+
+/// 信号只置位并唤醒监管循环，全部判定在循环线程完成。标志与信号量成对
+/// （辅助等待会消耗信号量，事后 rearmIfPending 补回）。
+private final class SignalFlags {
+  private let lock = NSLock()
+  private var stopRequested = false
+  private var reloadRequested = false
+  private let events = DispatchSemaphore(value: 0)
+
+  func requestStop() {
+    lock.lock()
+    stopRequested = true
+    lock.unlock()
+    events.signal()
+  }
+
+  func requestReload() {
+    lock.lock()
+    reloadRequested = true
+    lock.unlock()
+    events.signal()
+  }
+
+  func wake() {
+    events.signal()
+  }
+
+  func wait() {
+    events.wait()
+  }
+
+  func wait(timeout: DispatchTime) -> DispatchTimeoutResult {
+    events.wait(timeout: timeout)
+  }
+
+  func consumeStop() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    let value = stopRequested
+    stopRequested = false
+    return value
+  }
+
+  func consumeReload() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    let value = reloadRequested
+    reloadRequested = false
+    return value
+  }
+
+  func rearmIfPending() {
+    lock.lock()
+    let pending = stopRequested || reloadRequested
+    lock.unlock()
+    if pending {
+      events.signal()
+    }
+  }
+}
+
+private func observeSignal(_ number: Int32, flags: SignalFlags, handler: @escaping () -> Void)
+  -> DispatchSourceSignal
+{
+  signal(number, SIG_IGN)
+  let source = DispatchSource.makeSignalSource(signal: number, queue: signalsQueue)
+  source.setEventHandler(handler: handler)
+  source.resume()
+  return source
+}
+
+/// 子进程退出状态的单一写入点（handler 线程）与读取点（监管线程），由
+/// 信号量唤醒提供 happens-before。
+private final class ExitStatusBox {
+  private let lock = NSLock()
+  private var value: Int32?
+
+  func store(_ status: Int32) {
+    lock.lock()
+    value = status
+    lock.unlock()
+  }
+
+  func load() -> Int32? {
+    lock.lock()
+    defer { lock.unlock() }
+    return value
+  }
+}
+
+// MARK: - 契约与子进程
+
+private enum ContractLoad {
+  case missing
+  case invalid
+  case loaded(SslocalRuntimeDocument)
+}
+
+private func loadContract() -> ContractLoad {
+  guard let data = try? Data(contentsOf: contractURL) else { return .missing }
+  guard let document = SslocalRuntimeDocument.decodeValidated(data) else { return .invalid }
+  return .loaded(document)
+}
+
+private func spawnSslocal() -> Process? {
+  guard FileManager.default.isExecutableFile(atPath: sslocalURL.path) else { return nil }
+  let child = Process()
+  child.executableURL = sslocalURL
+  child.arguments = ["-c", contractURL.path]
+  var childEnvironment = environment
+  // 上游默认日志级别会把服务器地址写进普通日志（D5）：压到 warn，错误与
+  // 绑定失败仍然可见；verbose 设置由后续工单经环境变量接通。
+  if childEnvironment["RUST_LOG"] == nil {
+    childEnvironment["RUST_LOG"] = "warn"
+  }
+  child.environment = childEnvironment
+  do {
+    try child.run()
+  } catch {
+    return nil
+  }
+  RuntimeLog.emit(.sslocalSpawned(pid: child.processIdentifier))
+  return child
+}
+
+// MARK: - 日志收敛
+
+private func redirectStandardStreams(to logURL: URL) {
+  let fileManager = FileManager.default
+  let directory = logURL.deletingLastPathComponent()
+  try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+  try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+  if fileManager.fileExists(atPath: logURL.path) {
+    let attributes = try? fileManager.attributesOfItem(atPath: logURL.path)
+    if let size = attributes?[.size] as? UInt64, size > 1_048_576 {
+      // 启动时超限即截断；滚动与诊断导出由 #33 完善。
+      try? fileManager.removeItem(at: logURL)
+    }
+  }
+  if !fileManager.fileExists(atPath: logURL.path) {
+    fileManager.createFile(
+      atPath: logURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
+  }
+  try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: logURL.path)
+  freopen(logURL.path, "a", stdout)
+  freopen(logURL.path, "a", stderr)
+}

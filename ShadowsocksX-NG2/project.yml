@@ -23,6 +23,14 @@ targets:
       - path: App
       # 领域核心：配置目录树、凭据引用与持久化（spec #21 D3/D5）
       - path: Domain
+      # LaunchAgent 注册清单：SMAppService.agent(plistName:) 从 bundle 内
+      # Contents/Library/LaunchAgents/ 读取；ProgramArguments 用 bundle 相对路径
+      # （spec #21 D2，issue #27）。
+      - path: LaunchAgent/com.qiuyuzhou.ShadowsocksX-NG.agent.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchAgents
       # 外部二进制（Vendor/<name>/manifest.json 固定 tag+URL+SHA-256）。必须先跑
       # Scripts/fetch-external-binaries.sh 再 xcodegen generate：文件在生成时必须已存在，
       # 否则 Copy Files 阶段会被静默丢弃。构建内的 preBuildScripts 只做增量复验，
@@ -74,6 +82,28 @@ targets:
     scheme:
       testTargets:
         - ShadowsocksX-NG2Tests
+    dependencies:
+      # 代理运行时 wrapper（BundleProgram，spec #21 D2）：以独立可执行文件装入
+      # Contents/MacOS，由 LaunchAgent plist 以 bundle 相对路径引用。
+      - target: ShadowsocksX-NG2Agent
+        copy:
+          destination: wrapper
+          subpath: Contents/MacOS
+  ShadowsocksX-NG2Agent:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Agent
+      # wrapper 与 GUI 共享的跨进程契约：路径常量、运行时文档（含读取侧校验）
+      # 与日志事件基线（spec #21 D5）。
+      - path: Domain/RuntimePaths.swift
+      - path: Domain/SslocalRuntimeDocument.swift
+      - path: Domain/RuntimeLog.swift
+    settings:
+      base:
+        PRODUCT_NAME: ShadowsocksX-NG2Agent
+        PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG.agent
+        CODE_SIGN_IDENTITY: "Developer ID Application"
   ShadowsocksX-NG2Tests:
     type: bundle.unit-test
     platform: macOS

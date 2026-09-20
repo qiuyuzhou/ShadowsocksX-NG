@@ -60,3 +60,47 @@ struct SslocalListenSettings: Equatable, Sendable {
   /// 上游 `mode` 字段取值。
   var mode: String { udpRelayEnabled ? "tcp_and_udp" : "tcp_only" }
 }
+
+/// 监听指纹（spec #21 D5 变更协议）：SIGUSR1 只能热重载 `servers`，这四个
+/// 字段变化必须由 wrapper 走优雅重启。服务器列表变化不影响指纹。
+struct SslocalListenFingerprint: Equatable, Sendable {
+  let localAddress: String
+  let localPort: Int
+  let inboundProtocol: String
+  let mode: String
+}
+
+extension SslocalRuntimeDocument {
+  /// 读取侧单缝（GUI 与 wrapper 共用同一判定，防跨进程漂移）：解码成功且
+  /// 结构有效才返回文档；否则按「文件无效」处理。
+  static func decodeValidated(_ data: Data) -> SslocalRuntimeDocument? {
+    guard
+      let document = try? JSONDecoder().decode(SslocalRuntimeDocument.self, from: data),
+      document.isWellFormed
+    else { return nil }
+    return document
+  }
+
+  /// 监听指纹，供 wrapper 判定「结构性变化」。
+  var listenFingerprint: SslocalListenFingerprint {
+    SslocalListenFingerprint(
+      localAddress: localAddress,
+      localPort: localPort,
+      inboundProtocol: inboundProtocol,
+      mode: mode)
+  }
+
+  /// 读取侧防御校验（wrapper 与 GUI 共用）：契约可解码但结构性无效时按
+  /// 「文件无效」处理——停止并清理，避免把上游必然拒绝的配置反复交给 sslocal
+  /// 造成 KeepAlive 重启循环。写入侧文档由激活状态机派生，天然满足。
+  var isWellFormed: Bool {
+    guard (1...65535).contains(localPort), !localAddress.isEmpty else { return false }
+    guard !servers.isEmpty else { return false }
+    return servers.allSatisfy { server in
+      (1...65535).contains(server.serverPort)
+        && !server.id.isEmpty
+        && !server.server.isEmpty
+        && !server.method.isEmpty
+    }
+  }
+}

@@ -4,3 +4,9 @@
 protocol ManagedPluginProviding {
   func executablePath(forProgram program: String) -> String?
 }
+
+/// #27 的生产占位：#38 从供应链清单接通前，本版本一律不提供插件——引用
+/// 插件的服务器是显式无效激活候选（点名原因），不是静默失败。
+struct NoManagedPluginProvider: ManagedPluginProviding {
+  func executablePath(forProgram program: String) -> String? { nil }
+}

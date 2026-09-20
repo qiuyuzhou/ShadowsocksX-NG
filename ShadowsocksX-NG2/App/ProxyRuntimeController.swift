@@ -1,0 +1,351 @@
+import Foundation
+import SwiftUI
+
+/// 端点探测缝：注入以便控制器单测（真实探测走 EndpointHealthProbe）。
+protocol EndpointProbing: Sendable {
+  func probe(host: String, port: Int, timeout: TimeInterval) -> EndpointHealthProbe.Outcome
+}
+
+struct SystemEndpointProbe: EndpointProbing {
+  func probe(host: String, port: Int, timeout: TimeInterval) -> EndpointHealthProbe.Outcome {
+    EndpointHealthProbe.probe(host: host, port: port, timeout: timeout)
+  }
+}
+
+/// 代理运行时控制器（spec #21 D2/D5，issue #27）：把激活状态机的产出接到
+/// 「GUI → LaunchAgent → wrapper → sslocal」链路。决策全部在纯域
+/// `ProxyRuntimePlan`，本类按序执行动作并负责健康呈现；GUI 退出不影响任何
+/// 一侧（agent 由 launchd 持有，构造上成立）。
+@MainActor
+final class ProxyRuntimeController: ObservableObject {
+  enum ProxyState: Equatable {
+    case off
+    case starting
+    case running
+    /// 启动失败：携带点名端点与端口的事实（D8；端口语义细节 #30 接线）。
+    case launchFailed(detail: String)
+    /// 激活失败或活动目标清除（无静默回退族的呈现面）。
+    case activationFailed(reason: String)
+    /// 需要用户在系统设置-登录项中允许后台项。
+    case requiresApproval
+    /// 服务管理或运行时文件本身失败。
+    case serviceFailed(detail: String)
+  }
+
+  @Published private(set) var state: ProxyState = .off
+  private(set) var machine: ActivationStateMachine
+
+  private var catalog: ConfigurationCatalog
+  private let catalogFileStore: CatalogFileStore
+  private let activationFileStore: ActivationStateFileStore
+  private let runtimeFileStore: RuntimeFileStore
+  private let credentials: CredentialStoring
+  private let plugins: ManagedPluginProviding
+  private let listen: SslocalListenSettings
+  private let agent: LaunchAgentControlling
+  private let probe: EndpointProbing
+  /// 信号发送缝（默认 kill），单测观测 SIGUSR1 投递。
+  private let sendSignal: @Sendable (Int32, Int32) -> Int32
+  /// 并发流代际：停止请求可使进行中的启动探测立即失效。
+  private var flowGeneration = 0
+
+  init(
+    catalogFileStore: CatalogFileStore = CatalogFileStore(
+      fileURL: CatalogFileStore.defaultFileURL()),
+    activationFileStore: ActivationStateFileStore = ActivationStateFileStore(
+      fileURL: ActivationStateFileStore.defaultFileURL()),
+    runtimeFileStore: RuntimeFileStore = RuntimeFileStore(),
+    credentials: CredentialStoring = KeychainCredentialStore(),
+    plugins: ManagedPluginProviding = NoManagedPluginProvider(),
+    listen: SslocalListenSettings = SslocalListenSettings(),
+    agent: LaunchAgentControlling = SMAppLaunchAgentService(),
+    probe: EndpointProbing = SystemEndpointProbe(),
+    sendSignal: @escaping @Sendable (Int32, Int32) -> Int32 = { kill($0, $1) }
+  ) {
+    self.catalogFileStore = catalogFileStore
+    self.activationFileStore = activationFileStore
+    self.runtimeFileStore = runtimeFileStore
+    self.credentials = credentials
+    self.plugins = plugins
+    self.listen = listen
+    self.agent = agent
+    self.probe = probe
+    self.sendSignal = sendSignal
+    catalog = (try? catalogFileStore.load()) ?? ConfigurationCatalog()
+    let persistedTarget = try? activationFileStore.loadActiveTargetID()
+    machine = ActivationStateMachine(activeTargetID: persistedTarget)
+  }
+
+  var isActiveTargetPresent: Bool { machine.activeTargetID != nil }
+
+  /// 无活动目标时启用代理的点名原因（无静默回退族的呈现面）。
+  private static let noActiveTargetReason = "尚未激活任何服务器或分组，请先在主窗口激活后再启动代理"
+
+  // MARK: - 用户意图
+
+  /// 激活一个服务器或分组目标（目录 UI 工单复用入口）：持久化目标；代理
+  /// 开启时立即把新档推到运行时。激活原子失败时状态完全不动（D3）。
+  func activate(_ target: NodeID) async {
+    reloadCatalog()
+    do {
+      let configuration = try machine.activate(
+        target, in: catalog, credentials: credentials, plugins: plugins, listen: listen)
+      do {
+        try activationFileStore.save(activeTargetID: target)
+      } catch {
+        state = .serviceFailed(detail: String(describing: error))
+        return
+      }
+      if state != .off {
+        await deploy(configuration.document)
+      }
+    } catch let failure as ActivationFailure {
+      state = .activationFailed(reason: failure.presentedReason)
+    } catch {
+      state = .serviceFailed(detail: String(describing: error))
+    }
+  }
+
+  /// 代理开关。
+  func setProxyEnabled(_ enabled: Bool) async {
+    if enabled {
+      await enable()
+    } else {
+      await execute(.stop, document: nil)
+      state = .off
+    }
+  }
+
+  /// 目录已提交变更后的立即重展开（D3/D5）：有效非空且代理开启 → 原子更新
+  /// 运行时；目标失效 → 清除目标并停止代理。目录以磁盘为事实来源重载。
+  func catalogDidCommit() async {
+    reloadCatalog()
+    switch reexpand() {
+    case .deployed(let configuration):
+      if state != .off {
+        await deploy(configuration.document)
+      }
+    case .clearedAndStopped(let failure):
+      await handleCleared(failure)
+    case nil:
+      break
+    }
+  }
+
+  /// GUI 启动重同步（D5「GUI 下次启动重新校验同步」）：注册态是代理意图的
+  /// 事实来源——注册过即视为开启并重校验；随后与磁盘契约对齐（相同内容跳
+  /// 过写入）。GUI 崩溃期间 agent 与 wrapper 均不受影响。
+  func resyncOnLaunch() async {
+    reloadCatalog()
+    switch reexpand() {
+    case .deployed(let configuration):
+      let status = agent.status
+      if status == .registered || status == .requiresApproval {
+        await deploy(configuration.document)
+      } else {
+        // 未注册但可能残留运行时文件（上次异常退出）：清理残留，保持停止态。
+        runtimeFileStore.deleteRuntimeFiles()
+        RuntimeLog.emit(.runtimeFilesDeleted)
+        state = .off
+      }
+    case .clearedAndStopped(let failure):
+      await handleCleared(failure)
+    case nil:
+      // 无活动目标：只剩清理残留（计划层只在已注册时注销）。
+      await execute(.stop, document: nil)
+      state = .off
+    }
+  }
+
+  // MARK: - 动作执行
+
+  private func enable() async {
+    guard machine.activeTargetID != nil else {
+      presentNoActiveTarget()
+      return
+    }
+    reloadCatalog()
+    switch reexpand() {
+    case .deployed(let configuration):
+      await deploy(configuration.document)
+    case .clearedAndStopped(let failure):
+      await handleCleared(failure)
+    case nil:
+      presentNoActiveTarget()
+    }
+  }
+
+  private func presentNoActiveTarget() {
+    RuntimeLog.emit(.activationFailed(reason: Self.noActiveTargetReason))
+    state = .activationFailed(reason: Self.noActiveTargetReason)
+  }
+
+  /// 把「运行定义档」意图推到运行时：计划动作 → 顺序执行 → 端点健康呈现。
+  private func deploy(_ document: SslocalRuntimeDocument) async {
+    if await execute(.run(document), document: document) {
+      state = .starting
+      await presentLaunchHealth(document)
+    }
+  }
+
+  private func handleCleared(_ failure: ActivationFailure) async {
+    RuntimeLog.emit(.activationFailed(reason: failure.presentedReason))
+    do {
+      try activationFileStore.save(activeTargetID: nil)
+    } catch {
+      // 清目标失败不阻断停止：下次重同步会再次收敛（目标已不在状态机中）。
+      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+    }
+    await execute(.stop, document: nil)
+    state = .activationFailed(reason: failure.presentedReason)
+  }
+
+  /// 按计划顺序执行动作；返回 false 表示中途失败、状态已呈现（后续动作与
+  /// 健康探测都不应继续）。
+  private func execute(_ intent: RuntimeIntent, document: SslocalRuntimeDocument?) async -> Bool {
+    flowGeneration += 1
+    let actions = ProxyRuntimePlan.actions(
+      intent: intent,
+      agentStatus: agent.status,
+      wrapper: wrapperState(),
+      contractOnDisk: runtimeFileStore.readData())
+    if case .run = intent, actions.isEmpty {
+      RuntimeLog.emit(.contractUnchanged)
+    }
+    for action in actions {
+      guard await perform(action, document: document) else { return false }
+    }
+    return true
+  }
+
+  /// 执行单个动作；返回 false 表示应终止后续动作（状态已呈现）。
+  private func perform(_ action: RuntimeAction, document: SslocalRuntimeDocument?) async -> Bool {
+    switch action {
+    case .writeContract:
+      guard let document else {
+        state = .serviceFailed(detail: "缺少运行时文档")
+        return false
+      }
+      do {
+        try runtimeFileStore.write(document)
+        RuntimeLog.emit(.contractWritten(serverCount: document.servers.count))
+      } catch {
+        state = .serviceFailed(detail: String(describing: error))
+        return false
+      }
+    case .registerAgent:
+      do {
+        try agent.register()
+      } catch {
+        RuntimeLog.emit(.agentRegisterFailed(detail: describe(error)))
+        if agent.status == .requiresApproval {
+          // 注册请求已被系统接收，等待用户在登录项中批准。
+          state = .requiresApproval
+          return false
+        }
+        if agent.status != .registered {
+          state = .serviceFailed(detail: describe(error))
+          return false
+        }
+        // 注册与状态读取之间的竞态：已注册即达意图，不视为失败。
+      }
+      RuntimeLog.emit(.agentRegistered)
+      if agent.status == .requiresApproval {
+        state = .requiresApproval
+        return false
+      }
+    case .unregisterAgent:
+      do {
+        try agent.unregister()
+      } catch {
+        // 未注册竞态可忽略；其余错误记录后继续清理（尽力而为）。
+        RuntimeLog.emit(.agentUnregisterFailed(detail: describe(error)))
+      }
+      RuntimeLog.emit(.agentUnregistered)
+      await waitForWrapperExit()
+    case .signalReload(let pid):
+      _ = sendSignal(pid, SIGUSR1)
+    case .deleteRuntimeFiles:
+      runtimeFileStore.deleteRuntimeFiles()
+      RuntimeLog.emit(.runtimeFilesDeleted)
+    }
+    return true
+  }
+
+  /// 启动健康呈现（D2/D8）：以 TCP 连接确认 sslocal 实际绑定；超时即呈现
+  /// 「启动失败」，点名端点与端口（端口语义细节 #30 接线，这里给原始事实）。
+  private func presentLaunchHealth(_ document: SslocalRuntimeDocument) async {
+    let generation = flowGeneration
+    let deadline = Date().addingTimeInterval(15)
+    var outcome = EndpointHealthProbe.Outcome.timedOut
+    while Date() < deadline {
+      if generation != flowGeneration { return }
+      outcome = await probeAsync(
+        host: document.localAddress, port: document.localPort, timeout: 1.5)
+      if outcome == .reachable {
+        state = .running
+        return
+      }
+      try? await Task.sleep(nanoseconds: 200_000_000)
+    }
+    if generation != flowGeneration { return }
+    let detail: String
+    switch outcome {
+    case .reachable:
+      detail = "已连通"
+    case .refused(let reason):
+      detail = reason
+    case .timedOut:
+      detail = "连接超时"
+    }
+    RuntimeLog.emit(
+      .endpointProbeFailed(host: document.localAddress, port: document.localPort, detail: detail))
+    state = .launchFailed(
+      detail: "本地代理端点 \(document.localAddress):\(document.localPort) 未就绪（\(detail)）")
+  }
+
+  private func probeAsync(host: String, port: Int, timeout: TimeInterval) async
+    -> EndpointHealthProbe.Outcome
+  {
+    let probe = probe
+    return await Task.detached(priority: .utility) {
+      probe.probe(host: host, port: port, timeout: timeout)
+    }.value
+  }
+
+  /// 显式停止协议次序（D2）：注销（SIGTERM wrapper → wrapper 停 sslocal 并
+  /// 等待）完成后才允许后续删文件动作。最多等 5 秒，超时也继续（launchd 会
+  /// 兜底结束进程）。
+  private func waitForWrapperExit() async {
+    let deadline = Date().addingTimeInterval(5)
+    while wrapperState() != .notRunning && Date() < deadline {
+      try? await Task.sleep(nanoseconds: 100_000_000)
+    }
+  }
+
+  private func wrapperState() -> WrapperProcessState {
+    guard
+      let data = try? Data(contentsOf: runtimeFileStore.pidFileURL),
+      let text = String(data: data, encoding: .utf8)?.trimmingCharacters(
+        in: .whitespacesAndNewlines),
+      let pid = Int32(text)
+    else { return .notRunning }
+    guard sendSignal(pid, 0) == 0 else { return .notRunning }
+    return .running(pid: pid)
+  }
+
+  // MARK: - 目录同步
+
+  private func reloadCatalog() {
+    catalog = (try? catalogFileStore.load()) ?? catalog
+  }
+
+  private func reexpand() -> ActivationEffect? {
+    machine.catalogDidCommit(
+      catalog, credentials: credentials, plugins: plugins, listen: listen)
+  }
+
+  private func describe(_ error: Error) -> String {
+    (error as? ActivationFailure)?.presentedReason ?? String(describing: error)
+  }
+}

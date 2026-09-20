@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.qiuyuzhou.ShadowsocksX-NG.agent</string>
+	<!-- SMAppService 约定：相对路径由 launchd 按注册 app 的 bundle 位置解析 -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>Contents/MacOS/ShadowsocksX-NG2Agent</string>
+	</array>
+	<!-- 崩溃恢复（D2）：wrapper 非零退出（sslocal 崩溃）即重启并重放最后有效
+	     快照；wrapper 主动清理后的干净退出（无效契约、显式注销）不重启。 -->
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>2</integer>
+</dict>
+</plist>
