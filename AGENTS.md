@@ -2,6 +2,10 @@
 
 macOS Shadowsocks 客户端。`Legacy/` 是已冻结的旧版实现,仅作只读参考(见 Legacy/AGENTS.md);新实现位于 `ShadowsocksX-NG2/`。
 
+## NG2 提交门槛
+
+`ShadowsocksX-NG2/` 的 Swift 代码提交前必须过 `swift format` 格式化与 SwiftLint 检查,由 pre-commit 钩子强制;新 clone 先启用钩子。约定、启用步骤与工具版本见 `ShadowsocksX-NG2/AGENTS.md`。
+
 ## Agent skills
 
 ### Issue tracker

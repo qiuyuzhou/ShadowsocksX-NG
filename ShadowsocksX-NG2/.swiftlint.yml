@@ -1,0 +1,9 @@
+# 默认规则起步：只声明排除项，遇到实际痛点再调规则（见本目录 AGENTS.md）。
+# 路径相对本文件所在目录。
+excluded:
+  # 构建产物
+  - DerivedData
+  - .build
+  # 冻结目录：Legacy/ 只读，不 format / lint（本配置位于 ShadowsocksX-NG2/ 内，
+  # 常规调用天然扫不到它；此条保证带 --config 从仓库根调用时也明确排除）
+  - ../Legacy
