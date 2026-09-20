@@ -43,16 +43,6 @@ struct CatalogFileStore {
 
   /// 整体重写并原子替换；失败时保留原文件。目录按 D5 基线强制 0700（含自愈）。
   func save(_ catalog: ConfigurationCatalog) throws {
-    let directory = fileURL.deletingLastPathComponent()
-    do {
-      if !FileManager.default.fileExists(atPath: directory.path) {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-      }
-      try FileManager.default.setAttributes(
-        [.posixPermissions: 0o700], ofItemAtPath: directory.path)
-    } catch {
-      throw PersistenceError.ioFailure(detail: String(describing: error))
-    }
     let payload = CatalogFilePayload(
       version: Self.currentVersion,
       rootChildren: catalog.rootChildren,
@@ -64,23 +54,9 @@ struct CatalogFileStore {
     } catch {
       throw PersistenceError.ioFailure(detail: String(describing: error))
     }
-    let temporaryURL = directory.appendingPathComponent(
-      ".\(fileURL.lastPathComponent).tmp-\(UUID().uuidString)")
-    if !FileManager.default.createFile(
-      atPath: temporaryURL.path,
-      contents: data,
-      attributes: [.posixPermissions: 0o600]
-    ) {
-      throw PersistenceError.ioFailure(detail: "无法创建临时文件 \(temporaryURL.path)")
-    }
     do {
-      if FileManager.default.fileExists(atPath: fileURL.path) {
-        _ = try FileManager.default.replaceItemAt(fileURL, withItemAt: temporaryURL)
-      } else {
-        try FileManager.default.moveItem(at: temporaryURL, to: fileURL)
-      }
+      try AtomicFileWriter.write(data, to: fileURL)
     } catch {
-      try? FileManager.default.removeItem(at: temporaryURL)
       throw PersistenceError.ioFailure(detail: String(describing: error))
     }
   }
