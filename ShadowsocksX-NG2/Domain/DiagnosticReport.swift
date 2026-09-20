@@ -51,6 +51,7 @@ enum DiagnosticProxyState: Equatable, Sendable {
   case activationFailed(reason: String)
   case requiresApproval
   case serviceFailed
+  case systemProxyFailed
 
   var label: String {
     switch self {
@@ -70,6 +71,8 @@ enum DiagnosticProxyState: Equatable, Sendable {
       return "等待在系统设置-登录项中批准"
     case .serviceFailed:
       return "服务管理失败"
+    case .systemProxyFailed:
+      return "系统代理未应用"
     }
   }
 }

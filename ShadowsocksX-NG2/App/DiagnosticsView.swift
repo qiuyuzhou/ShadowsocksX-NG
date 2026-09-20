@@ -243,6 +243,8 @@ extension ProxyRuntimeController {
       return .requiresApproval
     case .serviceFailed:
       return .serviceFailed
+    case .systemProxyFailed:
+      return .systemProxyFailed
     }
   }
 }

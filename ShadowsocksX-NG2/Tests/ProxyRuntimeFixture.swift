@@ -13,9 +13,7 @@ enum ProxyRuntimeFixture {
     let pidFile: URL
   }
 
-  static func makeTemporaryV2(file: StaticString = #filePath, line: UInt = #line)
-    -> TemporaryV2
-  {
+  static func makeTemporaryV2(file: StaticString = #filePath, line: UInt = #line) -> TemporaryV2 {
     let directory = FileManager.default.temporaryDirectory
       .appendingPathComponent("ssxng-tests-\(UUID().uuidString)", isDirectory: true)
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -125,6 +123,7 @@ enum ProxyRuntimeFixture {
   final class FakeProbe: EndpointProbing, @unchecked Sendable {
     private let lock = NSLock()
     private var outcomes: [EndpointHealthProbe.Outcome]
+    private var requestedPorts: [Int] = []
     private(set) var callCount = 0
 
     init(outcomes: [EndpointHealthProbe.Outcome]) {
@@ -139,10 +138,17 @@ enum ProxyRuntimeFixture {
       FakeProbe(outcomes: [.refused(detail: "Connection refused")])
     }
 
+    var ports: [Int] {
+      lock.lock()
+      defer { lock.unlock() }
+      return requestedPorts
+    }
+
     func probe(host: String, port: Int, timeout: TimeInterval) -> EndpointHealthProbe.Outcome {
       lock.lock()
       defer { lock.unlock() }
       callCount += 1
+      requestedPorts.append(port)
       guard let outcome = outcomes.first else { return .timedOut }
       if outcomes.count > 1 {
         outcomes.removeFirst()
@@ -153,18 +159,50 @@ enum ProxyRuntimeFixture {
 
   final class FakePACProbe: PACHealthProbing, @unchecked Sendable {
     private let lock = NSLock()
-    private let outcome: PACHealthOutcome
+    private var outcomes: [PACHealthOutcome]
     private(set) var callCount = 0
+    private var requestedURLs: [URL] = []
 
     init(_ outcome: PACHealthOutcome = .reachable) {
-      self.outcome = outcome
+      outcomes = [outcome]
+    }
+
+    init(outcomes: [PACHealthOutcome]) {
+      precondition(!outcomes.isEmpty)
+      self.outcomes = outcomes
+    }
+
+    var urls: [URL] {
+      lock.lock()
+      defer { lock.unlock() }
+      return requestedURLs
     }
 
     func probe(url: URL, timeout: TimeInterval) async -> PACHealthOutcome {
       lock.lock()
       callCount += 1
+      requestedURLs.append(url)
+      let outcome = outcomes[0]
+      if outcomes.count > 1 { outcomes.removeFirst() }
       lock.unlock()
       return outcome
+    }
+  }
+
+  final class FakeSystemProxy: SystemProxyControlling {
+    private(set) var applied: [SystemProxyConfiguration] = []
+    private(set) var restoreCount = 0
+    var applyError: Error?
+    var restoreError: Error?
+
+    func apply(_ configuration: SystemProxyConfiguration) throws {
+      if let applyError { throw applyError }
+      applied.append(configuration)
+    }
+
+    func restore() throws {
+      restoreCount += 1
+      if let restoreError { throw restoreError }
     }
   }
 

@@ -25,4 +25,10 @@ enum RuntimePaths {
   static func agentLogURL() -> URL {
     v2Directory().appendingPathComponent("agent.log")
   }
+
+  /// Original network-service proxy dictionaries captured before 2.0 writes
+  /// system proxy settings. It is protected like the other v2 runtime files.
+  static func systemProxyOwnershipURL() -> URL {
+    v2Directory().appendingPathComponent("system-proxy-ownership.json")
+  }
 }

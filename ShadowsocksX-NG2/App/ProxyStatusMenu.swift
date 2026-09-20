@@ -71,6 +71,8 @@ struct ProxyStatusMenu: View {
         detail: "请在系统设置-登录项中允许 ShadowsocksX-NG 后台项")
     case .serviceFailed(let detail):
       return Presentation(isOn: false, status: "服务管理失败", detail: detail)
+    case .systemProxyFailed(let detail):
+      return Presentation(isOn: true, status: "系统代理未应用", detail: detail)
     }
   }
 }

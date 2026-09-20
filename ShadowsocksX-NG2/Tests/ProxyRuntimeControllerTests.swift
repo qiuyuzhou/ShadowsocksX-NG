@@ -11,6 +11,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
   private var activationFileURL: URL!
   private var credentials: InMemoryCredentialStore!
   private var agent: ProxyRuntimeFixture.FakeLaunchAgent!
+  private var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
   private var signals: SignalRecorder!
 
   /// SIGUSR1 投递记录缝。
@@ -43,6 +44,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     activationFileURL = runtime.directory.appendingPathComponent("activation.json")
     credentials = InMemoryCredentialStore()
     agent = ProxyRuntimeFixture.FakeLaunchAgent()
+    systemProxy = ProxyRuntimeFixture.FakeSystemProxy()
     signals = SignalRecorder()
   }
 
@@ -65,6 +67,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     agentStatus: LaunchAgentStatus = .notRegistered,
     listen: SslocalListenSettings = ActivationFixture.listen,
     pacProbe: PACHealthProbing = ProxyRuntimeFixture.FakePACProbe(),
+    proxyMode: ProxyMode = .pac,
+    systemProxy: SystemProxyControlling? = nil,
     firewallChecker: FirewallStatusChecking = ProxyRuntimeFixture.FakeFirewallChecker(),
     firewallExecutableURLs: [URL] = [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
     firewallPollIntervalNanoseconds: UInt64 = 1_000_000
@@ -80,6 +84,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       agent: agent,
       probe: probe,
       pacProbe: pacProbe,
+      systemProxy: systemProxy ?? self.systemProxy,
+      proxyMode: proxyMode,
       firewallChecker: firewallChecker,
       firewallExecutableURLs: firewallExecutableURLs,
       firewallPollIntervalNanoseconds: firewallPollIntervalNanoseconds,
@@ -103,7 +109,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
 
   func testActivateThenEnableWritesContractRegistersAndReachesRunning() async throws {
     let seeded = try makeSeededCatalog()
-    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
+    let probe = ProxyRuntimeFixture.FakeProbe.reachable()
+    let controller = makeController(probe: probe)
 
     await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
@@ -117,6 +124,68 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(onDisk.servers.count, 1)
     XCTAssertEqual(onDisk.socksPort, ActivationFixture.listen.socksPort)
     XCTAssertEqual(onDisk.servers.first?.password, "pw-香港 01", "凭据已解析进文档")
+    XCTAssertEqual(
+      systemProxy.applied,
+      [
+        SystemProxyConfiguration(
+          target: .pac(URL(string: "http://127.0.0.1:1089/v1/proxy.pac")!))
+      ],
+      "PAC 只有在本地 SOCKS 与 PAC 健康后才写入系统代理")
+    XCTAssertEqual(probe.ports, [1086, 1087], "系统代理写入前必须探测 SOCKS 和 HTTP 入站")
+  }
+
+  func testExternalPACHealthFailureDoesNotWriteSystemProxy() async throws {
+    let seeded = try makeSeededCatalog()
+    let externalURL = URL(string: "https://pac.example.test/proxy.pac")!
+    let pacProbe = ProxyRuntimeFixture.FakePACProbe(
+      outcomes: [.reachable, .failed(detail: "HTTP 状态异常")])
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      pacProbe: pacProbe,
+      proxyMode: .externalPAC(externalURL))
+
+    await controller.activate(seeded.server)
+    await controller.setProxyEnabled(true)
+
+    guard case .systemProxyFailed(let detail) = controller.state else {
+      XCTFail("外部 PAC 不健康时应阻止系统代理写入，实际 \(controller.state)")
+      return
+    }
+    XCTAssertTrue(detail.contains("外部 PAC") && detail.contains("HTTP 状态异常"))
+    XCTAssertTrue(systemProxy.applied.isEmpty)
+    XCTAssertEqual(
+      pacProbe.urls,
+      [
+        URL(string: "http://127.0.0.1:1089/v1/proxy.pac")!, externalURL,
+      ])
+  }
+
+  func testSwitchingGlobalAndManualModesIsImmediateAndRestoresOnStop() async throws {
+    let seeded = try makeSeededCatalog()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(), proxyMode: .global)
+
+    await controller.activate(seeded.server)
+    await controller.setProxyEnabled(true)
+    XCTAssertEqual(
+      systemProxy.applied,
+      [SystemProxyConfiguration(target: .socks(host: "127.0.0.1", port: 1086))])
+
+    await controller.setProxyMode(.manual)
+    XCTAssertEqual(controller.state, .running)
+    XCTAssertEqual(systemProxy.restoreCount, 1, "手动模式立即恢复原系统代理设置")
+
+    await controller.setProxyMode(.pac)
+    XCTAssertEqual(controller.state, .running)
+    XCTAssertEqual(systemProxy.applied.count, 2)
+    XCTAssertEqual(
+      systemProxy.applied.last,
+      SystemProxyConfiguration(
+        target: .pac(URL(string: "http://127.0.0.1:1089/v1/proxy.pac")!)))
+
+    await controller.setProxyEnabled(false)
+    XCTAssertEqual(controller.state, .off)
+    XCTAssertEqual(systemProxy.restoreCount, 2, "停止代理撤除 2.0 写入的系统代理")
   }
 
   func testEnableWhenProbeNeverSucceedsPresentsFailureNamingEndpointAndPort() async throws {
@@ -134,6 +203,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertTrue(
       detail.contains("127.0.0.1") && detail.contains("1086"),
       "启动失败必须点名端点与端口（D8）：\(detail)")
+    XCTAssertTrue(systemProxy.applied.isEmpty, "端点不健康时不得写系统代理")
   }
 
   func testDisableUnregistersAndCleansRuntimeFiles() async throws {
