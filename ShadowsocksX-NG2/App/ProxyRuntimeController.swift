@@ -38,6 +38,10 @@ final class ProxyRuntimeController: ObservableObject {
 
   @Published private(set) var state: ProxyState = .off
   @Published private(set) var pacURL: URL?
+  /// 当前活动目标（菜单栏状态摘要与级联只读呈现用，issue #31）。machine 是
+  /// 非发布值的普通结构体，代理关闭路径的激活动作不会触碰 state，菜单的
+  /// 「目标」行依赖这里的独立发布保持实时。
+  @Published private(set) var activeTargetID: NodeID?
   private(set) var machine: ActivationStateMachine
 
   private var catalog: ConfigurationCatalog
@@ -103,6 +107,7 @@ final class ProxyRuntimeController: ObservableObject {
     catalog = (try? catalogFileStore.load().catalog) ?? ConfigurationCatalog()
     let persistedTarget = try? activationFileStore.loadActiveTargetID()
     machine = ActivationStateMachine(activeTargetID: persistedTarget)
+    activeTargetID = machine.activeTargetID
     self.proxyMode = proxyMode
   }
 
@@ -138,6 +143,7 @@ final class ProxyRuntimeController: ObservableObject {
     do {
       let configuration = try machine.activate(
         target, in: catalog, credentials: credentials, plugins: plugins, listen: listen)
+      activeTargetID = target
       do {
         try activationFileStore.save(activeTargetID: target)
       } catch {
@@ -582,9 +588,12 @@ extension ProxyRuntimeController {
     catalog = (try? catalogFileStore.load().catalog) ?? catalog
   }
 
+  /// 目录以磁盘为事实来源重载后重展开；目标被清除时一并发布。
   private func reexpand() -> ActivationEffect? {
-    machine.catalogDidCommit(
+    let effect = machine.catalogDidCommit(
       catalog, credentials: credentials, plugins: plugins, listen: listen)
+    activeTargetID = machine.activeTargetID
+    return effect
   }
 
   private func describe(_ error: Error) -> String {

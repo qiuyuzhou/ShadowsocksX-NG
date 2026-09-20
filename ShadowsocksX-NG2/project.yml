@@ -4,6 +4,12 @@ options:
   developmentLanguage: zh-Hans
   deploymentTarget:
     macOS: "15.0"
+# Swift 包依赖：全局快捷键（spec #21 D11，issue #31）用 KeyboardShortcuts；
+# 快捷键不迁移 Legacy（D12），默认键位见 App/GlobalShortcuts.swift。
+packages:
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    from: 3.1.0
 settings:
   base:
     ARCHS: arm64
@@ -89,6 +95,8 @@ targets:
         copy:
           destination: wrapper
           subpath: Contents/MacOS
+      # 全局快捷键（D11，issue #31）：开关代理、切换模式。
+      - package: KeyboardShortcuts
   ShadowsocksX-NG2Agent:
     type: tool
     platform: macOS

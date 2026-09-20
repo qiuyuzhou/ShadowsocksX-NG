@@ -1,7 +1,8 @@
 import Foundation
 
 /// The mutually exclusive ways in which 2.0 exposes the local proxy to macOS.
-enum ProxyMode: Codable, Equatable, Sendable {
+/// Hashable 供菜单栏模式选择的勾选态 Picker 使用（issue #31）。
+enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   case pac
   case global
   case manual

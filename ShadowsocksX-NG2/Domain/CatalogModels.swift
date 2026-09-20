@@ -51,3 +51,16 @@ struct CatalogEntry: Codable, Equatable, Sendable {
   var enabled: Bool
   var kind: Kind
 }
+
+extension CatalogEntry {
+  /// 行显示名（主窗口侧栏与菜单栏级联共用口径，issue #31）：服务器备注优先、
+  /// 回退地址（含订阅 remarks 回退语义）；分组用名称。
+  var displayName: String {
+    switch kind {
+    case .group(let fields):
+      return fields.name
+    case .server(let fields):
+      return fields.remark.isEmpty ? fields.address : fields.remark
+    }
+  }
+}

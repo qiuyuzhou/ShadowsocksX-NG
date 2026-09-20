@@ -20,6 +20,8 @@ struct ShadowsocksXNG2App: App {
           // 全部订阅」（issue #35）等未开窗路径的目录提交同样立即重展开运行时。
           let controller = proxyController
           catalogViewModel.postCommit = { await controller.catalogDidCommit() }
+          // 全局快捷键（issue #31）：开关代理、切换模式，与菜单项同一入口。
+          GlobalShortcuts.wire(controller: controller)
           await proxyController.resyncOnLaunch()
         }
     }

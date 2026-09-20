@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 
 @testable import ShadowsocksX_NG2
@@ -105,6 +106,22 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       .activationFailed(reason: "尚未激活任何服务器或分组，请先在主窗口激活后再启动代理"))
     XCTAssertEqual(agent.registerCount, 0, "无目标不触碰 launchd（无静默回退）")
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
+  }
+
+  /// 菜单栏「目标」行的实时性（issue #31）：代理关闭时激活只改活动目标、
+  /// 不触碰 state，目标变更必须仍经 @Published 发布到菜单。
+  func testActivateWhileProxyOffPublishesActiveTargetID() async throws {
+    let seeded = try makeSeededCatalog()
+    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
+    var observed: NodeID?
+    let cancellable = controller.$activeTargetID.dropFirst().sink { observed = $0 }
+    defer { cancellable.cancel() }
+
+    await controller.activate(seeded.server)
+
+    XCTAssertEqual(controller.activeTargetID, seeded.server)
+    XCTAssertEqual(observed, seeded.server, "代理关闭路径的激活也要发布目标变更")
+    XCTAssertEqual(controller.state, .off, "仅激活不启动代理")
   }
 
   func testActivateThenEnableWritesContractRegistersAndReachesRunning() async throws {

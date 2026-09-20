@@ -58,15 +58,9 @@ final class CatalogViewModel: ObservableObject {
     (try? catalog.isEffectivelyEnabled(id)) ?? false
   }
 
-  /// 行显示名：服务器备注优先、回退地址（含订阅 remarks 回退语义）；分组用名称。
+  /// 行显示名：委托目录条目的共用口径（`CatalogEntry.displayName`）。
   func displayName(for id: NodeID) -> String {
-    guard let entry = catalog.entry(for: id) else { return "" }
-    switch entry.kind {
-    case .group(let fields):
-      return fields.name
-    case .server(let fields):
-      return fields.remark.isEmpty ? fields.address : fields.remark
-    }
+    catalog.entry(for: id)?.displayName ?? ""
   }
 
   // MARK: - 侧栏树快照
