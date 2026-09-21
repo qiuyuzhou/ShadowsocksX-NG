@@ -4,8 +4,8 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 /// 交接视图模型（issue #37）：观察编排次序——确认门禁、执行前停 2.0、成功后
-/// 启动 2.0、端口门禁失败不启动；确认按钮只对确有可停用内容且旧版 app 已退
-/// 出的识别结果开放。
+/// 启动 2.0、端口门禁失败不启动；确认按钮只对状态已知且旧版 app 已退出的识
+/// 别结果开放。
 @MainActor
 final class LegacyHandoffViewModelTests: XCTestCase {
   func testHappyPathStopsProxyHandsOffThenStartsProxy() async {
@@ -53,15 +53,21 @@ final class LegacyHandoffViewModelTests: XCTestCase {
     XCTAssertEqual(harness.events, [])
   }
 
-  func testConfirmationHiddenWhenNothingToStop() async {
+  func testConfirmationAvailableWhenLegacyServicesAreAlreadyStopped() async {
     let launchctl = FakeLaunchctl()
     let harness = makeHarness(launchctl: launchctl)
     launchctl.loadedLabels = []
 
     await harness.model.refresh()
 
-    XCTAssertFalse(harness.model.canConfirm)
+    XCTAssertTrue(harness.model.canConfirm)
     XCTAssertFalse(harness.model.hasUnknownState)
+
+    await harness.model.performHandoff()
+
+    XCTAssertEqual(harness.model.phase, .completed)
+    XCTAssertEqual(harness.events, [.stop, .start])
+    XCTAssertTrue(harness.marker.completed)
   }
 
   func testUnknownLaunchctlStateBlocksConfirmation() async {

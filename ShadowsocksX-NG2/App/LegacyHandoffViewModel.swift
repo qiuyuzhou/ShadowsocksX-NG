@@ -59,13 +59,13 @@ final class LegacyHandoffViewModel: ObservableObject {
     }
   }
 
-  /// 确认按钮的可用条件：识别完成、无未知状态、旧版 app 已退出、确有可停用
-  /// 的痕迹（无可停用内容时不提供确认，避免无意义地走一遍流程）。
+  /// 确认按钮的可用条件：识别完成、无未知状态且旧版 app 已退出。
+  /// 即使旧版后台服务已经停用，交接仍需清理归属明确的系统代理、确认端口已释放，
+  /// 写入完成标记并启动 2.0；因此不能把「没有 launchd 动作」当作不可确认。
   var canConfirm: Bool {
     guard let detection, phase != .performing else { return false }
     guard detection.printFailures.isEmpty, !detection.legacyAppRunning else { return false }
-    let plan = LegacyHandoffPlan.make(from: detection)
-    return !plan.actions.isEmpty
+    return true
   }
 
   var hasUnknownState: Bool {
