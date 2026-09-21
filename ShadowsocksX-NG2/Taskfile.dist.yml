@@ -1,0 +1,55 @@
+# https://taskfile.dev/
+version: '3'
+
+vars:
+  PROJECT_NAME: "ShadowsocksX-NG2"
+  BUILD_DIR: "{{ .TASKFILE_DIR }}/.build"
+  DERIVED_DATA_DIR: "{{ .BUILD_DIR }}/derivedData"
+
+tasks:
+  gen:prj:
+    desc: 'Generate xcode project by xcodegen'
+    cmds:
+      - xcodegen generate
+
+  build:
+    desc: Build the ShadowsocksX-NG2 macOS application
+    cmds:
+      - >-
+        xcodebuild
+        -project ShadowsocksX-NG2.xcodeproj
+        -scheme ShadowsocksX-NG2
+        -configuration Debug
+        -destination 'platform=macOS,arch=arm64'
+        -derivedDataPath {{ .DERIVED_DATA_DIR }}
+        build
+
+  format:
+    desc: 'Format the code by swift-format'
+    cmds:
+      - swift format format --in-place -r App Tests Domain Agent
+
+  lint:
+    desc: 'Lint the swift code by swiftlint'
+    cmds:
+      - swiftlint lint --config .swiftlint.yml --no-cache
+  
+  lint:fix:
+    desc: 'Automatically fix SwiftLint violations'
+    cmds:
+      - swiftlint lint --fix --config .swiftlint.yml --no-cache
+  
+  test:
+    desc: 'Run unit tests'
+    cmds:
+      - >-
+        xcodebuild
+        -project ShadowsocksX-NG2.xcodeproj
+        -scheme ShadowsocksX-NG2
+        -destination 'platform=macOS,arch=arm64'
+        -derivedDataPath {{ .DERIVED_DATA_DIR }}
+        test
+
+  clean:
+    cmds:
+      - rm -rf {{ .BUILD_DIR }}
