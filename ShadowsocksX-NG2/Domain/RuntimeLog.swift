@@ -37,6 +37,16 @@ enum RuntimeLogEvent: CustomStringConvertible, Sendable {
   case endpointProbeFailed(host: String, port: Int, detail: String)
   /// 激活失败或活动目标清除（原因枚举已点名且不含秘密）。
   case activationFailed(reason: String)
+  /// Legacy 交接（issue #37）：label 是产品硬编码白名单常量，端口为本机端点，
+  /// 均非敏感信息。
+  case legacyHandoffStarted
+  case legacyHandoffLabelRemoved(label: String)
+  case legacyHandoffLabelDisabled(label: String)
+  case legacyHandoffProxyCleaned(serviceCount: Int)
+  case legacyHandoffPortsConfirmed(portList: String)
+  case legacyHandoffPortsNotReleased(detail: String)
+  case legacyHandoffFailed(reason: String)
+  case legacyHandoffCompleted
   /// 用户显式触发的脱敏诊断导出已完成（不携带导出路径）。
   case diagnosticsExported
   /// 监听设置持久化读取失败，已回落出厂默认（D8：不静默改端口——事件进
@@ -89,6 +99,22 @@ enum RuntimeLogEvent: CustomStringConvertible, Sendable {
       return "endpoint \(host):\(port) not ready: \(detail)"
     case .activationFailed(let reason):
       return "activation failed: \(reason)"
+    case .legacyHandoffStarted:
+      return "legacy handoff started"
+    case .legacyHandoffLabelRemoved(let label):
+      return "legacy handoff removed launchd job: \(label)"
+    case .legacyHandoffLabelDisabled(let label):
+      return "legacy handoff disabled launchd label: \(label)"
+    case .legacyHandoffProxyCleaned(let serviceCount):
+      return "legacy handoff cleaned legacy-owned system proxy (services=\(serviceCount))"
+    case .legacyHandoffPortsConfirmed(let portList):
+      return "legacy handoff confirmed ports free: \(portList)"
+    case .legacyHandoffPortsNotReleased(let detail):
+      return "legacy handoff ports not released: \(detail)"
+    case .legacyHandoffFailed(let reason):
+      return "legacy handoff failed: \(reason)"
+    case .legacyHandoffCompleted:
+      return "legacy handoff completed"
     case .diagnosticsExported:
       return "diagnostics report exported (redacted)"
     case .listenSettingsUnreadable(let detail):

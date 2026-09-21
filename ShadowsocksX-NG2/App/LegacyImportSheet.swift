@@ -5,6 +5,9 @@ import SwiftUI
 /// named skipped records, identity regeneration, and migration warnings.
 struct LegacyImportSheet: View {
   @ObservedObject var viewModel: CatalogViewModel
+  /// 导入成功后的「切换到 2.0」第二阶段入口（issue #37：交接与导入分离，
+  /// 由用户显式发起）；nil 时隐藏。
+  var onHandoffRequested: (() -> Void)?
   @Environment(\.dismiss) private var dismiss
 
   @State private var isImporting = false
@@ -38,6 +41,9 @@ struct LegacyImportSheet: View {
       HStack {
         Button("暂不导入") { dismiss() }
         Spacer()
+        if viewModel.legacyImportReport != nil, let onHandoffRequested {
+          Button("切换到 2.0…") { onHandoffRequested() }
+        }
         Button(viewModel.legacyImportCompleted ? "再次导入" : "导入") {
           importLegacy()
         }
