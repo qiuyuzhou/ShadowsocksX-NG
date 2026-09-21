@@ -24,7 +24,7 @@ enum CredentialStoreError: Error, Equatable {
 struct KeychainCredentialStore: CredentialStoring {
   let service: String
 
-  init(service: String = "com.qiuyuzhou.ShadowsocksX-NG.credentials") {
+  init(service: String = "com.qiuyuzhou.ShadowsocksX-NG2.credentials") {
     self.service = service
   }
 

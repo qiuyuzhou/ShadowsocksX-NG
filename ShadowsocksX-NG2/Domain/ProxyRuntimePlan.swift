@@ -13,7 +13,7 @@ enum LaunchAgentStatus: Equatable, Sendable {
   case notFound
 }
 
-/// wrapper 进程活性：GUI 读 `v2/agent.pid` 并以 `kill(pid, 0)` 判定（D2）。
+/// wrapper 进程活性：GUI 读 `agent.pid` 并以 `kill(pid, 0)` 判定（D2）。
 enum WrapperProcessState: Equatable, Sendable {
   case notRunning
   case running(pid: Int32)

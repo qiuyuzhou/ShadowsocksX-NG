@@ -32,7 +32,7 @@ targets:
       # LaunchAgent 注册清单：SMAppService.agent(plistName:) 从 bundle 内
       # Contents/Library/LaunchAgents/ 读取；ProgramArguments 用 bundle 相对路径
       # （spec #21 D2，issue #27）。
-      - path: LaunchAgent/com.qiuyuzhou.ShadowsocksX-NG.agent.plist
+      - path: LaunchAgent/com.qiuyuzhou.ShadowsocksX-NG2.agent.plist
         buildPhase:
           copyFiles:
             destination: wrapper
@@ -67,7 +67,7 @@ targets:
           "$SRCROOT/Scripts/sign-embedded-helpers.sh"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG
+        PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2
         PRODUCT_NAME: ShadowsocksX-NG2
         CODE_SIGN_IDENTITY: "Developer ID Application"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -114,7 +114,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: ShadowsocksX-NG2Agent
-        PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG.agent
+        PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.agent
         CODE_SIGN_IDENTITY: "Developer ID Application"
   ShadowsocksX-NG2Tests:
     type: bundle.unit-test
@@ -123,7 +123,7 @@ targets:
       - path: Tests
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG.Tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.Tests
         # 必须与宿主 app 同 Team 签名：Hardened Runtime 的 library validation 拒绝
         # 加载不同 Team ID 的非平台库，ad-hoc（"-"）签名的 xctest 包无法注入。
         CODE_SIGN_IDENTITY: "Apple Development"

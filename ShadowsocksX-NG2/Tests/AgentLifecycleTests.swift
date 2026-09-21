@@ -63,7 +63,7 @@ final class AgentLifecycleTests: XCTestCase {
     var environment = ProcessInfo.processInfo.environment
     environment["SSXNG_CONTRACT_PATH"] = contractURL.path
     environment["SSXNG_SSLOCAL_PATH"] = stubURL.path
-    environment["SSXNG_V2_DIR"] = workDir.path
+    environment["SSXNG_RUNTIME_DIR"] = workDir.path
     environment["SSLOCAL_STUB_STATE"] = stubStateURL.path
     environment["SSLOCAL_STUB_BEHAVIOR"] = behavior
     process.environment = environment

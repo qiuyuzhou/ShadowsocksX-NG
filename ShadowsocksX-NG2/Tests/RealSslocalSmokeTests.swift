@@ -72,7 +72,7 @@ final class RealSslocalSmokeTests: XCTestCase {
     var environment = ProcessInfo.processInfo.environment
     environment["SSXNG_CONTRACT_PATH"] = contractURL.path
     environment["SSXNG_SSLOCAL_PATH"] = try sslocalURL.path
-    environment["SSXNG_V2_DIR"] = workDir.path
+    environment["SSXNG_RUNTIME_DIR"] = workDir.path
     process.environment = environment
     try process.run()
     return process

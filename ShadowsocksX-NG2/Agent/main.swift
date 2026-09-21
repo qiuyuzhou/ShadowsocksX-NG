@@ -1,7 +1,7 @@
 import Foundation
 
 // 代理运行时 wrapper（spec #21 D2/D5/D7，issue #27/#28）：LaunchAgent
-// 常驻进程，读取跨进程契约 `v2/sslocal-active.json`，承载 PAC HTTP endpoint，
+// 常驻进程，读取跨进程契约 `sslocal-active.json`，承载 PAC HTTP endpoint，
 // 并以绝对配置路径启动官方 sslocal、监管二者生命周期。
 //
 // 协议要点：
@@ -17,7 +17,7 @@ import Foundation
 //   清理后干净退出，避免把上游必然拒绝的配置反复交给 sslocal。
 //
 // 测试缝（生产走默认值）：`SSXNG_CONTRACT_PATH`、`SSXNG_SSLOCAL_PATH`、
-// `SSXNG_V2_DIR`（pid 文件与收敛日志的替代目录，测试隔离用）。
+// `SSXNG_RUNTIME_DIR`（pid 文件与收敛日志的替代目录，测试隔离用）。
 
 private let environment = ProcessInfo.processInfo.environment
 
@@ -29,20 +29,20 @@ private let sslocalURL: URL =
   environment["SSXNG_SSLOCAL_PATH"].map { URL(fileURLWithPath: $0) }
   ?? Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/sslocal")
 
-private let v2DirectoryOverride: URL? = environment["SSXNG_V2_DIR"].map {
+private let runtimeDirectoryOverride: URL? = environment["SSXNG_RUNTIME_DIR"].map {
   URL(fileURLWithPath: $0, isDirectory: true)
 }
 
 private let pidFileURL: URL =
-  v2DirectoryOverride?.appendingPathComponent("agent.pid") ?? RuntimePaths.agentPIDFileURL()
+  runtimeDirectoryOverride?.appendingPathComponent("agent.pid") ?? RuntimePaths.agentPIDFileURL()
 
 // 顶层脚本是按源码顺序执行的：队列必须先于下方任何函数调用完成初始化。
-private let signalsQueue = DispatchQueue(label: "com.qiuyuzhou.ShadowsocksX-NG.agent.signals")
+private let signalsQueue = DispatchQueue(label: "com.qiuyuzhou.ShadowsocksX-NG2.agent.signals")
 
 // wrapper 与 sslocal 的输出收敛到应用支持目录内的 0600 日志；launchd 统一日
 // 志不承载代理细节。
 redirectStandardStreams(
-  to: v2DirectoryOverride?.appendingPathComponent("agent.log") ?? RuntimePaths.agentLogURL())
+  to: runtimeDirectoryOverride?.appendingPathComponent("agent.log") ?? RuntimePaths.agentLogURL())
 
 FileManager.default.createFile(
   atPath: pidFileURL.path,

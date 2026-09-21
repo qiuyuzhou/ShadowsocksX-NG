@@ -5,12 +5,12 @@ import XCTest
 /// 运行时文件存取（spec #21 D5，issue #27）：0700/0600 权限基线、原子替换、
 /// 读取侧判定与显式停止清理。
 final class RuntimeFileStoreTests: XCTestCase {
-  private var runtime: ProxyRuntimeFixture.TemporaryV2!
+  private var runtime: ProxyRuntimeFixture.TemporaryRuntime!
   private var store: RuntimeFileStore!
 
   override func setUpWithError() throws {
     try super.setUpWithError()
-    runtime = ProxyRuntimeFixture.makeTemporaryV2()
+    runtime = ProxyRuntimeFixture.makeTemporaryRuntime()
     store = RuntimeFileStore(fileURL: runtime.contract)
   }
 

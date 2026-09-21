@@ -7,7 +7,7 @@ import XCTest
 /// 代理开关、目录重展开消费与 GUI 重同步重合（不触真实 SMAppService/launchd）。
 @MainActor
 final class ProxyRuntimeControllerTests: XCTestCase {
-  private var runtime: ProxyRuntimeFixture.TemporaryV2!
+  private var runtime: ProxyRuntimeFixture.TemporaryRuntime!
   private var catalogFileURL: URL!
   private var activationFileURL: URL!
   private var credentials: InMemoryCredentialStore!
@@ -40,7 +40,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
 
   override func setUpWithError() throws {
     try super.setUpWithError()
-    runtime = ProxyRuntimeFixture.makeTemporaryV2()
+    runtime = ProxyRuntimeFixture.makeTemporaryRuntime()
     catalogFileURL = runtime.directory.appendingPathComponent("catalog.json")
     activationFileURL = runtime.directory.appendingPathComponent("activation.json")
     credentials = InMemoryCredentialStore()

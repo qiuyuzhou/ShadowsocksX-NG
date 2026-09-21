@@ -6,7 +6,7 @@ import XCTest
 /// issue #30）：占位出厂端口不得部署——停止运行时并点名呈现启动失败。
 @MainActor
 final class UnreadableListenSettingsTests: XCTestCase {
-  private var runtime: ProxyRuntimeFixture.TemporaryV2!
+  private var runtime: ProxyRuntimeFixture.TemporaryRuntime!
   private var catalogFileURL: URL!
   private var activationFileURL: URL!
   private var credentials: InMemoryCredentialStore!
@@ -15,7 +15,7 @@ final class UnreadableListenSettingsTests: XCTestCase {
 
   override func setUpWithError() throws {
     try super.setUpWithError()
-    runtime = ProxyRuntimeFixture.makeTemporaryV2()
+    runtime = ProxyRuntimeFixture.makeTemporaryRuntime()
     catalogFileURL = runtime.directory.appendingPathComponent("catalog.json")
     activationFileURL = runtime.directory.appendingPathComponent("activation.json")
     credentials = InMemoryCredentialStore()

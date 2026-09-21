@@ -3,21 +3,23 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 代理运行时测试共享夹具（票 #27）：临时 v2 目录、契约文档构造、LaunchAgent
+/// 代理运行时测试共享夹具（票 #27）：临时运行时目录、契约文档构造、LaunchAgent
 /// 与探测替身。
 enum ProxyRuntimeFixture {
   /// 在临时目录中建一套隔离的运行时文件组（不触碰真实 ~/Library）。
-  struct TemporaryV2 {
+  struct TemporaryRuntime {
     let directory: URL
     let contract: URL
     let pidFile: URL
   }
 
-  static func makeTemporaryV2(file: StaticString = #filePath, line: UInt = #line) -> TemporaryV2 {
+  static func makeTemporaryRuntime(file: StaticString = #filePath, line: UInt = #line)
+    -> TemporaryRuntime
+  {
     let directory = FileManager.default.temporaryDirectory
       .appendingPathComponent("ssxng-tests-\(UUID().uuidString)", isDirectory: true)
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    return TemporaryV2(
+    return TemporaryRuntime(
       directory: directory,
       contract: directory.appendingPathComponent("sslocal-active.json"),
       pidFile: directory.appendingPathComponent("agent.pid"))

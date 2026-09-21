@@ -37,8 +37,8 @@ struct RestoredListenSettings: Equatable {
 }
 
 /// 用户监听设置（端口、HTTP 启用、UDP、监听范围）的磁盘持久化，落盘
-/// `~/Library/Application Support/ShadowsocksX-NG/listen-settings.json`。
-/// 只承载用户显式确认过的配置；与 v2/ 运行时契约文件分离。监听范围只按
+/// `~/Library/Application Support/ShadowsocksX-NG2/listen-settings.json`。
+/// 只承载用户显式确认过的配置；与运行时契约文件分离。监听范围只按
 /// 原样保留，有效性由派生文档的读取侧校验兜底。
 struct ListenSettingsFileStore: ListenSettingsStoring {
   private static let jsonEncoder: JSONEncoder = {
@@ -52,7 +52,7 @@ struct ListenSettingsFileStore: ListenSettingsStoring {
   static func defaultFileURL() -> URL {
     let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
       0]
-    return support.appendingPathComponent("ShadowsocksX-NG/listen-settings.json")
+    return support.appendingPathComponent("ShadowsocksX-NG2/listen-settings.json")
   }
 
   init(fileURL: URL = ListenSettingsFileStore.defaultFileURL()) {

@@ -11,7 +11,7 @@ final class DiagnosticFileCollectorTests: XCTestCase {
     directory = FileManager.default.temporaryDirectory
       .appendingPathComponent("ssxng-diag-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    // 临时目录默认带 0755：对齐产品基线（v2/ 0700）再断言。
+    // 临时目录默认带 0755：对齐产品基线（运行时目录 0700）再断言。
     try FileManager.default.setAttributes(
       [.posixPermissions: 0o700], ofItemAtPath: directory.path)
   }
@@ -38,7 +38,7 @@ final class DiagnosticFileCollectorTests: XCTestCase {
   }
 
   func testCollectsDirectoryPermissionsWithoutSize() throws {
-    let facts = DiagnosticFileCollector.collect(label: "v2 目录", url: directory)
+    let facts = DiagnosticFileCollector.collect(label: "运行时目录", url: directory)
 
     XCTAssertTrue(facts.exists)
     XCTAssertTrue(facts.isDirectory)

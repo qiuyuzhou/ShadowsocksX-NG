@@ -15,7 +15,7 @@ final class PACServer {
 
   private let configuration: PACRuntimeDocument
   private let requestHeaderTimeout: TimeInterval
-  private let queue = DispatchQueue(label: "com.qiuyuzhou.ShadowsocksX-NG.pac")
+  private let queue = DispatchQueue(label: "com.qiuyuzhou.ShadowsocksX-NG2.pac")
   private let lock = NSLock()
   private var listener: NWListener?
   /// 只在 queue 上访问；停止时一并取消，避免 listener 已停但旧连接仍可取 PAC。

@@ -194,7 +194,7 @@ struct DiagnosticsView: View {
 
   private static func fileFacts() -> [DiagnosticFileFacts] {
     [
-      DiagnosticFileCollector.collect(label: "v2 目录", url: RuntimePaths.v2Directory()),
+      DiagnosticFileCollector.collect(label: "运行时目录", url: RuntimePaths.runtimeDirectory()),
       DiagnosticFileCollector.collect(
         label: "catalog.json", url: CatalogFileStore.defaultFileURL()),
       DiagnosticFileCollector.collect(

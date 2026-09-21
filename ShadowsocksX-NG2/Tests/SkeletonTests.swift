@@ -11,8 +11,9 @@ final class SkeletonTests: XCTestCase {
     XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(.shared))
   }
 
-  func testAppBundleIDInheritedFromLegacy() {
-    XCTAssertEqual(Bundle.main.bundleIdentifier, "com.qiuyuzhou.ShadowsocksX-NG")
+  func testAppBundleIDIsDistinctFromLegacy() {
+    XCTAssertEqual(Bundle.main.bundleIdentifier, "com.qiuyuzhou.ShadowsocksX-NG2")
+    XCTAssertNotEqual(Bundle.main.bundleIdentifier, "com.qiuyuzhou.ShadowsocksX-NG")
   }
 
   func testAppIsMenuBarAgent() {

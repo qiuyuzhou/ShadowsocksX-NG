@@ -1,7 +1,7 @@
 import Foundation
 
 /// 配置树磁盘持久化（spec #21 D5）：落盘 `~/Library/Application Support/
-/// ShadowsocksX-NG/v2/catalog.json`，`v2/` 权限 0700、文件 0600；写临时文件
+/// ShadowsocksX-NG2/catalog.json`，目录权限 0700、文件 0600；写临时文件
 /// （创建即 0600）后原子替换。文件只含结构化目录、凭据引用与订阅元数据
 /// （URL 仍是凭据引用），永不落秘密明文。
 struct CatalogFileStore {
@@ -23,11 +23,11 @@ struct CatalogFileStore {
 
   let fileURL: URL
 
-  /// 默认位置：`~/Library/Application Support/ShadowsocksX-NG/v2/catalog.json`。
+  /// 默认位置：`~/Library/Application Support/ShadowsocksX-NG2/catalog.json`。
   static func defaultFileURL() -> URL {
     let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
       0]
-    return support.appendingPathComponent("ShadowsocksX-NG/v2/catalog.json")
+    return support.appendingPathComponent("ShadowsocksX-NG2/catalog.json")
   }
 
   /// 文件缺失 → 全新空文档；存在但损坏/版本未知/结构不一致 → `.corrupt`。

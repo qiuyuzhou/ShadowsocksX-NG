@@ -167,7 +167,7 @@ final class DiagnosticReportTests: XCTestCase {
     var snapshot = DiagnosticSnapshot()
     snapshot.eventLines = [
       RuntimeLogEvent.runtimePersistFailed(
-        detail: "/Users/SECRETUSER/Library/Application Support/ShadowsocksX-NG/v2: errno 13"
+        detail: "/Users/SECRETUSER/Library/Application Support/ShadowsocksX-NG2: errno 13"
       ).description
     ]
     snapshot.homePathForRedaction = "/Users/SECRETUSER"

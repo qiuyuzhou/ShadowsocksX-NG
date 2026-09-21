@@ -16,7 +16,7 @@ final class ExternalBinaryManifestTests: XCTestCase {
     var signIdentifier: String
   }
 
-  private static let bundleID = "com.qiuyuzhou.ShadowsocksX-NG"
+  private static let bundleID = "com.qiuyuzhou.ShadowsocksX-NG2"
   private static let vendorRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()  // Tests/
     .deletingLastPathComponent()  // ShadowsocksX-NG2/

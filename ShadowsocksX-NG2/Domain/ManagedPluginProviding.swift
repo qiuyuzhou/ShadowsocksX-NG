@@ -35,7 +35,7 @@ enum ManagedPluginCatalog {
       projectURL: "https://github.com/shadowsocks/v2ray-plugin",
       release: "v1.3.2",
       license: "MIT",
-      signIdentifier: "com.qiuyuzhou.ShadowsocksX-NG.plugin.v2ray-plugin")
+      signIdentifier: "com.qiuyuzhou.ShadowsocksX-NG2.plugin.v2ray-plugin")
   ]
 
   static func info(forProgram program: String) -> ManagedPluginInfo? {

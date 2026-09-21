@@ -1,6 +1,6 @@
 import Foundation
 
-/// 运行时文件存取（spec #21 D5，issue #27）：`v2/sslocal-active.json` 是 GUI
+/// 运行时文件存取（spec #21 D5，issue #27）：`sslocal-active.json` 是 GUI
 /// 写、wrapper 读的跨进程交接契约。写入复用 `AtomicFileWriter` 的物理安全
 /// 基线（目录 0700 含自愈、临时文件创建即 0600、写全校验后原子替换）；显式
 /// 停止后的清理只做普通 unlink，不承诺安全擦除（D5）。
@@ -16,7 +16,7 @@ struct RuntimeFileStore {
     self.fileURL = fileURL
   }
 
-  /// wrapper pid 文件与契约同目录（v2/）：GUI 判活与 SIGUSR1 投递依据
+  /// wrapper pid 文件与契约同目录：GUI 判活与 SIGUSR1 投递依据
   /// （SMAppService 不暴露运行中 agent 的 pid）。
   var pidFileURL: URL {
     fileURL.deletingLastPathComponent().appendingPathComponent("agent.pid")
