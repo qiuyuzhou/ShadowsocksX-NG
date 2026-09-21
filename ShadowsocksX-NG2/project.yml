@@ -70,6 +70,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG
         PRODUCT_NAME: ShadowsocksX-NG2
         CODE_SIGN_IDENTITY: "Developer ID Application"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "2.0.0"
         # 必须 > 旧版 1.x 已发布构建的 CFBundleVersion（始终为 1），保证 build 号严格递增。
         CURRENT_PROJECT_VERSION: 2
