@@ -8,8 +8,11 @@ excluded:
   # 常规调用天然扫不到它；此条保证带 --config 从仓库根调用时也明确排除）
   - ../Legacy
 disabled_rules:
-  # 与 .swift-format 基线冲突：multiElementCollectionTrailingCommas=true 要求
-  # 多元素集合字面量带尾逗号（触发案例：Domain/CredentialStore.swift 的
-  # Keychain 查询字典），而本规则默认对其告警；pre-commit 先 format 再 lint，
-  # 不关掉则每次提交必然出现同样的 warning。
+  # 与 .swift-format 基线冲突：SwiftFormat 的多元素集合尾逗号和
+  # 多行条件/签名的换行规则会被 SwiftLint 的自动修正规则改回去。
+  # 触发案例：Domain/CredentialStore.swift 的 Keychain 查询字典由
+  # multiElementCollectionTrailingCommas=true 保留尾逗号；
+  # App/SettingsView.swift 的多行条件由 SwiftFormat 保留独立的 {。
+  # pre-commit 先 format 再 lint；关闭冲突规则以 .swift-format 为准。
   - trailing_comma
+  - opening_brace
