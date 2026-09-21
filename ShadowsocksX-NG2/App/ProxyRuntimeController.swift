@@ -88,7 +88,7 @@ final class ProxyRuntimeController: ObservableObject {
     probe: EndpointProbing = SystemEndpointProbe(),
     pacProbe: PACHealthProbing = SystemPACHealthProbe(),
     systemProxy: SystemProxyControlling = SystemConfigurationProxyController(),
-    proxyMode: ProxyMode = .pac,
+    proxyMode: ProxyMode? = nil,
     firewallChecker: FirewallStatusChecking = SocketFilterFirewallChecker(),
     firewallExecutableURLs: [URL]? = nil,
     firewallPollIntervalNanoseconds: UInt64 = 2_000_000_000,
@@ -125,7 +125,7 @@ final class ProxyRuntimeController: ObservableObject {
     let persistedTarget = try? activationFileStore.loadActiveTargetID()
     machine = ActivationStateMachine(activeTargetID: persistedTarget)
     activeTargetID = machine.activeTargetID
-    self.proxyMode = proxyMode
+    self.proxyMode = proxyMode ?? Self.makeProxyMode(from: restoredSettings.settings)
   }
 
   var isActiveTargetPresent: Bool { machine.activeTargetID != nil }
@@ -468,6 +468,30 @@ extension ProxyRuntimeController {
       await setProxyEnabled(false)
     }
   }
+
+  /// Applies the post-import runtime boundary without touching SystemConfiguration.
+  /// Legacy import is intentionally separate from handoff: importing data must
+  /// leave the user's system proxy dictionary untouched, while any currently
+  /// running 2.0 runtime is stopped and the new target/settings are reloaded.
+  func legacyImportDidCommit() async {
+    cancelFirewallObservation()
+    flowGeneration += 1
+    _ = await execute(.stop, document: nil)
+    state = .off
+    pacURL = nil
+    lastDocument = nil
+
+    if let restored = try? settingsStore.load() {
+      settings = restored
+      settingsUnreadableReason = nil
+      listenUnreadableReason = nil
+      proxyMode = Self.makeProxyMode(from: restored)
+    }
+    reloadCatalog()
+    let persistedTarget = try? activationFileStore.loadActiveTargetID()
+    machine = ActivationStateMachine(activeTargetID: persistedTarget ?? nil)
+    activeTargetID = machine.activeTargetID
+  }
 }
 
 extension ProxyRuntimeController {
@@ -697,5 +721,23 @@ extension ProxyRuntimeController {
       return error.presentedReason
     }
     return String(describing: error)
+  }
+}
+
+extension ProxyRuntimeController {
+  fileprivate static func makeProxyMode(from settings: ProxySettings) -> ProxyMode {
+    switch settings.preferredMode {
+    case .pac:
+      return .pac
+    case .global:
+      return .global
+    case .manual:
+      return .manual
+    case .externalPAC:
+      guard let url = URL(string: settings.externalPACURL),
+        (try? ProxyMode.validateExternalPACURL(url)) != nil
+      else { return .pac }
+      return .externalPAC(url)
+    }
   }
 }

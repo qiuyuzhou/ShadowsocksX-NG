@@ -27,7 +27,9 @@ enum GlobalShortcuts {
     }
     KeyboardShortcuts.onKeyUp(for: .cycleProxyMode) {
       Task { @MainActor in
-        await controller.setProxyMode(StatusMenuModel.nextMode(after: controller.proxyMode))
+        await controller.setProxyMode(
+          StatusMenuModel.nextMode(
+            after: controller.proxyMode, availableModes: controller.settings.enabledModes))
       }
     }
   }

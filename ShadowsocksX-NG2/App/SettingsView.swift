@@ -96,10 +96,16 @@ struct SettingsView: View {
       }
 
       Picker("系统代理模式", selection: modeBinding) {
-        Text(ProxyMode.pac.label).tag(ProxyMode.pac)
-        Text(ProxyMode.global.label).tag(ProxyMode.global)
-        Text(ProxyMode.manual.label).tag(ProxyMode.manual)
-        if let externalMode = configuredExternalPACMode {
+        if isModeAvailable(.pac) {
+          Text(ProxyMode.pac.label).tag(ProxyMode.pac)
+        }
+        if isModeAvailable(.global) {
+          Text(ProxyMode.global.label).tag(ProxyMode.global)
+        }
+        if isModeAvailable(.manual) {
+          Text(ProxyMode.manual.label).tag(ProxyMode.manual)
+        }
+        if let externalMode = configuredExternalPACMode, isModeAvailable(externalMode.mode) {
           Text("外部 PAC（" + externalMode.urlString + "）")
             .tag(externalMode.mode)
         }
@@ -233,6 +239,12 @@ extension SettingsView {
       set: { mode in
         Task { await proxyController.setProxyMode(mode) }
       })
+  }
+
+  private func isModeAvailable(_ mode: ProxyMode) -> Bool {
+    if mode.kind == .externalPAC, configuredExternalPACMode != nil { return true }
+    return mode.kind == proxyController.proxyMode.kind
+      || proxyController.settings.enabledModes.contains(mode.kind)
   }
 
   private var configuredExternalPACMode: (mode: ProxyMode, urlString: String)? {

@@ -34,6 +34,11 @@ struct ShadowsocksXNG2App: App {
           // 全部订阅」（issue #35）等未开窗路径的目录提交同样立即重展开运行时。
           let controller = proxyController
           catalogViewModel.postCommit = { await controller.catalogDidCommit() }
+          let loginController = loginController
+          catalogViewModel.postLegacyImport = { outcome in
+            await controller.legacyImportDidCommit()
+            loginController.applyImportedValue(outcome.loginAtLogin)
+          }
           // 全局快捷键（issue #31）：开关代理、切换模式，与菜单项同一入口。
           GlobalShortcuts.wire(controller: controller)
           await proxyController.resyncOnLaunch()
@@ -50,9 +55,15 @@ struct ShadowsocksXNG2App: App {
         // 目录提交 → 代理运行时立即重展开（spec #21 D3「已提交编辑立即跟随」）。
         let controller = proxyController
         catalogViewModel.postCommit = { await controller.catalogDidCommit() }
+        let loginController = loginController
+        catalogViewModel.postLegacyImport = { outcome in
+          await controller.legacyImportDidCommit()
+          loginController.applyImportedValue(outcome.loginAtLogin)
+        }
       }
     }
-    .defaultLaunchBehavior(.suppressed)
+    .defaultLaunchBehavior(
+      catalogViewModel.shouldOfferLegacyImport ? .automatic : .suppressed)
 
     Settings {
       SettingsView(

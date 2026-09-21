@@ -1,5 +1,15 @@
 import Foundation
 
+/// Persisted identity of a proxy mode. Unlike `ProxyMode`, this type does not
+/// carry the URL of an external PAC, so it is safe to use in preferences and
+/// mode-availability settings.
+enum ProxyModeKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
+  case pac
+  case global
+  case manual
+  case externalPAC
+}
+
 /// The mutually exclusive ways in which 2.0 exposes the local proxy to macOS.
 /// Hashable 供菜单栏模式选择的勾选态 Picker 使用（issue #31）。
 enum ProxyMode: Codable, Equatable, Hashable, Sendable {
@@ -59,6 +69,15 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
       "手动"
     case .externalPAC:
       "外部 PAC"
+    }
+  }
+
+  var kind: ProxyModeKind {
+    switch self {
+    case .pac: .pac
+    case .global: .global
+    case .manual: .manual
+    case .externalPAC: .externalPAC
     }
   }
 

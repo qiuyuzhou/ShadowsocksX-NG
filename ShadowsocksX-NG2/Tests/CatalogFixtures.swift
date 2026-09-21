@@ -6,6 +6,8 @@ import Foundation
 final class InMemoryCredentialStore: CredentialStoring {
   private var storage: [String: String] = [:]
 
+  var storageCount: Int { storage.count }
+
   func save(_ secret: String, for reference: CredentialReference) throws {
     storage[reference.rawValue] = secret
   }

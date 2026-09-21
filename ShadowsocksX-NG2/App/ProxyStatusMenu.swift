@@ -36,11 +36,17 @@ struct ProxyStatusMenu: View {
 
     // ③ 模式选择（勾选态）
     Picker("模式", selection: modeBinding) {
-      Text(ProxyMode.pac.label).tag(ProxyMode.pac)
-      Text(ProxyMode.global.label).tag(ProxyMode.global)
-      Text(ProxyMode.manual.label).tag(ProxyMode.manual)
-      if case .externalPAC = controller.proxyMode {
-        Text(controller.proxyMode.label).tag(controller.proxyMode)
+      if isModeAvailable(.pac) {
+        Text(ProxyMode.pac.label).tag(ProxyMode.pac)
+      }
+      if isModeAvailable(.global) {
+        Text(ProxyMode.global.label).tag(ProxyMode.global)
+      }
+      if isModeAvailable(.manual) {
+        Text(ProxyMode.manual.label).tag(ProxyMode.manual)
+      }
+      if let externalMode = configuredExternalPACMode {
+        Text(externalMode.label).tag(externalMode)
       }
     }
     .pickerStyle(.inline)
@@ -101,6 +107,22 @@ struct ProxyStatusMenu: View {
     Binding(
       get: { controller.proxyMode },
       set: { mode in Task { await controller.setProxyMode(mode) } })
+  }
+
+  private func isModeAvailable(_ mode: ProxyMode) -> Bool {
+    mode.kind == controller.proxyMode.kind || controller.settings.enabledModes.contains(mode.kind)
+  }
+
+  private var configuredExternalPACMode: ProxyMode? {
+    if case .externalPAC(let url) = controller.proxyMode {
+      return .externalPAC(url)
+    }
+    guard controller.settings.enabledModes.contains(.externalPAC),
+      let url = URL(string: controller.settings.externalPACURL),
+      !controller.settings.externalPACURL.isEmpty,
+      (try? ProxyMode.validateExternalPACURL(url)) != nil
+    else { return nil }
+    return .externalPAC(url)
   }
 
   /// 只读级联树：分组展开为子菜单，活动目标以勾选呈现；无编辑入口。

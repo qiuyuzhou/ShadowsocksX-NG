@@ -7,6 +7,7 @@ struct ProxySettings: Equatable, Sendable {
   static let defaultGFWListURL = "https://cdn.jsdelivr.net/gh/gfwlist/gfwlist/gfwlist.txt"
   static let defaultProxyExceptions =
     "127.0.0.1, localhost, 192.168.0.0/16, 10.0.0.0/8, FE80::/64, ::1, FD00::/8"
+  static let defaultEnabledModes: Set<ProxyModeKind> = [.pac, .global, .manual]
 
   var listen: SslocalListenSettings
   var timeoutSeconds: Int
@@ -15,6 +16,12 @@ struct ProxySettings: Equatable, Sendable {
   var externalPACURL: String
   var gfwListURL: String
   var pacUserRules: String
+  /// Mode selected after a restart. An external PAC URL is resolved from
+  /// `externalPACURL` when this kind is `.externalPAC`.
+  var preferredMode: ProxyModeKind
+  /// Legacy's `EnableSwitchMode.*` values land here. The set is also used by
+  /// the menu/settings views to keep disabled modes out of the cycle.
+  var enabledModes: Set<ProxyModeKind>
 
   init(
     listen: SslocalListenSettings = SslocalListenSettings(),
@@ -23,7 +30,9 @@ struct ProxySettings: Equatable, Sendable {
     proxyExceptions: String = ProxySettings.defaultProxyExceptions,
     externalPACURL: String = "",
     gfwListURL: String = ProxySettings.defaultGFWListURL,
-    pacUserRules: String = ""
+    pacUserRules: String = "",
+    preferredMode: ProxyModeKind = .pac,
+    enabledModes: Set<ProxyModeKind> = ProxySettings.defaultEnabledModes
   ) {
     self.listen = listen
     self.timeoutSeconds = timeoutSeconds
@@ -32,6 +41,8 @@ struct ProxySettings: Equatable, Sendable {
     self.externalPACURL = externalPACURL
     self.gfwListURL = gfwListURL
     self.pacUserRules = pacUserRules
+    self.preferredMode = preferredMode
+    self.enabledModes = enabledModes
   }
 
   /// 系统代理的 ExceptionsList；输入顺序保留，重复项只保留第一次出现的值。
@@ -344,7 +355,9 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
         proxyExceptions: record.proxyExceptions,
         externalPACURL: externalPACURL,
         gfwListURL: gfwListURL,
-        pacUserRules: record.pacUserRules))
+        pacUserRules: record.pacUserRules,
+        preferredMode: record.preferredMode,
+        enabledModes: Set(record.enabledModes)))
   }
 
   private func record(from settings: ProxySettings) -> ProxySettingsRecord {
@@ -368,6 +381,8 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
       settings.gfwListURL.isEmpty ? nil : Self.gfwListReference
     record.gfwListURLConfigured = true
     record.pacUserRules = settings.pacUserRules
+    record.preferredMode = settings.preferredMode
+    record.enabledModes = settings.enabledModes.sorted { $0.rawValue < $1.rawValue }
     return record
   }
 
@@ -393,6 +408,10 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
   var gfwListCredentialReference: CredentialReference?
   var gfwListURLConfigured: Bool = false
   var pacUserRules: String = ""
+  var preferredMode: ProxyModeKind = .pac
+  var enabledModes: [ProxyModeKind] = ProxySettings.defaultEnabledModes.sorted {
+    $0.rawValue < $1.rawValue
+  }
 
   init() {}
 
@@ -417,6 +436,11 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
     gfwListURLConfigured =
       try container.decodeIfPresent(Bool.self, forKey: .gfwListURLConfigured) ?? false
     pacUserRules = try container.decodeIfPresent(String.self, forKey: .pacUserRules) ?? ""
+    preferredMode =
+      try container.decodeIfPresent(ProxyModeKind.self, forKey: .preferredMode) ?? .pac
+    enabledModes =
+      try container.decodeIfPresent([ProxyModeKind].self, forKey: .enabledModes)
+      ?? ProxySettings.defaultEnabledModes.sorted { $0.rawValue < $1.rawValue }
   }
 }
 
@@ -425,6 +449,6 @@ extension ProxySettingsRecord {
     case scopeKind, advertisedAddress, socksPort, httpProxyEnabled, httpPort, pacPort
     case udpRelayEnabled, timeoutSeconds, verboseLogging, proxyExceptions
     case externalPACCredentialReference, gfwListCredentialReference, gfwListURLConfigured
-    case pacUserRules
+    case pacUserRules, preferredMode, enabledModes
   }
 }

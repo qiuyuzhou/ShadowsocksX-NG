@@ -97,6 +97,17 @@ final class StatusMenuModelTests: XCTestCase {
       .pac)
   }
 
+  func testNextModeSkipsLegacyDisabledModes() {
+    let enabledModes: Set<ProxyModeKind> = [.pac, .manual]
+
+    XCTAssertEqual(
+      StatusMenuModel.nextMode(after: .pac, availableModes: enabledModes),
+      .manual)
+    XCTAssertEqual(
+      StatusMenuModel.nextMode(after: .manual, availableModes: enabledModes),
+      .pac)
+  }
+
   // MARK: - 活动目标级联树（只读）
 
   func testTargetTreeMirrorsCatalogStructureAndMarksActiveServer() throws {

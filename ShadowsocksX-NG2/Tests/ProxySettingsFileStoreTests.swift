@@ -40,6 +40,8 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     settings.externalPACURL = "https://pac.example.test/proxy.pac?token=secret"
     settings.gfwListURL = "https://lists.example.test/gfw.txt?token=secret"
     settings.pacUserRules = "@@||example.com^"
+    settings.preferredMode = .externalPAC
+    settings.enabledModes = [.pac, .externalPAC]
 
     try store.save(settings)
 

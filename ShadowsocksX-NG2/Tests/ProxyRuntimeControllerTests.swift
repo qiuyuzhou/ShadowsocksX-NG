@@ -423,6 +423,31 @@ final class ProxyRuntimeControllerTests: XCTestCase {
 }
 
 extension ProxyRuntimeControllerTests {
+  func testLegacyImportBoundaryStopsRuntimeWithoutRestoringSystemProxy() async throws {
+    let seeded = try makeSeededCatalog()
+    let settingsStore = InMemoryProxySettingsStore()
+    var importedSettings = ProxySettings()
+    importedSettings.preferredMode = .global
+    settingsStore.saved = importedSettings
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsStore: settingsStore,
+      systemProxy: systemProxy)
+
+    await controller.activate(seeded.server)
+    await controller.setProxyEnabled(true)
+    XCTAssertEqual(controller.state, .running)
+    XCTAssertEqual(systemProxy.applied.count, 1)
+
+    await controller.legacyImportDidCommit()
+
+    XCTAssertEqual(controller.state, .off)
+    XCTAssertEqual(controller.settings, importedSettings)
+    XCTAssertEqual(controller.activeTargetID, seeded.server)
+    XCTAssertEqual(systemProxy.restoreCount, 0, "Legacy 导入不能写入或恢复系统代理")
+    XCTAssertEqual(systemProxy.applied.count, 1, "导入边界不应重新应用系统代理")
+  }
+
   func testResyncWithInvalidActiveTargetClearsAndCleans() async throws {
     _ = try makeSeededCatalog()
     try Data("garbage".utf8).write(to: runtime.contract)
@@ -469,7 +494,7 @@ extension ProxyRuntimeControllerTests {
   }
 
   private final class InMemoryProxySettingsStore: ProxySettingsStoring {
-    private(set) var saved: ProxySettings?
+    var saved: ProxySettings?
 
     func load() throws -> ProxySettings {
       saved ?? ProxySettings()

@@ -14,6 +14,12 @@ final class CatalogViewModel: ObservableObject {
   @Published var selectedNodeID: NodeID?
   /// 需要弹窗呈现的错误（领域拒绝、导入失败、凭据失败）。
   @Published var presentedError: String?
+  /// Legacy 快照发现与一次性完成标记（issue #36）。跳过不写标记，显式
+  /// 再导入仍会创建新的独立手动分组。
+  @Published private(set) var legacyImportAvailable = false
+  @Published private(set) var legacyImportCompleted = false
+  @Published private(set) var legacyImportReport: LegacyImportReport?
+  private var discoveredLegacySnapshot: LegacySnapshot?
 
   private let fileStore: CatalogFileStore
   /// 订阅扩展（CatalogViewModel+Subscriptions）同样经此读写凭据。
@@ -23,20 +29,71 @@ final class CatalogViewModel: ObservableObject {
   var subscriptionFetcher: SubscriptionFetching
   /// 目录提交后的运行时重展开（生产接线 `ProxyRuntimeController.catalogDidCommit`）。
   var postCommit: (() async -> Void)?
+  /// Legacy 导入提交后的运行时边界（生产接线为不写系统代理的停止/重载）。
+  var postLegacyImport: ((LegacyImportOutcome) async -> Void)?
+  private let legacyImportService: LegacyImportService
 
   init(
     fileStore: CatalogFileStore = CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL()),
     credentials: CredentialStoring = KeychainCredentialStore(),
     plugins: ManagedPluginProviding = BundleManagedPluginProvider(),
-    subscriptionFetcher: SubscriptionFetching = HTTPSSubscriptionFetcher()
+    subscriptionFetcher: SubscriptionFetching = HTTPSSubscriptionFetcher(),
+    legacyImportService: LegacyImportService? = nil
   ) {
     self.fileStore = fileStore
     self.credentials = credentials
     self.plugins = plugins
     self.subscriptionFetcher = subscriptionFetcher
+    self.legacyImportService =
+      legacyImportService
+      ?? LegacyImportService(
+        catalogStore: fileStore,
+        settingsStore: ProxySettingsFileStore(credentials: credentials),
+        activationStore: ActivationStateFileStore(
+          fileURL: ActivationStateFileStore.defaultFileURL()),
+        credentials: credentials)
     let loaded = (try? fileStore.load()) ?? CatalogDocument()
     catalog = loaded.catalog
     subscriptions = loaded.subscriptions
+    refreshLegacyImportState()
+  }
+
+  var shouldOfferLegacyImport: Bool {
+    legacyImportAvailable && !legacyImportCompleted
+  }
+
+  /// Reads discovery state without writing any marker or Legacy data.
+  func refreshLegacyImportState() {
+    legacyImportCompleted = (try? legacyImportService.isCompleted()) ?? false
+    discoveredLegacySnapshot = try? legacyImportService.readSnapshot()
+    legacyImportAvailable = discoveredLegacySnapshot != nil
+  }
+
+  /// Imports the current immutable Legacy snapshot. The view model reloads its
+  /// published catalog only after the service has committed every store.
+  func importLegacy(reimport: Bool = false) async throws -> LegacyImportOutcome {
+    let snapshot: LegacySnapshot
+    if reimport {
+      guard let current = try legacyImportService.readSnapshot() else {
+        throw LegacyImportError.noSnapshot
+      }
+      snapshot = current
+    } else if let discoveredLegacySnapshot {
+      snapshot = discoveredLegacySnapshot
+    } else {
+      guard let current = try legacyImportService.readSnapshot() else {
+        throw LegacyImportError.noSnapshot
+      }
+      snapshot = current
+    }
+    let outcome = try legacyImportService.importSnapshot(snapshot, reimport: reimport)
+    let loaded = try fileStore.load()
+    catalog = loaded.catalog
+    subscriptions = loaded.subscriptions
+    legacyImportReport = outcome.report
+    refreshLegacyImportState()
+    await postLegacyImport?(outcome)
+    return outcome
   }
 
   // MARK: - 查询面

@@ -25,6 +25,8 @@ struct MainWindowView: View {
   @State private var moveTarget: NodeID?
   @State private var showImportURLSheet = false
   @State private var showQRImportSheet = false
+  @State private var showLegacyImportSheet = false
+  @State private var didOfferLegacyImport = false
   @State private var rootDropHovering = false
 
   var body: some View {
@@ -82,12 +84,20 @@ struct MainWindowView: View {
     .sheet(isPresented: $showQRImportSheet) {
       QRImportSheet(viewModel: viewModel)
     }
+    .sheet(isPresented: $showLegacyImportSheet) {
+      LegacyImportSheet(viewModel: viewModel)
+    }
     .sheet(
       item: Binding(
         get: { moveTarget.map(MoveContext.init) },
         set: { moveTarget = $0?.nodeID })
     ) { context in
       MoveNodeSheet(viewModel: viewModel, nodeID: context.nodeID)
+    }
+    .onAppear {
+      guard !didOfferLegacyImport, viewModel.shouldOfferLegacyImport else { return }
+      didOfferLegacyImport = true
+      showLegacyImportSheet = true
     }
   }
 
@@ -234,6 +244,14 @@ struct MainWindowView: View {
         Button("从剪贴板导入 ss://") { importFromClipboard() }
         Button("通过 URL 导入…") { showImportURLSheet = true }
         Button("从二维码图片导入…") { showQRImportSheet = true }
+        if viewModel.legacyImportAvailable {
+          Divider()
+          Button(
+            viewModel.legacyImportCompleted ? "再次导入 Legacy 配置…" : "导入 Legacy 配置…"
+          ) {
+            showLegacyImportSheet = true
+          }
+        }
         Divider()
         Button("新建分组…") {
           newGroupParent = viewModel.importTargetParent(for: viewModel.selectedNodeID)
