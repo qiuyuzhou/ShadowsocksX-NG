@@ -48,6 +48,15 @@ final class SystemProxyTests: XCTestCase {
     XCTAssertEqual(socks[SystemProxyPropertyList.socksPort] as? Int, 1086)
     XCTAssertEqual(socks[SystemProxyPropertyList.httpEnabled] as? Int, 0)
     XCTAssertEqual(socks[SystemProxyPropertyList.httpsEnabled] as? Int, 0)
+
+    let ownedExceptions = SystemProxyPropertyList.applying(
+      SystemProxyConfiguration(
+        target: .pac(URL(string: "http://127.0.0.1:1089/v1/proxy.pac")!),
+        exceptions: ["localhost", "127.0.0.1"]),
+      to: original)
+    XCTAssertEqual(
+      ownedExceptions[SystemProxyPropertyList.exceptionsList] as? [String],
+      ["localhost", "127.0.0.1"])
   }
 
   func testExternalPACRejectsUnverifiedSchemesAndCredentials() {

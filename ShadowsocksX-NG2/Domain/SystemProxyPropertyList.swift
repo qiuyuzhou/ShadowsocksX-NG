@@ -13,9 +13,10 @@ enum SystemProxyPropertyList {
   static let pacURL = "ProxyAutoConfigURLString"
   static let pacJavaScript = "ProxyAutoConfigJavaScript"
   static let autoDiscoveryEnabled = "ProxyAutoDiscoveryEnable"
+  static let exceptionsList = "ExceptionsList"
 
   static func applying(
-    _ target: SystemProxyConfiguration.Target, to original: [String: Any]
+    _ configuration: SystemProxyConfiguration, to original: [String: Any]
   ) -> [String: Any] {
     var dictionary = original
     dictionary[httpEnabled] = 0
@@ -25,7 +26,7 @@ enum SystemProxyPropertyList {
     dictionary[autoDiscoveryEnabled] = 0
     dictionary.removeValue(forKey: pacJavaScript)
 
-    switch target {
+    switch configuration.target {
     case .pac(let url):
       dictionary[pacEnabled] = 1
       dictionary[pacURL] = url.absoluteString
@@ -34,6 +35,15 @@ enum SystemProxyPropertyList {
       dictionary[socksProxy] = host
       dictionary[socksPort] = port
     }
+    if let exceptions = configuration.exceptions {
+      dictionary[exceptionsList] = exceptions
+    }
     return dictionary
+  }
+
+  static func applying(
+    _ target: SystemProxyConfiguration.Target, to original: [String: Any]
+  ) -> [String: Any] {
+    applying(SystemProxyConfiguration(target: target), to: original)
   }
 }

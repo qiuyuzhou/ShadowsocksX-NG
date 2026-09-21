@@ -37,6 +37,7 @@ final class ProxyRuntimeController: ObservableObject {
   }
 
   @Published private(set) var state: ProxyState = .off
+  @Published private(set) var settings: ProxySettings
   @Published private(set) var pacURL: URL?
   /// 当前活动目标（菜单栏状态摘要与级联只读呈现用，issue #31）。machine 是
   /// 非发布值的普通结构体，代理关闭路径的激活动作不会触碰 state，菜单的
@@ -50,10 +51,12 @@ final class ProxyRuntimeController: ObservableObject {
   private let runtimeFileStore: RuntimeFileStore
   private let credentials: CredentialStoring
   private let plugins: ManagedPluginProviding
-  private let listen: SslocalListenSettings
+  private let settingsStore: ProxySettingsStoring
   /// 监听设置不可读时的点名原因（D8「任何路径不静默改端口」）；非 nil 时
-  /// `listen` 只是占位出厂默认，禁止部署（见 `deploy`）。
-  private let listenUnreadableReason: String?
+  /// 设置只是占位出厂默认，禁止部署（见 `deploy`）。
+  private var listenUnreadableReason: String?
+  /// 新版偏好不可读时同样禁止部署，不以出厂端口静默替代用户配置。
+  private var settingsUnreadableReason: String?
   private let agent: LaunchAgentControlling
   private let probe: EndpointProbing
   private let pacProbe: PACHealthProbing
@@ -79,6 +82,8 @@ final class ProxyRuntimeController: ObservableObject {
     credentials: CredentialStoring = KeychainCredentialStore(),
     plugins: ManagedPluginProviding = NoManagedPluginProvider(),
     listenRestore: RestoredListenSettings = ListenSettingsFileStore.restored(),
+    settingsStore: ProxySettingsStoring = ProxySettingsFileStore(),
+    settingsRestore: RestoredProxySettings? = nil,
     agent: LaunchAgentControlling = SMAppLaunchAgentService(),
     probe: EndpointProbing = SystemEndpointProbe(),
     pacProbe: PACHealthProbing = SystemPACHealthProbe(),
@@ -94,8 +99,20 @@ final class ProxyRuntimeController: ObservableObject {
     self.runtimeFileStore = runtimeFileStore
     self.credentials = credentials
     self.plugins = plugins
-    self.listen = listenRestore.settings
-    listenUnreadableReason = listenRestore.unreadableError?.presentedReason
+    self.settingsStore = settingsStore
+    let restoredSettings =
+      settingsRestore
+      ?? RestoredProxySettings(
+        settings: ProxySettings(listen: listenRestore.settings),
+        unreadableError: listenRestore.unreadableError.map {
+          .legacyListenSettings($0)
+        })
+    settings = restoredSettings.settings
+    listenUnreadableReason =
+      settingsRestore == nil
+      ? listenRestore.unreadableError?.presentedReason
+      : nil
+    settingsUnreadableReason = restoredSettings.unreadableError?.presentedReason
     self.agent = agent
     self.probe = probe
     self.pacProbe = pacProbe
@@ -123,7 +140,7 @@ final class ProxyRuntimeController: ObservableObject {
 
   /// 诊断只读面（issue #34）：当前监听设置；监听地址在导出中只以回环/非回环
   /// 两态呈现（D7）。
-  var listenSettings: SslocalListenSettings { listen }
+  var listenSettings: SslocalListenSettings { settings.listen }
 
   /// 运行时契约的脱敏摘要（数量与协议元数据，D5）；契约缺失或无效返回 nil。
   /// 诊断导出不读契约内容，只携带此摘要。
@@ -142,7 +159,9 @@ final class ProxyRuntimeController: ObservableObject {
     reloadCatalog()
     do {
       let configuration = try machine.activate(
-        target, in: catalog, credentials: credentials, plugins: plugins, listen: listen)
+        target, in: catalog, credentials: credentials, plugins: plugins, listen: settings.listen,
+        timeout: settings.timeoutSeconds, verbose: settings.verboseLogging,
+        pacUserRules: settings.pacUserRules)
       activeTargetID = target
       do {
         try activationFileStore.save(activeTargetID: target)
@@ -285,7 +304,7 @@ final class ProxyRuntimeController: ObservableObject {
 
   /// 把「运行定义档」意图推到运行时：计划动作 → 顺序执行 → 端点健康呈现。
   private func deploy(_ document: SslocalRuntimeDocument) async {
-    if let reason = listenUnreadableReason {
+    if let reason = listenUnreadableReason ?? settingsUnreadableReason {
       await refuseDeployForUnreadableListenSettings(reason)
       return
     }
@@ -405,6 +424,49 @@ final class ProxyRuntimeController: ObservableObject {
       RuntimeLog.emit(.runtimeFilesDeleted)
     }
     return true
+  }
+}
+
+extension ProxyRuntimeController {
+  /// Persists a fully validated settings snapshot and, when the proxy is
+  /// active, re-derives the same runtime path with the new snapshot.
+  func updateSettings(_ next: ProxySettings) async throws {
+    try settingsStore.save(next)
+    settings = next
+    listenUnreadableReason = nil
+    settingsUnreadableReason = nil
+
+    if case .externalPAC = proxyMode {
+      if let url = URL(string: next.externalPACURL), !next.externalPACURL.isEmpty {
+        try ProxyMode.validateExternalPACURL(url)
+        proxyMode = .externalPAC(url)
+      } else {
+        proxyMode = .pac
+      }
+    }
+
+    guard state != .off else { return }
+    switch reexpand() {
+    case .deployed(let configuration):
+      await deploy(configuration.document)
+    case .clearedAndStopped(let failure):
+      await handleCleared(failure)
+    case nil:
+      break
+    }
+  }
+
+  /// Restores factory defaults, removes the persisted snapshot and stops any
+  /// active runtime before the next user action can use the defaults.
+  func resetPreferences() async throws {
+    try settingsStore.reset()
+    settings = ProxySettings()
+    listenUnreadableReason = nil
+    settingsUnreadableReason = nil
+    proxyMode = .pac
+    if state != .off {
+      await setProxyEnabled(false)
+    }
   }
 }
 
@@ -591,7 +653,9 @@ extension ProxyRuntimeController {
   /// 目录以磁盘为事实来源重载后重展开；目标被清除时一并发布。
   private func reexpand() -> ActivationEffect? {
     let effect = machine.catalogDidCommit(
-      catalog, credentials: credentials, plugins: plugins, listen: listen)
+      catalog, credentials: credentials, plugins: plugins, listen: settings.listen,
+      timeout: settings.timeoutSeconds, verbose: settings.verboseLogging,
+      pacUserRules: settings.pacUserRules)
     activeTargetID = machine.activeTargetID
     return effect
   }
@@ -602,7 +666,9 @@ extension ProxyRuntimeController {
 
   private func applySystemProxy(for document: SslocalRuntimeDocument) -> Bool {
     do {
-      if let configuration = try proxyMode.systemProxyConfiguration(for: document) {
+      if let configuration = try proxyMode.systemProxyConfiguration(
+        for: document, exceptions: settings.proxyExceptionList)
+      {
         try systemProxy.apply(configuration)
       } else {
         try systemProxy.restore()

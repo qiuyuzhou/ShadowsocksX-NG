@@ -27,10 +27,14 @@ struct ActivationStateMachine: Equatable, Sendable {
     in catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
     plugins: ManagedPluginProviding,
-    listen: SslocalListenSettings
+    listen: SslocalListenSettings,
+    timeout: Int = 60,
+    verbose: Bool = false,
+    pacUserRules: String = ""
   ) throws -> RuntimeConfiguration {
     let outcome = derive(
-      target: target, in: catalog, credentials: credentials, plugins: plugins, listen: listen)
+      target: target, in: catalog, credentials: credentials, plugins: plugins, listen: listen,
+      timeout: timeout, verbose: verbose, pacUserRules: pacUserRules)
     switch outcome {
     case .success(let configuration):
       activeTargetID = target
@@ -49,11 +53,15 @@ struct ActivationStateMachine: Equatable, Sendable {
     _ catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
     plugins: ManagedPluginProviding,
-    listen: SslocalListenSettings
+    listen: SslocalListenSettings,
+    timeout: Int = 60,
+    verbose: Bool = false,
+    pacUserRules: String = ""
   ) -> ActivationEffect? {
     guard let target = activeTargetID else { return nil }
     let outcome = derive(
-      target: target, in: catalog, credentials: credentials, plugins: plugins, listen: listen)
+      target: target, in: catalog, credentials: credentials, plugins: plugins, listen: listen,
+      timeout: timeout, verbose: verbose, pacUserRules: pacUserRules)
     switch outcome {
     case .success(let configuration):
       return .deployed(configuration)
@@ -72,7 +80,10 @@ struct ActivationStateMachine: Equatable, Sendable {
     in catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
     plugins: ManagedPluginProviding,
-    listen: SslocalListenSettings
+    listen: SslocalListenSettings,
+    timeout: Int,
+    verbose: Bool,
+    pacUserRules: String
   ) -> Result<RuntimeConfiguration, ActivationFailure> {
     guard catalog.contains(target) else { return .failure(.targetNotFound(target)) }
     if let disabledNode = firstDisabledNode(from: target, in: catalog) {
@@ -100,7 +111,10 @@ struct ActivationStateMachine: Equatable, Sendable {
         targetID: target,
         document: SslocalRuntimeDocument(
           servers: servers,
-          listen: listen)))
+          listen: listen,
+          timeout: timeout,
+          verbose: verbose,
+          pacUserRules: pacUserRules)))
   }
 
   /// 目标→根路径上第一个禁用节点；全部启用返回 `nil`。

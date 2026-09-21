@@ -63,6 +63,8 @@ struct PACRuntimeDocument: Codable, Equatable, Sendable {
   let port: Int
   let socksPort: Int
   let endpointPath: String
+  let userRules: String
+  let verbose: Bool
 
   enum CodingKeys: String, CodingKey {
     case port
@@ -71,12 +73,57 @@ struct PACRuntimeDocument: Codable, Equatable, Sendable {
     case advertisedAddress = "advertised_address"
     case socksPort = "socks_port"
     case endpointPath = "endpoint_path"
+    case userRules = "user_rules"
+    case verbose
+  }
+
+  init(
+    listenScope: ListenScopeKind,
+    bindAddress: String,
+    advertisedAddress: String,
+    port: Int,
+    socksPort: Int,
+    endpointPath: String,
+    userRules: String = "",
+    verbose: Bool = false
+  ) {
+    self.listenScope = listenScope
+    self.bindAddress = bindAddress
+    self.advertisedAddress = advertisedAddress
+    self.port = port
+    self.socksPort = socksPort
+    self.endpointPath = endpointPath
+    self.userRules = userRules
+    self.verbose = verbose
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    listenScope = try container.decode(ListenScopeKind.self, forKey: .listenScope)
+    bindAddress = try container.decode(String.self, forKey: .bindAddress)
+    advertisedAddress = try container.decode(String.self, forKey: .advertisedAddress)
+    port = try container.decode(Int.self, forKey: .port)
+    socksPort = try container.decode(Int.self, forKey: .socksPort)
+    endpointPath = try container.decode(String.self, forKey: .endpointPath)
+    userRules = try container.decodeIfPresent(String.self, forKey: .userRules) ?? ""
+    verbose = try container.decodeIfPresent(Bool.self, forKey: .verbose) ?? false
   }
 
   var javaScript: String {
     let chain =
       "SOCKS5 \(advertisedAddress):\(socksPort); SOCKS \(advertisedAddress):\(socksPort); DIRECT"
-    return "function FindProxyForURL(url, host) { return \"\(chain)\"; }\n"
+    let directSuffixes = PACRuleSet.directHostSuffixes(from: userRules)
+    guard !directSuffixes.isEmpty else {
+      return "function FindProxyForURL(url, host) { return \"\(chain)\"; }\n"
+    }
+    var lines = ["function FindProxyForURL(url, host) {"]
+    lines.append(
+      contentsOf: directSuffixes.map { suffix in
+        "  if (dnsDomainIs(host, \"\(suffix)\")) return \"DIRECT\";"
+      })
+    lines.append("  return \"\(chain)\";")
+    lines.append("}\n")
+    return lines.joined(separator: "\n")
   }
 
   /// 给用户复制/系统代理写入的 URL；主机态必须使用可路由的 LAN 地址。
@@ -105,16 +152,32 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
   let servers: [SslocalServerDocument]
   let locals: [SslocalLocalDocument]
   let pac: PACRuntimeDocument
+  let timeout: Int
 
   enum CodingKeys: String, CodingKey {
-    case servers, locals
+    case servers, locals, timeout
     case pac = "x_shadowsocksx_ng_pac"
   }
 
-  init(servers: [SslocalServerDocument], listen: SslocalListenSettings) {
+  init(
+    servers: [SslocalServerDocument],
+    listen: SslocalListenSettings,
+    timeout: Int = 60,
+    verbose: Bool = false,
+    pacUserRules: String = ""
+  ) {
     self.servers = servers
     locals = listen.locals
-    pac = listen.pac
+    pac = listen.pac(userRules: pacUserRules, verbose: verbose)
+    self.timeout = timeout
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    servers = try container.decode([SslocalServerDocument].self, forKey: .servers)
+    locals = try container.decode([SslocalLocalDocument].self, forKey: .locals)
+    pac = try container.decode(PACRuntimeDocument.self, forKey: .pac)
+    timeout = try container.decodeIfPresent(Int.self, forKey: .timeout) ?? 60
   }
 
   func jsonData() throws -> Data {
@@ -181,13 +244,19 @@ struct SslocalListenSettings: Equatable, Sendable {
   }
 
   var pac: PACRuntimeDocument {
+    pac(userRules: "", verbose: false)
+  }
+
+  func pac(userRules: String, verbose: Bool) -> PACRuntimeDocument {
     PACRuntimeDocument(
       listenScope: scope.kind,
       bindAddress: bindAddress,
       advertisedAddress: advertisedAddress,
       port: pacPort,
       socksPort: socksPort,
-      endpointPath: PACRuntimeDocument.versionedEndpointPath)
+      endpointPath: PACRuntimeDocument.versionedEndpointPath,
+      userRules: userRules,
+      verbose: verbose)
   }
 }
 
@@ -225,6 +294,7 @@ extension SslocalRuntimeDocument {
     guard !servers.isEmpty else { return false }
     guard
       (1...65535).contains(pac.port),
+      (1...86_400).contains(timeout),
       pac.endpointPath == PACRuntimeDocument.versionedEndpointPath,
       !pac.advertisedAddress.isEmpty
     else { return false }

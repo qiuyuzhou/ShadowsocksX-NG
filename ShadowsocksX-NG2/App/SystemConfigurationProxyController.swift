@@ -79,7 +79,7 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
 
       let existing = try loadOwnership()
       let plan = try makePlan(
-        services: services, existing: existing, target: configuration.target)
+        services: services, existing: existing, configuration: configuration)
 
       try SCPreferencesLockOrThrow(preferences)
       defer { SCPreferencesUnlock(preferences) }
@@ -105,7 +105,7 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
   private func makePlan(
     services: [ServiceSnapshot],
     existing: SystemProxyOwnershipRecord?,
-    target: SystemProxyConfiguration.Target
+    configuration: SystemProxyConfiguration
   ) throws -> (
     entries: [SystemProxyOwnershipRecord.Entry],
     ownership: SystemProxyOwnershipRecord
@@ -126,7 +126,7 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
       }
       let original = existingByID[service.id]?.originalConfiguration ?? service.configuration
       let applied = try managedConfiguration(
-        basedOn: original, target: target, serviceID: service.id)
+        basedOn: original, configuration: configuration, serviceID: service.id)
       entries.append(
         SystemProxyOwnershipRecord.Entry(
           serviceID: service.id,
@@ -245,10 +245,10 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
   }
 
   private func managedConfiguration(
-    basedOn original: Data?, target: SystemProxyConfiguration.Target, serviceID: String
+    basedOn original: Data?, configuration: SystemProxyConfiguration, serviceID: String
   ) throws -> Data {
     let originalDictionary = try dictionary(from: original, serviceID: serviceID)
-    let dictionary = SystemProxyPropertyList.applying(target, to: originalDictionary)
+    let dictionary = SystemProxyPropertyList.applying(configuration, to: originalDictionary)
     return try propertyListData(from: dictionary, serviceID: serviceID)
   }
 

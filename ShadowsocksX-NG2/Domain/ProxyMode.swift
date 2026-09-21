@@ -66,25 +66,26 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   /// `nil` means manual mode: restore the user's previous system settings and
   /// leave them under the user's control.
   func systemProxyConfiguration(
-    for document: SslocalRuntimeDocument
+    for document: SslocalRuntimeDocument,
+    exceptions: [String]? = nil
   ) throws -> SystemProxyConfiguration? {
     switch self {
     case .pac:
       guard let url = document.pac.publicURL else {
         throw ProxyModeError.invalidLocalPACURL
       }
-      return SystemProxyConfiguration(target: .pac(url))
+      return SystemProxyConfiguration(target: .pac(url), exceptions: exceptions)
     case .global:
       guard (1...65535).contains(document.socksPort) else {
         throw ProxyModeError.invalidSOCKSPort(document.socksPort)
       }
       return SystemProxyConfiguration(
-        target: .socks(host: "127.0.0.1", port: document.socksPort))
+        target: .socks(host: "127.0.0.1", port: document.socksPort), exceptions: exceptions)
     case .manual:
       return nil
     case .externalPAC(let url):
       try Self.validateExternalPACURL(url)
-      return SystemProxyConfiguration(target: .pac(url))
+      return SystemProxyConfiguration(target: .pac(url), exceptions: exceptions)
     }
   }
 
@@ -115,6 +116,14 @@ struct SystemProxyConfiguration: Equatable, Sendable {
   }
 
   let target: Target
+  /// `nil` preserves the user's original ExceptionsList. A non-nil value is
+  /// explicitly owned by the app and is projected on every activation.
+  let exceptions: [String]?
+
+  init(target: Target, exceptions: [String]? = nil) {
+    self.target = target
+    self.exceptions = exceptions
+  }
 }
 
 enum ProxyModeError: Error, Equatable, Sendable {

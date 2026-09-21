@@ -80,7 +80,7 @@ private func supervise() -> Int32 {
       document = loaded
     }
 
-    guard let child = spawnSslocal() else {
+    guard let child = spawnSslocal(document) else {
       RuntimeLog.emit(.sslocalSpawnFailed)
       return 0
     }
@@ -350,16 +350,16 @@ private func loadContract() -> ContractLoad {
   return .loaded(document)
 }
 
-private func spawnSslocal() -> Process? {
+private func spawnSslocal(_ document: SslocalRuntimeDocument) -> Process? {
   guard FileManager.default.isExecutableFile(atPath: sslocalURL.path) else { return nil }
   let child = Process()
   child.executableURL = sslocalURL
   child.arguments = ["-c", contractURL.path]
   var childEnvironment = environment
-  // 上游默认日志级别会把服务器地址写进普通日志（D5）：压到 warn，错误与
-  // 绑定失败仍然可见；verbose 设置由后续工单经环境变量接通。
+  // 上游默认日志级别会把服务器地址写进普通日志（D5）：常规模式压到 warn，
+  // 用户明确打开 verbose 后才放宽到 debug。显式外部 RUST_LOG 仍可用于诊断。
   if childEnvironment["RUST_LOG"] == nil {
-    childEnvironment["RUST_LOG"] = "warn"
+    childEnvironment["RUST_LOG"] = document.pac.verbose ? "debug" : "warn"
   }
   child.environment = childEnvironment
   do {

@@ -3,10 +3,24 @@ import SwiftUI
 @main
 struct ShadowsocksXNG2App: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-  @StateObject private var proxyController = ProxyRuntimeController()
+  @StateObject private var proxyController: ProxyRuntimeController
   @StateObject private var catalogViewModel = CatalogViewModel()
+  @StateObject private var loginController: LaunchAtLoginController
 
   init() {
+    let settingsStore = ProxySettingsFileStore()
+    let restoredSettings = ProxySettingsFileStore.restored(store: settingsStore)
+    _proxyController = StateObject(
+      wrappedValue: ProxyRuntimeController(
+        listenRestore: RestoredListenSettings(
+          settings: restoredSettings.settings.listen, unreadableError: nil),
+        settingsStore: settingsStore,
+        settingsRestore: restoredSettings))
+    let loginController = LaunchAtLoginController()
+    _loginController = StateObject(wrappedValue: loginController)
+    Task { @MainActor in
+      loginController.syncAtLaunch()
+    }
     // GUI 事件接入内存环形缓冲（spec #21 D5，issue #34）：主窗口日志查看器与
     // 诊断导出的来源；wrapper 侧不注册，仍走 stderr → agent.log 收敛。
     RuntimeLog.setSink(RuntimeEventStore.shared)
@@ -39,5 +53,13 @@ struct ShadowsocksXNG2App: App {
       }
     }
     .defaultLaunchBehavior(.suppressed)
+
+    Settings {
+      SettingsView(
+        proxyController: proxyController,
+        loginController: loginController
+      )
+      .frame(width: 640, height: 760)
+    }
   }
 }

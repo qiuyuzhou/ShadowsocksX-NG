@@ -85,6 +85,26 @@ final class RuntimeDocumentTests: XCTestCase {
     XCTAssertEqual(tcpAndUDP.mode, "tcp_and_udp")
   }
 
+  func testRuntimeDocumentCarriesTimeoutVerboseAndPACUserRules() throws {
+    let document = SslocalRuntimeDocument(
+      servers: [
+        SslocalServerDocument(
+          id: "server-1", remarks: "test", server: "example.com", serverPort: 8388,
+          password: "pw", method: "aes-256-gcm", plugin: nil, pluginOpts: nil)
+      ],
+      listen: SslocalListenSettings(),
+      timeout: 120,
+      verbose: true,
+      pacUserRules: "@@||example.com^")
+
+    let decoded = try XCTUnwrap(SslocalRuntimeDocument.decodeValidated(try document.jsonData()))
+
+    XCTAssertEqual(decoded.timeout, 120)
+    XCTAssertTrue(decoded.pac.verbose)
+    XCTAssertTrue(decoded.pac.javaScript.contains("dnsDomainIs(host, \"example.com\")"))
+    XCTAssertTrue(decoded.pac.javaScript.contains("DIRECT"))
+  }
+
   func testLoopbackScopeDerivesPACAndBothSslocalInbounds() {
     let listen = SslocalListenSettings(
       scope: .loopback,

@@ -67,6 +67,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     probe: EndpointProbing,
     agentStatus: LaunchAgentStatus = .notRegistered,
     listen: SslocalListenSettings = ActivationFixture.listen,
+    settingsStore: ProxySettingsStoring? = nil,
+    settingsRestore: RestoredProxySettings? = nil,
     pacProbe: PACHealthProbing = ProxyRuntimeFixture.FakePACProbe(),
     proxyMode: ProxyMode = .pac,
     systemProxy: SystemProxyControlling? = nil,
@@ -82,6 +84,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       credentials: credentials,
       plugins: ActivationFixture.plugins,
       listenRestore: RestoredListenSettings(settings: listen, unreadableError: nil),
+      settingsStore: settingsStore ?? InMemoryProxySettingsStore(),
+      settingsRestore: settingsRestore,
       agent: agent,
       probe: probe,
       pacProbe: pacProbe,
@@ -145,7 +149,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       systemProxy.applied,
       [
         SystemProxyConfiguration(
-          target: .pac(URL(string: "http://127.0.0.1:1089/v1/proxy.pac")!))
+          target: .pac(URL(string: "http://127.0.0.1:1089/v1/proxy.pac")!),
+          exceptions: ProxySettings().proxyExceptionList)
       ],
       "PAC 只有在本地 SOCKS 与 PAC 健康后才写入系统代理")
     XCTAssertEqual(probe.ports, [1086, 1087], "系统代理写入前必须探测 SOCKS 和 HTTP 入站")
@@ -186,7 +191,11 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     await controller.setProxyEnabled(true)
     XCTAssertEqual(
       systemProxy.applied,
-      [SystemProxyConfiguration(target: .socks(host: "127.0.0.1", port: 1086))])
+      [
+        SystemProxyConfiguration(
+          target: .socks(host: "127.0.0.1", port: 1086),
+          exceptions: ProxySettings().proxyExceptionList)
+      ])
 
     await controller.setProxyMode(.manual)
     XCTAssertEqual(controller.state, .running)
@@ -198,7 +207,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(
       systemProxy.applied.last,
       SystemProxyConfiguration(
-        target: .pac(URL(string: "http://127.0.0.1:1089/v1/proxy.pac")!)))
+        target: .pac(URL(string: "http://127.0.0.1:1089/v1/proxy.pac")!),
+        exceptions: ProxySettings().proxyExceptionList))
 
     await controller.setProxyEnabled(false)
     XCTAssertEqual(controller.state, .off)
@@ -410,6 +420,9 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(agent.registerCount, 0)
   }
 
+}
+
+extension ProxyRuntimeControllerTests {
   func testResyncWithInvalidActiveTargetClearsAndCleans() async throws {
     _ = try makeSeededCatalog()
     try Data("garbage".utf8).write(to: runtime.contract)
@@ -428,5 +441,46 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertNil(persisted)
     XCTAssertEqual(agent.unregisterCount, 1, "注册过即按停止协议注销")
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
+  }
+
+  func testUpdatingSettingsPersistsAndReactivatesTheRuntimeContract() async throws {
+    let seeded = try makeSeededCatalog()
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(), settingsStore: settingsStore)
+
+    await controller.activate(seeded.server)
+    await controller.setProxyEnabled(true)
+
+    var next = controller.settings
+    next.timeoutSeconds = 120
+    next.verboseLogging = true
+    next.proxyExceptions = "localhost, 127.0.0.1"
+    try await controller.updateSettings(next)
+
+    let document = try XCTUnwrap(RuntimeFileStore(fileURL: runtime.contract).loadDocument())
+    XCTAssertEqual(controller.settings, next)
+    XCTAssertEqual(settingsStore.saved, next)
+    XCTAssertEqual(document.timeout, 120)
+    XCTAssertTrue(document.pac.verbose)
+    XCTAssertEqual(
+      systemProxy.applied.last?.exceptions,
+      ["localhost", "127.0.0.1"])
+  }
+
+  private final class InMemoryProxySettingsStore: ProxySettingsStoring {
+    private(set) var saved: ProxySettings?
+
+    func load() throws -> ProxySettings {
+      saved ?? ProxySettings()
+    }
+
+    func save(_ settings: ProxySettings) throws {
+      saved = settings
+    }
+
+    func reset() throws {
+      saved = nil
+    }
   }
 }
