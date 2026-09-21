@@ -261,6 +261,32 @@ final class AgentLifecycleTests: XCTestCase {
       "两次停止各转发一次 SIGTERM")
   }
 
+  // MARK: 监听建立判定（issue #38，D10）
+
+  func testListenNotEstablishedWithinDeadlineIsLoggedAndSupervisionContinues() throws {
+    // stub sslocal 不监听任何端点：超时后应记 error 日志点名端点，且监管继续。
+    try writeContract(ProxyRuntimeFixture.makeDocument())
+    let wrapper = try launchWrapper(behavior: "run")
+
+    let agentLogURL = workDir.appendingPathComponent("agent.log")
+    XCTAssertTrue(
+      try waitUntil {
+        guard let log = try? String(contentsOf: agentLogURL, encoding: .utf8) else {
+          return false
+        }
+        return log.contains("listen not established within deadline")
+      },
+      "3 秒未建立监听应以 error 日志点名（D10），实际 agent.log：\(agentLog())")
+    XCTAssertTrue(pidAlive(wrapper.processIdentifier), "监听未建立只记日志，监管循环继续")
+
+    kill(wrapper.processIdentifier, SIGTERM)
+    XCTAssertEqual(try waitForExit(wrapper), 0, "后续显式停止链不受影响")
+  }
+
+  private func agentLog() -> String {
+    (try? String(contentsOf: workDir.appendingPathComponent("agent.log"), encoding: .utf8)) ?? ""
+  }
+
   // MARK: pid 文件契约
 
   func testWrapperWritesAndRemovesPIDFile() throws {

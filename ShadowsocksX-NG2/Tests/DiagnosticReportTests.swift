@@ -119,6 +119,27 @@ final class DiagnosticReportTests: XCTestCase {
     XCTAssertTrue(report.contains("diagnostics report exported (redacted)"))
   }
 
+  /// 受管插件清单（issue #38）：名称与版本入导出；插件参数仍是敏感值不入。
+  func testManagedPluginSectionListsNameAndVersionWithoutOptions() throws {
+    var snapshot = poisonedSnapshot(catalog: try poisonedCatalog())
+    snapshot.managedPlugins = [
+      DiagnosticPluginFacts(program: "v2ray-plugin", version: "v1.3.2", present: true),
+      DiagnosticPluginFacts(program: "shadow-tls", version: "v3", present: false),
+    ]
+
+    let report = DiagnosticReportBuilder.markdown(from: snapshot)
+
+    XCTAssertTrue(report.contains("## 受管插件"), "缺少受管插件清单：\n\(report)")
+    XCTAssertTrue(report.contains("- v2ray-plugin v1.3.2：已提供"))
+    XCTAssertTrue(report.contains("- shadow-tls v3：缺失"))
+    assertNoSecrets(report)
+  }
+
+  func testEmptyManagedPluginSectionStatesExplicitNone() {
+    let report = DiagnosticReportBuilder.markdown(from: DiagnosticSnapshot())
+    XCTAssertTrue(report.contains("（本版本未打包任何插件）"))
+  }
+
   /// 主机地址态：对外公布的 LAN 地址不进入导出（D7 只允许回环/非回环两态）。
   func testHostScopeDoesNotLeakAdvertisedAddress() {
     var snapshot = DiagnosticSnapshot()

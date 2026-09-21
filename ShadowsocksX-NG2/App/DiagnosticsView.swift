@@ -174,9 +174,22 @@ struct DiagnosticsView: View {
     snapshot.runtimeDocumentSummary = proxyController.runtimeDocumentSummary()
     snapshot.catalog = viewModel.catalog
     snapshot.fileFacts = Self.fileFacts()
+    snapshot.managedPlugins = Self.managedPluginFacts()
     snapshot.eventLines = eventStore.snapshot.suffix(200).map(\.renderedLine)
     snapshot.homePathForRedaction = NSHomeDirectory()
     return snapshot
+  }
+
+  /// 受管插件清单（issue #38）：静态事实表 + 可执行文件存在性（D10 生成配置
+  /// 时的同一检查；参数与路径不入导出）。
+  private static func managedPluginFacts() -> [DiagnosticPluginFacts] {
+    let provider = BundleManagedPluginProvider()
+    return ManagedPluginCatalog.plugins.map { info in
+      DiagnosticPluginFacts(
+        program: info.program,
+        version: info.release,
+        present: provider.executablePath(forProgram: info.program) != nil)
+    }
   }
 
   private static func fileFacts() -> [DiagnosticFileFacts] {

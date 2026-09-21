@@ -80,7 +80,7 @@ final class ProxyRuntimeController: ObservableObject {
       fileURL: ActivationStateFileStore.defaultFileURL()),
     runtimeFileStore: RuntimeFileStore = RuntimeFileStore(),
     credentials: CredentialStoring = KeychainCredentialStore(),
-    plugins: ManagedPluginProviding = NoManagedPluginProvider(),
+    plugins: ManagedPluginProviding = BundleManagedPluginProvider(),
     listenRestore: RestoredListenSettings = ListenSettingsFileStore.restored(),
     settingsStore: ProxySettingsStoring = ProxySettingsFileStore(),
     settingsRestore: RestoredProxySettings? = nil,
@@ -530,10 +530,10 @@ extension ProxyRuntimeController {
     in document: SslocalRuntimeDocument
   ) async -> LocalEndpointFailure? {
     for local in document.locals {
-      let host = local.localAddress == "0.0.0.0" ? "127.0.0.1" : local.localAddress
-      let outcome = await probeAsync(host: host, port: local.localPort, timeout: 1.5)
+      let outcome = await probeAsync(
+        host: local.probeHost, port: local.localPort, timeout: 1.5)
       if outcome != .reachable {
-        return LocalEndpointFailure(local: local, host: host, outcome: outcome)
+        return LocalEndpointFailure(local: local, host: local.probeHost, outcome: outcome)
       }
     }
     return nil

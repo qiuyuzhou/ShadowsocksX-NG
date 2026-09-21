@@ -95,8 +95,18 @@ struct DiagnosticSnapshot: Sendable {
   var fileFacts: [DiagnosticFileFacts] = []
   /// 渲染好的运行事件行（旧→新，调用方负责封顶）。
   var eventLines: [String] = []
+  /// bundle 内受管插件清单（issue #38；名称/版本/存在性，不含参数与路径）。
+  var managedPlugins: [DiagnosticPluginFacts] = []
   /// 长路径脱敏基准：文本中出现的该前缀一律改写为「~」。
   var homePathForRedaction: String?
+}
+
+/// 受管插件事实（issue #38）：程序名、固定版本与二进制是否在位。存在性属
+/// D5 允许类目；插件参数与文件路径不进导出。
+struct DiagnosticPluginFacts: Equatable, Sendable {
+  let program: String
+  let version: String
+  let present: Bool
 }
 
 /// 诊断报告构建器（spec #21 D5，issue #34）：只输出状态、存在性、权限、
@@ -190,6 +200,17 @@ enum DiagnosticReportBuilder {
       lines.append(contentsOf: catalogCountLines(catalog))
     } else {
       lines.append("- 配置目录不可用")
+    }
+    lines.append("")
+    lines.append("## 受管插件")
+    lines.append("")
+    if snapshot.managedPlugins.isEmpty {
+      lines.append("（本版本未打包任何插件）")
+    } else {
+      for plugin in snapshot.managedPlugins {
+        lines.append(
+          "- \(plugin.program) \(plugin.version)：\(plugin.present ? "已提供" : "缺失")")
+      }
     }
     lines.append("")
     return lines

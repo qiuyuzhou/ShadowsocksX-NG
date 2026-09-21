@@ -27,7 +27,7 @@ final class CatalogViewModel: ObservableObject {
   init(
     fileStore: CatalogFileStore = CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL()),
     credentials: CredentialStoring = KeychainCredentialStore(),
-    plugins: ManagedPluginProviding = NoManagedPluginProvider(),
+    plugins: ManagedPluginProviding = BundleManagedPluginProvider(),
     subscriptionFetcher: SubscriptionFetching = HTTPSSubscriptionFetcher()
   ) {
     self.fileStore = fileStore
@@ -162,14 +162,17 @@ final class CatalogViewModel: ObservableObject {
     }
   }
 
-  /// 详情表单提交（手动服务器）。密码经凭据存储覆盖写；插件区本票只读不在此改。
+  /// 详情表单提交（手动服务器）。密码经凭据存储覆盖写；插件选择按 #38 语义
+  /// 落盘（「无」整体清除、受管写程序名与参数、集外引用原样保留）。
   func updateServer(
     _ id: NodeID,
     address: String,
     port: Int,
     encryptionMethod: String,
     password: String,
-    remark: String
+    remark: String,
+    plugin: PluginSelection,
+    pluginOptions: String?
   ) async throws {
     let trimmedAddress = address.trimmingCharacters(in: .whitespaces)
     guard !trimmedAddress.isEmpty else { throw ServerFormError.invalidAddress }
@@ -183,6 +186,8 @@ final class CatalogViewModel: ObservableObject {
       fields.port = port
       fields.encryptionMethod = encryptionMethod
       fields.remark = remark.trimmingCharacters(in: .whitespaces)
+      try Self.applyPluginSelection(
+        plugin, options: pluginOptions, to: &fields, credentials: credentials)
       try catalog.updateServer(id, with: fields)
     }
   }
@@ -194,24 +199,40 @@ final class CatalogViewModel: ObservableObject {
       return nil
     }
     let password = (try? credentials.secret(for: fields.passwordRef)) ?? ""
-    let plugin = fields.pluginProgram.map { program in
-      PluginDisplay(
-        program: program,
-        provided: plugins.executablePath(forProgram: program) != nil,
-        optionsPresent: fields.pluginOptionsRef != nil)
-    }
     return ServerFormState(
       address: fields.address,
       port: fields.port,
       encryptionMethod: fields.encryptionMethod,
       password: password,
       remark: fields.remark,
-      plugin: plugin,
+      plugin: pluginSectionState(for: fields),
       isEditable: entry.source == .manual)
   }
 
-  func isPluginProvided(_ program: String) -> Bool {
-    plugins.executablePath(forProgram: program) != nil
+  /// 插件区状态（#38）：集内引用给可执行文件存在性事实与参数明文；集外引用
+  /// 以显式 unknown 呈现（原样保留，激活语义由状态机点名拒绝）。
+  private func pluginSectionState(for fields: ServerFields) -> PluginSectionState {
+    let selection: PluginSelection
+    if let program = fields.pluginProgram {
+      selection =
+        ManagedPluginCatalog.info(forProgram: program) != nil
+        ? .managed(program: program)
+        : .unknown(program: program)
+    } else {
+      selection = .none
+    }
+    var provided = false
+    var options = ""
+    if case .managed(let program) = selection {
+      provided = plugins.executablePath(forProgram: program) != nil
+      options = fields.pluginOptionsRef.flatMap { (try? credentials.secret(for: $0)) ?? "" } ?? ""
+    }
+    return PluginSectionState(
+      selection: selection,
+      managed: ManagedPluginCatalog.plugins,
+      provided: provided,
+      optionsPresent: fields.pluginOptionsRef != nil,
+      options: options)
   }
 
   // MARK: - 分享
@@ -304,6 +325,45 @@ final class CatalogViewModel: ObservableObject {
       pluginOptionsRef: pluginOptionsRef)
   }
 
+  /// 插件选择落盘（issue #38，D10/CONTEXT.md 不变量）：「无」整体清除引用与
+  /// 参数秘密；受管程序写引用、参数按空/非空写删钥匙串；集外引用原样保留
+  /// （不因打开或保存表单而漂移，激活语义由状态机点名拒绝）。
+  private static func applyPluginSelection(
+    _ selection: PluginSelection,
+    options: String?,
+    to fields: inout ServerFields,
+    credentials: CredentialStoring
+  ) throws {
+    switch selection {
+    case .none:
+      if let reference = fields.pluginOptionsRef {
+        try? credentials.delete(reference)
+      }
+      fields.pluginProgram = nil
+      fields.pluginOptionsRef = nil
+    case .managed(let program):
+      guard ManagedPluginCatalog.info(forProgram: program) != nil else {
+        throw ServerFormError.pluginNotManaged(program)
+      }
+      fields.pluginProgram = program
+      let trimmedOptions = (options ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmedOptions.isEmpty {
+        if let reference = fields.pluginOptionsRef {
+          try? credentials.delete(reference)
+        }
+        fields.pluginOptionsRef = nil
+      } else if let reference = fields.pluginOptionsRef {
+        try credentials.save(trimmedOptions, for: reference)
+      } else {
+        let reference = CredentialReference.fresh()
+        try credentials.save(trimmedOptions, for: reference)
+        fields.pluginOptionsRef = reference
+      }
+    case .unknown:
+      break
+    }
+  }
+
   private func serverFields(of entry: CatalogEntry) -> ServerFields? {
     if case .server(let fields) = entry.kind { return fields }
     return nil
@@ -315,4 +375,6 @@ enum ServerFormError: Error, Equatable {
   case invalidAddress
   case invalidPort
   case emptyName
+  /// 提交了受管集之外的插件选择（表单只能产生受管集内的选择，此为程序错误防线的显式拒绝）。
+  case pluginNotManaged(String)
 }

@@ -23,6 +23,9 @@ enum RuntimeLogEvent: CustomStringConvertible, Sendable {
   case sslocalSpawnFailed
   case sslocalExitedUnexpectedly(status: Int32)
   case sslocalStopRequested
+  /// sslocal 拉起后限时内未完成本地监听绑定（D10「3 秒未建立监听 → error
+  /// 日志」；监管继续，GUI 健康门负责呈现，端点为本机监听端点不受脱敏限制）。
+  case listenNotEstablished(detail: String)
   case pacStarted(port: Int)
   case pacStartFailed(port: Int, detail: String)
   case pacStopped
@@ -66,6 +69,8 @@ enum RuntimeLogEvent: CustomStringConvertible, Sendable {
       return "sslocal exited unexpectedly (status=\(status))"
     case .sslocalStopRequested:
       return "sslocal stop requested"
+    case .listenNotEstablished(let detail):
+      return "listen not established within deadline: \(detail)"
     case .pacStarted(let port):
       return "PAC endpoint started (port=\(port))"
     case .pacStartFailed(let port, let detail):

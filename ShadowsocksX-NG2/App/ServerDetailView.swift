@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// 服务器详情表单（issue #32）：地址、端口、加密、密码、备注可编辑（仅手动
-/// 节点）；插件区本票只读展示（选择器/参数编辑归 #38）；分享区（二维码 +
-/// 复制 ss://）。订阅服务器整表只读，仅树中启用开关可调。
+/// 服务器详情表单（issue #32/#38）：连接字段与插件选择可编辑（仅手动节点）。
+/// 插件区为受管选择器（D10）——「无」+ 受管列表，选中受管项才显示参数输入；
+/// 集外引用以显式「本版本未提供」呈现并原样保留；分享区（二维码 + 复制 ss://）。
+/// 订阅服务器整表只读，仅树中启用开关可调。
 struct ServerDetailView: View {
   let viewModel: CatalogViewModel
   let serverID: NodeID
@@ -13,6 +14,8 @@ struct ServerDetailView: View {
   @State private var encryptionMethod = ""
   @State private var password = ""
   @State private var remark = ""
+  @State private var pluginChoice: PluginSelection = .none
+  @State private var pluginOptionsText = ""
   @State private var showPassword = false
   @State private var showQR = false
   @State private var qrImage: NSImage?
@@ -69,7 +72,7 @@ struct ServerDetailView: View {
           .disabled(!isEditable)
       }
 
-      Section("插件（本版本只读）") {
+      Section("插件") {
         pluginSection
       }
 
@@ -108,23 +111,71 @@ struct ServerDetailView: View {
     .onChange(of: serverID) { _, _ in loadForm() }
   }
 
+  /// 受管选择器（D10）：「无」+ 受管列表；集外现有引用追加显式「本版本未提供」
+  /// 项使当前状态可见。选中受管项才显示供应链事实与参数输入。
   @ViewBuilder
   private var pluginSection: some View {
     if let plugin = formState?.plugin {
-      LabeledContent("插件程序", value: plugin.program)
-      LabeledContent("状态") {
-        if plugin.provided {
-          Label("本版本提供", systemImage: "checkmark.circle.fill")
-            .foregroundStyle(.green)
-        } else {
-          Label("本版本未提供该插件", systemImage: "exclamationmark.triangle.fill")
-            .foregroundStyle(.orange)
-            .help("该服务器在插件可用前是无效激活候选（点名拒绝）")
+      Picker("插件", selection: $pluginChoice) {
+        Text("无").tag(PluginSelection.none)
+        ForEach(plugin.managed, id: \.program) { info in
+          Text(info.program).tag(PluginSelection.managed(program: info.program))
+        }
+        if case .unknown(let program) = plugin.selection {
+          Text("\(program)（本版本未提供）").tag(PluginSelection.unknown(program: program))
         }
       }
-      LabeledContent("插件参数", value: plugin.optionsPresent ? "已配置（存于钥匙串）" : "未配置")
-    } else {
-      LabeledContent("插件程序", value: "无")
+      .disabled(!isEditable)
+
+      switch pluginChoice {
+      case .none:
+        Text("不使用插件：生成的配置不含 plugin 字段。")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+      case .managed(let program):
+        managedPluginDetails(program: program, plugin: plugin)
+      case .unknown(let program):
+        unknownPluginNotice(program: program, plugin: plugin)
+      }
+    }
+  }
+
+  /// 选中受管项：供应链事实（来源项目、许可证、固定版本、重签）与参数输入。
+  @ViewBuilder
+  private func managedPluginDetails(program: String, plugin: PluginSectionState) -> some View {
+    if let info = plugin.managed.first(where: { $0.program == program }) {
+      LabeledContent("来源项目", value: info.project)
+      LabeledContent("许可证", value: info.license)
+      LabeledContent("固定版本", value: info.release)
+      Text("随 app 打包，构建期经 Developer ID 重签：\(info.signIdentifier)")
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+      if !plugin.provided {
+        Label(
+          "受管插件可执行文件缺失：激活会被点名拒绝；请重新安装本 app。",
+          systemImage: "exclamationmark.triangle.fill"
+        )
+        .foregroundStyle(.orange)
+      }
+      TextField(
+        "插件参数",
+        text: $pluginOptionsText,
+        prompt: Text("如 mode=websocket;host=example.com（留空即无参数）")
+      )
+      .disabled(!isEditable)
+    }
+  }
+
+  /// 集外引用（Legacy 导入/订阅带入）：显式「本版本未提供」状态，原样保留。
+  @ViewBuilder
+  private func unknownPluginNotice(program: String, plugin: PluginSectionState) -> some View {
+    Label(
+      "本版本未提供「\(program)」：引用原样保留，激活包含该服务器会被点名拒绝；可改选「无」或受管插件。",
+      systemImage: "exclamationmark.triangle.fill"
+    )
+    .foregroundStyle(.orange)
+    if plugin.optionsPresent {
+      LabeledContent("插件参数", value: "已配置（存于钥匙串，原样保留）")
     }
   }
 
@@ -155,6 +206,8 @@ struct ServerDetailView: View {
     encryptionMethod = state.encryptionMethod
     password = state.password
     remark = state.remark
+    pluginChoice = state.plugin.selection
+    pluginOptionsText = state.plugin.options
     showPassword = false
   }
 
@@ -167,7 +220,9 @@ struct ServerDetailView: View {
           port: port,
           encryptionMethod: encryptionMethod,
           password: password,
-          remark: remark)
+          remark: remark,
+          plugin: pluginChoice,
+          pluginOptions: pluginOptionsText)
       } catch {
         viewModel.presentedError = error.presentableMessage
       }

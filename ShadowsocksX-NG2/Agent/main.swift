@@ -96,6 +96,9 @@ private func supervise() -> Int32 {
       return 0
     }
 
+    // 监听建立判定（issue #38，D10「3 秒未建立监听 → error 日志」）。
+    awaitListenEstablishment(document: document, child: child, flags: flags)
+
     let listen = document.listenFingerprint
 
     switch superviseChild(child, pacServer: pacServer, listen: listen, flags: flags) {
@@ -243,6 +246,45 @@ private func stopChild(
   }
   exitSource.cancel()
   flags.rearmIfPending()
+}
+
+// MARK: - 监听建立判定
+
+/// 监听判定时限（D10）：sslocal 拉起后 3 秒内应完成本地监听绑定。
+private let listenEstablishmentDeadline: TimeInterval = 3
+/// 单次探测超时与轮询间隔；正常启动百毫秒级完成，超时路径总耗时不超时限太多。
+private let listenProbeTimeout: TimeInterval = 0.25
+private let listenProbeInterval: TimeInterval = 0.1
+
+/// sslocal 拉起后阻塞监管线程至多 3 秒轮询契约内的本地端点（运行期失败以
+/// sslocal 信号为准，issue #38）：全部端点就绪即返回；信号（停止/重载/子进程
+/// 退出）到达即让位交还监管循环；超时且子进程仍在 → 记 error 日志但继续监管
+/// （GUI 健康门负责呈现，wrapper 不做启停决策）。
+private func awaitListenEstablishment(
+  document: SslocalRuntimeDocument,
+  child: Process,
+  flags: SignalFlags
+) {
+  let deadline = DispatchTime.now() + listenEstablishmentDeadline
+  while DispatchTime.now() < deadline {
+    if document.locals.allSatisfy({ local in
+      EndpointHealthProbe.probe(
+        host: local.probeHost,
+        port: local.localPort,
+        timeout: listenProbeTimeout) == .reachable
+    }) {
+      return
+    }
+    if flags.wait(timeout: .now() + listenProbeInterval) == .success {
+      flags.rearmIfPending()
+      return
+    }
+  }
+  guard child.isRunning else { return }  // 已退出：退出事件自带点名日志
+  let endpoints = document.locals
+    .map { "\($0.inboundProtocol) \($0.localAddress):\($0.localPort)" }
+    .joined(separator: ", ")
+  RuntimeLog.emit(.listenNotEstablished(detail: endpoints))
 }
 
 // MARK: - 信号与共享状态

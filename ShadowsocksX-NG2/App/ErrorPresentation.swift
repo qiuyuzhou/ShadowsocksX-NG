@@ -15,6 +15,8 @@ extension Error {
         return "端口必须是 1–65535 之间的整数"
       case .emptyName:
         return "名称不能为空"
+      case .pluginNotManaged(let program):
+        return "本版本未提供插件「\(program)」"
       }
     case let error as SsUriError:
       switch error {

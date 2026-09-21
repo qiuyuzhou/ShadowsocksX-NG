@@ -210,6 +210,14 @@ struct SslocalServerDocument: Codable, Equatable, Sendable {
   }
 }
 
+extension SslocalLocalDocument {
+  /// 探测用主机名：通配绑定地址按回环探测（wrapper 监听判定与 GUI 健康门
+  /// 共用口径，issue #38）。
+  var probeHost: String {
+    localAddress == "0.0.0.0" ? "127.0.0.1" : localAddress
+  }
+}
+
 /// 三个本地端点与单一监听范围的派生设置。HTTP 入站可独立关闭，但启用时与
 /// SOCKS、PAC 共用同一范围；默认端口沿用 Legacy 的 1086/1087/1089。
 struct SslocalListenSettings: Equatable, Sendable {

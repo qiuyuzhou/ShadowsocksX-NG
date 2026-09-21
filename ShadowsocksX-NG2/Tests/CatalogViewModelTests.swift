@@ -116,7 +116,7 @@ final class CatalogViewModelTests: XCTestCase {
     let oldRef = try XCTUnwrap(serverFields(of: id)?.passwordRef)
     try await viewModel.updateServer(
       id, address: "198.51.100.9", port: 9999, encryptionMethod: "chacha20-ietf-poly1305",
-      password: "新密码", remark: "改过的")
+      password: "新密码", remark: "改过的", plugin: .none, pluginOptions: nil)
     let fields = try XCTUnwrap(serverFields(of: id))
     XCTAssertEqual(fields.address, "198.51.100.9")
     XCTAssertEqual(fields.port, 9999)
@@ -135,7 +135,7 @@ final class CatalogViewModelTests: XCTestCase {
       {
         try await viewModel.updateServer(
           id, address: "  ", port: 8388, encryptionMethod: "aes-256-gcm", password: "p",
-          remark: "")
+          remark: "", plugin: .none, pluginOptions: nil)
       },
       onThrow: { error in
         XCTAssertEqual(error as? ServerFormError, .invalidAddress)
@@ -144,7 +144,7 @@ final class CatalogViewModelTests: XCTestCase {
       {
         try await viewModel.updateServer(
           id, address: "203.0.113.7", port: 0, encryptionMethod: "aes-256-gcm", password: "p",
-          remark: "")
+          remark: "", plugin: .none, pluginOptions: nil)
       },
       onThrow: { error in
         XCTAssertEqual(error as? ServerFormError, .invalidPort)
@@ -191,7 +191,7 @@ final class CatalogViewModelTests: XCTestCase {
     await expectThrowsAsync {
       try await viewModel.updateServer(
         subscriptionServer, address: "0.0.0.0", port: 1, encryptionMethod: "x", password: "p",
-        remark: "")
+        remark: "", plugin: .none, pluginOptions: nil)
     }
     // 手动节点移进订阅子树同样被拒（跨来源）。
     await expectThrowsAsync { try await viewModel.move(manualGroupID, to: fixture.groupID) }
