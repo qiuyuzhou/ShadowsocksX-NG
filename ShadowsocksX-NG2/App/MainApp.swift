@@ -65,12 +65,15 @@ struct ShadowsocksXNG2App: App {
     .defaultLaunchBehavior(
       catalogViewModel.shouldOfferLegacyImport ? .automatic : .suppressed)
 
-    Settings {
+    // 菜单栏 app 没有可依赖的常规应用菜单；设置窗口必须有显式 scene ID，
+    // 由状态菜单通过 openWindow(id:) 打开。
+    Window("设置", id: "settings") {
       SettingsView(
         proxyController: proxyController,
         loginController: loginController
       )
       .frame(width: 640, height: 760)
     }
+    .defaultLaunchBehavior(.suppressed)
   }
 }

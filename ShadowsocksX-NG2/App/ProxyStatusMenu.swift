@@ -4,8 +4,8 @@ import SwiftUI
 /// 状态菜单（spec #21 D11 八项白名单，issue #31）：①头部状态摘要（运行状态、
 /// 当前模式、活动目标）②代理开关 ③模式选择（勾选态）④活动目标级联选择器
 /// （组树子菜单、只读）⑤立即更新全部订阅 ⑥复制 HTTP 导出行 ⑦打开主窗口
-/// ⑧退出（明示代理仍在后台运行）。白名单外操作一律不进菜单栏；编辑类操作
-/// 只在主窗口。
+/// ⑧打开设置 ⑨退出（明示代理仍在后台运行）。白名单外操作一律不进菜单栏；
+/// 编辑类操作只在主窗口或设置窗口。
 struct ProxyStatusMenu: View {
   @Environment(\.openWindow) private var openWindow
   @ObservedObject var controller: ProxyRuntimeController
@@ -85,9 +85,15 @@ struct ProxyStatusMenu: View {
       openWindow(id: "main")
     }
 
+    // 菜单栏 app 没有常规应用菜单；设置 scene 由这里显式打开。
+    Button("打开设置…") {
+      NSApp.activate()
+      openWindow(id: "settings")
+    }
+
     Divider()
 
-    // ⑧ 退出：仅退 GUI；agent 由 launchd 持有，代理不受影响（构造上成立）。
+    // ⑨ 退出：仅退 GUI；agent 由 launchd 持有，代理不受影响（构造上成立）。
     Button("退出 ShadowsocksX-NG 2.0（代理仍在后台运行）") {
       NSApp.terminate(nil)
     }
