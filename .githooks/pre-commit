@@ -1,7 +1,7 @@
 #!/bin/sh
 #
-# Pre-commit 提交门槛（启用：git config core.hooksPath .githooks，
-# 约定见 ShadowsocksX-NG2/AGENTS.md，工具安装与版本见 ShadowsocksX-NG2/README.md）：
+# Pre-commit 检查（启用：git config core.hooksPath .githooks，
+# 行为约定见仓库根目录 README.md，工具安装与版本见 ShadowsocksX-NG2/README.md）：
 #   1. 对暂存的 ShadowsocksX-NG2/ 下 .swift 文件先 `swift format` 格式化，
 #      格式化结果直接写回暂存区（只改暂存区、不动工作区，部分暂存安全）；
 #   2. 再用 SwiftLint 检查暂存内容：error 级违规拒绝提交，warning 仅提示。
@@ -76,7 +76,7 @@ if ! swiftlint lint --config "${NG2_DIR}/.swiftlint.yml" --quiet "${TMP_DIR}" >"
 	echo "pre-commit: SwiftLint 发现 error 级违规，提交被拒绝" >&2
 	echo "pre-commit: 报告中的 0001_xxx.swift 是暂存内容的临时副本，序号_ 后为原文件名：" >&2
 	cat "${LINT_LOG}" >&2
-	echo "pre-commit: 请修复后重新提交；手动检查方式见 ShadowsocksX-NG2/AGENTS.md" >&2
+	echo "pre-commit: 请修复后重新提交；手动检查方式见 ShadowsocksX-NG2/README.md" >&2
 	exit 1
 fi
 

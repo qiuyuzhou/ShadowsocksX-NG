@@ -34,29 +34,42 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
 - 测试 target 用 Apple Development 证书签名：宿主 app 开启 Hardened Runtime 后 library validation 要求被注入的 xctest 包同 Team 签名。
 - Release 配置关闭 `CODE_SIGN_INJECT_BASE_ENTITLEMENTS`，保证发布产物 entitlements 只来自项目文件。
 
-## 构建与测试
+## 开发、构建与测试
+
+在本目录内，日常格式化、静态检查、工程生成、构建和测试优先使用 `Taskfile.dist.yml` 定义的任务：
 
 ```bash
-cd ShadowsocksX-NG2
-# 新 clone 或清单变更后：先取外部二进制，再生成工程（顺序不可颠倒）
+task format
+task lint
+task lint:fix  # 需要自动修复 SwiftLint 违规时使用；执行后再运行 task lint
+task gen:prj   # 生成 Xcode 工程
+task build     # 构建 Debug 版本 app
+task test      # 运行单元测试
+```
+
+`task format` 会格式化 `App/`、`Tests/`、`Domain/` 和 `Agent/` 下的 Swift 文件；`task lint:fix` 会修改源文件，执行后检查并复核 diff。
+
+新 clone 或清单变更后，在本目录内先取外部二进制，再生成工程（顺序不可颠倒）：
+
+```bash
 Scripts/fetch-external-binaries.sh
-xcodegen generate
-# 构建
-xcodebuild -project ShadowsocksX-NG2.xcodeproj -scheme ShadowsocksX-NG2 \
-  -configuration Debug -destination 'platform=macOS,arch=arm64' build
-# 运行单元测试
-xcodebuild -project ShadowsocksX-NG2.xcodeproj -scheme ShadowsocksX-NG2 \
-  -destination 'platform=macOS,arch=arm64' test
+task gen:prj
+```
+
+发布前对构建产物运行打包门槛检查：
+
+```bash
 # 打包门槛（对构建产物；发布前必须全绿）
 Scripts/packaging-gate.sh \
-  .build/DerivedData/Build/Products/Debug/ShadowsocksX-NG2.app
+  .build/derivedData/Build/Products/Debug/ShadowsocksX-NG2.app
 ```
 
 ## 代码风格工具
 
 - `swift format` 随 Xcode/Swift 工具链提供，无需单独安装（基线：Apple Swift 6.4）；SwiftLint 需 `brew install swiftlint`（基线 0.65.0）。工具缺失时，含本目录 Swift 文件的提交会被 pre-commit 钩子拒绝而不是放行。
 - 配置文件：`.swift-format` 是 Swift 6.4 工具链默认规则的快照（固定成文件，工具链升级不漂移）；`.swiftlint.yml` 默认规则起步，只声明排除项与个别和 format 基线冲突的关闭项（文件内有触发案例注释）。
-- 提交门槛的行为约定、钩子启用与手动执行命令见 [`AGENTS.md`](AGENTS.md)。
+- 仓库级 `pre-commit` 钩子的启用方式和检查范围见根目录 [`README.md`](../README.md)。
+- 调整规则只针对实际痛点：修改 `.swift-format` / `.swiftlint.yml` 的 PR 须给出触发案例，并同步更新本节中的基线版本。
 
 ## 依赖升级
 
