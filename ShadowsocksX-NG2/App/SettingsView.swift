@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// Native macOS settings for issue #33. Pure presentation over the settings
-/// workflow module: field bindings edit the module's draft, actions go through
-/// typed commands, and the login-item toggle binds its own independent
-/// controller. Domain decisions (validation, occupancy, save gating, the
-/// PAC-invalidation notice, reset) live behind the module's seam.
+/// Native macOS settings for issue #33, bound to the settings workflow seam
+/// (issue #44): field bindings edit the flat UI-shaped draft, issues render
+/// beside their fields from the seam's field-scoped projection, port rows read
+/// typed field state, and every discrete action is a named typed command.
+/// Whether a confirmation is required and its summary come from the seam's
+/// unified fact; this view only owns alert presentation. The login-item toggle
+/// binds its own independent controller (separate preference domain).
 struct SettingsView: View {
   @ObservedObject var workflow: SettingsWorkflow
   @ObservedObject var loginController: LaunchAtLoginController
-
-  @State private var showResetConfirmation = false
 
   var body: some View {
     Form {
@@ -22,25 +22,17 @@ struct SettingsView: View {
     .onAppear {
       workflow.reloadFromCommitted()
     }
-    .alert("PAC 地址将失效", isPresented: pacNoticeBinding) {
-      Button("继续保存") {
-        workflow.confirmPACNotice()
-      }
-      Button("取消", role: .cancel) {
-        workflow.cancelPACNotice()
-      }
-    } message: {
-      Text(workflow.pendingPACNotice ?? "")
-    }
     .alert(
-      "重置所有偏好？", isPresented: $showResetConfirmation
-    ) {
-      Button("重置", role: .destructive) {
-        workflow.reset()
-      }
-      Button("取消", role: .cancel) {}
-    } message: {
-      Text("端口、监听范围和 PAC 设置都会恢复为出厂值。")
+      workflow.pendingConfirmation.map { confirmationPresentation(for: $0).title } ?? "",
+      isPresented: confirmationBinding,
+      presenting: workflow.pendingConfirmation
+    ) { confirmation in
+      let presentation = confirmationPresentation(for: confirmation)
+      Button(
+        presentation.confirmTitle, role: presentation.confirmRole, action: presentation.confirm)
+      Button("取消", role: .cancel, action: presentation.cancel)
+    } message: { confirmation in
+      Text(confirmation.summary)
     }
   }
 
@@ -62,23 +54,30 @@ struct SettingsView: View {
           .foregroundStyle(.red)
       }
 
-      Toggle("启用 UDP 中继", isOn: $workflow.draft.listen.udpRelayEnabled)
+      Toggle("启用 UDP 中继", isOn: $workflow.draft.udpRelayEnabled)
       Stepper(value: $workflow.draft.timeoutSeconds, in: 1...86_400) {
         Text("超时：" + String(workflow.draft.timeoutSeconds) + " 秒")
       }
+      fieldIssues(.timeoutSeconds)
       Toggle("详细日志（verbose）", isOn: $workflow.draft.verboseLogging)
     }
   }
 
   private var advancedSection: some View {
     Section("高级") {
-      Picker("监听范围", selection: scopeBinding) {
+      Picker("监听范围", selection: $workflow.draft.isHostScope) {
         Text("仅本机（127.0.0.1）").tag(false)
         Text("局域网（主机地址）").tag(true)
       }
 
-      if case .host(let address) = workflow.draft.listen.scope {
-        TextField("对外公布的 IPv4 地址", text: hostAddressBinding)
+      if workflow.draft.isHostScope {
+        TextField("对外公布的 IPv4 地址", text: $workflow.draft.advertisedAddress)
+        fieldIssues(.advertisedAddress)
+        if workflow.draft.advertisedAddress.isEmpty {
+          Text("请输入本机可路由的局域网 IPv4 地址。")
+            .font(.caption)
+            .foregroundStyle(.red)
+        }
         Label(
           "局域网模式会把无鉴权的代理端口开放给局域网；请确认防火墙允许所需程序，并只在可信网络使用。",
           systemImage: "exclamationmark.triangle"
@@ -90,22 +89,19 @@ struct SettingsView: View {
         )
         .font(.caption)
         .foregroundStyle(.secondary)
-        if address.isEmpty {
-          Text("请输入本机可路由的局域网 IPv4 地址。")
-            .font(.caption)
-            .foregroundStyle(.red)
-        }
       }
 
-      portRow(.socks, value: $workflow.draft.listen.socksPort)
-      Toggle("启用 HTTP 代理", isOn: $workflow.draft.listen.httpProxyEnabled)
-      portRow(.http, value: $workflow.draft.listen.httpPort)
-        .disabled(!workflow.draft.listen.httpProxyEnabled)
-      portRow(.pac, value: $workflow.draft.listen.pacPort)
+      portRow(.socks)
+      Toggle("启用 HTTP 代理", isOn: $workflow.draft.httpProxyEnabled)
+      portRow(.http)
+        .disabled(!workflow.draft.httpProxyEnabled)
+      portRow(.pac)
 
       TextField("绕过列表（逗号或空格分隔）", text: $workflow.draft.proxyExceptions)
       TextField("外部 PAC URL（可选）", text: $workflow.draft.externalPACURL)
+      fieldIssues(.externalPACURL)
       TextField("GFW List URL", text: $workflow.draft.gfwListURL)
+      fieldIssues(.gfwListURL)
       Text("外部内容只保存 URL；本设置页不负责远程内容校验或自动更新。")
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -125,113 +121,102 @@ struct SettingsView: View {
 
   private var actionSection: some View {
     Section {
-      if let errorMessage = workflow.errorMessage {
-        Text(errorMessage)
+      if let failure = workflow.lastFailureMessage {
+        Text(failure)
           .foregroundStyle(.red)
       }
-      if !workflow.validationErrors.isEmpty {
-        Text(
-          workflow.validationErrors.map(\.presentedReason).joined(separator: "\n")
-        )
-        .font(.caption)
-        .foregroundStyle(.red)
-      }
-      if workflow.hasOccupiedPort {
+      if workflow.hasBlockingPortOccupancy {
         Text("检测到端口已被占用；请先使用对应的“建议空闲端口”，再保存设置。")
           .font(.caption)
           .foregroundStyle(.orange)
+      }
+      if workflow.isDirty {
+        Text("存在未保存的修改。")
+          .font(.caption)
+          .foregroundStyle(.secondary)
       }
 
       HStack {
         Spacer()
         Button("重置偏好") {
-          showResetConfirmation = true
+          workflow.reset()
         }
-        Button(workflow.isSaving ? "保存中…" : "保存") {
+        .disabled(workflow.isCommitting)
+        Button(workflow.isCommitting ? "保存中…" : "保存") {
           workflow.save()
         }
         .keyboardShortcut(.defaultAction)
-        .disabled(workflow.isSaving || !workflow.canSave)
+        .disabled(!workflow.canSave)
       }
     }
-  }
-
-  private var pacNoticeBinding: Binding<Bool> {
-    Binding(
-      get: { workflow.pendingPACNotice != nil },
-      set: { presented in
-        if !presented, workflow.pendingPACNotice != nil {
-          workflow.cancelPACNotice()
-        }
-      })
   }
 }
 
 extension SettingsView {
-  private func portRow(_ endpoint: ProxyEndpointKind, value: Binding<Int>) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
+  private func portRow(_ id: SettingsPortID) -> some View {
+    let state = workflow.portFieldState(for: id)
+    return VStack(alignment: .leading, spacing: 4) {
       HStack {
-        Text(endpoint.displayName + " 端口")
+        Text(title(for: id) + " 端口")
         Spacer()
         TextField(
-          endpoint.displayName + " 端口",
-          value: value,
+          title(for: id) + " 端口",
+          value: portBinding(for: id),
           format: .number
         )
         .frame(width: 90)
         .multilineTextAlignment(.trailing)
         .labelsHidden()
       }
-      if let occupancy = workflow.occupancy[endpoint] {
-        Text(occupancyText(occupancy, endpoint: endpoint))
+      ForEach(state.issues, id: \.self) { issue in
+        Text(issue)
+          .font(.caption)
+          .foregroundStyle(.red)
+      }
+      if let occupancy = state.occupancy {
+        Text(occupancyText(occupancy, state: state))
           .font(.caption)
           .foregroundStyle(occupancyColor(occupancy))
       }
-      if case .occupied = workflow.occupancy[endpoint], !workflow.isCurrentRuntimePort(endpoint) {
+      if state.canSuggestFreePort {
         Button("建议空闲端口") {
-          workflow.suggestPort(for: endpoint)
+          workflow.suggestFreePort(for: id)
         }
         .font(.caption)
       }
     }
   }
 
-  private var scopeBinding: Binding<Bool> {
+  private func portBinding(for id: SettingsPortID) -> Binding<Int> {
     Binding(
-      get: {
-        if case .host = workflow.draft.listen.scope { return true }
-        return false
-      },
-      set: { isHost in
-        guard isHost else {
-          workflow.draft.listen.scope = .loopback
-          return
-        }
-        let address: String
-        if case .host(let current) = workflow.draft.listen.scope {
-          address = current
-        } else {
-          address = ""
-        }
-        workflow.draft.listen.scope = .host(advertisedAddress: address)
-      })
+      get: { workflow.draft.portValue(for: id) },
+      set: { workflow.draft.setPortValue($0, for: id) })
   }
 
-  private var hostAddressBinding: Binding<String> {
-    Binding(
-      get: {
-        if case .host(let address) = workflow.draft.listen.scope { return address }
-        return ""
-      },
-      set: { workflow.draft.listen.scope = .host(advertisedAddress: $0) })
+  private func fieldIssues(_ field: SettingsFieldID) -> some View {
+    ForEach(workflow.issues(for: field), id: \.self) { issue in
+      Text(issue)
+        .font(.caption)
+        .foregroundStyle(.red)
+    }
   }
 
-  private func occupancyText(_ occupancy: PortOccupancy, endpoint: ProxyEndpointKind) -> String {
+  private func title(for id: SettingsPortID) -> String {
+    switch id {
+    case .socks: "SOCKS5"
+    case .http: "HTTP"
+    case .pac: "PAC"
+    }
+  }
+
+  private func occupancyText(
+    _ occupancy: SettingsPortOccupancy, state: SettingsPortFieldState
+  ) -> String {
     switch occupancy {
     case .free:
       return "当前端口可用"
     case .occupied(let occupier):
-      if workflow.isCurrentRuntimePort(endpoint) {
+      if state.isRuntimePortException {
         return "当前代理正在使用此端口，保存其他设置不会触发冲突"
       }
       return "当前端口已占用" + (occupier.map { "（" + $0 + "）" } ?? "")
@@ -240,11 +225,52 @@ extension SettingsView {
     }
   }
 
-  private func occupancyColor(_ occupancy: PortOccupancy) -> Color {
+  private func occupancyColor(_ occupancy: SettingsPortOccupancy) -> Color {
     switch occupancy {
     case .free: .secondary
     case .occupied: .orange
     case .unknown: .secondary
     }
+  }
+
+  // MARK: - 确认 alert 呈现（视图只持有呈现状态，事实来自 seam）
+
+  private struct ConfirmationPresentation {
+    let title: String
+    let confirmTitle: String
+    let confirmRole: ButtonRole?
+    let confirm: () -> Void
+    let cancel: () -> Void
+  }
+
+  private func confirmationPresentation(
+    for confirmation: SettingsConfirmation
+  ) -> ConfirmationPresentation {
+    switch confirmation {
+    case .pacInvalidation:
+      ConfirmationPresentation(
+        title: "PAC 地址将失效",
+        confirmTitle: "继续保存",
+        confirmRole: nil,
+        confirm: { workflow.confirmPACNotice() },
+        cancel: { workflow.cancelPACNotice() })
+    case .resetPreferences:
+      ConfirmationPresentation(
+        title: "重置所有偏好？",
+        confirmTitle: "重置",
+        confirmRole: .destructive,
+        confirm: { workflow.confirmReset() },
+        cancel: { workflow.cancelReset() })
+    }
+  }
+
+  private var confirmationBinding: Binding<Bool> {
+    Binding(
+      get: { workflow.pendingConfirmation != nil },
+      set: { presented in
+        if !presented, let confirmation = workflow.pendingConfirmation {
+          confirmationPresentation(for: confirmation).cancel()
+        }
+      })
   }
 }

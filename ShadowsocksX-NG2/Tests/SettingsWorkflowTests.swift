@@ -2,9 +2,9 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 设置工作流 module（Candidate 02）：保存门禁、占用反应、「当前运行端口」例外、
-/// PAC 失效确认、建议端口与重置的编排路径不经 SwiftUI 即可全测（占用探测与
-/// 运行时依赖全部注入替身）。
+/// 设置工作流与真实 `ProxyRuntimeController` 的提交路径集成（issue #44）：
+/// 界面投影与命令面已由 `SettingsWorkflowInterfaceTests` 用 fake 写入缝覆盖；
+/// 本文件保留确需端到端的场景，证明窄缝两端与运行时控制器的提交事务对齐。
 @MainActor
 final class SettingsWorkflowTests: XCTestCase {
   private var runtime: ProxyRuntimeFixture.TemporaryRuntime!
@@ -33,24 +33,18 @@ final class SettingsWorkflowTests: XCTestCase {
     try super.tearDownWithError()
   }
 
-  func testEditingListenSettingsRefreshesOccupancyAndBlocksSave() async throws {
-    probe = FakeOccupancyProbe(occupiedPorts: [12086])
+  func testSaveCommitsThroughTheRuntimeController() async throws {
     let pair = makePair()
 
-    pair.workflow.draft.listen.socksPort = 12086
-    await waitUntil(pair.workflow.occupancy[.socks] != nil)
-
-    guard case .occupied = pair.workflow.occupancy[.socks] else {
-      XCTFail("应呈现占用，实际 \(String(describing: pair.workflow.occupancy[.socks]))")
-      return
-    }
-    XCTAssertFalse(pair.workflow.isCurrentRuntimePort(.socks))
-    XCTAssertTrue(pair.workflow.hasOccupiedPort)
-    XCTAssertFalse(pair.workflow.canSave)
-
+    pair.workflow.draft.timeoutSeconds = 120
     pair.workflow.save()
-    await waitUntil(!pair.workflow.isSaving)
-    XCTAssertNil(settingsStore.saved, "门禁未过不得提交")
+    await waitUntil(!pair.workflow.isCommitting)
+
+    XCTAssertEqual(settingsStore.saved?.timeoutSeconds, 120)
+    XCTAssertEqual(pair.controller.settings.timeoutSeconds, 120)
+    XCTAssertEqual(
+      pair.workflow.draft, SettingsDraftAdapter.draft(from: pair.controller.settings),
+      "提交后草稿回到已提交快照")
   }
 
   func testOccupiedPortMatchingTheRunningRuntimeDoesNotBlockSave() async throws {
@@ -58,63 +52,34 @@ final class SettingsWorkflowTests: XCTestCase {
     let pair = try await makeRunningPair()
 
     pair.workflow.reloadFromCommitted()
-    await waitUntil(pair.workflow.occupancy[.socks] != nil)
+    await waitUntil(pair.workflow.portFieldState(for: .socks).occupancy != nil)
 
-    guard case .occupied = pair.workflow.occupancy[.socks] else {
-      XCTFail("替身应把运行端口报告为占用")
-      return
-    }
-    XCTAssertTrue(pair.workflow.isCurrentRuntimePort(.socks), "代理自身监听的端口不算冲突")
-    XCTAssertFalse(pair.workflow.hasOccupiedPort)
+    XCTAssertEqual(
+      pair.workflow.portFieldState(for: .socks).occupancy, .occupied(occupier: "other-app"))
+    XCTAssertTrue(
+      pair.workflow.portFieldState(for: .socks).isRuntimePortException,
+      "代理自身监听的端口不算冲突")
+    XCTAssertFalse(pair.workflow.hasBlockingPortOccupancy)
     XCTAssertTrue(pair.workflow.canSave)
 
     pair.workflow.draft.timeoutSeconds = 120
     pair.workflow.save()
     await waitUntil(settingsStore.saved != nil)
     XCTAssertEqual(settingsStore.saved?.timeoutSeconds, 120)
-    XCTAssertEqual(pair.controller.settings.timeoutSeconds, 120)
-    XCTAssertEqual(pair.workflow.draft, pair.controller.settings, "提交后草稿回到已提交快照")
   }
 
   func testPACPortChangeRequiresConfirmationBeforeCommitting() async throws {
     let pair = makePair()
 
-    pair.workflow.draft.listen.pacPort = 13089
-    await waitUntil(pair.workflow.occupancy[.pac] != nil)
+    pair.workflow.draft.pacPort = 13089
     pair.workflow.save()
-
-    XCTAssertNotNil(pair.workflow.pendingPACNotice)
+    XCTAssertNotNil(pair.workflow.pendingConfirmation)
     XCTAssertNil(settingsStore.saved, "未确认失效提示不得提交")
 
     pair.workflow.confirmPACNotice()
     await waitUntil(settingsStore.saved != nil)
-    XCTAssertNil(pair.workflow.pendingPACNotice)
+    XCTAssertNil(pair.workflow.pendingConfirmation)
     XCTAssertEqual(pair.controller.settings.listen.pacPort, 13089)
-  }
-
-  func testCancelingPACNoticeDiscardsThePendingSave() async throws {
-    let pair = makePair()
-
-    pair.workflow.draft.listen.pacPort = 13089
-    await waitUntil(pair.workflow.occupancy[.pac] != nil)
-    pair.workflow.save()
-    pair.workflow.cancelPACNotice()
-
-    XCTAssertNil(pair.workflow.pendingPACNotice)
-    XCTAssertNil(settingsStore.saved)
-    XCTAssertEqual(pair.controller.settings.listen.pacPort, 11089, "取消后已提交值保持")
-  }
-
-  func testValidationErrorsBlockSave() async throws {
-    let pair = makePair()
-
-    pair.workflow.draft.timeoutSeconds = 0
-    XCTAssertFalse(pair.workflow.validationErrors.isEmpty)
-    XCTAssertFalse(pair.workflow.canSave)
-
-    pair.workflow.save()
-    await waitUntil(!pair.workflow.isSaving)
-    XCTAssertNil(settingsStore.saved)
   }
 
   func testCommitFailureSurfacesPresentedReasonAndKeepsCommittedValues() async throws {
@@ -123,15 +88,15 @@ final class SettingsWorkflowTests: XCTestCase {
 
     pair.workflow.draft.timeoutSeconds = 120
     pair.workflow.save()
-    await waitUntil(pair.workflow.errorMessage != nil)
+    await waitUntil(pair.workflow.lastFailureMessage != nil)
 
-    XCTAssertTrue(pair.workflow.errorMessage?.contains("fake-io-error") == true)
+    XCTAssertTrue(pair.workflow.lastFailureMessage?.contains("fake-io-error") == true)
     XCTAssertNil(settingsStore.saved)
     XCTAssertEqual(pair.controller.settings.timeoutSeconds, 60, "失败保留旧值")
     XCTAssertEqual(pair.workflow.draft.timeoutSeconds, 120, "草稿保留待修改值")
   }
 
-  func testResetRestoresFactorySnapshotIntoTheDraft() async throws {
+  func testConfirmedResetRestoresFactorySnapshotThroughTheRuntimeController() async throws {
     let pair = makePair()
     var custom = pair.controller.settings
     custom.timeoutSeconds = 120
@@ -139,20 +104,12 @@ final class SettingsWorkflowTests: XCTestCase {
     XCTAssertEqual(pair.controller.settings.timeoutSeconds, 120)
 
     pair.workflow.reset()
+    XCTAssertNotNil(pair.workflow.pendingConfirmation, "重置恒先经 seam 裁定的确认")
+    pair.workflow.confirmReset()
     await waitUntil(pair.controller.settings == ProxySettings())
 
-    XCTAssertEqual(pair.workflow.draft, ProxySettings())
+    XCTAssertEqual(pair.workflow.draft, SettingsDraftAdapter.draft(from: ProxySettings()))
     XCTAssertNil(settingsStore.saved)
-  }
-
-  func testSuggestPortWritesCandidateIntoDraftOnly() async throws {
-    let pair = makePair()
-
-    pair.workflow.suggestPort(for: .socks)
-    await waitUntil(pair.workflow.draft.listen.socksPort != 11086)
-
-    XCTAssertEqual(pair.workflow.draft.listen.socksPort, 32768, "高位段首个空闲且避开其他端点")
-    XCTAssertNil(settingsStore.saved, "建议只写草稿，必须经用户保存")
   }
 
   // MARK: - 夹具
@@ -174,7 +131,7 @@ final class SettingsWorkflowTests: XCTestCase {
       firewallExecutableURLs: [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
       firewallPollIntervalNanoseconds: 1_000_000,
       sendSignal: { _, _ in 0 })
-    let workflow = SettingsWorkflow(controller: controller, occupancyProbe: probe)
+    let workflow = SettingsWorkflow(committing: controller, occupancyProbe: probe)
     return (controller, workflow)
   }
 
@@ -190,19 +147,6 @@ final class SettingsWorkflowTests: XCTestCase {
     await pair.controller.setProxyEnabled(true)
     await waitUntil(pair.controller.state == .running)
     return pair
-  }
-
-  private func waitUntil(
-    _ condition: @autoclosure () -> Bool,
-    timeout: TimeInterval = 2,
-    file: StaticString = #filePath,
-    line: UInt = #line
-  ) async {
-    let deadline = Date().addingTimeInterval(timeout)
-    while !condition() && Date() < deadline {
-      try? await Task.sleep(nanoseconds: 10_000_000)
-    }
-    XCTAssertTrue(condition(), file: file, line: line)
   }
 
   private enum FakeSaveError: Error, CustomStringConvertible {
@@ -227,34 +171,5 @@ final class SettingsWorkflowTests: XCTestCase {
     func reset() throws {
       saved = nil
     }
-  }
-}
-
-/// 占用探测替身：按端口预设占用/不可判定，记录全部探测请求。
-final class FakeOccupancyProbe: PortOccupancyProbing, @unchecked Sendable {
-  private let lock = NSLock()
-  private let occupiedPorts: Set<Int>
-  private var unknownPorts: Set<Int>
-  private var requestedPorts: [Int] = []
-
-  init(occupiedPorts: Set<Int> = [], unknownPorts: Set<Int> = []) {
-    self.occupiedPorts = occupiedPorts
-    self.unknownPorts = unknownPorts
-  }
-
-  var requested: [Int] {
-    lock.lock()
-    defer { lock.unlock() }
-    return requestedPorts
-  }
-
-  func occupancy(port: Int, bindAddress: String) -> PortOccupancy {
-    lock.lock()
-    defer { lock.unlock() }
-    requestedPorts.append(port)
-    if unknownPorts.contains(port) {
-      return .unknown(detail: "无法判定")
-    }
-    return occupiedPorts.contains(port) ? .occupied(occupier: "other-app") : .free
   }
 }

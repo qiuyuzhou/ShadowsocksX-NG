@@ -32,8 +32,9 @@ struct ShadowsocksXNG2App: App {
       },
       activator: controller)
     _catalogWorkflow = StateObject(wrappedValue: catalogWorkflow)
-    // 设置工作流 module（Candidate 02）：设置窗口的唯一 seam，组合根接线一次。
-    _settingsWorkflow = StateObject(wrappedValue: SettingsWorkflow(controller: controller))
+    // 设置工作流 module（Candidate 02）：设置窗口的唯一 seam，组合根接线一次；
+    // 写入侧经窄缝 SettingsCommitting（issue #44），运行时控制器薄扩展即生产实现。
+    _settingsWorkflow = StateObject(wrappedValue: SettingsWorkflow(committing: controller))
     // 诊断工作流 module（issue #43）：诊断区唯一 seam，组合根接线一次；共享
     // 实例供诊断侧栏与详情共同使用。
     _diagnosticsWorkflow = StateObject(
