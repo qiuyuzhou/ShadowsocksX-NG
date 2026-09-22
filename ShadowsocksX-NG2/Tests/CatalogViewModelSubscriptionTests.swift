@@ -3,16 +3,17 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 /// 订阅端到端语义（issue #35 验收）：创建门禁、刷新失败保留快照、overlay 与
-/// 身份连续性、URL 编辑保身份、删除递归清除、UI 数据面与 postCommit 接线。
-/// 获取走 FakeSubscriptionFetcher（传输侧契约在 SubscriptionFetcherTests）。
+/// 身份连续性、URL 编辑保身份、删除递归清除、UI 数据面与提交接线。
+/// 获取走 FakeSubscriptionFetcher（传输侧契约在 SubscriptionFetcherTests）；
+/// 提交后的运行时收敛以确定性 fake 计数（issue #40）。
 @MainActor
 final class CatalogViewModelSubscriptionTests: XCTestCase {
   private var workDir: URL!
   private var fileURL: URL!
   private var credentials: InMemoryCredentialStore!
   private var fetcher: FakeSubscriptionFetcher!
+  private var runtime: FakeCatalogRuntime!
   private var viewModel: CatalogViewModel!
-  private var commitCounter: CommitCounter!
 
   override func setUp() async throws {
     try await super.setUp()
@@ -21,7 +22,7 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
     try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
     fileURL = workDir.appendingPathComponent("catalog.json")
     credentials = InMemoryCredentialStore()
-    commitCounter = CommitCounter()
+    runtime = FakeCatalogRuntime()
     fetcher = FakeSubscriptionFetcher(behavior: .success(SubscriptionDocs.flat(serverCount: 1)))
     viewModel = makeViewModel()
   }
@@ -32,13 +33,15 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
   }
 
   private func makeViewModel() -> CatalogViewModel {
+    // 计数即提交计数：提交后的运行时收敛由协调器异步调度（issue #40）。
+    runtime.hasActiveTarget = true
+    let coordinator = CatalogCommitCoordinator(
+      fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime)
     let model = CatalogViewModel(
-      fileStore: CatalogFileStore(fileURL: fileURL),
+      coordinator: coordinator,
       credentials: credentials,
       plugins: NoManagedPluginProvider())
     model.subscriptionFetcher = fetcher!
-    let counter = commitCounter!
-    model.postCommit = { await counter.increment() }
     return model
   }
 
@@ -123,7 +126,7 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
     fetcher = FakeSubscriptionFetcher(behavior: .success(treeDoc))
     viewModel = makeViewModel()
     let record = try await viewModel.createSubscription(urlString: "https://p.example.com/s.json")
-    let commitsBefore = await commitCounter.count
+    let convergesBefore = runtime.convergeCount
 
     fetcher = FakeSubscriptionFetcher(behavior: .failure(.httpStatus(code: 503)))
     viewModel.subscriptionFetcher = fetcher
@@ -139,8 +142,8 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
     }
     XCTAssertTrue(reason.contains("503"))
     // 仅状态提交了一次（快照未动）。
-    let commitsAfter = await commitCounter.count
-    XCTAssertEqual(commitsAfter - commitsBefore, 1)
+    await waitUntilRuntimeSettles(runtime.convergeCount - convergesBefore == 1)
+    XCTAssertEqual(runtime.convergeCount - convergesBefore, 1)
   }
 
   func testDecodeAndSchemaFailuresMarkFailedWithoutTouchingSnapshot() async throws {
@@ -301,7 +304,7 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
     let record = try await seedSuccessfulSubscription()
     viewModel.selectedNodeID = serverAID
     let passwordRef = try XCTUnwrap(serverFields(of: serverAID)).passwordRef
-    let commitsBefore = await commitCounter.count
+    let convergesBefore = runtime.convergeCount
 
     try await viewModel.removeSubscription(record.id)
 
@@ -312,8 +315,8 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
     XCTAssertNil(viewModel.selectedNodeID, "选中节点随子树清除")
     XCTAssertNil(try credentials.secret(for: passwordRef), "远端成员凭据一并清理")
     XCTAssertNil(try credentials.secret(for: record.urlRef), "订阅 URL 凭据一并清理")
-    let commitsAfter = await commitCounter.count
-    XCTAssertEqual(commitsAfter - commitsBefore, 1, "删除经 postCommit 触发活动目标重展开接线")
+    await waitUntilRuntimeSettles(runtime.convergeCount - convergesBefore == 1)
+    XCTAssertEqual(runtime.convergeCount - convergesBefore, 1, "删除经提交协调器触发活动目标重展开")
   }
 
   // MARK: 批量刷新与持久化
@@ -322,7 +325,7 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
     _ = try await seedSuccessfulSubscription()
     _ = try await createOnly(urlString: "https://q.example.com/t.json")
     let requestsBefore = fetcher.requestCount
-    let commitsBefore = await commitCounter.count
+    let convergesBefore = runtime.convergeCount
 
     await viewModel.refreshAllSubscriptions()
 
@@ -332,15 +335,16 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
         return XCTFail("全部订阅都应记成功态：\(record.id)")
       }
     }
-    let commitsAfter = await commitCounter.count
-    XCTAssertEqual(commitsAfter - commitsBefore, 2)
+    await waitUntilRuntimeSettles(runtime.convergeCount - convergesBefore == 2)
+    XCTAssertEqual(runtime.convergeCount - convergesBefore, 2)
   }
 
   func testSubscriptionsPersistAcrossViewModelReload() async throws {
     let record = try await seedSuccessfulSubscription()
 
     let reloaded = CatalogViewModel(
-      fileStore: CatalogFileStore(fileURL: fileURL),
+      coordinator: CatalogCommitCoordinator(
+        fileStore: CatalogFileStore(fileURL: fileURL), runtime: FakeCatalogRuntime()),
       credentials: credentials,
       plugins: NoManagedPluginProvider())
     XCTAssertEqual(reloaded.subscriptions.count, 1)

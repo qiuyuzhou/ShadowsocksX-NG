@@ -231,22 +231,6 @@ final class ProxyRuntimeController: ObservableObject {
     await presentLaunchHealth(document)
   }
 
-  /// 目录已提交变更后的立即重展开（D3/D5）：有效非空且代理开启 → 原子更新
-  /// 运行时；目标失效 → 清除目标并停止代理。目录以磁盘为事实来源重载。
-  func catalogDidCommit() async {
-    reloadCatalog()
-    switch reexpand() {
-    case .deployed(let configuration):
-      if state != .off {
-        await deploy(configuration.document)
-      }
-    case .clearedAndStopped(let failure):
-      await handleCleared(failure)
-    case nil:
-      break
-    }
-  }
-
   /// GUI 启动重同步（D5「GUI 下次启动重新校验同步」）：注册态是代理意图的
   /// 事实来源——注册过即视为开启并重校验；随后与磁盘契约对齐（相同内容跳
   /// 过写入）。GUI 崩溃期间 agent 与 wrapper 均不受影响。
@@ -433,6 +417,44 @@ final class ProxyRuntimeController: ObservableObject {
 }
 
 extension ProxyRuntimeController {
+  /// 目录提交协调器的生产适配入口（issue #40）：以刚提交的内存快照重展开，
+  /// 不回读磁盘（磁盘仍是重启与跨进程恢复的权威来源）。有效非空且代理开启
+  /// → 原子更新运行时；目标失效 → 清除目标并停止代理。返回结构化收敛结果，
+  /// 健康检查耗时属于本调用的异步收敛阶段，不改变「目录已提交」的事实。
+  func catalogDidCommit(snapshot catalog: ConfigurationCatalog) async -> RuntimeSyncOutcome {
+    self.catalog = catalog
+    switch reexpand() {
+    case .deployed(let configuration):
+      guard state != .off else {
+        return .revalidated
+      }
+      await deploy(configuration.document)
+      return Self.syncOutcome(for: state, skippedServers: configuration.skippedServers)
+    case .clearedAndStopped(let failure):
+      await handleCleared(failure)
+      return .clearedAndStopped(failure)
+    case nil:
+      return .revalidated
+    }
+  }
+
+  /// 部署后的控制器状态 → 结构化收敛结果：健康通过（含防火墙受阻的运行态）
+  /// 视为已收敛；启动、服务、系统代理与激活拒绝都视为未收敛并携带点名细节。
+  private static func syncOutcome(
+    for state: ProxyState, skippedServers: [SkippedServer]
+  ) -> RuntimeSyncOutcome {
+    switch state {
+    case .running, .firewallBlocked:
+      .converged(skippedServers: skippedServers)
+    case .launchFailed(let detail), .serviceFailed(let detail), .systemProxyFailed(let detail):
+      .failed(detail: detail)
+    case .activationFailed(let reason):
+      .failed(detail: reason)
+    case .requiresApproval, .off, .starting:
+      .failed(detail: nil)
+    }
+  }
+
   /// Persists a fully validated settings snapshot and, when the proxy is
   /// active, re-derives the same runtime path with the new snapshot.
   func updateSettings(_ next: ProxySettings) async throws {

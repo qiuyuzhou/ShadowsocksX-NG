@@ -3,8 +3,9 @@ import SwiftUI
 
 /// 主窗口视图模型（issue #32/#35）：把 ConfigurationCatalog 领域语义接到树
 /// 操作、详情表单、添加三入口、分享与订阅生命周期。所有变更走「副本变更 →
-/// 落盘 → 发布 → postCommit 重展开」，失败即整体不变更；凭据读写只在模型层
-/// 出现。
+/// 落盘 → 发布」，失败即整体不变更；凭据读写只在模型层出现。提交管线、
+/// 运行时收敛与并发代次由注入的 `CatalogCommitCoordinator` 负责（issue #40），
+/// 本类在迁移期间保留为兼容 facade，向现有 SwiftUI 调用方提供已发布状态。
 @MainActor
 final class CatalogViewModel: ObservableObject {
   @Published private(set) var catalog: ConfigurationCatalog
@@ -21,29 +22,32 @@ final class CatalogViewModel: ObservableObject {
   @Published private(set) var legacyImportReport: LegacyImportReport?
   private var discoveredLegacySnapshot: LegacySnapshot?
 
+  /// 提交管线与运行时收敛的唯一入口（组合根注入，issue #40）。
+  let coordinator: CatalogCommitCoordinator
   private let fileStore: CatalogFileStore
   /// 订阅扩展（CatalogViewModel+Subscriptions）同样经此读写凭据。
   let credentials: CredentialStoring
   private let plugins: ManagedPluginProviding
   /// 订阅获取缝（默认 URLSession 实现；测试注入夹具，issue #35）。
   var subscriptionFetcher: SubscriptionFetching
-  /// 目录提交后的运行时重展开（生产接线 `ProxyRuntimeController.catalogDidCommit`）。
-  var postCommit: (() async -> Void)?
-  /// Legacy 导入提交后的运行时边界（生产接线为不写系统代理的停止/重载）。
-  var postLegacyImport: ((LegacyImportOutcome) async -> Void)?
+  /// Legacy 导入提交后的运行时边界（组合根一次性接线；独立于普通提交管线）。
+  private let postLegacyImport: ((LegacyImportOutcome) async -> Void)?
   private let legacyImportService: LegacyImportService
 
   init(
-    fileStore: CatalogFileStore = CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL()),
+    coordinator: CatalogCommitCoordinator,
     credentials: CredentialStoring = KeychainCredentialStore(),
     plugins: ManagedPluginProviding = BundleManagedPluginProvider(),
     subscriptionFetcher: SubscriptionFetching = HTTPSSubscriptionFetcher(),
-    legacyImportService: LegacyImportService? = nil
+    legacyImportService: LegacyImportService? = nil,
+    postLegacyImport: ((LegacyImportOutcome) async -> Void)? = nil
   ) {
-    self.fileStore = fileStore
+    self.coordinator = coordinator
+    fileStore = coordinator.fileStore
     self.credentials = credentials
     self.plugins = plugins
     self.subscriptionFetcher = subscriptionFetcher
+    self.postLegacyImport = postLegacyImport
     self.legacyImportService =
       legacyImportService
       ?? LegacyImportService(
@@ -52,9 +56,8 @@ final class CatalogViewModel: ObservableObject {
         activationStore: ActivationStateFileStore(
           fileURL: ActivationStateFileStore.defaultFileURL()),
         credentials: credentials)
-    let loaded = (try? fileStore.load()) ?? CatalogDocument()
-    catalog = loaded.catalog
-    subscriptions = loaded.subscriptions
+    catalog = coordinator.committedCatalog
+    subscriptions = coordinator.committedSubscriptions
     refreshLegacyImportState()
   }
 
@@ -87,9 +90,9 @@ final class CatalogViewModel: ObservableObject {
       snapshot = current
     }
     let outcome = try legacyImportService.importSnapshot(snapshot, reimport: reimport)
-    let loaded = try fileStore.load()
-    catalog = loaded.catalog
-    subscriptions = loaded.subscriptions
+    coordinator.reloadCommittedStateFromStore()
+    catalog = coordinator.committedCatalog
+    subscriptions = coordinator.committedSubscriptions
     legacyImportReport = outcome.report
     refreshLegacyImportState()
     await postLegacyImport?(outcome)
@@ -140,7 +143,7 @@ final class CatalogViewModel: ObservableObject {
     }
     guard !prepared.isEmpty else { return (0, failures) }
     do {
-      try await commit { catalog in
+      try commit { catalog in
         for item in prepared {
           try catalog.addServer(item.fields, to: parent)
         }
@@ -158,7 +161,7 @@ final class CatalogViewModel: ObservableObject {
   func addGroup(named name: String, into parent: NodeID?) async throws -> NodeID {
     let trimmed = name.trimmingCharacters(in: .whitespaces)
     guard !trimmed.isEmpty else { throw ServerFormError.emptyName }
-    return try await commit { catalog in
+    return try commit { catalog in
       try catalog.addGroup(trimmed, to: parent)
     }
   }
@@ -166,21 +169,21 @@ final class CatalogViewModel: ObservableObject {
   func renameGroup(_ id: NodeID, to name: String) async throws {
     let trimmed = name.trimmingCharacters(in: .whitespaces)
     guard !trimmed.isEmpty else { throw ServerFormError.emptyName }
-    try await commit { catalog in
+    try commit { catalog in
       try catalog.renameGroup(id, to: trimmed)
     }
   }
 
   /// 拖拽/移动菜单落点。跨来源、成环、移动进自身由领域拒绝，原样上抛呈现。
   func move(_ id: NodeID, to parent: NodeID?) async throws {
-    try await commit { catalog in
+    try commit { catalog in
       try catalog.move(id, to: parent)
     }
   }
 
   /// 删除（手动分组递归删整棵子树），并尽力清理被删节点的 Keychain 秘密。
   func remove(_ id: NodeID) async throws {
-    let removed: [CatalogEntry] = try await commit { catalog in
+    let removed: [CatalogEntry] = try commit { catalog in
       try catalog.remove(id)
     }
     if let selection = selectedNodeID, removed.contains(where: { $0.id == selection }) {
@@ -215,7 +218,7 @@ final class CatalogViewModel: ObservableObject {
       throw ServerFormError.unsupportedEncryptionMethod(trimmedMethod)
     }
     guard !password.isEmpty else { throw ServerFormError.invalidPassword }
-    try await commit { catalog in
+    try commit { catalog in
       guard let entry = catalog.entry(for: id), case .server(var fields) = entry.kind else {
         throw CatalogError.notAServer(id)
       }
@@ -312,28 +315,23 @@ final class CatalogViewModel: ObservableObject {
 
   // MARK: - 提交管线
 
-  /// 副本变更 → 落盘 → 发布 → postCommit；任一步失败则已发布状态不动。
+  /// 仅目录变更的提交便捷入口（订阅扩展使用双参 `commitDocument`）。
   private func commit<T>(
     _ mutate: (inout ConfigurationCatalog) throws -> T
-  ) async throws -> T {
-    try await commitDocument { catalog, _ in
+  ) throws -> T {
+    try commitDocument { catalog, _ in
       try mutate(&catalog)
     }
   }
 
-  /// 目录 + 订阅记录同文档提交（订阅刷新/创建/删除共用）：任一步失败则已
-  /// 发布状态不动，成功才依次发布并触发运行时重展开。
+  /// 副本变更 → 协调器落盘 → 发布已提交状态；任一步失败则已发布状态不动。
+  /// 运行时收敛由协调器异步调度（issue #40），不阻塞也不回滚本提交。
   func commitDocument<T>(
     _ mutate: (inout ConfigurationCatalog, inout [SubscriptionRecord]) throws -> T
-  ) async throws -> T {
-    var workingCatalog = catalog
-    var workingSubscriptions = subscriptions
-    let result = try mutate(&workingCatalog, &workingSubscriptions)
-    try fileStore.save(
-      CatalogDocument(catalog: workingCatalog, subscriptions: workingSubscriptions))
-    catalog = workingCatalog
-    subscriptions = workingSubscriptions
-    await postCommit?()
+  ) throws -> T {
+    let result = try coordinator.commit(mutate)
+    catalog = coordinator.committedCatalog
+    subscriptions = coordinator.committedSubscriptions
     return result
   }
 

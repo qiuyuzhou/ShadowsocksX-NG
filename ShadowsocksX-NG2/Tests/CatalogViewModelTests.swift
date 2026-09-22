@@ -3,14 +3,15 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 /// 主窗口视图模型（issue #32）：三入口导入、凭据生命周期、订阅子树只读夹具、
-/// 分享互逆与 postCommit 接线。全部走内存凭据存储与临时目录文件存储。
+/// 分享互逆与提交接线。全部走内存凭据存储与临时目录文件存储；提交后的运行
+/// 时收敛以确定性 fake 计数（issue #40）。
 @MainActor
 final class CatalogViewModelTests: XCTestCase {
   private var workDir: URL!
   private var fileURL: URL!
   private var credentials: InMemoryCredentialStore!
+  private var runtime: FakeCatalogRuntime!
   private var viewModel: CatalogViewModel!
-  private var commitCounter: CommitCounter!
 
   override func setUp() async throws {
     try await super.setUp()
@@ -20,7 +21,7 @@ final class CatalogViewModelTests: XCTestCase {
     try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
     fileURL = workDir.appendingPathComponent("catalog.json")
     credentials = InMemoryCredentialStore()
-    commitCounter = CommitCounter()
+    runtime = FakeCatalogRuntime()
     viewModel = makeViewModel()
   }
 
@@ -30,13 +31,14 @@ final class CatalogViewModelTests: XCTestCase {
   }
 
   private func makeViewModel() -> CatalogViewModel {
-    let model = CatalogViewModel(
-      fileStore: CatalogFileStore(fileURL: fileURL),
+    // 计数即提交计数：提交后的运行时收敛由协调器异步调度（issue #40）。
+    runtime.hasActiveTarget = true
+    let coordinator = CatalogCommitCoordinator(
+      fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime)
+    return CatalogViewModel(
+      coordinator: coordinator,
       credentials: credentials,
       plugins: NoManagedPluginProvider())
-    let counter = commitCounter!
-    model.postCommit = { await counter.increment() }
-    return model
   }
 
   private func makeSubscriptionCatalog() throws {
@@ -137,8 +139,14 @@ final class CatalogViewModelTests: XCTestCase {
     XCTAssertEqual(fields.remark, "改过的")
     XCTAssertEqual(fields.passwordRef, oldRef, "同一引用始终对应最新秘密")
     XCTAssertEqual(try credentials.secret(for: oldRef), "新密码")
-    let commitCount = await commitCounter.count
-    XCTAssertEqual(commitCount, 2, "导入 + 更新各一次提交")
+    // 连续提交合并为最新代次的收敛（issue #40）：旧代次在启动前被取代，
+    // 最终结果必为最新提交快照。
+    await waitUntilRuntimeSettles(viewModel.coordinator.syncStatus != .syncing(generation: 2))
+    XCTAssertEqual(
+      viewModel.coordinator.syncStatus,
+      .finished(generation: 2, outcome: .converged(skippedServers: [])))
+    XCTAssertFalse(runtime.convergeSnapshots.isEmpty)
+    XCTAssertEqual(runtime.convergeSnapshots.last?.catalog, viewModel.catalog)
   }
 
   func testUpdateServerRejectsInvalidAddressAndPort() async throws {
@@ -249,12 +257,6 @@ final class CatalogViewModelTests: XCTestCase {
     XCTAssertTrue(reloaded.catalog.contains(groupID))
     XCTAssertEqual(reloaded.displayName(for: groupID), "持久组")
   }
-}
-
-/// postCommit 触发计数。
-actor CommitCounter {
-  private(set) var count = 0
-  func increment() { count += 1 }
 }
 
 /// `XCTAssertThrowsError` 的 async 版本（表达式在 await 之后才能检查）。

@@ -43,12 +43,11 @@ final class CatalogViewModelPluginTests: XCTestCase {
   }
 
   private func makeViewModel() -> CatalogViewModel {
-    let model = CatalogViewModel(
-      fileStore: CatalogFileStore(fileURL: fileURL),
+    CatalogViewModel(
+      coordinator: CatalogCommitCoordinator(
+        fileStore: CatalogFileStore(fileURL: fileURL), runtime: FakeCatalogRuntime()),
       credentials: credentials,
       plugins: BundleManagedPluginProvider(bundleURL: bundleRoot))
-    model.postCommit = {}
-    return model
   }
 
   /// 直建目录（不经 URI 导入）后重载视图模型，返回该服务器身份。

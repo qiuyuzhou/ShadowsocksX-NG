@@ -3,8 +3,8 @@ import Foundation
 /// 订阅生命周期（spec #21 D4，issue #35）：粘贴 HTTPS URL 创建、单个/全部
 /// 立即更新、编辑 URL（保留身份）、删除（递归清除）。刷新 = 完整获取、解析、
 /// 校验后同文档原子提交快照与刷新状态；任何失败保留最后成功快照、活动目标与
-/// 运行状态，仅标记来源失败。每次提交都触发 postCommit
-/// 重展开（订阅子树变更 → 活动目标原子跟随或清除停止）。
+/// 运行状态，仅标记来源失败。每次提交都经目录提交协调器异步触发运行时收敛
+/// （issue #40；订阅子树变更 → 活动目标原子跟随或清除停止）。
 extension CatalogViewModel {
   /// 创建订阅：校验 HTTPS URL → 落订阅记录与空固定分组 → 立即首次刷新。
   /// 首次刷新失败留空分组加错误态（状态在刷新内标记，创建本身总是成功）。
@@ -17,7 +17,7 @@ extension CatalogViewModel {
       urlRef: .fresh(),
       status: .never)
     try credentials.save(url.absoluteString, for: record.urlRef)
-    try await commitDocument { catalog, subscriptions in
+    try commitDocument { catalog, subscriptions in
       // 固定分组挂在目录根（CONTEXT.md「Subscription group」）；名称以 host
       // 兜底，首次成功刷新后跟随远端。
       try catalog.addGroup(url.host ?? "", source: .subscription, id: record.groupID)
@@ -73,7 +73,7 @@ extension CatalogViewModel {
       throw SubscriptionFormError.notFound
     }
     var removedEntries: [CatalogEntry] = []
-    try await commitDocument { catalog, subscriptions in
+    try commitDocument { catalog, subscriptions in
       removedEntries = try catalog.removeSubscriptionSubtree(of: record.groupID)
       subscriptions.removeAll { $0.id == id }
     }
@@ -148,7 +148,7 @@ extension CatalogViewModel {
     var removedServers: [CatalogEntry] = []
     var credentialJournal = CredentialWriteJournal(credentials: credentials)
     do {
-      try await commitDocument { catalog, subscriptions in
+      try commitDocument { catalog, subscriptions in
         // 凭据引用按节点身份复用：延续节点覆盖写秘密，不新增孤儿引用；
         // journal 保证快照提交失败时恢复旧秘密。
         var reusedRefs: [NodeID: ServerCredentialRefs] = [:]
@@ -182,7 +182,7 @@ extension CatalogViewModel {
   }
 
   private func markRefreshFailed(subscriptionID: NodeID, reason: String) async {
-    try? await commitDocument { _, subscriptions in
+    try? commitDocument { _, subscriptions in
       if let index = subscriptions.firstIndex(where: { $0.id == subscriptionID }) {
         subscriptions[index].status = .failed(at: Date(), reason: reason)
       }

@@ -336,7 +336,9 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     try catalog.updateServer(seeded.server, with: fields)
     try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
 
-    await controller.catalogDidCommit()
+    // 协调器生产适配入口（issue #40）：以刚提交的内存快照重展开。
+    let committed = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
+    await controller.catalogDidCommit(snapshot: committed)
 
     XCTAssertEqual(controller.state, .running)
     let expectedRemark = "新加坡 01"
@@ -359,7 +361,9 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     try catalog.remove(seeded.server)
     try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
 
-    await controller.catalogDidCommit()
+    // 协调器生产适配入口（issue #40）：以刚提交的内存快照重展开。
+    let committed = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
+    await controller.catalogDidCommit(snapshot: committed)
 
     guard case .activationFailed = controller.state else {
       XCTFail("应呈现点名原因，实际 \(controller.state)")

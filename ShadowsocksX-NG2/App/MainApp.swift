@@ -4,20 +4,32 @@ import SwiftUI
 struct ShadowsocksXNG2App: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @StateObject private var proxyController: ProxyRuntimeController
-  @StateObject private var catalogViewModel = CatalogViewModel()
+  @StateObject private var catalogViewModel: CatalogViewModel
   @StateObject private var loginController: LaunchAtLoginController
 
   init() {
     let settingsStore = ProxySettingsFileStore()
     let restoredSettings = ProxySettingsFileStore.restored(store: settingsStore)
-    _proxyController = StateObject(
-      wrappedValue: ProxyRuntimeController(
-        listenRestore: RestoredListenSettings(
-          settings: restoredSettings.settings.listen, unreadableError: nil),
-        settingsStore: settingsStore,
-        settingsRestore: restoredSettings))
+    let controller = ProxyRuntimeController(
+      listenRestore: RestoredListenSettings(
+        settings: restoredSettings.settings.listen, unreadableError: nil),
+      settingsStore: settingsStore,
+      settingsRestore: restoredSettings)
+    _proxyController = StateObject(wrappedValue: controller)
     let loginController = LaunchAtLoginController()
     _loginController = StateObject(wrappedValue: loginController)
+    // 组合根（issue #40）：目录提交协调器与生产运行时适配器只在此接线一次，
+    // 各 scene 不再重复设置提交回调；Legacy 导入边界同为一次性注入。
+    let coordinator = CatalogCommitCoordinator(
+      fileStore: CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL()),
+      runtime: ProxyRuntimeSyncAdapter(controller: controller))
+    _catalogViewModel = StateObject(
+      wrappedValue: CatalogViewModel(
+        coordinator: coordinator,
+        postLegacyImport: { outcome in
+          await controller.legacyImportDidCommit()
+          loginController.applyImportedValue(outcome.loginAtLogin)
+        }))
     Task { @MainActor in
       loginController.syncAtLaunch()
     }
@@ -30,17 +42,8 @@ struct ShadowsocksXNG2App: App {
     MenuBarExtra("ShadowsocksX-NG 2.0", systemImage: "network") {
       ProxyStatusMenu(controller: proxyController, catalogViewModel: catalogViewModel)
         .task {
-          // postCommit 在应用启动即接线（不只主窗口打开时）：菜单栏「立即更新
-          // 全部订阅」（issue #35）等未开窗路径的目录提交同样立即重展开运行时。
-          let controller = proxyController
-          catalogViewModel.postCommit = { await controller.catalogDidCommit() }
-          let loginController = loginController
-          catalogViewModel.postLegacyImport = { outcome in
-            await controller.legacyImportDidCommit()
-            loginController.applyImportedValue(outcome.loginAtLogin)
-          }
           // 全局快捷键（issue #31）：开关代理、切换模式，与菜单项同一入口。
-          GlobalShortcuts.wire(controller: controller)
+          GlobalShortcuts.wire(controller: proxyController)
           await proxyController.resyncOnLaunch()
         }
     }
@@ -51,16 +54,6 @@ struct ShadowsocksXNG2App: App {
         viewModel: catalogViewModel, proxyController: proxyController,
         eventStore: .shared
       )
-      .task {
-        // 目录提交 → 代理运行时立即重展开（spec #21 D3「已提交编辑立即跟随」）。
-        let controller = proxyController
-        catalogViewModel.postCommit = { await controller.catalogDidCommit() }
-        let loginController = loginController
-        catalogViewModel.postLegacyImport = { outcome in
-          await controller.legacyImportDidCommit()
-          loginController.applyImportedValue(outcome.loginAtLogin)
-        }
-      }
     }
     .defaultLaunchBehavior(
       catalogViewModel.shouldOfferLegacyImport ? .automatic : .suppressed)
