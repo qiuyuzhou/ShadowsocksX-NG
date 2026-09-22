@@ -6,6 +6,7 @@ struct ShadowsocksXNG2App: App {
   @StateObject private var proxyController: ProxyRuntimeController
   @StateObject private var catalogWorkflow: CatalogWorkflow
   @StateObject private var loginController: LaunchAtLoginController
+  @StateObject private var settingsWorkflow: SettingsWorkflow
 
   init() {
     let settingsStore = ProxySettingsFileStore()
@@ -29,6 +30,8 @@ struct ShadowsocksXNG2App: App {
         postLegacyImport: { _ in
           await controller.legacyImportDidCommit()
         }))
+    // 设置工作流 module（Candidate 02）：设置窗口的唯一 seam，组合根接线一次。
+    _settingsWorkflow = StateObject(wrappedValue: SettingsWorkflow(controller: controller))
     // GUI 事件接入内存环形缓冲（spec #21 D5，issue #34）：主窗口日志查看器与
     // 诊断导出的来源；wrapper 侧不注册，仍走 stderr → agent.log 收敛。
     RuntimeLog.setSink(RuntimeEventStore.shared)
@@ -56,7 +59,7 @@ struct ShadowsocksXNG2App: App {
     // 由状态菜单通过 openWindow(id:) 打开。
     Window("设置", id: "settings") {
       SettingsView(
-        proxyController: proxyController,
+        workflow: settingsWorkflow,
         loginController: loginController
       )
       .frame(width: 640, height: 760)

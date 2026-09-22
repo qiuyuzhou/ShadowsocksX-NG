@@ -54,19 +54,8 @@ enum StatusMenuModel {
       detail = reason
     }
     return Summary(
-      isOn: isOn(state: state), status: status, detail: detail, modeLabel: mode.label,
+      isOn: state.isOn, status: status, detail: detail, modeLabel: mode.label,
       targetPath: targetPath)
-  }
-
-  /// 代理开关的当前意图（状态菜单与当前运行端口判断共用同一判定）：启动失败等
-  /// 中间态视为未开——状态菜单的下一步动作是「启动」。
-  static func isOn(state: ProxyRuntimeController.ProxyState) -> Bool {
-    switch state {
-    case .off, .launchFailed, .activationFailed, .serviceFailed:
-      false
-    case .starting, .running, .firewallBlocked, .requiresApproval, .systemProxyFailed:
-      true
-    }
   }
 
   /// 复制 HTTP 导出行（D11）：shell 可直接 source 的 http/https 双导出；

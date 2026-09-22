@@ -429,6 +429,19 @@ final class ProxyRuntimeController: ObservableObject {
   }
 }
 
+extension ProxyRuntimeController.ProxyState {
+  /// 代理开关的当前意图（菜单开关与设置工作流共用的同一判定）：启动失败等
+  /// 未运行态视为未开——两个入口的下一步动作都是「启动」。
+  var isOn: Bool {
+    switch self {
+    case .off, .launchFailed, .activationFailed, .serviceFailed:
+      false
+    case .starting, .running, .firewallBlocked, .requiresApproval, .systemProxyFailed:
+      true
+    }
+  }
+}
+
 extension ProxyRuntimeController {
   /// 目录提交协调器的生产适配入口（issue #40）：以刚提交的内存快照重展开，
   /// 不回读磁盘（磁盘仍是重启与跨进程恢复的权威来源）。有效非空且代理开启
