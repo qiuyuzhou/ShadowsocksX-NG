@@ -1,14 +1,13 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 主窗口诊断区（spec #21 D11，issue #34/#41）：日志查看器（GUI 事件流实时
-/// 呈现 + wrapper 收敛日志尾部，均可复制）与显式触发的脱敏诊断导出。导出仅由
-/// 用户点击触发，内容只含 D5 允许的元数据类目；目录计数经工作流 module 的
-/// 诊断事实填充，原始目录不出 module。
+/// 主窗口诊断区（spec #21 D11，issue #34/#43）：日志查看器（GUI 事件流实时
+/// 呈现 + wrapper 收敛日志尾部，均可复制）与显式触发的脱敏诊断导出。事实
+/// 采样、轮询代际与报告准备全部经 DiagnosticsWorkflow（issue #43 的唯一
+/// UI-facing seam）；本视图只负责生命周期触发、呈现、剪贴板、保存面板与
+/// 报告文件写入——文件实际写入成功后才登记导出完成事件。
 struct DiagnosticsView: View {
-  @ObservedObject var workflow: CatalogWorkflow
-  @ObservedObject var proxyController: ProxyRuntimeController
-  let eventStore: RuntimeEventStore
+  @ObservedObject var diagnostics: DiagnosticsWorkflow
   let errors: ErrorAlertPresenter
 
   enum LogSource: String, CaseIterable, Identifiable {
@@ -28,8 +27,6 @@ struct DiagnosticsView: View {
   }
 
   @State private var source: LogSource = .guiEvents
-  @State private var guiLines: [String] = []
-  @State private var agentLogText: String?
   @State private var exportedPath: String?
 
   var body: some View {
@@ -40,7 +37,7 @@ struct DiagnosticsView: View {
       Divider()
       logPane
     }
-    .task { await refreshLoop() }
+    .task { await diagnostics.readWhileActive() }
     .alert(
       "诊断已导出",
       isPresented: Binding(
@@ -85,20 +82,25 @@ struct DiagnosticsView: View {
     .padding(8)
   }
 
-  @ViewBuilder
-  private var logPane: some View {
+  /// 当前日志来源的文本与空态提示（呈现与复制共用同一来源，story 21）。
+  private var activeLog: (text: String, emptyMessage: String) {
     switch source {
     case .guiEvents:
-      logText(
-        guiLines.joined(separator: "\n"),
-        emptyMessage: "暂无 GUI 事件；开关代理或激活服务器后，运行事件会实时出现在这里。")
+      return (
+        diagnostics.logView.guiEventLines.joined(separator: "\n"),
+        "暂无 GUI 事件；开关代理或激活服务器后，运行事件会实时出现在这里。"
+      )
     case .agentLog:
-      logText(
-        agentLogText ?? "",
-        emptyMessage:
-          "暂无运行日志；代理运行时（wrapper）启动后，它与 sslocal 的输出会收敛到 agent.log 并在此呈现。"
+      return (
+        diagnostics.logView.agentLogTail ?? "",
+        "暂无运行日志；代理运行时（wrapper）启动后，它与 sslocal 的输出会收敛到 agent.log 并在此呈现。"
       )
     }
+  }
+
+  @ViewBuilder
+  private var logPane: some View {
+    logText(activeLog.text, emptyMessage: activeLog.emptyMessage)
   }
 
   private func logText(_ text: String, emptyMessage: String) -> some View {
@@ -119,25 +121,8 @@ struct DiagnosticsView: View {
     }
   }
 
-  // MARK: - 实时刷新
-
-  /// 两个日志来源都以轮询刷新（GUI 事件走内存缓冲，agent.log 走尾部读取），
-  /// 一秒粒度对诊断足够，也避免引入跨线程 @Published。
-  private func refreshLoop() async {
-    while !Task.isCancelled {
-      guiLines = eventStore.snapshot.map(\.renderedLine)
-      agentLogText = AgentLogTail.readLastLines(of: RuntimePaths.agentLogURL())
-      try? await Task.sleep(for: .seconds(1))
-    }
-  }
-
   private var activeText: String {
-    switch source {
-    case .guiEvents:
-      return guiLines.joined(separator: "\n")
-    case .agentLog:
-      return agentLogText ?? ""
-    }
+    activeLog.text
   }
 
   private func copyToClipboard(_ text: String) {
@@ -150,130 +135,34 @@ struct DiagnosticsView: View {
   private func exportReport() {
     let panel = NSSavePanel()
     panel.allowedContentTypes = [.plainText]
-    panel.nameFieldStringValue = "ShadowsocksX-NG-诊断-\(fileStamp()).txt"
+    panel.nameFieldStringValue = diagnostics.suggestedReportFileName()
     guard panel.runModal() == .OK, let url = panel.url else { return }
-    do {
-      let report = DiagnosticReportBuilder.markdown(from: makeSnapshot())
-      guard let data = report.data(using: .utf8) else {
-        errors.present(text: "导出失败：报告无法编码为 UTF-8")
-        return
+    switch diagnostics.prepareReport() {
+    case .ready(let draft):
+      do {
+        try draft.data.write(to: url)
+        diagnostics.noteExportCompleted()
+        exportedPath = url.path
+      } catch {
+        errors.present(text: "导出失败：\(error.localizedDescription)")
       }
-      try data.write(to: url)
-      RuntimeLog.emit(.diagnosticsExported)
-      exportedPath = url.path
-    } catch {
-      errors.present(text: "导出失败：\(error.localizedDescription)")
-    }
-  }
-
-  private func makeSnapshot() -> DiagnosticSnapshot {
-    var snapshot = DiagnosticSnapshot()
-    snapshot.appVersion = Self.appVersion()
-    snapshot.systemSummary = Self.systemSummary()
-    snapshot.proxyState = proxyController.diagnosticState
-    snapshot.hasActiveTarget = proxyController.isActiveTargetPresent
-    snapshot.listen = proxyController.listenSettings
-    snapshot.runtimeDocumentSummary = proxyController.runtimeDocumentSummary()
-    workflow.fillDiagnosticCatalogFacts(into: &snapshot)
-    snapshot.fileFacts = Self.fileFacts()
-    snapshot.managedPlugins = Self.managedPluginFacts()
-    snapshot.eventLines = eventStore.snapshot.suffix(200).map(\.renderedLine)
-    snapshot.homePathForRedaction = NSHomeDirectory()
-    return snapshot
-  }
-
-  /// 受管插件清单（issue #38）：静态事实表 + 可执行文件存在性（D10 生成配置
-  /// 时的同一检查；参数与路径不入导出）。
-  private static func managedPluginFacts() -> [DiagnosticPluginFacts] {
-    let provider = BundleManagedPluginProvider()
-    return ManagedPluginCatalog.plugins.map { info in
-      DiagnosticPluginFacts(
-        program: info.program,
-        version: info.release,
-        present: provider.executablePath(forProgram: info.program) != nil)
-    }
-  }
-
-  private static func fileFacts() -> [DiagnosticFileFacts] {
-    [
-      DiagnosticFileCollector.collect(label: "运行时目录", url: RuntimePaths.runtimeDirectory()),
-      DiagnosticFileCollector.collect(
-        label: "catalog.json", url: CatalogFileStore.defaultFileURL()),
-      DiagnosticFileCollector.collect(
-        label: "activation.json", url: ActivationStateFileStore.defaultFileURL()),
-      DiagnosticFileCollector.collect(
-        label: "sslocal-active.json", url: RuntimePaths.runtimeFileURL()),
-      DiagnosticFileCollector.collect(label: "agent.pid", url: RuntimePaths.agentPIDFileURL()),
-      DiagnosticFileCollector.collect(label: "agent.log", url: RuntimePaths.agentLogURL()),
-    ]
-  }
-
-  private static func appVersion() -> String? {
-    guard let info = Bundle.main.infoDictionary else { return nil }
-    let parts = [
-      (info["CFBundleShortVersionString"] as? String).map { "版本 \($0)" },
-      (info["CFBundleVersion"] as? String).map { "构建 \($0)" },
-    ].compactMap { $0 }
-    return parts.isEmpty ? nil : parts.joined(separator: "，")
-  }
-
-  private static func systemSummary() -> String {
-    let arch: String
-    #if arch(arm64)
-      arch = "arm64"
-    #elseif arch(x86_64)
-      arch = "x86_64"
-    #else
-      arch = "未知架构"
-    #endif
-    return "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)，\(arch)"
-  }
-
-  private func fileStamp() -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "yyyyMMdd-HHmmss"
-    return formatter.string(from: Date())
-  }
-}
-
-extension ProxyRuntimeController {
-  /// 控制器状态 → 诊断安全呈现（D5：不透传任意错误 detail；监听地址只以
-  /// 回环/非回环两态进入导出，原始错误文本一律丢弃）。
-  var diagnosticState: DiagnosticProxyState {
-    switch state {
-    case .off:
-      return .off
-    case .starting:
-      return .starting
-    case .running:
-      return .running
-    case .firewallBlocked:
-      return .firewallBlocked
-    case .launchFailed:
-      return .launchFailed
-    case .activationFailed(let reason):
-      return .activationFailed(reason: reason)
-    case .requiresApproval:
-      return .requiresApproval
-    case .serviceFailed:
-      return .serviceFailed
-    case .systemProxyFailed:
-      return .systemProxyFailed
+    case .failed:
+      errors.present(text: "导出失败：诊断报告无法安全构造")
     }
   }
 }
 
-/// 诊断分区侧栏摘要（D11）：代理状态一览与脱敏说明。
+/// 诊断分区侧栏摘要（D11，story 25）：与详情共用 DiagnosticsWorkflow 的同一
+/// 份安全摘要 projection。
 struct DiagnosticsSummarySidebar: View {
-  @ObservedObject var proxyController: ProxyRuntimeController
+  @ObservedObject var workflow: DiagnosticsWorkflow
 
   var body: some View {
     List {
       Section("状态摘要") {
-        LabeledContent("代理状态", value: proxyController.diagnosticState.label)
+        LabeledContent("代理状态", value: workflow.summary.proxyState.label)
         LabeledContent(
-          "活动目标", value: proxyController.isActiveTargetPresent ? "已设置" : "未设置")
+          "活动目标", value: workflow.summary.hasActiveTarget ? "已设置" : "未设置")
       }
       Section {
         Text(

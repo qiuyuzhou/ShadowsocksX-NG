@@ -16,28 +16,36 @@ final class RuntimeEventStoreTests: XCTestCase {
     let first = Date(timeIntervalSince1970: 1_000)
     let second = Date(timeIntervalSince1970: 2_000)
 
-    store.append(text: "first event", timestamp: first)
-    store.append(text: "second event", timestamp: second)
+    store.append(event: .contractWritten(serverCount: 42), timestamp: first)
+    store.append(event: .agentRegistered, timestamp: second)
 
     let snapshot = store.snapshot
-    XCTAssertEqual(snapshot.map(\.text), ["first event", "second event"])
+    XCTAssertEqual(
+      snapshot.map(\.text),
+      ["contract written (servers=42)", "launch agent registered"])
     XCTAssertEqual(snapshot.map(\.id), [0, 1])
     // 行格式 = 固定格式时间戳 + 两空格 + 事件文本（不锚定时区，格式器随本机）。
     XCTAssertEqual(
       snapshot[0].renderedLine,
-      RuntimeEventStore.Entry.timestampFormatter.string(from: first) + "  first event")
+      RuntimeEventStore.Entry.timestampFormatter.string(from: first)
+        + "  contract written (servers=42)")
     XCTAssertEqual(
       snapshot[1].renderedLine,
-      RuntimeEventStore.Entry.timestampFormatter.string(from: second) + "  second event")
+      RuntimeEventStore.Entry.timestampFormatter.string(from: second) + "  launch agent registered")
   }
 
   func testCapacityKeepsMostRecentEvents() {
     let store = RuntimeEventStore(capacity: 3)
     for index in 0..<5 {
-      store.append(text: "event-\(index)", timestamp: Date())
+      store.append(event: .contractWritten(serverCount: index), timestamp: Date())
     }
 
-    XCTAssertEqual(store.snapshot.map(\.text), ["event-2", "event-3", "event-4"])
+    XCTAssertEqual(
+      store.snapshot.map(\.text),
+      [
+        "contract written (servers=2)", "contract written (servers=3)",
+        "contract written (servers=4)",
+      ])
   }
 
   func testEmitRoutesToRegisteredSink() {

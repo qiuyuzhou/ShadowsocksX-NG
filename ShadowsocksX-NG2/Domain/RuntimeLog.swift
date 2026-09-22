@@ -5,7 +5,7 @@ import Foundation
 /// 内容；服务器地址与备注默认不进普通日志（端点探测失败点名的 host:port
 /// 是本机监听端点，属 D8 要求呈现的事实字段，不受此限）。日志查看与诊断
 /// 导出由 #34 在本事件流上接出。
-enum RuntimeLogEvent: CustomStringConvertible, Sendable {
+enum RuntimeLogEvent: Equatable, CustomStringConvertible, Sendable {
   /// 契约文件已原子写入（只携带数量元数据，非内容）。
   case contractWritten(serverCount: Int)
   /// 契约内容与磁盘一致，跳过写入（幂等）。
@@ -97,11 +97,12 @@ enum RuntimeLogEvent: CustomStringConvertible, Sendable {
   }
 }
 
-/// 事件接收缝（issue #34）：GUI 进程把渲染后的事件文本接入 RuntimeEventStore
-/// （内存环形缓冲），供主窗口日志查看器实时呈现与诊断导出取用；wrapper 进程
-/// 不注册，仅走 stderr → agent.log 收敛。
+/// 事件接收缝（issue #34）：GUI 进程把事件接入 RuntimeEventStore（内存环形
+/// 缓冲），供主窗口日志查看器实时呈现与诊断导出取用；wrapper 进程不注册，
+/// 仅走 stderr → agent.log 收敛。接收方拿到的是封闭枚举原值，渲染发生在
+/// 呈现边缘（诊断报告的白名单清洗只可能作用于原值，issue #43）。
 protocol RuntimeEventSink: Sendable {
-  func append(text: String, timestamp: Date)
+  func append(event: RuntimeLogEvent, timestamp: Date)
 }
 
 /// 敏感信息脱敏工具（D5「敏感信息」定义的读取面）。
@@ -135,7 +136,7 @@ enum RuntimeLog {
   static func emit(_ event: RuntimeLogEvent) {
     let line = "ssxng: \(event.description)\n"
     FileHandle.standardError.write(Data(line.utf8))
-    sinkHolder.current?.append(text: event.description, timestamp: Date())
+    sinkHolder.current?.append(event: event, timestamp: Date())
   }
 
   /// 可变静态的锁保护持有者：emit 可能来自任意线程。

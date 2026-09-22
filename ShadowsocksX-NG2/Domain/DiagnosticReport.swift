@@ -79,9 +79,20 @@ enum DiagnosticProxyState: Equatable, Sendable {
 
 // MARK: - 快照与构建器
 
+/// 目录聚合诊断事实（issue #43，story 32/36）：数量元数据与已知无效数。原始
+/// 目录、目录条目、服务器地址、备注与凭据引用不进入本类型——构造它的唯一
+/// 生产入口是目录 workflow 的 domain-neutral 事实缝，报告 builder 只接受
+/// 已经裁剪的聚合事实。
+struct DiagnosticCatalogFacts: Equatable, Sendable {
+  var counts = DiagnosticReportBuilder.CatalogCounts()
+  /// 已知无效服务器数（应用层以当前凭据与插件供应事实计算；nil = 未知）。
+  var knownInvalidServerCount: Int?
+}
+
 /// 诊断快照（issue #34）：导出报告的全部输入。字段要么是数量/布尔/时间等
 /// 元数据，要么是已脱敏文本（由夹具测试验证），构建器不再接触任何秘密来源
-/// ——不读 Keychain、不读契约与目录的文件内容。
+/// ——不读 Keychain、不读契约与目录的文件内容；目录事实只以聚合计数进入
+/// （issue #43）。
 struct DiagnosticSnapshot: Sendable {
   var generatedAt = Date()
   var appVersion: String?
@@ -91,11 +102,11 @@ struct DiagnosticSnapshot: Sendable {
   var listen: SslocalListenSettings?
   /// `Redactor.documentSummary` 产出的契约脱敏摘要（数量与模式）。
   var runtimeDocumentSummary: String?
-  var catalog: ConfigurationCatalog?
-  /// 由应用层用当前凭据与插件供应事实计算的已知无效服务器数。
-  var knownInvalidServerCount: Int?
+  /// 目录聚合事实；nil = 目录事实源不可用（报告中明确标注，不静默丢失）。
+  var catalogFacts: DiagnosticCatalogFacts?
   var fileFacts: [DiagnosticFileFacts] = []
-  /// 渲染好的运行事件行（旧→新，调用方负责封顶）。
+  /// 渲染好的运行事件行（旧→新，调用方负责封顶；行文本必须来自白名单
+  /// 清洗投影，issue #43）。
   var eventLines: [String] = []
   /// bundle 内受管插件清单（issue #38；名称/版本/存在性，不含参数与路径）。
   var managedPlugins: [DiagnosticPluginFacts] = []
@@ -190,14 +201,14 @@ enum DiagnosticReportBuilder {
     }
     if let summary = snapshot.runtimeDocumentSummary {
       lines.append("- 运行时契约摘要：\(summary)")
+    } else {
+      lines.append("- 运行时契约摘要：不可用")
     }
     lines.append("")
     lines.append("## 配置目录（数量）")
     lines.append("")
-    if let catalog = snapshot.catalog {
-      lines.append(
-        contentsOf: catalogCountLines(
-          catalog, knownInvalidServerCount: snapshot.knownInvalidServerCount))
+    if let facts = snapshot.catalogFacts {
+      lines.append(contentsOf: catalogCountLines(facts))
     } else {
       lines.append("- 配置目录不可用")
     }
@@ -229,11 +240,10 @@ enum DiagnosticReportBuilder {
     return lines
   }
 
-  private static func catalogCountLines(
-    _ catalog: ConfigurationCatalog, knownInvalidServerCount: Int?
-  ) -> [String] {
-    let counts = counts(in: catalog)
-    let invalid = knownInvalidServerCount.map { "已知无效 \($0)；" } ?? ""
+  /// 目录行只呈现聚合事实（issue #43）：目录条目本身永不进入快照与渲染。
+  private static func catalogCountLines(_ facts: DiagnosticCatalogFacts) -> [String] {
+    let counts = facts.counts
+    let invalid = facts.knownInvalidServerCount.map { "已知无效 \($0)；" } ?? ""
     return [
       "- 服务器：\(counts.servers)（\(invalid)"
         + "配置插件 \(counts.serversWithPlugin)；"

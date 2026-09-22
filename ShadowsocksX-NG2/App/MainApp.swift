@@ -7,6 +7,7 @@ struct ShadowsocksXNG2App: App {
   @StateObject private var catalogWorkflow: CatalogWorkflow
   @StateObject private var loginController: LaunchAtLoginController
   @StateObject private var settingsWorkflow: SettingsWorkflow
+  @StateObject private var diagnosticsWorkflow: DiagnosticsWorkflow
 
   init() {
     let settingsStore = ProxySettingsFileStore()
@@ -24,14 +25,20 @@ struct ShadowsocksXNG2App: App {
     let coordinator = CatalogCommitCoordinator(
       fileStore: CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL()),
       runtime: ProxyRuntimeSyncAdapter(controller: controller))
-    _catalogWorkflow = StateObject(
-      wrappedValue: CatalogWorkflow(
-        coordinator: coordinator,
-        postLegacyImport: { _ in
-          await controller.legacyImportDidCommit()
-        }))
+    let catalogWorkflow = CatalogWorkflow(
+      coordinator: coordinator,
+      postLegacyImport: { _ in
+        await controller.legacyImportDidCommit()
+      })
+    _catalogWorkflow = StateObject(wrappedValue: catalogWorkflow)
     // 设置工作流 module（Candidate 02）：设置窗口的唯一 seam，组合根接线一次。
     _settingsWorkflow = StateObject(wrappedValue: SettingsWorkflow(controller: controller))
+    // 诊断工作流 module（issue #43）：诊断区唯一 seam，组合根接线一次；共享
+    // 实例供诊断侧栏与详情共同使用。
+    _diagnosticsWorkflow = StateObject(
+      wrappedValue: DiagnosticsWorkflow(
+        runtimeFacts: controller,
+        catalogFacts: { catalogWorkflow.diagnosticCatalogFacts }))
     // GUI 事件接入内存环形缓冲（spec #21 D5，issue #34）：主窗口日志查看器与
     // 诊断导出的来源；wrapper 侧不注册，仍走 stderr → agent.log 收敛。
     RuntimeLog.setSink(RuntimeEventStore.shared)
@@ -49,8 +56,7 @@ struct ShadowsocksXNG2App: App {
     Window("ShadowsocksX-NG 2.0", id: "main") {
       MainWindowView(
         workflow: catalogWorkflow, proxyController: proxyController,
-        eventStore: .shared
-      )
+        diagnostics: diagnosticsWorkflow)
     }
     .defaultLaunchBehavior(
       catalogWorkflow.legacyImportState.shouldOffer ? .automatic : .suppressed)

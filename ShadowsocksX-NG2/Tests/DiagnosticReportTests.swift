@@ -61,7 +61,8 @@ final class DiagnosticReportTests: XCTestCase {
     snapshot.runtimeDocumentSummary = Redactor.documentSummary(
       ProxyRuntimeFixture.makeDocument(
         serverAddress: address, password: password, pluginOpts: pluginOpts))
-    snapshot.catalog = catalog
+    snapshot.catalogFacts = DiagnosticCatalogFacts(
+      counts: DiagnosticReportBuilder.counts(in: catalog))
     snapshot.fileFacts = [
       DiagnosticFileFacts(
         label: "sslocal-active.json", exists: true, isDirectory: false,
@@ -160,21 +161,19 @@ final class DiagnosticReportTests: XCTestCase {
     XCTAssertEqual(summary, "https://example.com/…")
   }
 
-  /// 导出动作自身不泄露：事件行是唯一允许进入报告的自由文本，其中的家目录
-  /// 前缀必须改写为「~」；serviceFailed 等原始错误 detail 不入导出。
-  func testEventLinesRedactHomePath() {
-    var snapshot = DiagnosticSnapshot()
-    snapshot.eventLines = [
-      RuntimeLogEvent.runtimePersistFailed(
-        detail: "/Users/SECRETUSER/Library/Application Support/ShadowsocksX-NG2: errno 13"
-      ).description
-    ]
-    snapshot.homePathForRedaction = "/Users/SECRETUSER"
+  /// 家目录前缀改写是报告渲染的兜底防线（issue #43 后自由 detail 已被上游
+  /// 白名单清洗，此防御保留给任何仍携带路径的文本）。
+  func testHomePathRedactionRewritesPrefix() {
+    let text = RuntimeLogEvent.runtimePersistFailed(
+      detail: "/Users/SECRETUSER/Library/Application Support/ShadowsocksX-NG2: errno 13"
+    ).description
 
-    let report = DiagnosticReportBuilder.markdown(from: snapshot)
+    let redacted = DiagnosticReportBuilder.redactingHomePaths(text, home: "/Users/SECRETUSER")
 
-    XCTAssertTrue(report.contains("~/Library/Application Support"))
-    XCTAssertFalse(report.contains("/Users/SECRETUSER"))
+    XCTAssertTrue(redacted.contains("~/Library/Application Support"))
+    XCTAssertFalse(redacted.contains("/Users/SECRETUSER"))
+    XCTAssertEqual(
+      DiagnosticReportBuilder.redactingHomePaths(text, home: nil), text)
   }
 
   /// 原始错误文本不属 D5 白名单类目：serviceFailed 只呈现固定状态文案。

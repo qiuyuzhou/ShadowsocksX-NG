@@ -16,7 +16,8 @@ struct MainWindowView: View {
 
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var proxyController: ProxyRuntimeController
-  let eventStore: RuntimeEventStore
+  /// 诊断工作流 module（issue #43）：诊断侧栏与详情共用的唯一 seam。
+  @ObservedObject var diagnostics: DiagnosticsWorkflow
 
   /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
   @StateObject private var errors = ErrorAlertPresenter()
@@ -134,7 +135,7 @@ struct MainWindowView: View {
 
   /// 诊断分区侧栏：代理状态摘要与脱敏说明（详情与导出入口在右侧日志区）。
   private var diagnosticsSidebar: some View {
-    DiagnosticsSummarySidebar(proxyController: proxyController)
+    DiagnosticsSummarySidebar(workflow: diagnostics)
   }
 
   /// 订阅分区侧栏：订阅摘要说明（卡片与操作全在右侧详情区）。
@@ -231,9 +232,7 @@ struct MainWindowView: View {
   private var detailPane: some View {
     switch pane {
     case .diagnostics:
-      DiagnosticsView(
-        workflow: workflow, proxyController: proxyController, eventStore: eventStore,
-        errors: errors)
+      DiagnosticsView(diagnostics: diagnostics, errors: errors)
     case .subscriptions:
       SubscriptionsView(
         workflow: workflow, errors: errors,

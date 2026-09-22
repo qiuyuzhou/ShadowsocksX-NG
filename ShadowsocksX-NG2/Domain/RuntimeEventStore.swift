@@ -8,12 +8,22 @@ final class RuntimeEventStore: RuntimeEventSink, @unchecked Sendable {
   struct Entry: Equatable, Identifiable {
     let id: Int
     let timestamp: Date
-    let text: String
+    /// 事件原值（封闭枚举）：原始呈现与报告白名单投影共用同一事实。
+    let event: RuntimeLogEvent
 
-    /// 查看器与导出共用的行格式；固定 POSIX locale 保证报障对照不随用户
+    /// 事件文本（查看器与原始行共用）。
+    var text: String { event.description }
+
+    /// 查看器共用的行格式；固定 POSIX locale 保证报障对照不随用户
     /// 区域漂移。
     var renderedLine: String {
-      "\(Self.timestampFormatter.string(from: timestamp))  \(text)"
+      renderedLine(eventText: text)
+    }
+
+    /// 指定事件文本的行格式（报告侧经白名单清洗后复用同一时间戳与间隔，
+    /// issue #43）。
+    func renderedLine(eventText: String) -> String {
+      "\(Self.timestampFormatter.string(from: timestamp))  \(eventText)"
     }
 
     /// DateFormatter 在现代 Foundation 中线程安全；本格式器只被读取。
@@ -44,10 +54,10 @@ final class RuntimeEventStore: RuntimeEventSink, @unchecked Sendable {
     return entries
   }
 
-  func append(text: String, timestamp: Date = Date()) {
+  func append(event: RuntimeLogEvent, timestamp: Date = Date()) {
     lock.lock()
     defer { lock.unlock() }
-    entries.append(Entry(id: nextID, timestamp: timestamp, text: text))
+    entries.append(Entry(id: nextID, timestamp: timestamp, event: event))
     nextID += 1
     if entries.count > capacity {
       entries.removeFirst(entries.count - capacity)
