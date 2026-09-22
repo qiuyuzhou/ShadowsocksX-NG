@@ -8,7 +8,6 @@ import SwiftUI
 struct ServerDetailView: View {
   let workflow: CatalogWorkflow
   let serverID: NodeID
-  let proxyController: ProxyRuntimeController
   let errors: ErrorAlertPresenter
 
   @State private var address = ""
@@ -74,10 +73,10 @@ struct ServerDetailView: View {
           .disabled(!isEditable)
       }
 
-      if let validation = node?.validation, !validation.isValid {
+      if let node, node.isInvalid {
         Section("激活状态") {
-          ForEach(Array(validation.issues.enumerated()), id: \.offset) { _, issue in
-            Label(issue.presentedReason, systemImage: "exclamationmark.triangle.fill")
+          ForEach(Array(node.invalidReasons.enumerated()), id: \.offset) { _, reason in
+            Label(reason.presentedReason, systemImage: "exclamationmark.triangle.fill")
               .foregroundStyle(.orange)
           }
         }

@@ -178,8 +178,8 @@ struct QRImportSheet: View {
   }
 }
 
-/// 「移动到」表单（issue #41）：目的地由树 projection 派生——目录根与除自身
-/// 子树外的全部手动组；跨来源与成环由领域层最终拒绝。
+/// 「移动到」表单（issue #41）：目的地由 seam 的 `moveDestinations` 提供——
+/// 目录根与除自身子树外的全部手动组；跨来源与成环由领域层最终拒绝。
 struct MoveNodeSheet: View {
   let workflow: CatalogWorkflow
   let errors: ErrorAlertPresenter
@@ -194,19 +194,10 @@ struct MoveNodeSheet: View {
   }
 
   private var destinations: [Destination] {
-    var result = [Destination(id: nil, title: "目录根")]
-    let excluded = workflow.tree.node(withID: nodeID)?.subtreeIDs ?? [nodeID]
-    func walk(_ nodes: [CatalogTreeNode], depth: Int) {
-      for node in nodes {
-        guard node.isGroup, node.isManual else { continue }
-        guard !excluded.contains(node.id) else { continue }
-        let indent = String(repeating: "    ", count: depth)
-        result.append(Destination(id: node.id, title: indent + node.name))
-        walk(node.children ?? [], depth: depth + 1)
-      }
+    workflow.moveDestinations(for: nodeID).map { item in
+      let indent = String(repeating: "    ", count: item.depth)
+      return Destination(id: item.id, title: indent + item.name)
     }
-    walk(workflow.tree.roots, depth: 0)
-    return result
   }
 
   var body: some View {

@@ -3,8 +3,10 @@ import Foundation
 // MARK: - 目录树 projection（非敏感）
 
 /// 目录树节点快照（目录工作流 module 的 UI-facing projection，issue #41）：
-/// 名称、来源、形态、校验事实与子树计数；不含凭据引用、密码、插件参数等
+/// 名称、来源、形态、渲染原子与子树计数；不含凭据引用、密码、插件参数等
 /// 秘密值。身份为不透明 `NodeID`，重命名、移动或刷新后保持稳定（story 3）。
+/// 门禁/关系型事实（删除档位、移动资格、激活资格）走 module 查询方法，
+/// 不在节点上堆政策字段。
 struct CatalogTreeNode: Identifiable, Equatable {
   let id: NodeID
   let name: String
@@ -12,21 +14,18 @@ struct CatalogTreeNode: Identifiable, Equatable {
   let source: NodeSource
   /// 父节点身份；目录根层节点为 `nil`。
   let parentID: NodeID?
-  /// 服务器叶子的 app 可知校验结果；分组为 `nil`。
-  let validation: ServerValidation?
+  /// 服务器叶子的已知阻塞原因（typed，无成句文案）；分组为空。
+  let invalidReasons: [LeafInvalidationReason]
   /// 直接子节点数（分组）。
   let childCount: Int
   /// 子树全部后代节点数（分组；不含自身；删除确认的递归规模）。
   let subtreeNodeCount: Int
-  /// 子树中已知无效的服务器数量（不含当前叶子自身）。
+  /// 子树中已知无效的服务器数量（不含当前叶子自身；仅供 tooltip 展示）。
   let invalidDescendantCount: Int
-  /// 子树中服务器叶子总数（叶子为 1）。
-  let serverCount: Int
   /// 分组持有子树快照；服务器叶子为 `nil`。
   let children: [CatalogTreeNode]?
 
-  var isInvalid: Bool { validation?.isValid == false }
-  var invalidServerCount: Int { (isInvalid ? 1 : 0) + invalidDescendantCount }
+  var isInvalid: Bool { !invalidReasons.isEmpty }
   var isManual: Bool { source == .manual }
   /// 子树快照；服务器叶子为空（与 `children` 的 nil 区分叶子语义并存）。
   var childNodes: [CatalogTreeNode] { children ?? [] }
@@ -47,6 +46,11 @@ extension CatalogTreeNode {
     var ids: Set<NodeID> = [id]
     for child in children ?? [] { ids.formUnion(child.subtreeIDs) }
     return ids
+  }
+
+  /// 子树内已知无效服务器总数（含自身叶子）。
+  var subtreeInvalidServerCount: Int {
+    (isInvalid ? 1 : 0) + invalidDescendantCount
   }
 }
 
@@ -69,7 +73,9 @@ struct CatalogTreeSnapshot: Equatable {
   func containsNode(_ id: NodeID) -> Bool { node(withID: id) != nil }
 
   /// 全树已知无效服务器总数（诊断计数）。
-  var invalidServerCount: Int { roots.reduce(0) { $0 + $1.invalidServerCount } }
+  var invalidServerCount: Int {
+    roots.reduce(0) { $0 + $1.subtreeInvalidServerCount }
+  }
 }
 
 extension CatalogTreeSnapshot {
@@ -93,24 +99,24 @@ extension CatalogTreeSnapshot {
           isGroup: true,
           source: entry.source,
           parentID: parentID,
-          validation: nil,
+          invalidReasons: [],
           childCount: children.count,
           subtreeNodeCount: children.reduce(0) { $0 + 1 + $1.subtreeNodeCount },
-          invalidDescendantCount: children.reduce(0) { $0 + $1.invalidServerCount },
-          serverCount: children.reduce(0) { $0 + $1.serverCount },
+          invalidDescendantCount: children.reduce(0) { $0 + $1.subtreeInvalidServerCount },
           children: children)
       case .server(let fields):
+        let validation = ServerValidation.evaluate(
+          fields, credentials: credentials, plugins: plugins)
         return CatalogTreeNode(
           id: id,
           name: entry.displayName,
           isGroup: false,
           source: entry.source,
           parentID: parentID,
-          validation: ServerValidation.evaluate(fields, credentials: credentials, plugins: plugins),
+          invalidReasons: validation.issues,
           childCount: 0,
           subtreeNodeCount: 0,
           invalidDescendantCount: 0,
-          serverCount: 1,
           children: nil)
       }
     }
@@ -120,6 +126,54 @@ extension CatalogTreeSnapshot {
     }
     return CatalogTreeSnapshot(roots: roots)
   }
+}
+
+// MARK: - 目录政策事实（UI 写句子；本 module 不产成句文案）
+
+/// 删除确认档位（CONTEXT.md 删除不变量的结构化事实）。
+enum DeleteConfirmKind: Equatable, Sendable {
+  /// 服务器叶子：单次确认。
+  case leaf
+  /// 空手动分组：单次确认。
+  case emptyGroup
+  /// 非空手动分组：二次确认，点名子树规模与凭据移除。
+  case subtree(count: Int, includesCredentials: Bool)
+}
+
+/// 「移动到」目的地（目录根 + 除自身子树外的全部手动组）。
+struct MoveDestination: Identifiable, Equatable, Sendable {
+  /// `nil` = 目录根。
+  let id: NodeID?
+  let name: String
+  /// 展示缩进深度（根为 0）。
+  let depth: Int
+}
+
+/// 激活资格事实（点前门禁；与 `ActivationCommandOutcome` 的点后结果区分）。
+struct ActivationEligibility: Equatable, Sendable {
+  enum Ineligibility: Equatable, Sendable {
+    case emptyGroup
+    case noCandidates
+  }
+
+  let canActivate: Bool
+  let candidateCount: Int
+  let skippedInvalidCount: Int
+  let ineligibility: Ineligibility?
+}
+
+/// 激活命令的结构化结果（意外错误仍 throws）。
+enum ActivationCommandOutcome: Equatable, Sendable {
+  /// 成功；组展开时跳过的已知无效叶子数。
+  case activated(skippedInvalid: Int)
+  /// 原子拒绝（无 activation candidate / 目标失效）；状态完全不动。
+  case rejectedActivation
+}
+
+/// 激活缝（issue #41）：目录命令面经此发出激活意图。生产 adapter 为
+/// `ProxyRuntimeController`；测试注入假 adapter 观察目标传递。
+protocol Activating: AnyObject {
+  func activate(_ target: NodeID) async throws -> ActivationCommandOutcome
 }
 
 // MARK: - 服务器详情与编辑

@@ -19,7 +19,7 @@ extension CatalogWorkflow {
       status: .never)
     try credentials.save(url.absoluteString, for: record.urlRef)
     do {
-      try commitDocument { catalog, subscriptions in
+      try commitSubscriptionDocument { catalog, subscriptions in
         // 固定分组挂在目录根（CONTEXT.md「Subscription group」）；名称以 host
         // 兜底，首次成功刷新后跟随远端。
         try catalog.addGroup(url.host ?? "", source: .subscription, id: record.groupID)
@@ -81,7 +81,7 @@ extension CatalogWorkflow {
       throw SubscriptionFormError.notFound
     }
     var removedEntries: [CatalogEntry] = []
-    try commitDocument { catalog, subscriptions in
+    try commitSubscriptionDocument { catalog, subscriptions in
       removedEntries = try catalog.removeSubscriptionSubtree(of: record.groupID)
       subscriptions.removeAll { $0.id == id }
     }
@@ -126,7 +126,7 @@ extension CatalogWorkflow {
     var removedServers: [CatalogEntry] = []
     var credentialJournal = CredentialWriteJournal(credentials: credentials)
     do {
-      try commitDocument { [self] catalog, subscriptions in
+      try commitSubscriptionDocument { [self] catalog, subscriptions in
         // 凭据引用按节点身份复用：延续节点覆盖写秘密，不新增孤儿引用；
         // journal 保证快照提交失败时恢复旧秘密（story 29）。
         var reusedRefs: [NodeID: ServerCredentialRefs] = [:]
@@ -160,7 +160,7 @@ extension CatalogWorkflow {
   /// 不含订阅 URL），不是弹窗文案；其文案化沿用在同一 presentation 边缘的
   /// `Error.presentableMessage`，独立编译 target 拆分时随该边缘外移。
   private func markRefreshFailed(subscriptionID: NodeID, reason: String) async {
-    try? commitDocument { _, subscriptions in
+    try? commitSubscriptionDocument { _, subscriptions in
       if let index = subscriptions.firstIndex(where: { $0.id == subscriptionID }) {
         subscriptions[index].status = .failed(at: Date(), reason: reason)
       }

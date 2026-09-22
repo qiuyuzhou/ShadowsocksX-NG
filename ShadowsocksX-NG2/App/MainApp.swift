@@ -29,7 +29,8 @@ struct ShadowsocksXNG2App: App {
       coordinator: coordinator,
       postLegacyImport: { _ in
         await controller.legacyImportDidCommit()
-      })
+      },
+      activator: controller)
     _catalogWorkflow = StateObject(wrappedValue: catalogWorkflow)
     // 设置工作流 module（Candidate 02）：设置窗口的唯一 seam，组合根接线一次。
     _settingsWorkflow = StateObject(wrappedValue: SettingsWorkflow(controller: controller))

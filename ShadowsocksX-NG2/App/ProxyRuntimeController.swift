@@ -156,8 +156,10 @@ final class ProxyRuntimeController: ObservableObject {
   // MARK: - 用户意图
 
   /// 激活一个服务器或分组目标（目录 UI 工单复用入口）：持久化目标；代理
-  /// 开启时立即把新档推到运行时。激活原子失败时状态完全不动（D3）。
-  func activate(_ target: NodeID) async {
+  /// 开启时立即把新档推到运行时。激活原子失败时状态完全不动（D3），返回
+  /// `.rejectedActivation`；意外错误 throws 并进入 `serviceFailed`。
+  @discardableResult
+  func activate(_ target: NodeID) async throws -> ActivationCommandOutcome {
     reloadCatalog()
     do {
       let configuration = try machine.activate(
@@ -170,15 +172,18 @@ final class ProxyRuntimeController: ObservableObject {
         try activationFileStore.save(activeTargetID: target)
       } catch {
         state = .serviceFailed(detail: String(describing: error))
-        return
+        throw error
       }
       if state != .off {
         await deploy(configuration.document)
       }
+      return .activated(skippedInvalid: configuration.skippedServers.count)
     } catch let failure as ActivationFailure {
       state = .activationFailed(reason: failure.presentedReason)
+      return .rejectedActivation
     } catch {
       state = .serviceFailed(detail: String(describing: error))
+      throw error
     }
   }
 
@@ -441,6 +446,8 @@ extension ProxyRuntimeController.ProxyState {
     }
   }
 }
+
+extension ProxyRuntimeController: Activating {}
 
 extension ProxyRuntimeController {
   /// 目录提交协调器的生产适配入口（issue #40）：以刚提交的内存快照重展开，

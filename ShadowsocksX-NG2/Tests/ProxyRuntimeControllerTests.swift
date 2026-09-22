@@ -121,7 +121,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let cancellable = controller.$activeTargetID.dropFirst().sink { observed = $0 }
     defer { cancellable.cancel() }
 
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
 
     XCTAssertEqual(controller.activeTargetID, seeded.server)
     XCTAssertEqual(observed, seeded.server, "代理关闭路径的激活也要发布目标变更")
@@ -133,7 +133,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let probe = ProxyRuntimeFixture.FakeProbe.reachable()
     let controller = makeController(probe: probe)
 
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
     XCTAssertEqual(controller.state, .running)
@@ -166,7 +166,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       pacProbe: pacProbe,
       proxyMode: .externalPAC(externalURL))
 
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
     guard case .systemProxyFailed(let detail) = controller.state else {
@@ -187,7 +187,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(), proxyMode: .global)
 
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
     XCTAssertEqual(
       systemProxy.applied,
@@ -220,7 +220,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.refusing(), agentStatus: .notRegistered)
 
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
     guard case .launchFailed(let detail) = controller.state else {
@@ -236,7 +236,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
   func testDisableUnregistersAndCleansRuntimeFiles() async throws {
     let seeded = try makeSeededCatalog()
     let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
     await controller.setProxyEnabled(false)
@@ -253,7 +253,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(), firewallChecker: firewall)
 
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
     XCTAssertEqual(controller.state, .running)
@@ -275,7 +275,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       listen: listen,
       firewallChecker: firewall)
 
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
     guard case .firewallBlocked(let detail) = controller.state else {
@@ -297,7 +297,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       listen: listen,
       firewallChecker: firewall)
 
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
     let deadline = Date().addingTimeInterval(1)
@@ -317,7 +317,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
   func testCatalogEditOfActiveTargetRewritesAndSignalsRunningWrapper() async throws {
     let seeded = try makeSeededCatalog()
     let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
     // 模拟 wrapper 在跑：pid 指向本测试进程（kill(pid, 0) 判活通过）。
     try Data("\(ProcessInfo.processInfo.processIdentifier)".utf8).write(to: runtime.pidFile)
@@ -353,7 +353,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let seeded = try makeSeededCatalog()
     try Data("\(ProcessInfo.processInfo.processIdentifier)".utf8).write(to: runtime.pidFile)
     let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
     // 删除活动目标 → 重展开失败 → 清除并停止。
@@ -381,7 +381,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let seeded = try makeSeededCatalog()
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(), agentStatus: .notRegistered)
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
     XCTAssertTrue(agent.registerCount >= 1)
     let contractMtime =
@@ -414,7 +414,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     try Data("99999".utf8).write(to: runtime.pidFile)
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(), agentStatus: .notRegistered)
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     try ActivationStateFileStore(fileURL: activationFileURL).save(activeTargetID: seeded.server)
 
     await controller.resyncOnLaunch()
@@ -499,7 +499,7 @@ extension ProxyRuntimeControllerTests {
       settingsStore: settingsStore,
       systemProxy: systemProxy)
 
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
     XCTAssertEqual(controller.state, .running)
     XCTAssertEqual(systemProxy.applied.count, 1)
@@ -539,7 +539,7 @@ extension ProxyRuntimeControllerTests {
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(), settingsStore: settingsStore)
 
-    await controller.activate(seeded.server)
+    try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
     var next = controller.settings

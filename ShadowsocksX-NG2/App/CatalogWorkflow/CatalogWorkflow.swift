@@ -44,6 +44,8 @@ final class CatalogWorkflow: ObservableObject {
   /// Legacy 导入提交后的运行时边界（组合根一次性接线；独立于普通提交管线）。
   let postLegacyImport: ((LegacyImportOutcome) async -> Void)?
   let legacyImportService: LegacyImportService
+  /// 激活缝（issue #41）：生产 adapter 为 `ProxyRuntimeController`，测试注入假 adapter。
+  let activator: Activating
 
   init(
     coordinator: CatalogCommitCoordinator,
@@ -51,7 +53,8 @@ final class CatalogWorkflow: ObservableObject {
     plugins: ManagedPluginProviding = BundleManagedPluginProvider(),
     subscriptionFetcher: SubscriptionFetching = HTTPSSubscriptionFetcher(),
     legacyImportService: LegacyImportService? = nil,
-    postLegacyImport: ((LegacyImportOutcome) async -> Void)? = nil
+    postLegacyImport: ((LegacyImportOutcome) async -> Void)? = nil,
+    activator: Activating = RejectingActivator()
   ) {
     self.coordinator = coordinator
     fileStore = coordinator.fileStore
@@ -59,6 +62,7 @@ final class CatalogWorkflow: ObservableObject {
     self.plugins = plugins
     self.subscriptionFetcher = subscriptionFetcher
     self.postLegacyImport = postLegacyImport
+    self.activator = activator
     self.legacyImportService =
       legacyImportService
       ?? LegacyImportService(
@@ -81,9 +85,9 @@ final class CatalogWorkflow: ObservableObject {
     coordinator.committedCatalog.entry(for: id)?.displayName ?? ""
   }
 
-  /// 服务器激活校验结果（非敏感点名原因；编辑面「激活状态」区）。
-  func serverValidation(for id: NodeID) -> ServerValidation? {
-    tree.node(withID: id)?.validation
+  /// 服务器叶子的已知阻塞原因（typed；编辑面「激活状态」区）。
+  func serverInvalidReasons(for id: NodeID) -> [LeafInvalidationReason] {
+    tree.node(withID: id)?.invalidReasons ?? []
   }
 
   /// 服务器编辑面（显式命令，story 11）：解析密码与受管插件参数明文。
@@ -288,10 +292,10 @@ final class CatalogWorkflow: ObservableObject {
     ).encode()
   }
 
-  // MARK: - 提交管线（module 内部）
+  // MARK: - 提交管线（module 内部；UI 不得调用，拆独立 target 前靠约定）
 
-  /// 仅目录变更的提交便捷入口（订阅扩展使用双参 `commitDocument`）。
-  func commit<T>(
+  /// 仅目录变更的提交便捷入口（订阅扩展经 `commitSubscriptionDocument`）。
+  private func commit<T>(
     _ mutate: (inout ConfigurationCatalog) throws -> T
   ) throws -> T {
     try commitDocument { catalog, _ in
@@ -301,12 +305,19 @@ final class CatalogWorkflow: ObservableObject {
 
   /// 副本变更 → 协调器落盘 → 重新发布 projection；任一步失败则已发布状态
   /// 不动。运行时收敛由协调器异步调度（issue #40），不阻塞也不回滚本提交。
-  func commitDocument<T>(
+  private func commitDocument<T>(
     _ mutate: (inout ConfigurationCatalog, inout [SubscriptionRecord]) throws -> T
   ) throws -> T {
     let result = try coordinator.commit(mutate)
     republishCommittedState()
     return result
+  }
+
+  /// 订阅扩展的唯一写路径（module 内部窄缝，替代直接摸 `commitDocument`）。
+  func commitSubscriptionDocument<T>(
+    _ mutate: (inout ConfigurationCatalog, inout [SubscriptionRecord]) throws -> T
+  ) throws -> T {
+    try commitDocument(mutate)
   }
 
   /// 提交成功后的 projection 重建（树 + 订阅卡片）。
@@ -428,6 +439,13 @@ final class CatalogWorkflow: ObservableObject {
       // supported plugin explicitly.
       break
     }
+  }
+}
+
+/// 默认激活 adapter：未接线时原子拒绝（测试不触激活的场景）。
+final class RejectingActivator: Activating {
+  func activate(_ target: NodeID) async throws -> ActivationCommandOutcome {
+    .rejectedActivation
   }
 }
 

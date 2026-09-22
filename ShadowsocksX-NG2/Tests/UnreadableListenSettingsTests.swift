@@ -64,7 +64,7 @@ final class UnreadableListenSettingsTests: XCTestCase {
         .duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 1086)
       ]))
 
-    await controller.activate(server)
+    try await controller.activate(server)
     await controller.setProxyEnabled(true)
 
     guard case .launchFailed(let detail) = controller.state else {

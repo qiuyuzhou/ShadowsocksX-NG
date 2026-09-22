@@ -65,7 +65,7 @@ final class CatalogWorkflowTests: XCTestCase {
     XCTAssertEqual(roots[0].name, "香港 01", "备注优先的显示名")
     XCTAssertEqual(
       workflow.serverEditForm(for: roots[0].id)?.password, "password123", "密码入凭据存储")
-    XCTAssertTrue(roots[0].validation?.isValid ?? false)
+    XCTAssertTrue(roots[0].invalidReasons.isEmpty)
     // 两个身份均为全新 UUID 形态（不按内容去重）。
     XCTAssertNotEqual(roots[0].id, roots[1].id)
   }
@@ -94,7 +94,7 @@ final class CatalogWorkflowTests: XCTestCase {
     XCTAssertEqual(outcome.addedCount, 1)
     let node = try XCTUnwrap(workflow.tree.roots.first)
     XCTAssertEqual(
-      node.validation?.issues, [.unsupportedEncryptionMethod("future-cipher")],
+      node.invalidReasons, [.unsupportedEncryptionMethod("future-cipher")],
       "不支持的方法保留并明确标记为无效(story 9)")
   }
 
@@ -134,14 +134,12 @@ final class CatalogWorkflowTests: XCTestCase {
     XCTAssertEqual(group.parentID, nil)
     XCTAssertEqual(group.childCount, 1)
     XCTAssertEqual(group.subtreeNodeCount, 2, "嵌套分组 + 服务器叶子")
-    XCTAssertEqual(group.serverCount, 1)
-    XCTAssertEqual(group.invalidServerCount, 0)
     let nested = try XCTUnwrap(group.children?.first)
     XCTAssertEqual(nested.id, nestedID)
     XCTAssertEqual(nested.parentID, groupID)
     let rootServer = try XCTUnwrap(workflow.tree.roots.last)
     XCTAssertFalse(rootServer.isGroup)
-    XCTAssertEqual(rootServer.serverCount, 1)
+    XCTAssertFalse(rootServer.isInvalid)
     XCTAssertNil(rootServer.children)
     XCTAssertTrue(workflow.tree.containsNode(groupID))
   }

@@ -186,7 +186,7 @@ final class SettingsWorkflowTests: XCTestCase {
       "香港 01", in: &catalog, credentials: credentials)
     try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
     let pair = makePair()
-    await pair.controller.activate(server)
+    try await pair.controller.activate(server)
     await pair.controller.setProxyEnabled(true)
     await waitUntil(pair.controller.state == .running)
     return pair

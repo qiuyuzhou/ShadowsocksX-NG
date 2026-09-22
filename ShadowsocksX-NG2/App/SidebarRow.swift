@@ -1,19 +1,18 @@
 import SwiftUI
 
 /// 侧栏树行（issue #41）：来源标识、有效性提示、活动目标标记与右键菜单。
-/// 数据来自目录工作流 module 的树 projection；服务器/分组不再拥有独立的启
-/// 用/停用状态，激活时由状态机按有效性展开。
+/// 数据来自目录工作流 module 的树 projection；激活经 seam 的 typed command，
+/// 活动目标标记由父视图传入（运行时事实，不进目录 projection）。删除一律
+/// 交父视图确认弹窗（空手动组单次、非空二次，CONTEXT.md）。
 struct SidebarRow: View {
   let node: CatalogTreeNode
   let workflow: CatalogWorkflow
-  let proxyController: ProxyRuntimeController
+  let activeTargetID: NodeID?
   let errors: ErrorAlertPresenter
   let onRename: (NodeID) -> Void
   let onNewGroup: (NodeID?) -> Void
   let onMove: (NodeID) -> Void
   let onDelete: (NodeID) -> Void
-  /// 直接删除完成后的回调（携带被删身份集合；UI 据此清除失效选择）。
-  let onRemoved: (Set<NodeID>) -> Void
 
   private var isSubscription: Bool { node.source == .subscription }
 
@@ -26,7 +25,7 @@ struct SidebarRow: View {
       if node.isInvalid {
         Image(systemName: "exclamationmark.triangle.fill")
           .foregroundStyle(.orange)
-          .help(node.validation?.issues.first?.presentedReason ?? "服务器存在已知阻塞问题")
+          .help(node.invalidReasons.first?.presentedReason ?? "服务器存在已知阻塞问题")
       } else if node.invalidDescendantCount > 0 {
         Image(systemName: "exclamationmark.triangle")
           .foregroundStyle(.orange)
@@ -37,7 +36,7 @@ struct SidebarRow: View {
           .foregroundStyle(.tertiary)
           .help("订阅节点：由远端管理")
       }
-      if proxyController.activeTargetID == node.id {
+      if activeTargetID == node.id {
         Image(systemName: "bolt.fill")
           .foregroundStyle(.orange)
           .help("活动目标")
@@ -46,15 +45,16 @@ struct SidebarRow: View {
     .contextMenu { contextMenu }
   }
 
-  /// 空手动组直接删除；服务器与非空手动组走确认弹窗（issue #32）。
-  private var isEmptyManualGroup: Bool {
-    node.isGroup && node.isManual && node.childNodes.isEmpty
-  }
-
   @ViewBuilder
   private var contextMenu: some View {
     Button("激活") {
-      Task { await proxyController.activate(node.id) }
+      Task {
+        do {
+          _ = try await workflow.activate(node.id)
+        } catch {
+          errors.present(error)
+        }
+      }
     }
     if !isSubscription {
       Divider()
@@ -68,18 +68,7 @@ struct SidebarRow: View {
       Button("移动到…") { onMove(node.id) }
       Divider()
       Button("删除…", role: .destructive) {
-        if isEmptyManualGroup {
-          Task {
-            do {
-              let outcome = try await workflow.remove(node.id)
-              onRemoved(outcome.removedNodeIDs)
-            } catch {
-              errors.present(error)
-            }
-          }
-        } else {
-          onDelete(node.id)
-        }
+        onDelete(node.id)
       }
     }
   }

@@ -15,6 +15,7 @@ struct MainWindowView: View {
   }
 
   @ObservedObject var workflow: CatalogWorkflow
+  /// 运行时事实来源：活动目标标记；激活命令经 `workflow.activate`。
   @ObservedObject var proxyController: ProxyRuntimeController
   /// 诊断工作流 module（issue #43）：诊断侧栏与详情共用的唯一 seam。
   @ObservedObject var diagnostics: DiagnosticsWorkflow
@@ -158,7 +159,7 @@ struct MainWindowView: View {
         SidebarRow(
           node: node,
           workflow: workflow,
-          proxyController: proxyController,
+          activeTargetID: proxyController.activeTargetID,
           errors: errors,
           onRename: { id in
             renameTarget = id
@@ -169,14 +170,13 @@ struct MainWindowView: View {
             newGroupName = ""
           },
           onMove: { moveTarget = $0 },
-          onDelete: { deleteTarget = $0 },
-          onRemoved: { clearSelectionIfInvalidated($0) }
+          onDelete: { deleteTarget = $0 }
         )
         .onDrag {
-          // 订阅节点结构只读：携带空负载，落点校验节点存在性后自动忽略。
-          node.isManual
-            ? NSItemProvider(object: node.id.rawValue as NSString)
-            : NSItemProvider()
+          guard let payload = workflow.dragPayload(for: node.id) else {
+            return NSItemProvider()
+          }
+          return NSItemProvider(object: payload as NSString)
         }
         .dropDestination(for: String.self) { payload, _ in
           handleDrop(payload, onto: node.id)
@@ -211,11 +211,11 @@ struct MainWindowView: View {
   }
 
   /// 落点语义：拖到分组行 = 移入该组（仅手动组接受），拖到列表空白/根 = 移到根。
-  /// 跨来源由视图过滤 + 领域拒绝双重保证；无效负载不接收。
+  /// 资格事实由 seam 提供；跨来源/成环仍由领域拒绝（不变量防线）。
   private func handleDrop(_ payload: [String], onto target: NodeID?) -> Bool {
     guard let raw = payload.first else { return false }
     let dragged = NodeID(rawValue: raw)
-    guard dragged != target, workflow.tree.containsNode(dragged) else { return false }
+    guard workflow.canMove(dragged, to: target) else { return false }
     Task {
       do {
         try await workflow.move(dragged, to: target)
@@ -241,11 +241,11 @@ struct MainWindowView: View {
       if let id = selection, let node = workflow.tree.node(withID: id) {
         if node.isGroup {
           GroupDetailView(
-            workflow: workflow, groupID: id, proxyController: proxyController,
+            workflow: workflow, groupID: id,
             errors: errors)
         } else {
           ServerDetailView(
-            workflow: workflow, serverID: id, proxyController: proxyController,
+            workflow: workflow, serverID: id,
             errors: errors)
         }
       } else {
@@ -332,27 +332,29 @@ struct MainWindowView: View {
     }
   }
 
-  private var deleteTargetNode: CatalogTreeNode? {
-    deleteTarget.flatMap { workflow.tree.node(withID: $0) }
-  }
-
-  /// 删除语义：非空手动组点名子树规模（二次确认），空组与服务器单次确认。
+  /// 删除确认文案：档位与规模事实来自 seam；句子由 UI 拼（Q3-A）。
   private var deleteTitle: String {
-    guard let node = deleteTargetNode, node.isGroup, node.isManual else {
-      return "删除「\(deleteTargetName)」？"
+    guard let id = deleteTarget else { return "" }
+    let name = workflow.displayName(for: id)
+    switch workflow.deleteFacts(for: id) {
+    case .subtree:
+      return "删除分组「\(name)」及其整棵子树？"
+    case .leaf, .emptyGroup, nil:
+      return "删除「\(name)」？"
     }
-    return "删除分组「\(deleteTargetName)」及其整棵子树？"
   }
 
   private var deleteMessage: String {
-    guard let node = deleteTargetNode, node.isGroup, node.isManual else {
+    guard let id = deleteTarget else { return "" }
+    switch workflow.deleteFacts(for: id) {
+    case .subtree(let count, let includesCredentials):
+      if includesCredentials {
+        return "将递归删除 \(count) 个节点（含其中的服务器与凭据），此操作不可撤销。"
+      }
+      return "将递归删除 \(count) 个节点，此操作不可撤销。"
+    case .leaf, .emptyGroup, nil:
       return "此操作不可撤销。"
     }
-    return "将递归删除 \(node.subtreeNodeCount) 个节点（含其中的服务器与凭据），此操作不可撤销。"
-  }
-
-  private var deleteTargetName: String {
-    deleteTarget.map { workflow.displayName(for: $0) } ?? ""
   }
 
   private func commitDelete() {
