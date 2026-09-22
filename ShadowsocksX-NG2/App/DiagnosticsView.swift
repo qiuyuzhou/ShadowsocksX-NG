@@ -1,13 +1,15 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 主窗口诊断区（spec #21 D11，issue #34）：日志查看器（GUI 事件流实时呈现 +
-/// wrapper 收敛日志尾部，均可复制）与显式触发的脱敏诊断导出。导出仅由用户
-/// 点击触发，内容只含 D5 允许的元数据类目。
+/// 主窗口诊断区（spec #21 D11，issue #34/#41）：日志查看器（GUI 事件流实时
+/// 呈现 + wrapper 收敛日志尾部，均可复制）与显式触发的脱敏诊断导出。导出仅由
+/// 用户点击触发，内容只含 D5 允许的元数据类目；目录计数经工作流 module 的
+/// 诊断事实填充，原始目录不出 module。
 struct DiagnosticsView: View {
-  @ObservedObject var viewModel: CatalogViewModel
+  @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var proxyController: ProxyRuntimeController
   let eventStore: RuntimeEventStore
+  let errors: ErrorAlertPresenter
 
   enum LogSource: String, CaseIterable, Identifiable {
     case guiEvents
@@ -153,14 +155,14 @@ struct DiagnosticsView: View {
     do {
       let report = DiagnosticReportBuilder.markdown(from: makeSnapshot())
       guard let data = report.data(using: .utf8) else {
-        viewModel.presentedError = "导出失败：报告无法编码为 UTF-8"
+        errors.present(text: "导出失败：报告无法编码为 UTF-8")
         return
       }
       try data.write(to: url)
       RuntimeLog.emit(.diagnosticsExported)
       exportedPath = url.path
     } catch {
-      viewModel.presentedError = "导出失败：\(error.localizedDescription)"
+      errors.present(text: "导出失败：\(error.localizedDescription)")
     }
   }
 
@@ -172,10 +174,7 @@ struct DiagnosticsView: View {
     snapshot.hasActiveTarget = proxyController.isActiveTargetPresent
     snapshot.listen = proxyController.listenSettings
     snapshot.runtimeDocumentSummary = proxyController.runtimeDocumentSummary()
-    snapshot.catalog = viewModel.catalog
-    snapshot.knownInvalidServerCount = viewModel.sidebarNodes().reduce(0) {
-      $0 + $1.invalidServerCount
-    }
+    workflow.fillDiagnosticCatalogFacts(into: &snapshot)
     snapshot.fileFacts = Self.fileFacts()
     snapshot.managedPlugins = Self.managedPluginFacts()
     snapshot.eventLines = eventStore.snapshot.suffix(200).map(\.renderedLine)

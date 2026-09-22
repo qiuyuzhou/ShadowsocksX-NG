@@ -1,29 +1,34 @@
 import SwiftUI
 
-/// 订阅分区（spec #21 D11，issue #35）：每订阅一卡片（名称、URL host、状态、
-/// 上次刷新、服务器数）+ 单个/全部更新 + 编辑 URL + 删除确认；新建即粘贴 URL。
+/// 订阅分区（spec #21 D11，issue #35/#41）：每订阅一卡片（名称、URL host、
+/// 状态、上次刷新、服务器数）+ 单个/全部更新 + 编辑 URL + 删除确认；新建即
+/// 粘贴 URL。卡片数据来自订阅 projection（非敏感）；结构化刷新状态在呈现层
+/// 本地化（story 42）。
 struct SubscriptionsView: View {
-  @ObservedObject var viewModel: CatalogViewModel
+  @ObservedObject var workflow: CatalogWorkflow
+  let errors: ErrorAlertPresenter
+  /// 删除完成后回调（被删身份集合；主窗口据此清除失效选择）。
+  let onNodesRemoved: (Set<NodeID>) -> Void
 
   @State private var showAddSheet = false
-  @State private var editTarget: SubscriptionRecord?
-  @State private var deleteTarget: SubscriptionRecord?
+  @State private var editTarget: SubscriptionSummary?
+  @State private var deleteTarget: SubscriptionSummary?
   @State private var isRefreshingAll = false
 
   var body: some View {
     List {
-      ForEach(viewModel.subscriptions) { record in
+      ForEach(workflow.subscriptions) { summary in
         SubscriptionCard(
-          info: viewModel.subscriptionCard(for: record),
-          isRefreshing: viewModel.inFlightRefreshIDs.contains(record.id),
-          onRefresh: { Task { await viewModel.refreshSubscription(record.id) } },
-          onEdit: { editTarget = record },
-          onDelete: { deleteTarget = record })
+          summary: summary,
+          isRefreshing: workflow.refreshingSubscriptionIDs.contains(summary.id),
+          onRefresh: { Task { await workflow.refreshSubscription(summary.id) } },
+          onEdit: { editTarget = summary },
+          onDelete: { deleteTarget = summary })
       }
     }
     .listStyle(.inset)
     .overlay {
-      if viewModel.subscriptions.isEmpty {
+      if workflow.subscriptions.isEmpty {
         ContentUnavailableView(
           "暂无订阅", systemImage: "arrow.triangle.2.circlepath",
           description: Text("用「添加订阅…」粘贴 HTTPS 订阅地址（SIP-008 JSON）")
@@ -33,13 +38,13 @@ struct SubscriptionsView: View {
     }
     .safeAreaInset(edge: .bottom) { bottomBar }
     .sheet(isPresented: $showAddSheet) {
-      AddSubscriptionSheet(viewModel: viewModel)
+      AddSubscriptionSheet(workflow: workflow, errors: errors)
     }
-    .sheet(item: $editTarget) { record in
-      EditSubscriptionURLSheet(viewModel: viewModel, record: record)
+    .sheet(item: $editTarget) { summary in
+      EditSubscriptionURLSheet(workflow: workflow, errors: errors, summary: summary)
     }
     .confirmationDialog(
-      "删除订阅「\(deleteTarget.map { viewModel.displayName(for: $0.groupID) } ?? "")」及其整棵子树？",
+      "删除订阅「\(deleteTarget?.name ?? "")」及其整棵子树？",
       isPresented: Binding(
         get: { deleteTarget != nil },
         set: { if !$0 { deleteTarget = nil } }),
@@ -71,7 +76,7 @@ struct SubscriptionsView: View {
           Label("立即更新全部", systemImage: "arrow.triangle.2.circlepath")
         }
       }
-      .disabled(viewModel.subscriptions.isEmpty || isRefreshingAll)
+      .disabled(workflow.subscriptions.isEmpty || isRefreshingAll)
     }
     .padding(12)
     .background(.bar)
@@ -80,7 +85,7 @@ struct SubscriptionsView: View {
   private func refreshAll() {
     isRefreshingAll = true
     Task {
-      await viewModel.refreshAllSubscriptions()
+      await workflow.refreshAllSubscriptions()
       isRefreshingAll = false
     }
   }
@@ -90,17 +95,47 @@ struct SubscriptionsView: View {
     deleteTarget = nil
     Task {
       do {
-        try await viewModel.removeSubscription(target.id)
+        let outcome = try await workflow.removeSubscription(target.id)
+        onNodesRemoved(outcome.removedNodeIDs)
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }
 }
 
+/// 刷新状态 → 呈现文案（story 42：本地化在 UI 呈现层，不在 module 内）。
+extension SubscriptionRefreshStatus {
+  var badgeText: String {
+    switch self {
+    case .never: "尚未刷新"
+    case .succeeded: "正常"
+    case .failed: "刷新失败"
+    }
+  }
+
+  var lastRefreshText: String {
+    switch self {
+    case .never: "尚未刷新"
+    case .succeeded(let date), .failed(let date, _):
+      date.formatted(date: .abbreviated, time: .shortened)
+    }
+  }
+
+  var failureDetail: String? {
+    if case .failed(_, let reason) = self { return reason }
+    return nil
+  }
+
+  var isFailed: Bool {
+    if case .failed = self { return true }
+    return false
+  }
+}
+
 /// 单张订阅卡片。
 private struct SubscriptionCard: View {
-  let info: SubscriptionCardInfo
+  let summary: SubscriptionSummary
   let isRefreshing: Bool
   let onRefresh: () -> Void
   let onEdit: () -> Void
@@ -110,8 +145,8 @@ private struct SubscriptionCard: View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 8) {
         Image(systemName: "arrow.triangle.2.circlepath")
-          .foregroundStyle(info.isFailed ? Color.red : Color.secondary)
-        Text(info.name)
+          .foregroundStyle(summary.status.isFailed ? Color.red : Color.secondary)
+        Text(summary.name)
           .font(.headline)
           .lineLimit(1)
         Spacer()
@@ -128,19 +163,19 @@ private struct SubscriptionCard: View {
           .help("立即更新此订阅")
         }
       }
-      Text(info.host)
+      Text(summary.host)
         .font(.footnote)
         .foregroundStyle(.secondary)
         .lineLimit(1)
         .truncationMode(.middle)
         .help("订阅主机（完整地址不入诊断与日志）")
       HStack(spacing: 12) {
-        Label("\(info.serverCount) 台服务器", systemImage: "server.rack")
-        Label(info.lastRefreshText, systemImage: "clock")
+        Label("\(summary.serverCount) 台服务器", systemImage: "server.rack")
+        Label(summary.status.lastRefreshText, systemImage: "clock")
       }
       .font(.caption)
       .foregroundStyle(.secondary)
-      if let detail = info.statusDetail {
+      if let detail = summary.status.failureDetail {
         Text(detail)
           .font(.caption)
           .foregroundStyle(.red)
@@ -160,8 +195,8 @@ private struct SubscriptionCard: View {
 
   @ViewBuilder
   private var statusBadge: some View {
-    if info.isFailed {
-      Text(info.statusText)
+    if summary.status.isFailed {
+      Text(summary.status.badgeText)
         .font(.caption2)
         .fontWeight(.medium)
         .padding(.horizontal, 6)
@@ -169,7 +204,7 @@ private struct SubscriptionCard: View {
         .background(Capsule().fill(Color.red.opacity(0.15)))
         .foregroundStyle(.red)
     } else {
-      Text(info.statusText)
+      Text(summary.status.badgeText)
         .font(.caption2)
         .foregroundStyle(.secondary)
     }
@@ -178,7 +213,8 @@ private struct SubscriptionCard: View {
 
 /// 「添加订阅」表单：粘贴 HTTPS 订阅地址；创建后立即首次刷新。
 private struct AddSubscriptionSheet: View {
-  @ObservedObject var viewModel: CatalogViewModel
+  let workflow: CatalogWorkflow
+  let errors: ErrorAlertPresenter
   @Environment(\.dismiss) private var dismiss
 
   @State private var urlString = ""
@@ -205,19 +241,21 @@ private struct AddSubscriptionSheet: View {
   private func create() {
     Task {
       do {
-        try await viewModel.createSubscription(urlString: urlString)
+        _ = try await workflow.createSubscription(urlString: urlString)
         dismiss()
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }
 }
 
 /// 「编辑订阅 URL」表单（保留订阅与固定分组身份）；保存后立即刷新。
+/// URL 明文经显式命令读取（story 11）。
 private struct EditSubscriptionURLSheet: View {
-  @ObservedObject var viewModel: CatalogViewModel
-  let record: SubscriptionRecord
+  let workflow: CatalogWorkflow
+  let errors: ErrorAlertPresenter
+  let summary: SubscriptionSummary
   @Environment(\.dismiss) private var dismiss
 
   @State private var urlString = ""
@@ -243,18 +281,17 @@ private struct EditSubscriptionURLSheet: View {
     .onAppear {
       guard !loaded else { return }
       loaded = true
-      let stored = (try? viewModel.credentials.secret(for: record.urlRef)) ?? nil
-      urlString = stored ?? ""
+      urlString = (try? workflow.subscriptionURL(for: summary.id)) ?? ""
     }
   }
 
   private func save() {
     Task {
       do {
-        try await viewModel.editSubscriptionURL(record.id, urlString: urlString)
+        try await workflow.editSubscriptionURL(summary.id, urlString: urlString)
         dismiss()
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }

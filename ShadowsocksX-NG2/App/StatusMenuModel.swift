@@ -101,57 +101,23 @@ enum StatusMenuModel {
     }
   }
 
-  /// 活动目标级联子菜单的只读树快照：结构与配置树一致（含全部节点），活动
-  /// 目标以勾选呈现。分组节点持有子树，服务器叶子无子。`id` 供 SwiftUI
-  /// ForEach 稳定标识（导入不去重，同名兄弟节点合法）。
-  struct TargetNode: Equatable {
-    let id: NodeID
-    let name: String
-    let isGroup: Bool
-    let isActive: Bool
-    let children: [TargetNode]
-  }
-
-  static func targetTree(
-    catalog: ConfigurationCatalog,
-    activeTargetID: NodeID?
-  ) -> [TargetNode] {
-    targetChildren(of: nil, catalog: catalog, activeTargetID: activeTargetID)
-  }
-
-  /// 活动目标的显示名路径（根 → 节点，" / " 连接）；未激活或目标已不在目录
-  /// 中为 nil。
-  static func targetPath(catalog: ConfigurationCatalog, activeTargetID: NodeID?) -> String? {
-    guard let activeTargetID, catalog.contains(activeTargetID) else { return nil }
-    let chain = catalog.ancestors(of: activeTargetID).reversed() + [activeTargetID]
-    return chain.map { displayName(catalog: catalog, id: $0) }.joined(separator: " / ")
-  }
-
-  private static func targetChildren(
-    of parent: NodeID?,
-    catalog: ConfigurationCatalog,
-    activeTargetID: NodeID?
-  ) -> [TargetNode] {
-    let ids = (try? catalog.children(of: parent)) ?? []
-    return ids.compactMap { id in
-      guard let entry = catalog.entry(for: id) else { return nil }
-      let isGroup: Bool = {
-        if case .group = entry.kind { return true }
-        return false
-      }()
-      return TargetNode(
-        id: id,
-        name: displayName(catalog: catalog, id: id),
-        isGroup: isGroup,
-        isActive: id == activeTargetID,
-        children: isGroup
-          ? targetChildren(of: id, catalog: catalog, activeTargetID: activeTargetID)
-          : [])
+  /// 活动目标的显示名路径（根 → 节点，" / " 连接）；基于目录树 projection
+  /// 派生（issue #41）。未激活或目标已不在树中为 nil。
+  static func targetPath(in nodes: [CatalogTreeNode], activeTargetID: NodeID?) -> String? {
+    guard let activeTargetID else { return nil }
+    var path: [String] = []
+    func search(_ node: CatalogTreeNode) -> Bool {
+      if node.id == activeTargetID {
+        path.append(node.name)
+        return true
+      }
+      for child in node.children ?? [] where search(child) {
+        path.insert(node.name, at: 0)
+        return true
+      }
+      return false
     }
-  }
-
-  /// 行显示名：委托目录条目的共用口径（`CatalogEntry.displayName`）。
-  private static func displayName(catalog: ConfigurationCatalog, id: NodeID) -> String {
-    catalog.entry(for: id)?.displayName ?? ""
+    for node in nodes where search(node) { break }
+    return path.isEmpty ? nil : path.joined(separator: " / ")
   }
 }

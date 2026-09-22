@@ -4,7 +4,7 @@ import SwiftUI
 /// exposes passwords, plugin options, or remote URL values; it presents counts,
 /// named skipped records, identity regeneration, and migration warnings.
 struct LegacyImportSheet: View {
-  @ObservedObject var viewModel: CatalogViewModel
+  @ObservedObject var workflow: CatalogWorkflow
   /// 导入成功后的「切换到 2.0」第二阶段入口（issue #37：交接与导入分离，
   /// 由用户显式发起）；nil 时隐藏。
   var onHandoffRequested: (() -> Void)?
@@ -15,16 +15,16 @@ struct LegacyImportSheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text(viewModel.legacyImportCompleted ? "再次导入 Legacy 配置" : "发现 Legacy 配置")
+      Text(workflow.legacyImportState.completed ? "再次导入 Legacy 配置" : "发现 Legacy 配置")
         .font(.title2.weight(.semibold))
       Text(
-        viewModel.legacyImportCompleted
+        workflow.legacyImportState.completed
           ? "再次导入会创建新的独立手动分组，不会合并或修改原 Legacy 数据。"
           : "可以把旧版服务器和支持的偏好复制到 2.0。导入是一次快照提交；代理保持关闭，也不会写入系统代理。"
       )
       .foregroundStyle(.secondary)
 
-      if let report = viewModel.legacyImportReport {
+      if let report = workflow.legacyImportReport {
         reportView(report)
       } else {
         Text("插件程序引用会原样保留，但不会复制 Legacy 插件二进制；本版本未提供的插件需要你之后处理。")
@@ -41,14 +41,14 @@ struct LegacyImportSheet: View {
       HStack {
         Button("暂不导入") { dismiss() }
         Spacer()
-        if viewModel.legacyImportReport != nil, let onHandoffRequested {
+        if workflow.legacyImportReport != nil, let onHandoffRequested {
           Button("切换到 2.0…") { onHandoffRequested() }
         }
-        Button(viewModel.legacyImportCompleted ? "再次导入" : "导入") {
+        Button(workflow.legacyImportState.completed ? "再次导入" : "导入") {
           importLegacy()
         }
         .keyboardShortcut(.defaultAction)
-        .disabled(isImporting || !viewModel.legacyImportAvailable)
+        .disabled(isImporting || !workflow.legacyImportState.snapshotFound)
       }
     }
     .padding(24)
@@ -109,10 +109,10 @@ struct LegacyImportSheet: View {
   private func importLegacy() {
     isImporting = true
     errorMessage = nil
-    let reimport = viewModel.legacyImportCompleted
+    let reimport = workflow.legacyImportState.completed
     Task { @MainActor in
       do {
-        _ = try await viewModel.importLegacy(reimport: reimport)
+        _ = try await workflow.importLegacy(reimport: reimport)
       } catch let error as LegacyImportError {
         errorMessage = error.presentedReason
       } catch {

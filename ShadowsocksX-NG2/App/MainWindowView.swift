@@ -1,10 +1,12 @@
 import SwiftUI
 
-/// 主窗口（spec #21 D11，issue #32/#34/#35）：NavigationSplitView 分区。侧栏
-/// 顶部分区切换「服务器 / 订阅 / 诊断」；服务器分区是配置目录分组树（订阅子
-/// 树只读）与详情编辑；订阅分区是订阅卡片与刷新/编辑/删除；诊断
+/// 主窗口（spec #21 D11，issue #32/#34/#35/#41）：NavigationSplitView 分区。
+/// 侧栏顶部分区切换「服务器 / 订阅 / 诊断」；服务器分区是配置目录分组树（订阅
+/// 子树只读）与详情编辑；订阅分区是订阅卡片与刷新/编辑/删除；诊断
 /// 分区是日志查看与脱敏导出（D11「诊断收进主窗口」）。编辑类操作只在主窗口
 /// （菜单栏仅保留 D11 白名单内的「立即更新全部订阅」快速动作）。
+/// 窗口状态（选择、pane、sheet、alert、确认弹窗）由本视图持有；目录事实与
+/// 命令结果全部经由目录工作流 module（issue #41）。
 struct MainWindowView: View {
   enum Pane: Hashable {
     case servers
@@ -12,13 +14,17 @@ struct MainWindowView: View {
     case diagnostics
   }
 
-  @ObservedObject var viewModel: CatalogViewModel
+  @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var proxyController: ProxyRuntimeController
   let eventStore: RuntimeEventStore
 
   @StateObject private var legacyHandoffModel = LegacyHandoffViewModel()
+  /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
+  @StateObject private var errors = ErrorAlertPresenter()
 
+  // 纯窗口状态（issue #41）：selection/pane/sheet/alert 不进目录 module。
   @State private var pane: Pane = .servers
+  @State private var selection: NodeID?
   @State private var renameTarget: NodeID?
   @State private var renameText = ""
   @State private var newGroupParent: NodeID?
@@ -62,12 +68,12 @@ struct MainWindowView: View {
     .alert(
       "操作失败",
       isPresented: Binding(
-        get: { viewModel.presentedError != nil },
-        set: { if !$0 { viewModel.presentedError = nil } })
+        get: { errors.isPresented },
+        set: { if !$0 { errors.dismiss() } })
     ) {
       Button("好", role: .cancel) {}
     } message: {
-      Text(viewModel.presentedError ?? "")
+      Text(errors.message ?? "")
     }
     .confirmationDialog(
       deleteTitle,
@@ -82,14 +88,14 @@ struct MainWindowView: View {
       Text(deleteMessage)
     }
     .sheet(isPresented: $showImportURLSheet) {
-      ImportURLSheet(viewModel: viewModel)
+      ImportURLSheet(workflow: workflow, errors: errors, selection: $selection)
     }
     .sheet(isPresented: $showQRImportSheet) {
-      QRImportSheet(viewModel: viewModel)
+      QRImportSheet(workflow: workflow, errors: errors, selection: $selection)
     }
     .sheet(isPresented: $showLegacyImportSheet) {
       LegacyImportSheet(
-        viewModel: viewModel,
+        workflow: workflow,
         onHandoffRequested: {
           showLegacyImportSheet = false
           showLegacyHandoffSheet = true
@@ -110,10 +116,10 @@ struct MainWindowView: View {
         get: { moveTarget.map(MoveContext.init) },
         set: { moveTarget = $0?.nodeID })
     ) { context in
-      MoveNodeSheet(viewModel: viewModel, nodeID: context.nodeID)
+      MoveNodeSheet(workflow: workflow, errors: errors, nodeID: context.nodeID)
     }
     .onAppear {
-      guard !didOfferLegacyImport, viewModel.shouldOfferLegacyImport else { return }
+      guard !didOfferLegacyImport, workflow.legacyImportState.shouldOffer else { return }
       didOfferLegacyImport = true
       showLegacyImportSheet = true
     }
@@ -167,26 +173,28 @@ struct MainWindowView: View {
   }
 
   private var serverSidebar: some View {
-    List(selection: $viewModel.selectedNodeID) {
-      OutlineGroup(viewModel.sidebarNodes(), children: \.children) { node in
+    List(selection: $selection) {
+      OutlineGroup(workflow.tree.roots, children: \.children) { node in
         SidebarRow(
           node: node,
-          viewModel: viewModel,
+          workflow: workflow,
           proxyController: proxyController,
+          errors: errors,
           onRename: { id in
             renameTarget = id
-            renameText = viewModel.displayName(for: id)
+            renameText = workflow.displayName(for: id)
           },
           onNewGroup: { parent in
             newGroupParent = parent
             newGroupName = ""
           },
           onMove: { moveTarget = $0 },
-          onDelete: { deleteTarget = $0 }
+          onDelete: { deleteTarget = $0 },
+          onRemoved: { clearSelectionIfInvalidated($0) }
         )
         .onDrag {
           // 订阅节点结构只读：携带空负载，落点校验节点存在性后自动忽略。
-          node.source == .manual
+          node.isManual
             ? NSItemProvider(object: node.id.rawValue as NSString)
             : NSItemProvider()
         }
@@ -198,7 +206,7 @@ struct MainWindowView: View {
     }
     .listStyle(.sidebar)
     .overlay(alignment: .center) {
-      if viewModel.catalog.isEmpty {
+      if workflow.tree.isEmpty {
         ContentUnavailableView(
           "暂无服务器", systemImage: "server.rack",
           description: Text("用工具栏「添加」导入 ss:// 链接或新建分组")
@@ -214,17 +222,25 @@ struct MainWindowView: View {
     .toolbar { toolbarContent }
   }
 
+  /// 删除结果 → selection invalidation（story 18）：仅清除失效选择，不自动
+  /// 改选相邻节点。
+  private func clearSelectionIfInvalidated(_ removed: Set<NodeID>) {
+    if let selection, removed.contains(selection) {
+      self.selection = nil
+    }
+  }
+
   /// 落点语义：拖到分组行 = 移入该组（仅手动组接受），拖到列表空白/根 = 移到根。
   /// 跨来源由视图过滤 + 领域拒绝双重保证；无效负载不接收。
   private func handleDrop(_ payload: [String], onto target: NodeID?) -> Bool {
     guard let raw = payload.first else { return false }
     let dragged = NodeID(rawValue: raw)
-    guard dragged != target, viewModel.catalog.contains(dragged) else { return false }
+    guard dragged != target, workflow.tree.containsNode(dragged) else { return false }
     Task {
       do {
-        try await viewModel.move(dragged, to: target)
+        try await workflow.move(dragged, to: target)
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
     return true
@@ -237,17 +253,22 @@ struct MainWindowView: View {
     switch pane {
     case .diagnostics:
       DiagnosticsView(
-        viewModel: viewModel, proxyController: proxyController, eventStore: eventStore)
+        workflow: workflow, proxyController: proxyController, eventStore: eventStore,
+        errors: errors)
     case .subscriptions:
-      SubscriptionsView(viewModel: viewModel)
+      SubscriptionsView(
+        workflow: workflow, errors: errors,
+        onNodesRemoved: { clearSelectionIfInvalidated($0) })
     case .servers:
-      if let id = viewModel.selectedNodeID, let entry = viewModel.entry(for: id) {
-        switch entry.kind {
-        case .server:
+      if let id = selection, let node = workflow.tree.node(withID: id) {
+        if node.isGroup {
+          GroupDetailView(
+            workflow: workflow, groupID: id, proxyController: proxyController,
+            errors: errors)
+        } else {
           ServerDetailView(
-            viewModel: viewModel, serverID: id, proxyController: proxyController)
-        case .group:
-          GroupDetailView(viewModel: viewModel, groupID: id, proxyController: proxyController)
+            workflow: workflow, serverID: id, proxyController: proxyController,
+            errors: errors)
         }
       } else {
         ContentUnavailableView(
@@ -266,15 +287,15 @@ struct MainWindowView: View {
         Button("从剪贴板导入 ss://") { importFromClipboard() }
         Button("通过 URL 导入…") { showImportURLSheet = true }
         Button("从二维码图片导入…") { showQRImportSheet = true }
-        if viewModel.legacyImportAvailable {
+        if workflow.legacyImportState.snapshotFound {
           Divider()
           Button(
-            viewModel.legacyImportCompleted ? "再次导入 Legacy 配置…" : "导入 Legacy 配置…"
+            workflow.legacyImportState.completed ? "再次导入 Legacy 配置…" : "导入 Legacy 配置…"
           ) {
             showLegacyImportSheet = true
           }
         }
-        if viewModel.legacyImportAvailable || !legacyHandoffModel.handoffCompleted
+        if workflow.legacyImportState.snapshotFound || !legacyHandoffModel.handoffCompleted
           || legacyHandoffModel.hasLegacyEvidence
         {
           Button(
@@ -286,7 +307,7 @@ struct MainWindowView: View {
         }
         Divider()
         Button("新建分组…") {
-          newGroupParent = viewModel.importTargetParent(for: viewModel.selectedNodeID)
+          newGroupParent = workflow.importTargetParent(for: selection)
           newGroupName = ""
         }
       } label: {
@@ -304,17 +325,15 @@ struct MainWindowView: View {
   private func performImport(_ text: String) {
     Task {
       do {
-        let parent = viewModel.importTargetParent(for: viewModel.selectedNodeID)
-        let outcome = try await viewModel.addServers(fromURIs: text, into: parent)
-        if outcome.added == 0 && outcome.failures.isEmpty {
-          viewModel.presentedError = "剪贴板没有可导入的文本"
-        } else if !outcome.failures.isEmpty {
-          viewModel.presentedError =
-            "已添加 \(outcome.added) 台服务器；以下条目无法解析：\n"
-            + outcome.failures.joined(separator: "\n")
+        let parent = workflow.importTargetParent(for: selection)
+        let outcome = try await workflow.createServers(fromURIs: text, into: parent)
+        if outcome.addedCount == 0 && outcome.failures.isEmpty {
+          errors.present(text: "剪贴板没有可导入的文本")
+        } else if let message = ImportOutcomePresentation.failureMessage(outcome) {
+          errors.present(text: message)
         }
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }
@@ -326,9 +345,9 @@ struct MainWindowView: View {
     renameTarget = nil
     Task {
       do {
-        try await viewModel.renameGroup(id, to: renameText)
+        try await workflow.renameGroup(id, to: renameText)
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }
@@ -338,40 +357,34 @@ struct MainWindowView: View {
     newGroupParent = nil
     Task {
       do {
-        _ = try await viewModel.addGroup(named: newGroupName, into: parent)
+        _ = try await workflow.createGroup(named: newGroupName, into: parent)
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }
 
-  private var deleteTargetName: String {
-    deleteTarget.map { viewModel.displayName(for: $0) } ?? ""
+  private var deleteTargetNode: CatalogTreeNode? {
+    deleteTarget.flatMap { workflow.tree.node(withID: $0) }
   }
 
   /// 删除语义：非空手动组点名子树规模（二次确认），空组与服务器单次确认。
   private var deleteTitle: String {
-    guard let id = deleteTarget,
-      let entry = viewModel.entry(for: id),
-      case .group = entry.kind,
-      entry.source == .manual
-    else { return "删除「\(deleteTargetName)」？" }
+    guard let node = deleteTargetNode, node.isGroup, node.isManual else {
+      return "删除「\(deleteTargetName)」？"
+    }
     return "删除分组「\(deleteTargetName)」及其整棵子树？"
   }
 
   private var deleteMessage: String {
-    guard let id = deleteTarget, let entry = viewModel.entry(for: id),
-      case .group(let fields) = entry.kind, entry.source == .manual
-    else { return "此操作不可撤销。" }
-    let count = subtreeCount(fields.children)
-    return "将递归删除 \(count) 个节点（含其中的服务器与凭据），此操作不可撤销。"
+    guard let node = deleteTargetNode, node.isGroup, node.isManual else {
+      return "此操作不可撤销。"
+    }
+    return "将递归删除 \(node.subtreeNodeCount) 个节点（含其中的服务器与凭据），此操作不可撤销。"
   }
 
-  private func subtreeCount(_ children: [NodeID]) -> Int {
-    children.reduce(0) { total, child in
-      let grandchildren = (try? viewModel.catalog.children(of: child)) ?? []
-      return total + 1 + subtreeCount(grandchildren)
-    }
+  private var deleteTargetName: String {
+    deleteTarget.map { workflow.displayName(for: $0) } ?? ""
   }
 
   private func commitDelete() {
@@ -379,9 +392,10 @@ struct MainWindowView: View {
     deleteTarget = nil
     Task {
       do {
-        try await viewModel.remove(id)
+        let outcome = try await workflow.remove(id)
+        clearSelectionIfInvalidated(outcome.removedNodeIDs)
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }

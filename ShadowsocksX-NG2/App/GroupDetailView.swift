@@ -1,16 +1,18 @@
 import SwiftUI
 
-/// 分组详情（issue #32）：名称编辑（手动组）、直接子节点数与激活入口。
-/// 订阅固定分组名称由远端管理，只读。空组保留可编辑（可先搭结构再填内容）。
+/// 分组详情（issue #32/#41）：名称编辑（手动组）、直接子节点数与激活入口。
+/// 数据来自目录工作流 module 的树 projection；订阅固定分组名称由远端管理，
+/// 只读。空组保留可编辑（可先搭结构再填内容）。
 struct GroupDetailView: View {
-  let viewModel: CatalogViewModel
+  let workflow: CatalogWorkflow
   let groupID: NodeID
   let proxyController: ProxyRuntimeController
+  let errors: ErrorAlertPresenter
 
   @State private var name = ""
 
-  private var entry: CatalogEntry? { viewModel.entry(for: groupID) }
-  private var isManual: Bool { entry?.source == .manual }
+  private var node: CatalogTreeNode? { workflow.tree.node(withID: groupID) }
+  private var isManual: Bool { node?.isManual ?? false }
 
   var body: some View {
     Form {
@@ -49,58 +51,26 @@ struct GroupDetailView: View {
       }
     }
     .formStyle(.grouped)
-    .navigationTitle(viewModel.displayName(for: groupID))
+    .navigationTitle(workflow.displayName(for: groupID))
     .onAppear(perform: loadName)
     .onChange(of: groupID) { _, _ in loadName() }
   }
 
-  private var directChildCount: Int {
-    (try? viewModel.catalog.children(of: groupID))?.count ?? 0
-  }
-
-  private var invalidServerCount: Int {
-    groupNode?.invalidServerCount ?? 0
-  }
-
-  private var validServerCount: Int {
-    serverCount - invalidServerCount
-  }
-
-  private var serverCount: Int {
-    guard let node = groupNode else {
-      return 0
-    }
-    return countServers(in: node)
-  }
-
-  private var groupNode: SidebarNode? {
-    func find(_ nodes: [SidebarNode]) -> SidebarNode? {
-      for node in nodes {
-        if node.id == groupID { return node }
-        if let match = find(node.children ?? []) { return match }
-      }
-      return nil
-    }
-    return find(viewModel.sidebarNodes())
-  }
-
-  private func countServers(in node: SidebarNode) -> Int {
-    if node.isGroup {
-      return (node.children ?? []).reduce(0) { $0 + countServers(in: $1) }
-    }
-    return 1
-  }
+  private var directChildCount: Int { node?.childCount ?? 0 }
+  private var invalidServerCount: Int { node?.invalidServerCount ?? 0 }
+  private var serverCount: Int { node?.serverCount ?? 0 }
+  private var validServerCount: Int { serverCount - invalidServerCount }
 
   private func loadName() {
-    name = viewModel.displayName(for: groupID)
+    name = workflow.displayName(for: groupID)
   }
 
   private func saveName() {
     Task {
       do {
-        try await viewModel.renameGroup(groupID, to: name)
+        try await workflow.renameGroup(groupID, to: name)
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }

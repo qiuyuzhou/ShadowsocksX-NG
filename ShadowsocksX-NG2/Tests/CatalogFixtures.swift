@@ -1,4 +1,5 @@
 import Foundation
+import XCTest
 
 @testable import ShadowsocksX_NG2
 
@@ -7,6 +8,9 @@ final class InMemoryCredentialStore: CredentialStoring {
   private var storage: [String: String] = [:]
 
   var storageCount: Int { storage.count }
+
+  /// 全量键值快照（凭据生命周期观察：删除/回滚后应有值消失或恢复）。
+  var storageSnapshot: [String: String] { storage }
 
   func save(_ secret: String, for reference: CredentialReference) throws {
     storage[reference.rawValue] = secret
@@ -79,5 +83,20 @@ extension ConfigurationCatalog {
     try addServer(
       CatalogFixtures.serverFields(remark: remark), source: source, id: id, to: parent, index: index
     )
+  }
+}
+
+/// `XCTAssertThrowsError` 的 async 版本（表达式在 await 之后才能检查）。
+func expectThrowsAsync(
+  _ expression: () async throws -> Void,
+  onThrow errorHandler: (Error) -> Void = { _ in },
+  file: StaticString = #filePath,
+  line: UInt = #line
+) async {
+  do {
+    _ = try await expression()
+    XCTFail("预期抛错，但成功返回", file: file, line: line)
+  } catch {
+    errorHandler(error)
   }
 }

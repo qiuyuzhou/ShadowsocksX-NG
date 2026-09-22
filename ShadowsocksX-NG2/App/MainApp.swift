@@ -4,7 +4,7 @@ import SwiftUI
 struct ShadowsocksXNG2App: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @StateObject private var proxyController: ProxyRuntimeController
-  @StateObject private var catalogViewModel: CatalogViewModel
+  @StateObject private var catalogWorkflow: CatalogWorkflow
   @StateObject private var loginController: LaunchAtLoginController
 
   init() {
@@ -18,13 +18,13 @@ struct ShadowsocksXNG2App: App {
     _proxyController = StateObject(wrappedValue: controller)
     let loginController = LaunchAtLoginController()
     _loginController = StateObject(wrappedValue: loginController)
-    // 组合根（issue #40）：目录提交协调器与生产运行时适配器只在此接线一次，
+    // 组合根（issue #40/#41）：目录提交协调器与生产运行时适配器只在此接线一次，
     // 各 scene 不再重复设置提交回调；Legacy 导入边界同为一次性注入。
     let coordinator = CatalogCommitCoordinator(
       fileStore: CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL()),
       runtime: ProxyRuntimeSyncAdapter(controller: controller))
-    _catalogViewModel = StateObject(
-      wrappedValue: CatalogViewModel(
+    _catalogWorkflow = StateObject(
+      wrappedValue: CatalogWorkflow(
         coordinator: coordinator,
         postLegacyImport: { outcome in
           await controller.legacyImportDidCommit()
@@ -40,7 +40,7 @@ struct ShadowsocksXNG2App: App {
 
   var body: some Scene {
     MenuBarExtra("ShadowsocksX-NG 2.0", systemImage: "network") {
-      ProxyStatusMenu(controller: proxyController, catalogViewModel: catalogViewModel)
+      ProxyStatusMenu(controller: proxyController, catalogWorkflow: catalogWorkflow)
         .task {
           // 全局快捷键（issue #31）：开关代理、切换模式，与菜单项同一入口。
           GlobalShortcuts.wire(controller: proxyController)
@@ -51,12 +51,12 @@ struct ShadowsocksXNG2App: App {
 
     Window("ShadowsocksX-NG 2.0", id: "main") {
       MainWindowView(
-        viewModel: catalogViewModel, proxyController: proxyController,
+        workflow: catalogWorkflow, proxyController: proxyController,
         eventStore: .shared
       )
     }
     .defaultLaunchBehavior(
-      catalogViewModel.shouldOfferLegacyImport ? .automatic : .suppressed)
+      catalogWorkflow.legacyImportState.shouldOffer ? .automatic : .suppressed)
 
     // 菜单栏 app 没有可依赖的常规应用菜单；设置窗口必须有显式 scene ID，
     // 由状态菜单通过 openWindow(id:) 打开。

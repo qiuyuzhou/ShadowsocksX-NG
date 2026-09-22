@@ -2,21 +2,23 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 插件区编辑语义（issue #38，D10）：选择器三态呈现与落盘、「无」整体清除、
-/// 参数写删钥匙串、集外引用原样保留，以及经编辑面的 ss:// 分享往返。
-/// 走内存凭据存储与注入 bundleURL 的受管插件提供。
+/// 插件区编辑语义（issue #38/#41，D10）经目录工作流 module interface 观察：
+/// 选择器三态呈现与落盘、「无」整体清除、参数写删钥匙串、集外引用原样保留，
+/// 以及经编辑面的 ss:// 分享往返。走内存凭据存储与注入 bundleURL 的受管插件
+/// 提供。
 @MainActor
-final class CatalogViewModelPluginTests: XCTestCase {
+final class CatalogWorkflowPluginTests: XCTestCase {
   private var workDir: URL!
   private var bundleRoot: URL!
   private var fileURL: URL!
   private var credentials: InMemoryCredentialStore!
-  private var viewModel: CatalogViewModel!
+  private var workflow: CatalogWorkflow!
 
   override func setUp() async throws {
     try await super.setUp()
     workDir = FileManager.default.temporaryDirectory
-      .appendingPathComponent("catalog-plugin-tests-\(UUID().uuidString)", isDirectory: true)
+      .appendingPathComponent(
+        "catalog-plugin-workflow-tests-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
     bundleRoot = FileManager.default.temporaryDirectory
       .appendingPathComponent("catalog-plugin-bundle-\(UUID().uuidString)", isDirectory: true)
@@ -25,7 +27,7 @@ final class CatalogViewModelPluginTests: XCTestCase {
       withIntermediateDirectories: true)
     fileURL = workDir.appendingPathComponent("catalog.json")
     credentials = InMemoryCredentialStore()
-    viewModel = makeViewModel()
+    workflow = makeWorkflow()
   }
 
   override func tearDown() async throws {
@@ -42,15 +44,15 @@ final class CatalogViewModelPluginTests: XCTestCase {
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
   }
 
-  private func makeViewModel() -> CatalogViewModel {
-    CatalogViewModel(
+  private func makeWorkflow() -> CatalogWorkflow {
+    CatalogWorkflow(
       coordinator: CatalogCommitCoordinator(
         fileStore: CatalogFileStore(fileURL: fileURL), runtime: FakeCatalogRuntime()),
       credentials: credentials,
       plugins: BundleManagedPluginProvider(bundleURL: bundleRoot))
   }
 
-  /// 直建目录（不经 URI 导入）后重载视图模型，返回该服务器身份。
+  /// 直建目录（不经 URI 导入）后重载工作流，返回该服务器身份。
   private func addPluginServer(program: String?, options: String?) async throws -> NodeID {
     var catalog = ConfigurationCatalog()
     var fields = ServerFields(
@@ -70,13 +72,8 @@ final class CatalogViewModelPluginTests: XCTestCase {
     }
     try catalog.addServer(fields)
     try CatalogFileStore(fileURL: fileURL).save(CatalogDocument(catalog: catalog))
-    viewModel = makeViewModel()
-    return try XCTUnwrap(viewModel.catalog.rootChildren.first)
-  }
-
-  private func serverFields(of id: NodeID) -> ServerFields? {
-    guard case .server(let fields) = viewModel.entry(for: id)?.kind else { return nil }
-    return fields
+    workflow = makeWorkflow()
+    return try XCTUnwrap(workflow.tree.roots.first?.id)
   }
 
   private func update(
@@ -85,9 +82,11 @@ final class CatalogViewModelPluginTests: XCTestCase {
     pluginOptions: String?,
     address: String = "203.0.113.7"
   ) async throws {
-    try await viewModel.updateServer(
-      id, address: address, port: 8388, encryptionMethod: "aes-256-gcm",
-      password: "pw", remark: "带插件", plugin: plugin, pluginOptions: pluginOptions)
+    try await workflow.updateServer(
+      id,
+      draft: ServerEditDraft(
+        address: address, port: 8388, encryptionMethod: "aes-256-gcm", password: "pw",
+        remark: "带插件", plugin: plugin, pluginOptions: pluginOptions))
   }
 
   // MARK: - 选择器呈现
@@ -95,7 +94,7 @@ final class CatalogViewModelPluginTests: XCTestCase {
   func testManagedSelectionShownWithFactsAndParamsPlaintext() async throws {
     try writePluginBinary()
     let id = try await addPluginServer(program: pluginBinaryName, options: "mode=websocket")
-    let plugin = try XCTUnwrap(viewModel.serverFormState(for: id)?.plugin)
+    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName))
     XCTAssertTrue(plugin.provided, "二进制在位即提供")
     XCTAssertTrue(plugin.optionsPresent)
@@ -105,14 +104,14 @@ final class CatalogViewModelPluginTests: XCTestCase {
 
   func testMissingBinaryShowsManagedButNotProvided() async throws {
     let id = try await addPluginServer(program: pluginBinaryName, options: nil)
-    let plugin = try XCTUnwrap(viewModel.serverFormState(for: id)?.plugin)
+    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName))
     XCTAssertFalse(plugin.provided, "打包损坏/降级丢插件时点名呈现")
   }
 
   func testUnknownProgramRendersExplicitUnknownState() async throws {
     let id = try await addPluginServer(program: "obfs-local", options: "obfs=http")
-    let plugin = try XCTUnwrap(viewModel.serverFormState(for: id)?.plugin)
+    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .unknown(program: "obfs-local"), "集外引用显式未提供")
     XCTAssertFalse(plugin.provided)
     XCTAssertTrue(plugin.optionsPresent, "已配置参数的事实照常呈现")
@@ -121,7 +120,7 @@ final class CatalogViewModelPluginTests: XCTestCase {
 
   func testNoPluginSelectionIsDefault() async throws {
     let id = try await addPluginServer(program: nil, options: nil)
-    let plugin = try XCTUnwrap(viewModel.serverFormState(for: id)?.plugin)
+    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .none)
     XCTAssertFalse(plugin.provided)
     XCTAssertFalse(plugin.optionsPresent)
@@ -135,44 +134,45 @@ final class CatalogViewModelPluginTests: XCTestCase {
     try await update(
       id, plugin: .managed(program: pluginBinaryName),
       pluginOptions: "mode=websocket;host=example.com")
-    let fields = try XCTUnwrap(serverFields(of: id))
-    XCTAssertEqual(fields.pluginProgram, pluginBinaryName)
-    let optionsRef = try XCTUnwrap(fields.pluginOptionsRef)
-    XCTAssertEqual(try credentials.secret(for: optionsRef), "mode=websocket;host=example.com")
+    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName))
+    XCTAssertEqual(plugin.options, "mode=websocket;host=example.com")
+    XCTAssertTrue(plugin.optionsPresent)
   }
 
-  func testSavingEmptyOptionsDropsOptionsReference() async throws {
+  func testSavingEmptyOptionsDropsOptions() async throws {
     try writePluginBinary()
     let id = try await addPluginServer(program: pluginBinaryName, options: "mode=websocket")
-    let oldRef = try XCTUnwrap(serverFields(of: id)?.pluginOptionsRef)
     try await update(id, plugin: .managed(program: pluginBinaryName), pluginOptions: "   ")
-    let fields = try XCTUnwrap(serverFields(of: id))
-    XCTAssertEqual(fields.pluginProgram, pluginBinaryName, "程序引用保留")
-    XCTAssertNil(fields.pluginOptionsRef, "空参数即无参数引用")
-    XCTAssertNil(try credentials.secret(for: oldRef), "清空参数即删除钥匙串秘密")
+    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName), "程序引用保留")
+    XCTAssertFalse(plugin.optionsPresent, "空参数即无参数引用")
+    XCTAssertEqual(plugin.options, "")
+    // 秘密确实从凭据存储删除（引用固定为夹具常量）。
+    XCTAssertNil(
+      try credentials.secret(for: CredentialReference(rawValue: "ref-opts")),
+      "清空参数即删除钥匙串秘密")
   }
 
   func testSelectingNoneClearsProgramAndOptions() async throws {
     let id = try await addPluginServer(program: pluginBinaryName, options: "mode=websocket")
-    let oldRef = try XCTUnwrap(serverFields(of: id)?.pluginOptionsRef)
     try await update(id, plugin: .none, pluginOptions: nil)
-    let fields = try XCTUnwrap(serverFields(of: id))
-    XCTAssertNil(fields.pluginProgram)
-    XCTAssertNil(fields.pluginOptionsRef)
-    XCTAssertNil(try credentials.secret(for: oldRef))
+    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    XCTAssertEqual(plugin.selection, .none)
+    XCTAssertFalse(plugin.optionsPresent)
+    XCTAssertNil(try credentials.secret(for: CredentialReference(rawValue: "ref-opts")))
   }
 
   func testUnknownSelectionPreservesReferenceAndOptionsVerbatim() async throws {
     let id = try await addPluginServer(program: "obfs-local", options: "obfs=http")
-    let before = try XCTUnwrap(serverFields(of: id))
     try await update(
       id, plugin: .unknown(program: "obfs-local"), pluginOptions: nil,
       address: "198.51.100.9")
-    let after = try XCTUnwrap(serverFields(of: id))
-    XCTAssertEqual(after.address, "198.51.100.9", "连接字段照常更新")
-    XCTAssertEqual(after.pluginProgram, "obfs-local", "集外引用原样保留")
-    XCTAssertEqual(after.pluginOptionsRef, before.pluginOptionsRef)
-    let ref = try XCTUnwrap(after.pluginOptionsRef)
+    let form = try XCTUnwrap(workflow.serverEditForm(for: id))
+    XCTAssertEqual(form.address, "198.51.100.9", "连接字段照常更新")
+    XCTAssertEqual(form.plugin.selection, .unknown(program: "obfs-local"), "集外引用原样保留")
+    XCTAssertTrue(form.plugin.optionsPresent)
+    let ref = CredentialReference(rawValue: "ref-opts")
     XCTAssertEqual(try credentials.secret(for: ref), "obfs=http", "参数秘密不动")
   }
 
@@ -196,21 +196,18 @@ final class CatalogViewModelPluginTests: XCTestCase {
       id, plugin: .managed(program: pluginBinaryName),
       pluginOptions: "mode=websocket;host=example.com")
 
-    let shared = try viewModel.ssUri(for: id)
+    let shared = try workflow.shareURI(for: id)
     let decoded = try SsUri.decode(shared)
     XCTAssertEqual(decoded.pluginProgram, pluginBinaryName)
     XCTAssertEqual(decoded.pluginOptions, "mode=websocket;host=example.com")
 
     // 导回目录：插件字段同构（新建身份，不按内容去重）。
-    let outcome = try await viewModel.addServers(fromURIs: shared, into: nil)
-    XCTAssertEqual(outcome.added, 1)
-    let importedID = try XCTUnwrap(
-      viewModel.catalog.rootChildren.dropFirst().first,
-      "第二个根节点应是新导入的服务器")
-    let imported = try XCTUnwrap(serverFields(of: importedID))
-    XCTAssertEqual(imported.pluginProgram, pluginBinaryName)
-    let importedRef = try XCTUnwrap(imported.pluginOptionsRef)
-    XCTAssertEqual(
-      try credentials.secret(for: importedRef), "mode=websocket;host=example.com")
+    let outcome = try await workflow.createServers(fromURIs: shared, into: nil)
+    XCTAssertEqual(outcome.addedCount, 1)
+    let importedNode = try XCTUnwrap(
+      workflow.tree.roots.dropFirst().first, "第二个根节点应是新导入的服务器")
+    let imported = try XCTUnwrap(workflow.serverEditForm(for: importedNode.id))
+    XCTAssertEqual(imported.plugin.selection, .managed(program: pluginBinaryName))
+    XCTAssertEqual(imported.plugin.options, "mode=websocket;host=example.com")
   }
 }

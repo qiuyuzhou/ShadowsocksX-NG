@@ -1,15 +1,19 @@
 import SwiftUI
 
-/// 侧栏树行：来源标识、有效性提示、活动目标标记与右键菜单。
-/// 服务器/分组不再拥有独立的启用/停用状态；激活时由状态机按有效性展开。
+/// 侧栏树行（issue #41）：来源标识、有效性提示、活动目标标记与右键菜单。
+/// 数据来自目录工作流 module 的树 projection；服务器/分组不再拥有独立的启
+/// 用/停用状态，激活时由状态机按有效性展开。
 struct SidebarRow: View {
-  let node: SidebarNode
-  let viewModel: CatalogViewModel
+  let node: CatalogTreeNode
+  let workflow: CatalogWorkflow
   let proxyController: ProxyRuntimeController
+  let errors: ErrorAlertPresenter
   let onRename: (NodeID) -> Void
   let onNewGroup: (NodeID?) -> Void
   let onMove: (NodeID) -> Void
   let onDelete: (NodeID) -> Void
+  /// 直接删除完成后的回调（携带被删身份集合；UI 据此清除失效选择）。
+  let onRemoved: (Set<NodeID>) -> Void
 
   private var isSubscription: Bool { node.source == .subscription }
 
@@ -33,7 +37,7 @@ struct SidebarRow: View {
           .foregroundStyle(.tertiary)
           .help("订阅节点：由远端管理")
       }
-      if proxyController.machine.activeTargetID == node.id {
+      if proxyController.activeTargetID == node.id {
         Image(systemName: "bolt.fill")
           .foregroundStyle(.orange)
           .help("活动目标")
@@ -44,7 +48,7 @@ struct SidebarRow: View {
 
   /// 空手动组直接删除；服务器与非空手动组走确认弹窗（issue #32）。
   private var isEmptyManualGroup: Bool {
-    node.isGroup && node.source == .manual && (node.children?.isEmpty ?? true)
+    node.isGroup && node.isManual && node.childNodes.isEmpty
   }
 
   @ViewBuilder
@@ -58,7 +62,7 @@ struct SidebarRow: View {
         Button("重命名…") { onRename(node.id) }
       }
       Button("新建分组…") {
-        onNewGroup(node.isGroup ? node.id : viewModel.parentID(of: node.id))
+        onNewGroup(node.isGroup ? node.id : node.parentID)
       }
       Divider()
       Button("移动到…") { onMove(node.id) }
@@ -67,9 +71,10 @@ struct SidebarRow: View {
         if isEmptyManualGroup {
           Task {
             do {
-              try await viewModel.remove(node.id)
+              let outcome = try await workflow.remove(node.id)
+              onRemoved(outcome.removedNodeIDs)
             } catch {
-              viewModel.presentedError = error.presentableMessage
+              errors.present(error)
             }
           }
         } else {

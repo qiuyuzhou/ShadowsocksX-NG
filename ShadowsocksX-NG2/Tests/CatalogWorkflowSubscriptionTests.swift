@@ -2,29 +2,29 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 订阅端到端语义（issue #35 验收）：创建门禁、刷新失败保留快照、overlay 与
-/// 身份连续性、URL 编辑保身份、删除递归清除、UI 数据面与提交接线。
-/// 获取走 FakeSubscriptionFetcher（传输侧契约在 SubscriptionFetcherTests）；
-/// 提交后的运行时收敛以确定性 fake 计数（issue #40）。
+/// 订阅端到端语义（issue #35/#41）经目录工作流 module interface 观察：创建
+/// 门禁、刷新失败保留快照、身份连续性、URL 编辑保身份、删除递归清除、卡片
+/// projection 与提交接线。获取走 FakeSubscriptionFetcher（传输侧契约在
+/// SubscriptionFetcherTests）；提交后的运行时收敛以确定性 fake 计数（issue #40）。
 @MainActor
-final class CatalogViewModelSubscriptionTests: XCTestCase {
+final class CatalogWorkflowSubscriptionTests: XCTestCase {
   private var workDir: URL!
   private var fileURL: URL!
   private var credentials: InMemoryCredentialStore!
   private var fetcher: FakeSubscriptionFetcher!
   private var runtime: FakeCatalogRuntime!
-  private var viewModel: CatalogViewModel!
+  private var workflow: CatalogWorkflow!
 
   override func setUp() async throws {
     try await super.setUp()
     workDir = FileManager.default.temporaryDirectory
-      .appendingPathComponent("subscription-vm-tests-\(UUID().uuidString)", isDirectory: true)
+      .appendingPathComponent("subscription-workflow-tests-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
     fileURL = workDir.appendingPathComponent("catalog.json")
     credentials = InMemoryCredentialStore()
     runtime = FakeCatalogRuntime()
     fetcher = FakeSubscriptionFetcher(behavior: .success(SubscriptionDocs.flat(serverCount: 1)))
-    viewModel = makeViewModel()
+    workflow = makeWorkflow()
   }
 
   override func tearDown() async throws {
@@ -32,37 +32,36 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
     try await super.tearDown()
   }
 
-  private func makeViewModel() -> CatalogViewModel {
+  private func makeWorkflow() -> CatalogWorkflow {
     // 计数即提交计数：提交后的运行时收敛由协调器异步调度（issue #40）。
     runtime.hasActiveTarget = true
     let coordinator = CatalogCommitCoordinator(
       fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime)
-    let model = CatalogViewModel(
+    return CatalogWorkflow(
       coordinator: coordinator,
       credentials: credentials,
-      plugins: NoManagedPluginProvider())
-    model.subscriptionFetcher = fetcher!
-    return model
+      plugins: NoManagedPluginProvider(),
+      subscriptionFetcher: fetcher!)
   }
 
-  // MARK: 文档夹具（稳定 UUID 服务器 a/b + 可选扩展树）
-
-  /// 订阅身份是创建时新生成的 UUID，服务器作用域 ID 前缀随机；按文档稳定
-  /// ID 后缀查找。
-  private func serverID(withSuffix suffix: String) -> NodeID? {
-    viewModel.catalog.entries.keys.first { $0.rawValue.hasSuffix(suffix) }
+  /// 文档稳定 ID 后缀在树 projection 中定位节点（订阅前缀随机）。
+  private func findNode(withSuffix suffix: String) -> CatalogTreeNode? {
+    var stack = workflow.tree.roots
+    while let node = stack.popLast() {
+      if node.id.rawValue.hasSuffix(suffix) { return node }
+      stack.append(contentsOf: node.children ?? [])
+    }
+    return nil
   }
 
   private var serverAID: NodeID {
-    NodeID(
-      rawValue: (serverID(withSuffix: "id:aaaaaaaa-0000-4000-8000-00000000000a"))?.rawValue
-        ?? "missing-a")
+    findNode(withSuffix: "aaaaaaaa-0000-4000-8000-00000000000a")?.id
+      ?? NodeID(rawValue: "missing-a")
   }
 
   private var serverBID: NodeID {
-    NodeID(
-      rawValue: (serverID(withSuffix: "id:bbbbbbbb-0000-4000-8000-00000000000b"))?.rawValue
-        ?? "missing-b")
+    findNode(withSuffix: "bbbbbbbb-0000-4000-8000-00000000000b")?.id
+      ?? NodeID(rawValue: "missing-b")
   }
 
   /// b 移到根 + a 改名 + 重排（远端改名/移动/排序跟随的对照文档）。
@@ -74,30 +73,30 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
   func testCreateRequiresHTTPSURL() async {
     for bad in ["http://example.com/sub.json", "ftp://x/y", "不是 URL", "https://"] {
       do {
-        _ = try await viewModel.createSubscription(urlString: bad)
+        _ = try await workflow.createSubscription(urlString: bad)
         XCTFail("「\(bad)」应被拒绝")
       } catch {
         XCTAssertEqual(error as? SubscriptionFormError, .invalidURL)
       }
     }
-    XCTAssertTrue(viewModel.subscriptions.isEmpty, "创建失败不留半成品")
-    XCTAssertTrue(viewModel.catalog.isEmpty)
+    XCTAssertTrue(workflow.subscriptions.isEmpty, "创建失败不留半成品")
+    XCTAssertTrue(workflow.tree.isEmpty)
   }
 
   func testCreateAddsRecordEmptyGroupAndRefreshes() async throws {
     fetcher = FakeSubscriptionFetcher(behavior: .success(treeDoc))
-    viewModel = makeViewModel()
+    workflow = makeWorkflow()
 
-    let record = try await viewModel.createSubscription(
+    let summary = try await workflow.createSubscription(
       urlString: "https://provider.example.com/sub.json")
 
-    XCTAssertEqual(record.id, viewModel.subscriptions.first?.id)
+    XCTAssertEqual(summary.id, workflow.subscriptions.first?.id)
     XCTAssertEqual(fetcher.lastURL?.host, "provider.example.com", "创建即首次刷新")
-    let group = try XCTUnwrap(viewModel.entry(for: record.groupID))
-    guard case .group(let fields) = group.kind else { return XCTFail("固定分组应存在") }
-    XCTAssertEqual(fields.name, "Example subscription", "名称跟随远端根分组")
-    XCTAssertTrue(viewModel.catalog.rootChildren.contains(record.groupID), "固定分组挂目录根")
-    guard case .succeeded = viewModel.subscriptions[0].status else {
+    let group = try XCTUnwrap(workflow.tree.node(withID: summary.groupID))
+    XCTAssertTrue(group.isGroup)
+    XCTAssertEqual(group.name, "Example subscription", "名称跟随远端根分组")
+    XCTAssertFalse(group.isManual)
+    guard case .succeeded = workflow.subscriptions[0].status else {
       return XCTFail("首次刷新成功应记成功态")
     }
   }
@@ -105,15 +104,14 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
   func testFirstRefreshFailureLeavesEmptyGroupWithFailedStatus() async throws {
     fetcher = FakeSubscriptionFetcher(
       behavior: .failure(.transport(detail: "URLError.timedOut")))
-    viewModel = makeViewModel()
+    workflow = makeWorkflow()
 
-    let created = try await viewModel.createSubscription(
+    let created = try await workflow.createSubscription(
       urlString: "https://provider.example.com/s.json")
 
-    XCTAssertNotNil(viewModel.entry(for: created.groupID), "首刷失败仍留空分组")
-    XCTAssertEqual(
-      viewModel.displayName(for: created.groupID), "provider.example.com", "空分组以 host 兜底")
-    guard case .failed(_, let reason) = viewModel.subscriptions[0].status else {
+    XCTAssertNotNil(workflow.tree.node(withID: created.groupID), "首刷失败仍留空分组")
+    XCTAssertEqual(created.name, "provider.example.com", "空分组以 host 兜底")
+    guard case .failed(_, let reason) = workflow.subscriptions[0].status else {
       return XCTFail("首刷失败应记失败态")
     }
     XCTAssertTrue(reason.contains("URLError.timedOut"))
@@ -124,20 +122,20 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
 
   func testFailedRefreshKeepsSnapshotAndStatus() async throws {
     fetcher = FakeSubscriptionFetcher(behavior: .success(treeDoc))
-    viewModel = makeViewModel()
-    let record = try await viewModel.createSubscription(urlString: "https://p.example.com/s.json")
+    workflow = makeWorkflow()
+    let record = try await workflow.createSubscription(urlString: "https://p.example.com/s.json")
     let convergesBefore = runtime.convergeCount
+    let treeBefore = workflow.tree
 
     fetcher = FakeSubscriptionFetcher(behavior: .failure(.httpStatus(code: 503)))
-    viewModel.subscriptionFetcher = fetcher
-    await viewModel.refreshSubscription(record.id)
+    workflow.subscriptionFetcher = fetcher
+    await workflow.refreshSubscription(record.id)
 
     // 快照原样保留。
-    XCTAssertNotNil(viewModel.entry(for: serverAID))
-    XCTAssertNotNil(viewModel.entry(for: serverBID))
-    XCTAssertEqual(viewModel.displayName(for: serverAID), "香港 01")
+    XCTAssertEqual(workflow.tree, treeBefore, "传输失败不动最后成功快照（projection 等价）")
+    XCTAssertEqual(findNode(withSuffix: "aaaaaaaa-0000-4000-8000-00000000000a")?.name, "香港 01")
     // 状态点名失败且原因脱敏。
-    guard case .failed(_, let reason) = viewModel.subscriptions[0].status else {
+    guard case .failed(_, let reason) = workflow.subscriptions[0].status else {
       return XCTFail("应记失败态")
     }
     XCTAssertTrue(reason.contains("503"))
@@ -154,15 +152,15 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
       FakeSubscriptionFetcher.Behavior.success(Data("not json".utf8)),
       FakeSubscriptionFetcher.Behavior.success(Data(#"{"version": 9, "servers": []}"#.utf8)),
     ] {
-      let snapshotBefore = viewModel.catalog
-      viewModel.subscriptionFetcher = FakeSubscriptionFetcher(behavior: behavior)
-      await viewModel.refreshSubscription(record.id)
+      let treeBefore = workflow.tree
+      workflow.subscriptionFetcher = FakeSubscriptionFetcher(behavior: behavior)
+      await workflow.refreshSubscription(record.id)
 
-      guard case .failed(_, let reason) = viewModel.subscriptions[0].status else {
+      guard case .failed(_, let reason) = workflow.subscriptions[0].status else {
         return XCTFail("应记失败态：\(behavior)")
       }
       XCTAssertFalse(reason.isEmpty)
-      XCTAssertEqual(viewModel.catalog, snapshotBefore, "解析类失败不动快照")
+      XCTAssertEqual(workflow.tree, treeBefore, "解析类失败不动快照（projection 等价）")
       // 失败原因不携带订阅 URL。
       XCTAssertFalse(reason.lowercased().contains("p.example.com"))
     }
@@ -170,32 +168,32 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
 
   func testDuplicateIDFailureKeepsSnapshot() async throws {
     let record = try await seedSuccessfulSubscription()
-    let snapshotBefore = viewModel.catalog
+    let treeBefore = workflow.tree
 
-    viewModel.subscriptionFetcher = FakeSubscriptionFetcher(
+    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
       behavior: .success(SubscriptionDocs.duplicateIDs()))
-    await viewModel.refreshSubscription(record.id)
+    await workflow.refreshSubscription(record.id)
 
-    guard case .failed(_, let reason) = viewModel.subscriptions[0].status else {
+    guard case .failed(_, let reason) = workflow.subscriptions[0].status else {
       return XCTFail("应记失败态")
     }
     XCTAssertTrue(reason.contains("重复"), "点名重复 ID：\(reason)")
-    XCTAssertEqual(viewModel.catalog, snapshotBefore)
+    XCTAssertEqual(workflow.tree, treeBefore)
   }
 
   func testRecordValidationFailureKeepsSnapshot() async throws {
     let record = try await seedSuccessfulSubscription()
-    let snapshotBefore = viewModel.catalog
+    let treeBefore = workflow.tree
 
-    viewModel.subscriptionFetcher = FakeSubscriptionFetcher(
+    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
       behavior: .success(SubscriptionDocs.invalidRecord()))
-    await viewModel.refreshSubscription(record.id)
+    await workflow.refreshSubscription(record.id)
 
-    guard case .failed(_, let reason) = viewModel.subscriptions[0].status else {
+    guard case .failed(_, let reason) = workflow.subscriptions[0].status else {
       return XCTFail("应记失败态")
     }
     XCTAssertTrue(reason.contains("server_port"), "点名无效字段：\(reason)")
-    XCTAssertEqual(viewModel.catalog, snapshotBefore)
+    XCTAssertEqual(workflow.tree, treeBefore)
   }
 
   // MARK: 空快照与扁平回退
@@ -203,14 +201,14 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
   func testEmptySnapshotIsSuccessAndClearsSubtree() async throws {
     let record = try await seedSuccessfulSubscription()
 
-    viewModel.subscriptionFetcher = FakeSubscriptionFetcher(
+    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
       behavior: .success(SubscriptionDocs.flat(serverCount: 0)))
-    await viewModel.refreshSubscription(record.id)
+    await workflow.refreshSubscription(record.id)
 
-    let group = try viewModel.entry(for: record.groupID)
-    guard case .group(let fields) = group?.kind else { return XCTFail("固定分组应保留") }
-    XCTAssertTrue(fields.children.isEmpty, "合法空快照清空子树")
-    guard case .succeeded = viewModel.subscriptions[0].status else {
+    let group = try XCTUnwrap(workflow.tree.node(withID: record.groupID))
+    XCTAssertTrue(group.isGroup)
+    XCTAssertEqual(group.childCount, 0, "合法空快照清空子树")
+    guard case .succeeded = workflow.subscriptions[0].status else {
       return XCTFail("空快照按成功处理")
     }
   }
@@ -218,16 +216,14 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
   func testCycleDocumentFallsBackToFlatAndSucceeds() async throws {
     let record = try await seedSuccessfulSubscription()
 
-    viewModel.subscriptionFetcher = FakeSubscriptionFetcher(
+    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
       behavior: .success(SubscriptionDocs.cycleExtension()))
-    await viewModel.refreshSubscription(record.id)
+    await workflow.refreshSubscription(record.id)
 
-    guard case .group(let fields) = viewModel.entry(for: record.groupID)?.kind else {
-      return XCTFail("固定分组应存在")
-    }
-    XCTAssertEqual(fields.children.count, 2, "回退扁平：标准服务器直接进固定分组")
-    XCTAssertEqual(fields.name, "p.example.com", "扁平回退以 host 兜底名称")
-    guard case .succeeded = viewModel.subscriptions[0].status else {
+    let group = try XCTUnwrap(workflow.tree.node(withID: record.groupID))
+    XCTAssertEqual(group.childCount, 2, "回退扁平：标准服务器直接进固定分组")
+    XCTAssertEqual(group.name, "p.example.com", "扁平回退以 host 兜底名称")
+    guard case .succeeded = workflow.subscriptions[0].status else {
       return XCTFail("回退扁平仍是成功刷新")
     }
   }
@@ -236,36 +232,35 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
 
   func testRemoteRenameMoveReorderFollowsWithoutLocalOverlay() async throws {
     fetcher = FakeSubscriptionFetcher(behavior: .success(treeDoc))
-    viewModel = makeViewModel()
-    let record = try await viewModel.createSubscription(urlString: "https://p.example.com/s.json")
-    viewModel.subscriptionFetcher = FakeSubscriptionFetcher(
+    workflow = makeWorkflow()
+    let record = try await workflow.createSubscription(urlString: "https://p.example.com/s.json")
+    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
       behavior: .success(changedTreeDoc))
-    await viewModel.refreshSubscription(record.id)
+    await workflow.refreshSubscription(record.id)
 
     // 身份不变；名称/位置/顺序跟随远端。
-    XCTAssertEqual(viewModel.displayName(for: serverAID), "香港 01（新名）")
-    guard case .group(let fields) = viewModel.entry(for: record.groupID)?.kind else {
-      return XCTFail("固定分组应存在")
-    }
+    XCTAssertEqual(findNode(withSuffix: "aaaaaaaa-0000-4000-8000-00000000000a")?.name, "香港 01（新名）")
+    let group = try XCTUnwrap(workflow.tree.node(withID: record.groupID))
     let japanGroupID = try XCTUnwrap(
-      viewModel.catalog.entries.keys.first { $0.rawValue.hasSuffix("g:jp") })
-    XCTAssertEqual(fields.children, [serverBID, japanGroupID], "远端排序跟随")
+      findNode(withSuffix: "g:jp")?.id,
+      "嵌套分组应存在")
+    XCTAssertEqual(group.children?.map(\.id), [serverBID, japanGroupID], "远端排序跟随")
   }
 
   func testIdLessServerContinuityOnlyForExactMatch() async throws {
     fetcher = FakeSubscriptionFetcher(behavior: .success(SubscriptionDocs.idLess()))
-    viewModel = makeViewModel()
-    let record = try await viewModel.createSubscription(urlString: "https://p.example.com/s.json")
+    workflow = makeWorkflow()
+    let record = try await workflow.createSubscription(urlString: "https://p.example.com/s.json")
     let serverID = try XCTUnwrap(onlyServerChildID(ofGroup: record.groupID))
     // 完全相同记录 → 身份延续。
-    await viewModel.refreshSubscription(record.id)
+    await workflow.refreshSubscription(record.id)
     XCTAssertEqual(onlyServerChildID(ofGroup: record.groupID), serverID)
 
     // 端口变化 → 新身份：旧节点删除（无墓碑）。
-    viewModel.subscriptionFetcher = FakeSubscriptionFetcher(
+    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
       behavior: .success(SubscriptionDocs.idLess(port: 9999)))
-    await viewModel.refreshSubscription(record.id)
-    XCTAssertNil(viewModel.entry(for: serverID), "无稳定 ID 且记录变化即不同节点")
+    await workflow.refreshSubscription(record.id)
+    XCTAssertNil(workflow.tree.node(withID: serverID), "无稳定 ID 且记录变化即不同节点")
     let newID = try XCTUnwrap(onlyServerChildID(ofGroup: record.groupID))
     XCTAssertNotEqual(newID, serverID)
   }
@@ -279,42 +274,54 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
 
     // 新地址先失败：快照保留、身份不动。
     let failing = FakeSubscriptionFetcher(behavior: .failure(.httpStatus(code: 404)))
-    viewModel.subscriptionFetcher = failing
-    try await viewModel.editSubscriptionURL(
+    workflow.subscriptionFetcher = failing
+    try await workflow.editSubscriptionURL(
       record.id, urlString: "https://other.example.com/v2.json")
-    XCTAssertEqual(viewModel.subscriptions[0].id, originalRecordID, "订阅身份保留")
-    guard case .failed = viewModel.subscriptions[0].status else {
+    XCTAssertEqual(workflow.subscriptions[0].id, originalRecordID, "订阅身份保留")
+    guard case .failed = workflow.subscriptions[0].status else {
       return XCTFail("新地址失败应记失败态")
     }
     XCTAssertEqual(failing.lastURL?.host, "other.example.com")
-    XCTAssertNotNil(viewModel.entry(for: serverAID), "失败保留最后成功快照")
+    XCTAssertNotNil(findNode(withSuffix: "aaaaaaaa-0000-4000-8000-00000000000a"), "失败保留最后成功快照")
 
     // 新地址成功：同一身份命名空间下应用新内容。
-    viewModel.subscriptionFetcher = FakeSubscriptionFetcher(
+    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
       behavior: .success(SubscriptionDocs.flat(serverCount: 1)))
-    await viewModel.refreshSubscription(record.id)
-    XCTAssertEqual(viewModel.subscriptions[0].groupID, originalGroupID)
-    guard case .succeeded = viewModel.subscriptions[0].status else {
-      return XCTFail("换址成功应记成功态，实际 \(viewModel.subscriptions[0].status)")
+    await workflow.refreshSubscription(record.id)
+    XCTAssertEqual(workflow.subscriptions[0].groupID, originalGroupID)
+    guard case .succeeded = workflow.subscriptions[0].status else {
+      return XCTFail("换址成功应记成功态，实际 \(workflow.subscriptions[0].status)")
     }
-    XCTAssertEqual(viewModel.catalog.rootChildren.count, 1)
+    XCTAssertEqual(workflow.tree.roots.count, 1)
   }
 
-  func testRemoveSubscriptionClearsRecordSubtreeCredentialsAndSelection() async throws {
+  func testEditURLRequiresHTTPS() async throws {
     let record = try await seedSuccessfulSubscription()
-    viewModel.selectedNodeID = serverAID
-    let passwordRef = try XCTUnwrap(serverFields(of: serverAID)).passwordRef
+    await expectThrowsAsync(
+      { try await workflow.editSubscriptionURL(record.id, urlString: "http://p.example.com/x") },
+      onThrow: { error in
+        XCTAssertEqual(error as? SubscriptionFormError, .invalidURL)
+      })
+  }
+
+  func testRemoveSubscriptionClearsSubtreeCredentialsAndReportsInvalidation() async throws {
+    let record = try await seedSuccessfulSubscription()
+    // 身份在删除前捕获(删除后树上已不存在)。
+    let serverA = serverAID
+    let serverB = serverBID
     let convergesBefore = runtime.convergeCount
 
-    try await viewModel.removeSubscription(record.id)
+    let outcome = try await workflow.removeSubscription(record.id)
 
-    XCTAssertTrue(viewModel.subscriptions.isEmpty, "订阅记录移除")
-    XCTAssertNil(viewModel.entry(for: record.groupID), "固定分组递归清除")
-    XCTAssertNil(viewModel.entry(for: serverAID))
-    XCTAssertNil(viewModel.entry(for: serverBID))
-    XCTAssertNil(viewModel.selectedNodeID, "选中节点随子树清除")
-    XCTAssertNil(try credentials.secret(for: passwordRef), "远端成员凭据一并清理")
-    XCTAssertNil(try credentials.secret(for: record.urlRef), "订阅 URL 凭据一并清理")
+    XCTAssertTrue(workflow.subscriptions.isEmpty, "订阅记录移除")
+    XCTAssertNil(workflow.tree.node(withID: record.groupID), "固定分组递归清除")
+    XCTAssertNil(workflow.tree.node(withID: serverA))
+    XCTAssertNil(workflow.tree.node(withID: serverB))
+    XCTAssertTrue(
+      outcome.removedNodeIDs.contains(serverA) && outcome.removedNodeIDs.contains(record.groupID)
+        && outcome.removedNodeIDs.contains(serverB),
+      "删除结果携带被删子树身份（selection invalidation，story 18/30）")
+    XCTAssertNil(readURLSecret(), "订阅 URL 凭据一并清理")
     await waitUntilRuntimeSettles(runtime.convergeCount - convergesBefore == 1)
     XCTAssertEqual(runtime.convergeCount - convergesBefore, 1, "删除经提交协调器触发活动目标重展开")
   }
@@ -327,22 +334,22 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
     let requestsBefore = fetcher.requestCount
     let convergesBefore = runtime.convergeCount
 
-    await viewModel.refreshAllSubscriptions()
+    await workflow.refreshAllSubscriptions()
 
     XCTAssertEqual(fetcher.requestCount - requestsBefore, 2, "每个订阅各刷一次")
-    for record in viewModel.subscriptions {
-      guard case .succeeded = record.status else {
-        return XCTFail("全部订阅都应记成功态：\(record.id)")
+    for summary in workflow.subscriptions {
+      guard case .succeeded = summary.status else {
+        return XCTFail("全部订阅都应记成功态：\(summary.id)")
       }
     }
     await waitUntilRuntimeSettles(runtime.convergeCount - convergesBefore == 2)
     XCTAssertEqual(runtime.convergeCount - convergesBefore, 2)
   }
 
-  func testSubscriptionsPersistAcrossViewModelReload() async throws {
+  func testSubscriptionsPersistAcrossWorkflowReload() async throws {
     let record = try await seedSuccessfulSubscription()
 
-    let reloaded = CatalogViewModel(
+    let reloaded = CatalogWorkflow(
       coordinator: CatalogCommitCoordinator(
         fileStore: CatalogFileStore(fileURL: fileURL), runtime: FakeCatalogRuntime()),
       credentials: credentials,
@@ -352,31 +359,26 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
     guard case .succeeded = reloaded.subscriptions[0].status else {
       return XCTFail("刷新状态跨持久化保留")
     }
-    XCTAssertNotNil(reloaded.entry(for: serverAID))
+    XCTAssertNotNil(reloaded.tree.node(withID: serverAID), "订阅子树跨持久化保留")
   }
 
   // MARK: 卡片数据面
 
-  func testSubscriptionCardReflectsStatusAndCounts() async throws {
+  func testSubscriptionSummaryReflectsStatusAndCounts() async throws {
     _ = try await seedSuccessfulSubscription()
-    let record = try XCTUnwrap(viewModel.subscriptions.first)
-
-    let healthy = viewModel.subscriptionCard(for: record)
+    let healthy = try XCTUnwrap(workflow.subscriptions.first)
     XCTAssertEqual(healthy.name, "Example subscription")
-    XCTAssertEqual(healthy.host, "p.example.com", "卡片展示 host，不展示完整 URL")
-    XCTAssertEqual(healthy.statusText, "正常")
+    XCTAssertEqual(healthy.host, "p.example.com", "卡片展示 host，不展示完整 URL（story 23）")
+    guard case .succeeded = healthy.status else { return XCTFail("应记成功态") }
     XCTAssertEqual(healthy.serverCount, 2)
-    XCTAssertFalse(healthy.isFailed)
 
-    viewModel.subscriptionFetcher = FakeSubscriptionFetcher(
+    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
       behavior: .failure(.transport(detail: "URLError.cannotConnectToHost")))
-    await viewModel.refreshSubscription(record.id)
+    await workflow.refreshSubscription(healthy.id)
 
-    let current = try XCTUnwrap(viewModel.subscriptions.first)
-    let failed = viewModel.subscriptionCard(for: current)
-    XCTAssertTrue(failed.isFailed)
-    XCTAssertEqual(failed.statusText, "刷新失败")
-    XCTAssertTrue(failed.statusDetail?.contains("URLError.cannotConnectToHost") == true)
+    let failed = try XCTUnwrap(workflow.subscriptions.first)
+    XCTAssertTrue(failed.status.isFailed)
+    XCTAssertEqual(failed.status.failureDetail?.contains("URLError.cannotConnectToHost"), true)
     XCTAssertEqual(failed.serverCount, 2, "失败保留最后成功的服务器数")
   }
 
@@ -385,45 +387,47 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
   func testConcurrentRefreshOnSameSubscriptionDoesNotReenter() async throws {
     let record = try await seedSuccessfulSubscription()
     let gated = GatedFetcher()
-    viewModel.subscriptionFetcher = gated
+    workflow.subscriptionFetcher = gated
 
-    async let first: Void = viewModel.refreshSubscription(record.id)
+    async let first: Void = workflow.refreshSubscription(record.id)
     // 轮询而非阻塞等待：主线程阻塞会饿死继承 MainActor 的 async let 子任务。
     while !gated.didEnterFetch {
       try await Task.sleep(nanoseconds: 10_000_000)
     }
-    await viewModel.refreshSubscription(record.id)
+    await workflow.refreshSubscription(record.id)
 
     XCTAssertEqual(gated.requestCount, 1, "同一订阅刷新进行中不重入")
     gated.releaseAll()
     await first
-    XCTAssertTrue(viewModel.inFlightRefreshIDs.isEmpty, "完成后守卫释放")
+    XCTAssertTrue(workflow.refreshingSubscriptionIDs.isEmpty, "完成后守卫释放")
   }
 
   // MARK: 夹具与辅助
 
   private func onlyServerChildID(ofGroup groupID: NodeID) -> NodeID? {
-    guard case .group(let fields) = viewModel.entry(for: groupID)?.kind,
-      fields.children.count == 1,
-      case .server = viewModel.entry(for: fields.children[0])?.kind
+    guard let group = workflow.tree.node(withID: groupID),
+      group.childCount == 1,
+      let only = group.children?.first,
+      !only.isGroup
     else { return nil }
-    return fields.children[0]
+    return only.id
   }
 
-  private func serverFields(of id: NodeID) -> ServerFields? {
-    guard case .server(let fields) = viewModel.entry(for: id)?.kind else { return nil }
-    return fields
+  /// 订阅 URL 秘密的观察口：创建后恰有一个订阅 URL 凭据；删除后应为 nil。
+  /// （凭据引用不进投影；经存储快照里的唯一 URL 值反查。）
+  private func readURLSecret() -> String? {
+    credentials.storageSnapshot.values.first { $0.hasPrefix("https://") }
   }
 
   /// 建一个「创建 + 首刷成功（tree 文档，服务器 a/b）」的订阅。
-  private func seedSuccessfulSubscription() async throws -> SubscriptionRecord {
+  private func seedSuccessfulSubscription() async throws -> SubscriptionSummary {
     fetcher = FakeSubscriptionFetcher(behavior: .success(SubscriptionDocs.tree()))
-    viewModel = makeViewModel()
+    workflow = makeWorkflow()
     return try await createOnly(urlString: "https://p.example.com/s.json")
   }
 
-  private func createOnly(urlString: String) async throws -> SubscriptionRecord {
-    try await viewModel.createSubscription(urlString: urlString)
+  private func createOnly(urlString: String) async throws -> SubscriptionSummary {
+    try await workflow.createSubscription(urlString: urlString)
   }
 }
 
@@ -461,7 +465,7 @@ final class GatedFetcher: SubscriptionFetching, @unchecked Sendable {
   }
 }
 
-/// SIP-008 文档夹具（订阅 VM 语义测试）。
+/// SIP-008 文档夹具（订阅工作流语义测试）。
 enum SubscriptionDocs {
   private static let stableServerA = "aaaaaaaa-0000-4000-8000-00000000000a"
   private static let stableServerB = "bbbbbbbb-0000-4000-8000-00000000000b"

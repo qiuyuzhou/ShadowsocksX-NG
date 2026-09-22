@@ -1,0 +1,253 @@
+import XCTest
+
+@testable import ShadowsocksX_NG2
+
+/// 目录工作流 module 的失败语义与阶段分离（issue #41，story 13/33/34/38/39）：
+/// 目录持久化失败时旧配置与旧凭据都保持有效；目录提交完成与运行时收敛是分离
+/// 的观察面且收敛失败不回滚目录；Legacy 导入不驱动运行时收敛、不自动重复。
+@MainActor
+final class CatalogWorkflowRollbackTests: XCTestCase {
+  private var workDir: URL!
+  private var fileURL: URL!
+  private var credentials: InMemoryCredentialStore!
+  private var runtime: FakeCatalogRuntime!
+
+  override func setUp() async throws {
+    try await super.setUp()
+    workDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("catalog-rollback-tests-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+    // 目录文件置于 gate 子目录:破坏持久化时把 gate 目录替换为同名文件,
+    // 临时文件创建必失败(比替换目标更确定的失败注入)。
+    fileURL = workDir.appendingPathComponent("gate/catalog.json")
+    credentials = InMemoryCredentialStore()
+    runtime = FakeCatalogRuntime()
+  }
+
+  /// 让下一次目录持久化必然失败:gate 目录替换为同名文件后,临时文件无法
+  /// 在其中创建。
+  private func breakPersistence() throws {
+    let gateDir = workDir.appendingPathComponent("gate")
+    try FileManager.default.removeItem(at: gateDir)
+    try Data().write(to: gateDir)
+  }
+
+  override func tearDown() async throws {
+    try? FileManager.default.removeItem(at: workDir)
+    try await super.tearDown()
+  }
+
+  private func makeWorkflow(
+    legacyImportService: LegacyImportService? = nil,
+    postLegacyImport: ((LegacyImportOutcome) async -> Void)? = nil
+  ) -> CatalogWorkflow {
+    runtime.hasActiveTarget = true
+    let coordinator = CatalogCommitCoordinator(
+      fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime)
+    return CatalogWorkflow(
+      coordinator: coordinator,
+      credentials: credentials,
+      plugins: NoManagedPluginProvider(),
+      legacyImportService: legacyImportService,
+      postLegacyImport: postLegacyImport)
+  }
+
+  /// 直建一条服务器（凭据引用固定，便于观察回滚），返回其身份。
+  private func seedServer(password: String) async throws -> NodeID {
+    var catalog = ConfigurationCatalog()
+    let fields = ServerFields(
+      address: "203.0.113.7", port: 8388, encryptionMethod: "aes-256-gcm",
+      passwordRef: CredentialReference(rawValue: "ref-pw"), remark: "夹具")
+    try credentials.save(password, for: fields.passwordRef)
+    try catalog.addServer(fields)
+    try CatalogFileStore(fileURL: fileURL).save(CatalogDocument(catalog: catalog))
+    let workflow = makeWorkflow()
+    self.workflow = workflow
+    return try XCTUnwrap(workflow.tree.roots.first?.id)
+  }
+
+  private var workflow: CatalogWorkflow!
+
+  private func isFinished(_ status: RuntimeSyncStatus) -> Bool {
+    if case .finished = status { return true }
+    return false
+  }
+
+  // MARK: - story 13：持久化失败 → 旧配置与旧凭据都保持有效
+
+  func testUpdateServerRollsBackCredentialWhenPersistenceFails() async throws {
+    let id = try await seedServer(password: "旧密码")
+
+    try breakPersistence()
+
+    await expectThrowsAsync {
+      try await workflow.updateServer(
+        id,
+        draft: ServerEditDraft(
+          address: "198.51.100.9", port: 9999, encryptionMethod: "aes-256-gcm",
+          password: "新密码", remark: "", plugin: .none, pluginOptions: nil))
+    }
+
+    let form = try XCTUnwrap(workflow.serverEditForm(for: id))
+    XCTAssertEqual(form.address, "203.0.113.7", "目录提交失败则已发布状态不动")
+    XCTAssertEqual(form.password, "旧密码", "旧凭据继续生效（journal 回滚，story 13）")
+    XCTAssertEqual(
+      try credentials.secret(for: CredentialReference(rawValue: "ref-pw")), "旧密码")
+  }
+
+  func testUpdateServerRollsBackPluginOptionsDeletionWhenPersistenceFails() async throws {
+    // 带参数引用的服务器；把参数改为空触发 journal delete，再让持久化失败。
+    var catalog = ConfigurationCatalog()
+    let fields = ServerFields(
+      address: "203.0.113.7", port: 8388, encryptionMethod: "aes-256-gcm",
+      passwordRef: CredentialReference(rawValue: "ref-pw"), remark: "夹具",
+      pluginProgram: "v2ray-plugin",
+      pluginOptionsRef: CredentialReference(rawValue: "ref-opts"))
+    try credentials.save("旧密码", for: fields.passwordRef)
+    try credentials.save("mode=websocket", for: try XCTUnwrap(fields.pluginOptionsRef))
+    try catalog.addServer(fields)
+    try CatalogFileStore(fileURL: fileURL).save(CatalogDocument(catalog: catalog))
+    workflow = makeWorkflow()
+    let id = try XCTUnwrap(workflow.tree.roots.first?.id)
+
+    try breakPersistence()
+
+    await expectThrowsAsync {
+      try await workflow.updateServer(
+        id,
+        draft: ServerEditDraft(
+          address: "203.0.113.7", port: 8388, encryptionMethod: "aes-256-gcm",
+          password: "旧密码", remark: "", plugin: .none, pluginOptions: nil))
+    }
+
+    let form = try XCTUnwrap(workflow.serverEditForm(for: id))
+    XCTAssertEqual(form.plugin.selection, .managed(program: "v2ray-plugin"), "插件引用保留")
+    XCTAssertEqual(form.plugin.options, "mode=websocket", "被删除的参数秘密已恢复")
+    XCTAssertEqual(
+      try credentials.secret(for: CredentialReference(rawValue: "ref-opts")), "mode=websocket")
+  }
+
+  // MARK: - story 38：提交完成与运行时收敛是分离的观察面
+
+  func testCommitCompletesWhileRuntimeConvergenceIsStillSyncing() async throws {
+    let workflow = makeWorkflow()
+    runtime.hasActiveTarget = true
+    runtime.armGate(count: 1)
+
+    let groupID = try await workflow.createGroup(named: "组", into: nil)
+
+    // 目录提交已完成（树已发布），运行时仍在收敛中。
+    XCTAssertNotNil(workflow.tree.node(withID: groupID))
+    XCTAssertEqual(workflow.runtimeSync, .syncing(generation: 1))
+    runtime.openGate()
+    await waitUntilRuntimeSettles(isFinished(workflow.runtimeSync))
+    guard case .finished(1, .converged(skippedServers: [])) = workflow.runtimeSync else {
+      return XCTFail("收敛应正常结束，实际 \(workflow.runtimeSync)")
+    }
+  }
+
+  // MARK: - story 39：运行时收敛失败不回滚已提交目录
+
+  func testRuntimeConvergenceFailureDoesNotRollbackCatalog() async throws {
+    let workflow = makeWorkflow()
+    runtime.hasActiveTarget = true
+    runtime.enqueueOutcomes([.failed(detail: "sslocal exited before ready")])
+
+    let groupID = try await workflow.createGroup(named: "组", into: nil)
+
+    await waitUntilRuntimeSettles(isFinished(workflow.runtimeSync))
+    XCTAssertNotNil(workflow.tree.node(withID: groupID), "收敛失败不回滚已提交目录")
+    XCTAssertEqual(
+      workflow.runtimeSync,
+      .finished(generation: 1, outcome: .failed(detail: "sslocal exited before ready")))
+  }
+
+  // MARK: - story 33/34/35：Legacy 导入不驱动运行时，不自动重复
+
+  func testLegacyImportCommitsGroupWithoutRuntimeSyncOrRepeat() async throws {
+    let service = try makeLegacyService()
+    var postCalls = 0
+    let workflow = makeWorkflow(legacyImportService: service) { _ in postCalls += 1 }
+    // 有活动目标也不得触发运行时收敛（导入不启动代理、不写系统代理）。
+    XCTAssertTrue(runtime.hasActiveTarget)
+
+    let report = try await workflow.importLegacy()
+
+    XCTAssertEqual(report.importedServerCount, 1)
+    XCTAssertEqual(workflow.tree.roots.count, 1)
+    let group = try XCTUnwrap(workflow.tree.roots.first)
+    XCTAssertTrue(group.isGroup)
+    XCTAssertTrue(group.isManual)
+    XCTAssertEqual(group.childCount, 1)
+    XCTAssertEqual(runtime.convergeCount, 0, "导入不经提交管线触发运行时收敛")
+    XCTAssertEqual(postCalls, 1, "导入后的运行时边界只经注入闭包（独立于普通提交）")
+    XCTAssertEqual(workflow.legacyImportState.completed, true, "成功导入写完成标记")
+    XCTAssertNotNil(workflow.legacyImportReport)
+
+    // 首次导入成功后不再自动重复；显式再导入创建独立分组。
+    workflow.refreshLegacyImportState()
+    XCTAssertFalse(workflow.legacyImportState.shouldOffer)
+    _ = try await workflow.importLegacy(reimport: true)
+    XCTAssertEqual(workflow.tree.roots.count, 2, "再导入创建新的独立手动分组")
+    XCTAssertEqual(runtime.convergeCount, 0)
+  }
+
+  // MARK: - 夹具
+
+  private func makeLegacySnapshot() throws -> LegacySnapshot {
+    let profile: [String: Any] = [
+      "Id": "11111111-2222-4333-8444-555555555555",
+      "ServerHost": "203.0.113.9",
+      "ServerPort": 8388,
+      "Method": "aes-256-gcm",
+      "Password": "legacy-pw",
+      "Remark": "旧服务器",
+    ]
+    return try LegacySnapshot(
+      propertyList: ["ServerProfiles": [profile], "ShadowsocksRunningMode": "manual"],
+      userRules: nil)
+  }
+
+  private func makeLegacyService() throws -> LegacyImportService {
+    let snapshot = try makeLegacySnapshot()
+    return LegacyImportService(
+      source: FixedLegacySnapshotProvider(snapshot: snapshot),
+      catalogStore: CatalogFileStore(fileURL: fileURL),
+      settingsStore: NoopProxySettingsStore(),
+      activationStore: ActivationStateFileStore(
+        fileURL: workDir.appendingPathComponent("activation.json")),
+      credentials: credentials,
+      marker: InMemoryLegacyImportMarker())
+  }
+}
+
+/// 固定快照提供缝（与 LegacyImportTests 同型的最小替身）。
+private final class FixedLegacySnapshotProvider: LegacySnapshotProviding {
+  let snapshot: LegacySnapshot?
+
+  init(snapshot: LegacySnapshot?) {
+    self.snapshot = snapshot
+  }
+
+  func readSnapshot() throws -> LegacySnapshot? { snapshot }
+}
+
+/// 不落盘的设置存储替身（导入的偏好迁移事实不进本测试断言面）。
+private final class NoopProxySettingsStore: ProxySettingsStoring {
+  private var settings = ProxySettings()
+
+  func load() throws -> ProxySettings { settings }
+  func save(_ settings: ProxySettings) throws { self.settings = settings }
+  func reset() throws {}
+}
+
+/// 内存完成标记替身。
+private final class InMemoryLegacyImportMarker: LegacyImportMarkerStoring {
+  private(set) var completed = false
+
+  func isCompleted() throws -> Bool { completed }
+
+  func setCompleted(_ completed: Bool) throws {
+    self.completed = completed
+  }
+}

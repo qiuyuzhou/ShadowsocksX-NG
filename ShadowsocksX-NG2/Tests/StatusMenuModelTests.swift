@@ -108,44 +108,46 @@ final class StatusMenuModelTests: XCTestCase {
       .pac)
   }
 
-  // MARK: - 活动目标级联树（只读）
+  // MARK: - 活动目标路径（目录树 projection 派生，issue #41）
 
-  func testTargetTreeMirrorsCatalogStructureAndMarksActiveServer() throws {
-    let fixture = try CatalogFixtures.makeSubscriptionFixture()
-    let tree = StatusMenuModel.targetTree(
-      catalog: fixture.catalog, activeTargetID: fixture.serverIDs[0])
-    XCTAssertEqual(tree.count, 1)
-    let group = tree[0]
-    XCTAssertEqual(group.name, "订阅分组")
-    XCTAssertTrue(group.isGroup)
-    XCTAssertFalse(group.isActive)
-    XCTAssertEqual(group.children.count, 2)
-    XCTAssertEqual(group.children[0].name, "嵌套分组")
-    XCTAssertTrue(group.children[0].isGroup)
-    XCTAssertEqual(group.children[0].children.count, 1)
-    XCTAssertEqual(group.children[0].children[0].name, "日本 02")
-    XCTAssertFalse(group.children[0].children[0].isActive)
-    XCTAssertEqual(group.children[1].name, "香港 01")
-    XCTAssertFalse(group.children[1].isGroup)
-    XCTAssertTrue(group.children[1].isActive)
+  /// 目录树 projection 构建夹具（同工作流 module 的推导路径）。
+  private func makeTree(from catalog: ConfigurationCatalog) -> CatalogTreeSnapshot {
+    CatalogTreeSnapshot.build(
+      from: catalog, credentials: InMemoryCredentialStore(),
+      plugins: NoManagedPluginProvider())
   }
 
-  func testTargetTreeMarksActiveGroupAndServerNameFallsBackToAddress() throws {
+  func testTargetPathResolvesThroughTreeProjection() throws {
+    let fixture = try CatalogFixtures.makeSubscriptionFixture()
+    let tree = makeTree(from: fixture.catalog)
+    XCTAssertEqual(tree.roots.count, 1)
+    XCTAssertEqual(
+      StatusMenuModel.targetPath(in: tree.roots, activeTargetID: fixture.serverIDs[0]),
+      "订阅分组 / 香港 01")
+    XCTAssertEqual(
+      StatusMenuModel.targetPath(in: tree.roots, activeTargetID: fixture.serverIDs[1]),
+      "订阅分组 / 嵌套分组 / 日本 02")
+  }
+
+  func testTargetPathMarksGroupTargetAndAddressFallback() throws {
     var catalog = ConfigurationCatalog()
     let serverID = NodeID(rawValue: "manual:server")
     try catalog.addServer(CatalogFixtures.serverFields(remark: ""), id: serverID)
     let groupID = NodeID(rawValue: "manual:group")
     try catalog.addGroup("本地分组", id: groupID)
-    let tree = StatusMenuModel.targetTree(catalog: catalog, activeTargetID: groupID)
-    XCTAssertEqual(tree.count, 2)
-    XCTAssertEqual(tree[0].name, "203.0.113.7")
-    XCTAssertFalse(tree[0].isActive)
-    XCTAssertEqual(tree[1].name, "本地分组")
-    XCTAssertTrue(tree[1].isActive)
+    let tree = makeTree(from: catalog)
+    XCTAssertEqual(
+      StatusMenuModel.targetPath(in: tree.roots, activeTargetID: groupID), "本地分组")
+    XCTAssertEqual(
+      StatusMenuModel.targetPath(in: tree.roots, activeTargetID: serverID), "203.0.113.7")
   }
 
-  func testTargetTreeEmptyCatalogYieldsEmptyTree() {
-    XCTAssertTrue(
-      StatusMenuModel.targetTree(catalog: ConfigurationCatalog(), activeTargetID: nil).isEmpty)
+  func testTargetPathNilWhenAbsentOrMissing() throws {
+    let fixture = try CatalogFixtures.makeSubscriptionFixture()
+    let tree = makeTree(from: fixture.catalog)
+    XCTAssertNil(StatusMenuModel.targetPath(in: tree.roots, activeTargetID: nil))
+    XCTAssertNil(
+      StatusMenuModel.targetPath(in: tree.roots, activeTargetID: NodeID(rawValue: "gone")),
+      "目标已不在树中为 nil")
   }
 }

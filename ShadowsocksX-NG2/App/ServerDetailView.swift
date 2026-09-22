@@ -1,13 +1,15 @@
 import SwiftUI
 
-/// 服务器详情表单（issue #32/#38）：连接字段与插件选择可编辑（仅手动节点）。
+/// 服务器详情表单（issue #32/#38/#41）：连接字段与插件选择可编辑（仅手动节
+/// 点）。表单状态经工作流的显式编辑命令解析（凭据明文仅在编辑动作中出现）；
 /// 插件区为受管选择器（D10）——「无」+ 受管列表，选中受管项才显示参数输入；
-/// 集外引用以显式「本版本未提供」呈现并原样保留；分享区（二维码 + 复制 ss://）。
-/// 订阅服务器整表只读。
+/// 集外引用以显式「本版本未提供」呈现并原样保留；分享区（二维码 + 复制 ss://，
+/// 显式分享命令）。订阅服务器整表只读。
 struct ServerDetailView: View {
-  let viewModel: CatalogViewModel
+  let workflow: CatalogWorkflow
   let serverID: NodeID
   let proxyController: ProxyRuntimeController
+  let errors: ErrorAlertPresenter
 
   @State private var address = ""
   @State private var port = 8388
@@ -20,12 +22,16 @@ struct ServerDetailView: View {
   @State private var showQR = false
   @State private var qrImage: NSImage?
 
-  private var formState: ServerFormState? {
-    viewModel.serverFormState(for: serverID)
+  private var formState: ServerEditForm? {
+    workflow.serverEditForm(for: serverID)
   }
 
   private var isEditable: Bool {
     formState?.isEditable ?? false
+  }
+
+  private var node: CatalogTreeNode? {
+    workflow.tree.node(withID: serverID)
   }
 
   /// 当前 sslocal 能力目录；目录中既有的未知方法原样追加显示，便于用户修复。
@@ -68,7 +74,7 @@ struct ServerDetailView: View {
           .disabled(!isEditable)
       }
 
-      if let validation = viewModel.validation(for: serverID), !validation.isValid {
+      if let validation = node?.validation, !validation.isValid {
         Section("激活状态") {
           ForEach(Array(validation.issues.enumerated()), id: \.offset) { _, issue in
             Label(issue.presentedReason, systemImage: "exclamationmark.triangle.fill")
@@ -108,7 +114,7 @@ struct ServerDetailView: View {
       }
     }
     .formStyle(.grouped)
-    .navigationTitle(viewModel.displayName(for: serverID))
+    .navigationTitle(workflow.displayName(for: serverID))
     .popover(isPresented: $showQR) {
       qrPopover
     }
@@ -219,23 +225,24 @@ struct ServerDetailView: View {
   private func save() {
     Task {
       do {
-        try await viewModel.updateServer(
+        try await workflow.updateServer(
           serverID,
-          address: address,
-          port: port,
-          encryptionMethod: encryptionMethod,
-          password: password,
-          remark: remark,
-          plugin: pluginChoice,
-          pluginOptions: pluginOptionsText)
+          draft: ServerEditDraft(
+            address: address,
+            port: port,
+            encryptionMethod: encryptionMethod,
+            password: password,
+            remark: remark,
+            plugin: pluginChoice,
+            pluginOptions: pluginOptionsText))
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }
 
   private func qrPayload() -> String? {
-    try? viewModel.ssUri(for: serverID)
+    try? workflow.shareURI(for: serverID)
   }
 
   private func copySsUri() {

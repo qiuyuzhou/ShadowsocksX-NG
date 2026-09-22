@@ -2,9 +2,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// 「通过 URL 导入」表单（issue #32 添加入口之二）：粘贴 ss:// 链接（每行一条），
-/// 与剪贴板入口共用视图模型的批量落点。
+/// 与剪贴板入口共用工作流的批量落点；逐行结构化结果在呈现层格式化。
 struct ImportURLSheet: View {
-  @ObservedObject var viewModel: CatalogViewModel
+  let workflow: CatalogWorkflow
+  let errors: ErrorAlertPresenter
+  @Binding var selection: NodeID?
   @Environment(\.dismiss) private var dismiss
 
   @State private var text = ""
@@ -39,18 +41,16 @@ struct ImportURLSheet: View {
   }
 
   private func importText() {
-    let parent = viewModel.importTargetParent(for: viewModel.selectedNodeID)
+    let parent = workflow.importTargetParent(for: selection)
     Task {
       do {
-        let outcome = try await viewModel.addServers(fromURIs: text, into: parent)
-        if !outcome.failures.isEmpty {
-          viewModel.presentedError =
-            "已添加 \(outcome.added) 台服务器；以下条目无法解析：\n"
-            + outcome.failures.joined(separator: "\n")
+        let outcome = try await workflow.createServers(fromURIs: text, into: parent)
+        if let message = ImportOutcomePresentation.failureMessage(outcome) {
+          errors.present(text: message)
         }
         dismiss()
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }
@@ -59,7 +59,9 @@ struct ImportURLSheet: View {
 /// 「从二维码图片识别」表单（issue #32 添加入口之三）：文件选择 + 拖图入窗。
 /// 屏幕扫码明确不做（spec #21）；识别结果按全新身份导入，不与既有节点合并去重。
 struct QRImportSheet: View {
-  @ObservedObject var viewModel: CatalogViewModel
+  let workflow: CatalogWorkflow
+  let errors: ErrorAlertPresenter
+  @Binding var selection: NodeID?
   @Environment(\.dismiss) private var dismiss
 
   @State private var detectedURIs: [String] = []
@@ -160,28 +162,27 @@ struct QRImportSheet: View {
   }
 
   private func importDetected() {
-    let parent = viewModel.importTargetParent(for: viewModel.selectedNodeID)
+    let parent = workflow.importTargetParent(for: selection)
     Task {
       do {
         let text = detectedURIs.joined(separator: "\n")
-        let outcome = try await viewModel.addServers(fromURIs: text, into: parent)
-        if !outcome.failures.isEmpty {
-          viewModel.presentedError =
-            "已添加 \(outcome.added) 台服务器；以下条目无法解析：\n"
-            + outcome.failures.joined(separator: "\n")
+        let outcome = try await workflow.createServers(fromURIs: text, into: parent)
+        if let message = ImportOutcomePresentation.failureMessage(outcome) {
+          errors.present(text: message)
         }
         dismiss()
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }
 }
 
-/// 「移动到」表单：目的地为目录根与除自身子树外的全部手动组（跨来源与成环
-/// 由领域层最终拒绝）。
+/// 「移动到」表单（issue #41）：目的地由树 projection 派生——目录根与除自身
+/// 子树外的全部手动组；跨来源与成环由领域层最终拒绝。
 struct MoveNodeSheet: View {
-  @ObservedObject var viewModel: CatalogViewModel
+  let workflow: CatalogWorkflow
+  let errors: ErrorAlertPresenter
   let nodeID: NodeID
   @Environment(\.dismiss) private var dismiss
 
@@ -194,23 +195,23 @@ struct MoveNodeSheet: View {
 
   private var destinations: [Destination] {
     var result = [Destination(id: nil, title: "目录根")]
-    func walk(_ nodes: [SidebarNode], depth: Int) {
+    let excluded = workflow.tree.node(withID: nodeID)?.subtreeIDs ?? [nodeID]
+    func walk(_ nodes: [CatalogTreeNode], depth: Int) {
       for node in nodes {
-        guard node.isGroup, node.source == .manual else { continue }
-        let ancestors = viewModel.catalog.ancestors(of: node.id)
-        guard node.id != nodeID, !ancestors.contains(nodeID) else { continue }
+        guard node.isGroup, node.isManual else { continue }
+        guard !excluded.contains(node.id) else { continue }
         let indent = String(repeating: "    ", count: depth)
         result.append(Destination(id: node.id, title: indent + node.name))
         walk(node.children ?? [], depth: depth + 1)
       }
     }
-    walk(viewModel.sidebarNodes(), depth: 0)
+    walk(workflow.tree.roots, depth: 0)
     return result
   }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text("把「\(viewModel.displayName(for: nodeID))」移动到：")
+      Text("把「\(workflow.displayName(for: nodeID))」移动到：")
         .font(.callout)
       Picker(
         "目的地",
@@ -238,10 +239,10 @@ struct MoveNodeSheet: View {
   private func move() {
     Task {
       do {
-        try await viewModel.move(nodeID, to: destination)
+        try await workflow.move(nodeID, to: destination)
         dismiss()
       } catch {
-        viewModel.presentedError = error.presentableMessage
+        errors.present(error)
       }
     }
   }

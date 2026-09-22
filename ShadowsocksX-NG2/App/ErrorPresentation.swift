@@ -49,8 +49,21 @@ extension Error {
       return error.presentedMessage
     case let error as SubscriptionParseError:
       return error.presentedMessage
+    case let error as ImportLineFailureReason:
+      return error.presentableMessage
     default:
       return String(describing: self)
+    }
+  }
+}
+
+extension ImportLineFailureReason {
+  var presentableMessage: String {
+    switch self {
+    case .decode(let error):
+      return error.presentableMessage
+    case .credential(let error):
+      return error.presentableMessage
     }
   }
 }

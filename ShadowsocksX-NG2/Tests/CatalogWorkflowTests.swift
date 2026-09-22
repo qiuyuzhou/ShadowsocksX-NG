@@ -1,0 +1,313 @@
+import XCTest
+
+@testable import ShadowsocksX_NG2
+
+/// 目录工作流 module 的 UI-facing interface 测试（issue #41）：三入口导入、
+/// 手动服务器/分组创建、重命名、移动、删除、来源所有权、树 projection 与
+/// 分享往返。全部观察 projection、command outcome 与 typed error，不锁定
+/// SwiftUI 视图层级或内部存储；凭据生命周期经注入的内存存储观察。提交后的
+/// 运行时收敛以确定性 fake 计数（issue #40）。
+@MainActor
+final class CatalogWorkflowTests: XCTestCase {
+  private var workDir: URL!
+  private var fileURL: URL!
+  private var credentials: InMemoryCredentialStore!
+  private var runtime: FakeCatalogRuntime!
+  private var workflow: CatalogWorkflow!
+
+  override func setUp() async throws {
+    try await super.setUp()
+    // 专用工作目录：写入器会把父目录强制 0700（不得指向临时根）。
+    workDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("catalog-workflow-tests-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+    fileURL = workDir.appendingPathComponent("catalog.json")
+    credentials = InMemoryCredentialStore()
+    runtime = FakeCatalogRuntime()
+    workflow = makeWorkflow()
+  }
+
+  override func tearDown() async throws {
+    try? FileManager.default.removeItem(at: workDir)
+    try await super.tearDown()
+  }
+
+  private func makeWorkflow() -> CatalogWorkflow {
+    // 计数即提交计数：提交后的运行时收敛由协调器异步调度（issue #40）。
+    runtime.hasActiveTarget = true
+    let coordinator = CatalogCommitCoordinator(
+      fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime)
+    return CatalogWorkflow(
+      coordinator: coordinator,
+      credentials: credentials,
+      plugins: NoManagedPluginProvider())
+  }
+
+  private func makeSubscriptionCatalog() throws {
+    let fixture = try CatalogFixtures.makeSubscriptionFixture()
+    try CatalogFileStore(fileURL: fileURL).save(CatalogDocument(catalog: fixture.catalog))
+    workflow = makeWorkflow()
+  }
+
+  // MARK: - 三入口导入（共同落点）
+
+  func testImportMixedLinesAddsParsedAndReportsFailures() async throws {
+    let validSIP002 = "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388#香港 01"
+    let legacy = "ss://YWVzLTI1Ni1nY206dGVzdEAyMDMuMC4xMTMuNzo4Mzg4"
+    let outcome = try await workflow.createServers(
+      fromURIs: "\(validSIP002)\n垃圾行\n\(legacy)", into: nil)
+    XCTAssertEqual(outcome.addedCount, 2)
+    XCTAssertEqual(outcome.failures.count, 1)
+    XCTAssertEqual(outcome.failures[0].lineIndex, 1, "失败行按换行切分点名")
+
+    let roots = workflow.tree.roots
+    XCTAssertEqual(roots.count, 2)
+    XCTAssertEqual(roots[0].name, "香港 01", "备注优先的显示名")
+    XCTAssertEqual(
+      workflow.serverEditForm(for: roots[0].id)?.password, "password123", "密码入凭据存储")
+    XCTAssertTrue(roots[0].validation?.isValid ?? false)
+    // 两个身份均为全新 UUID 形态（不按内容去重）。
+    XCTAssertNotEqual(roots[0].id, roots[1].id)
+  }
+
+  func testImportWithPluginStoresProgramAndOptions() async throws {
+    let uri =
+      "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388"
+      + "/?plugin=v2ray-plugin%3Bmode%3Dwebsocket%3Bhost%3Dexample.com"
+    _ = try await workflow.createServers(fromURIs: uri, into: nil)
+    let id = try XCTUnwrap(workflow.tree.roots.first?.id)
+    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    XCTAssertEqual(plugin.selection, .managed(program: "v2ray-plugin"))
+    XCTAssertTrue(plugin.optionsPresent)
+    // NoManagedPluginProvider:程序引用保留但可执行文件缺失(集外点名事实)。
+    XCTAssertFalse(plugin.provided)
+    XCTAssertEqual(plugin.options, "mode=websocket;host=example.com")
+  }
+
+  func testImportUnsupportedMethodKeepsServerAsInvalidCandidate() async throws {
+    let uri = SsUri(
+      method: "future-cipher", password: "password", host: "203.0.113.7", port: 8388
+    ).encode()
+
+    let outcome = try await workflow.createServers(fromURIs: uri, into: nil)
+
+    XCTAssertEqual(outcome.addedCount, 1)
+    let node = try XCTUnwrap(workflow.tree.roots.first)
+    XCTAssertEqual(
+      node.validation?.issues, [.unsupportedEncryptionMethod("future-cipher")],
+      "不支持的方法保留并明确标记为无效(story 9)")
+  }
+
+  func testImportIntoSelectedManualGroup() async throws {
+    let groupID = try await workflow.createGroup(named: "手动组", into: nil)
+    let target = try XCTUnwrap(workflow.importTargetParent(for: groupID))
+    XCTAssertEqual(target, groupID)
+    _ = try await workflow.createServers(
+      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: target)
+    XCTAssertEqual(workflow.tree.node(withID: groupID)?.childCount, 1)
+    // 选中服务器时落到其手动父组；无选中落到根。
+    let serverID = try XCTUnwrap(workflow.tree.node(withID: groupID)?.children?.first?.id)
+    XCTAssertEqual(workflow.importTargetParent(for: serverID), groupID)
+    XCTAssertNil(workflow.importTargetParent(for: nil))
+  }
+
+  func testImportTargetSkipsSubscriptionSubtree() async throws {
+    try makeSubscriptionCatalog()
+    let fixture = try CatalogFixtures.makeSubscriptionFixture()
+    XCTAssertEqual(workflow.importTargetParent(for: fixture.groupID), nil)
+    XCTAssertEqual(workflow.importTargetParent(for: fixture.serverIDs[0]), nil)
+  }
+
+  // MARK: - 树 projection
+
+  func testTreeSnapshotMirrorsStructureCountsAndParents() async throws {
+    let groupID = try await workflow.createGroup(named: "组A", into: nil)
+    let nestedID = try await workflow.createGroup(named: "嵌套", into: groupID)
+    _ = try await workflow.createServers(
+      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: nestedID)
+    _ = try await workflow.createServers(
+      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.8:8388", into: nil)
+
+    let group = try XCTUnwrap(workflow.tree.node(withID: groupID))
+    XCTAssertTrue(group.isGroup)
+    XCTAssertTrue(group.isManual)
+    XCTAssertEqual(group.parentID, nil)
+    XCTAssertEqual(group.childCount, 1)
+    XCTAssertEqual(group.subtreeNodeCount, 2, "嵌套分组 + 服务器叶子")
+    XCTAssertEqual(group.serverCount, 1)
+    XCTAssertEqual(group.invalidServerCount, 0)
+    let nested = try XCTUnwrap(group.children?.first)
+    XCTAssertEqual(nested.id, nestedID)
+    XCTAssertEqual(nested.parentID, groupID)
+    let rootServer = try XCTUnwrap(workflow.tree.roots.last)
+    XCTAssertFalse(rootServer.isGroup)
+    XCTAssertEqual(rootServer.serverCount, 1)
+    XCTAssertNil(rootServer.children)
+    XCTAssertTrue(workflow.tree.containsNode(groupID))
+  }
+
+  // MARK: - 表单编辑与凭据生命周期
+
+  func testUpdateServerPersistsFieldsAndPassword() async throws {
+    _ = try await workflow.createServers(
+      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: nil)
+    let id = try XCTUnwrap(workflow.tree.roots.first?.id)
+    try await workflow.updateServer(
+      id,
+      draft: ServerEditDraft(
+        address: "198.51.100.9", port: 9999,
+        encryptionMethod: "chacha20-ietf-poly1305", password: "新密码",
+        remark: "改过的", plugin: .none, pluginOptions: nil))
+    let form = try XCTUnwrap(workflow.serverEditForm(for: id))
+    XCTAssertEqual(form.address, "198.51.100.9")
+    XCTAssertEqual(form.port, 9999)
+    XCTAssertEqual(form.remark, "改过的")
+    XCTAssertEqual(form.password, "新密码", "同一引用始终对应最新秘密")
+    XCTAssertEqual(form.encryptionMethod, "chacha20-ietf-poly1305")
+    // 连续提交合并为最新代次的收敛（issue #40）：旧代次在启动前被取代，
+    // 最终结果必为最新提交快照。
+    await waitUntilRuntimeSettles(workflow.runtimeSync != .syncing(generation: 2))
+    XCTAssertEqual(
+      workflow.runtimeSync,
+      .finished(generation: 2, outcome: .converged(skippedServers: [])),
+      "目录提交与运行时收敛分离呈现(story 38)")
+  }
+
+  func testUpdateServerRejectsInvalidAddressAndPort() async throws {
+    _ = try await workflow.createServers(
+      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: nil)
+    let id = try XCTUnwrap(workflow.tree.roots.first?.id)
+    await expectThrowsAsync(
+      {
+        try await workflow.updateServer(
+          id,
+          draft: ServerEditDraft(
+            address: "  ", port: 8388, encryptionMethod: "aes-256-gcm", password: "p",
+            remark: "", plugin: .none, pluginOptions: nil))
+      },
+      onThrow: { error in
+        XCTAssertEqual(error as? ServerFormError, .invalidAddress)
+      })
+    await expectThrowsAsync(
+      {
+        try await workflow.updateServer(
+          id,
+          draft: ServerEditDraft(
+            address: "203.0.113.7", port: 0, encryptionMethod: "aes-256-gcm", password: "p",
+            remark: "", plugin: .none, pluginOptions: nil))
+      },
+      onThrow: { error in
+        XCTAssertEqual(error as? ServerFormError, .invalidPort)
+      })
+  }
+
+  func testRemoveServerCleansCredentials() async throws {
+    // 已知凭据引用直建目录（模块投影不含引用；身份经文件夹具固定）。
+    var catalog = ConfigurationCatalog()
+    var fields = ServerFields(
+      address: "203.0.113.7", port: 8388, encryptionMethod: "aes-256-gcm",
+      passwordRef: CredentialReference(rawValue: "ref-pw"), remark: "删除我",
+      pluginProgram: "v2ray-plugin",
+      pluginOptionsRef: CredentialReference(rawValue: "ref-opts"))
+    try credentials.save("pw", for: fields.passwordRef)
+    try credentials.save("opts", for: try XCTUnwrap(fields.pluginOptionsRef))
+    try catalog.addServer(fields)
+    try CatalogFileStore(fileURL: fileURL).save(CatalogDocument(catalog: catalog))
+    workflow = makeWorkflow()
+
+    let id = try XCTUnwrap(workflow.tree.roots.first?.id)
+    let outcome = try await workflow.remove(id)
+
+    XCTAssertEqual(outcome.removedNodeIDs, [id], "删除返回 selection invalidation(story 18)")
+    XCTAssertTrue(workflow.tree.isEmpty)
+    XCTAssertNil(try credentials.secret(for: fields.passwordRef), "密码秘密已清理")
+    XCTAssertNil(
+      try credentials.secret(for: try XCTUnwrap(fields.pluginOptionsRef)), "插件参数秘密已清理")
+  }
+
+  func testRemoveNonEmptyGroupRemovesWholeSubtree() async throws {
+    let groupID = try await workflow.createGroup(named: "组", into: nil)
+    _ = try await workflow.createServers(
+      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: groupID)
+    let serverID = try XCTUnwrap(workflow.tree.node(withID: groupID)?.children?.first?.id)
+    let outcome = try await workflow.remove(groupID)
+    XCTAssertEqual(outcome.removedNodeIDs, [groupID, serverID])
+    XCTAssertTrue(workflow.tree.isEmpty)
+  }
+
+  // MARK: - 重命名与移动
+
+  func testRenameGroupKeepsIdentityParentAndOrder() async throws {
+    let groupID = try await workflow.createGroup(named: "旧名", into: nil)
+    _ = try await workflow.createServers(
+      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: groupID)
+    try await workflow.renameGroup(groupID, to: "新名")
+    let node = try XCTUnwrap(workflow.tree.node(withID: groupID))
+    XCTAssertEqual(node.name, "新名")
+    XCTAssertEqual(node.childCount, 1, "identity 与子项顺序不变(story 6)")
+    await expectThrowsAsync(
+      { try await workflow.renameGroup(groupID, to: "  ") },
+      onThrow: { error in XCTAssertEqual(error as? ServerFormError, .emptyName) })
+  }
+
+  func testMoveRejectsCrossSourceAndCycle() async throws {
+    try makeSubscriptionCatalog()
+    let fixture = try CatalogFixtures.makeSubscriptionFixture()
+    let manualGroupID = try await workflow.createGroup(named: "手动组", into: nil)
+
+    await expectThrowsAsync { try await workflow.move(fixture.serverIDs[0], to: manualGroupID) }
+    await expectThrowsAsync { try await workflow.remove(fixture.serverIDs[0]) }
+    await expectThrowsAsync { try await workflow.renameGroup(fixture.groupID, to: "改名") }
+    await expectThrowsAsync {
+      try await workflow.updateServer(
+        fixture.serverIDs[0],
+        draft: ServerEditDraft(
+          address: "0.0.0.0", port: 1, encryptionMethod: "x", password: "p",
+          remark: "", plugin: .none, pluginOptions: nil))
+    }
+    // 手动节点移进订阅子树同样被拒（跨来源，story 15）。
+    await expectThrowsAsync { try await workflow.move(manualGroupID, to: fixture.groupID) }
+    // 分组移动进自身子树被拒（成环）。
+    let nestedID = try await workflow.createGroup(named: "嵌套", into: manualGroupID)
+    await expectThrowsAsync { try await workflow.move(manualGroupID, to: nestedID) }
+  }
+
+  // MARK: - 分享（与添加互逆）
+
+  func testShareSsUriRoundTripsBackThroughImport() async throws {
+    let source =
+      "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388"
+      + "/?plugin=v2ray-plugin%3Bmode%3Dwebsocket%3Bhost%3Dexample.com#分享节点"
+    _ = try await workflow.createServers(fromURIs: source, into: nil)
+    let id = try XCTUnwrap(workflow.tree.roots.first?.id)
+    let shared = try workflow.shareURI(for: id)
+    let decoded = try SsUri.decode(shared)
+    XCTAssertEqual(decoded.method, "aes-256-gcm")
+    XCTAssertEqual(decoded.password, "password123")
+    XCTAssertEqual(decoded.host, "203.0.113.7")
+    XCTAssertEqual(decoded.port, 8388)
+    XCTAssertEqual(decoded.pluginProgram, "v2ray-plugin")
+    XCTAssertEqual(decoded.pluginOptions, "mode=websocket;host=example.com")
+    XCTAssertEqual(decoded.remark, "分享节点")
+  }
+
+  func testShareFailsWhenCredentialMissing() async throws {
+    var catalog = ConfigurationCatalog()
+    var fields = CatalogFixtures.serverFields(remark: "无凭据")
+    fields.passwordRef = CredentialReference.fresh()
+    try catalog.addServer(fields)
+    try CatalogFileStore(fileURL: fileURL).save(CatalogDocument(catalog: catalog))
+    workflow = makeWorkflow()
+    let id = try XCTUnwrap(workflow.tree.roots.first?.id)
+    await expectThrowsAsync { _ = try workflow.shareURI(for: id) }
+  }
+
+  // MARK: - 持久化
+
+  func testChangesPersistAcrossWorkflowInstances() async throws {
+    let groupID = try await workflow.createGroup(named: "持久组", into: nil)
+    let reloaded = makeWorkflow()
+    XCTAssertTrue(reloaded.tree.containsNode(groupID))
+    XCTAssertEqual(reloaded.displayName(for: groupID), "持久组")
+  }
+}
