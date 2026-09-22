@@ -15,8 +15,8 @@ enum CatalogError: Error, Equatable, Sendable {
   case duplicateID(NodeID)
   /// 手动与订阅来源严格分离：不允许把节点放进另一来源的子树。
   case crossSourcePlacement(node: NodeSource, container: NodeSource)
-  /// 订阅子树由远端权威所有：本地结构操作（移动/删除/改连接字段/改名）一律拒绝，
-  /// 仅 `enabled` 作为本地资格状态可写；整棵订阅子树的移除属于订阅票（#35）。
+  /// 订阅子树由远端权威所有：本地结构操作（移动/删除/改连接字段/改名）一律拒绝；
+  /// 整棵订阅子树的移除属于订阅票（#35）。
   case subscriptionNodeImmutable(NodeID)
   /// 订阅服务器叶子必须位于其订阅固定分组内，不得直挂目录根（CONTEXT.md
   /// 「Subscription group」：根层只允许订阅固定分组本身）。

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// 主窗口（spec #21 D11，issue #32/#34/#35）：NavigationSplitView 分区。侧栏
 /// 顶部分区切换「服务器 / 订阅 / 诊断」；服务器分区是配置目录分组树（订阅子
-/// 树只读、仅启用开关）与详情编辑；订阅分区是订阅卡片与刷新/编辑/删除；诊断
+/// 树只读）与详情编辑；订阅分区是订阅卡片与刷新/编辑/删除；诊断
 /// 分区是日志查看与脱敏导出（D11「诊断收进主窗口」）。编辑类操作只在主窗口
 /// （菜单栏仅保留 D11 白名单内的「立即更新全部订阅」快速动作）。
 struct MainWindowView: View {
@@ -157,7 +157,7 @@ struct MainWindowView: View {
     VStack(alignment: .leading, spacing: 8) {
       Text("订阅")
         .font(.headline)
-      Text("每个订阅是一张卡片：远端 SIP-008 文档经解析校验后原子提交；刷新失败保留最后一次成功内容。远端名称、结构与成员权威，本地仅保留启用开关。")
+      Text("每个订阅是一张卡片：远端 SIP-008 文档经解析校验后原子提交；刷新失败保留最后一次成功内容。远端名称、结构与成员权威；不支持的服务器配置会保留并在激活时跳过。")
         .font(.callout)
         .foregroundStyle(.secondary)
       Spacer()

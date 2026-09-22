@@ -173,6 +173,9 @@ struct DiagnosticsView: View {
     snapshot.listen = proxyController.listenSettings
     snapshot.runtimeDocumentSummary = proxyController.runtimeDocumentSummary()
     snapshot.catalog = viewModel.catalog
+    snapshot.knownInvalidServerCount = viewModel.sidebarNodes().reduce(0) {
+      $0 + $1.invalidServerCount
+    }
     snapshot.fileFacts = Self.fileFacts()
     snapshot.managedPlugins = Self.managedPluginFacts()
     snapshot.eventLines = eventStore.snapshot.suffix(200).map(\.renderedLine)

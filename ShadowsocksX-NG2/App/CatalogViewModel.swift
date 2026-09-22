@@ -111,38 +111,9 @@ final class CatalogViewModel: ObservableObject {
 
   func parentID(of id: NodeID) -> NodeID? { (try? catalog.parentID(of: id)) ?? nil }
 
-  func isEffectivelyEnabled(_ id: NodeID) -> Bool {
-    (try? catalog.isEffectivelyEnabled(id)) ?? false
-  }
-
   /// 行显示名：委托目录条目的共用口径（`CatalogEntry.displayName`）。
   func displayName(for id: NodeID) -> String {
     catalog.entry(for: id)?.displayName ?? ""
-  }
-
-  // MARK: - 侧栏树快照
-
-  func sidebarNodes() -> [SidebarNode] {
-    sidebarChildren(of: nil)
-  }
-
-  private func sidebarChildren(of parent: NodeID?) -> [SidebarNode] {
-    let ids = (try? catalog.children(of: parent)) ?? []
-    return ids.compactMap { id in
-      guard let entry = catalog.entry(for: id) else { return nil }
-      let isGroup: Bool = {
-        if case .group = entry.kind { return true }
-        return false
-      }()
-      return SidebarNode(
-        id: id,
-        name: displayName(for: id),
-        isGroup: isGroup,
-        source: entry.source,
-        enabled: entry.enabled,
-        effectivelyEnabled: isEffectivelyEnabled(id),
-        children: isGroup ? sidebarChildren(of: id) : nil)
-    }
   }
 
   // MARK: - 变更面（CatalogError / ServerFormError / CredentialStoreError 上抛）
@@ -153,24 +124,34 @@ final class CatalogViewModel: ObservableObject {
   func addServers(fromURIs text: String, into parent: NodeID?) async throws -> (
     added: Int, failures: [String]
   ) {
-    var parsed: [SsUri] = []
+    var prepared: [(uri: SsUri, fields: ServerFields)] = []
     var failures: [String] = []
     for line in text.split(whereSeparator: \.isNewline) {
       do {
-        parsed.append(try SsUri.decode(String(line)))
+        let uri = try SsUri.decode(String(line))
+        let fields = try Self.serverFields(from: uri, credentials: credentials)
+        prepared.append((uri: uri, fields: fields))
       } catch {
         let digest = line.count > 24 ? "\(line.prefix(24))…" : line
-        let reason = (error as? SsUriError).map { String(describing: $0) } ?? "未知错误"
+        let reason =
+          (error as? SsUriError).map { String(describing: $0) } ?? error.presentableMessage
         failures.append("「\(digest)」：\(reason)")
       }
     }
-    try await commit { catalog in
-      for uri in parsed {
-        let fields = try Self.serverFields(from: uri, credentials: credentials)
-        try catalog.addServer(fields, to: parent)
+    guard !prepared.isEmpty else { return (0, failures) }
+    do {
+      try await commit { catalog in
+        for item in prepared {
+          try catalog.addServer(item.fields, to: parent)
+        }
       }
+    } catch {
+      for item in prepared {
+        Self.deleteCredentialRefs(for: item.fields, credentials: credentials)
+      }
+      throw error
     }
-    return (parsed.count, failures)
+    return (prepared.count, failures)
   }
 
   @discardableResult
@@ -187,12 +168,6 @@ final class CatalogViewModel: ObservableObject {
     guard !trimmed.isEmpty else { throw ServerFormError.emptyName }
     try await commit { catalog in
       try catalog.renameGroup(id, to: trimmed)
-    }
-  }
-
-  func setEnabled(_ id: NodeID, _ enabled: Bool) async throws {
-    try await commit { catalog in
-      try catalog.setEnabled(id, enabled)
     }
   }
 
@@ -234,6 +209,12 @@ final class CatalogViewModel: ObservableObject {
     let trimmedAddress = address.trimmingCharacters(in: .whitespaces)
     guard !trimmedAddress.isEmpty else { throw ServerFormError.invalidAddress }
     guard (1...65_535).contains(port) else { throw ServerFormError.invalidPort }
+    let trimmedMethod = encryptionMethod.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedMethod.isEmpty else { throw ServerFormError.missingEncryptionMethod }
+    guard EncryptionMethodCatalog.isSupported(trimmedMethod) else {
+      throw ServerFormError.unsupportedEncryptionMethod(trimmedMethod)
+    }
+    guard !password.isEmpty else { throw ServerFormError.invalidPassword }
     try await commit { catalog in
       guard let entry = catalog.entry(for: id), case .server(var fields) = entry.kind else {
         throw CatalogError.notAServer(id)
@@ -241,7 +222,7 @@ final class CatalogViewModel: ObservableObject {
       try credentials.save(password, for: fields.passwordRef)
       fields.address = trimmedAddress
       fields.port = port
-      fields.encryptionMethod = encryptionMethod
+      fields.encryptionMethod = trimmedMethod
       fields.remark = remark.trimmingCharacters(in: .whitespaces)
       try Self.applyPluginSelection(
         plugin, options: pluginOptions, to: &fields, credentials: credentials)
@@ -361,16 +342,18 @@ final class CatalogViewModel: ObservableObject {
     from uri: SsUri, credentials: CredentialStoring
   ) throws -> ServerFields {
     let passwordRef = CredentialReference.fresh()
-    try credentials.save(uri.password, for: passwordRef)
-    var pluginProgram: String?
     var pluginOptionsRef: CredentialReference?
-    if let program = uri.pluginProgram {
-      pluginProgram = program
-      if let options = uri.pluginOptions {
+    do {
+      try credentials.save(uri.password, for: passwordRef)
+      if uri.pluginProgram != nil, let options = uri.pluginOptions {
         let ref = CredentialReference.fresh()
         try credentials.save(options, for: ref)
         pluginOptionsRef = ref
       }
+    } catch {
+      try? credentials.delete(passwordRef)
+      if let pluginOptionsRef { try? credentials.delete(pluginOptionsRef) }
+      throw error
     }
     return ServerFields(
       address: uri.host,
@@ -378,8 +361,15 @@ final class CatalogViewModel: ObservableObject {
       encryptionMethod: uri.method,
       passwordRef: passwordRef,
       remark: uri.remark ?? "",
-      pluginProgram: pluginProgram,
+      pluginProgram: uri.pluginProgram,
       pluginOptionsRef: pluginOptionsRef)
+  }
+
+  private static func deleteCredentialRefs(
+    for fields: ServerFields, credentials: CredentialStoring
+  ) {
+    try? credentials.delete(fields.passwordRef)
+    if let optionsRef = fields.pluginOptionsRef { try? credentials.delete(optionsRef) }
   }
 
   /// 插件选择落盘（issue #38，D10/CONTEXT.md 不变量）：「无」整体清除引用与
@@ -417,6 +407,9 @@ final class CatalogViewModel: ObservableObject {
         fields.pluginOptionsRef = reference
       }
     case .unknown:
+      // Imported manual records may contain an unsupported plugin. Keep the opaque
+      // reference unchanged while the user repairs another field or selects a
+      // supported plugin explicitly.
       break
     }
   }
@@ -427,10 +420,52 @@ final class CatalogViewModel: ObservableObject {
   }
 }
 
+extension CatalogViewModel {
+  func validation(for id: NodeID) -> ServerValidation? {
+    guard let entry = catalog.entry(for: id), case .server(let fields) = entry.kind else {
+      return nil
+    }
+    return ServerValidation.evaluate(fields, credentials: credentials, plugins: plugins)
+  }
+
+  // MARK: - 侧栏树快照
+
+  func sidebarNodes() -> [SidebarNode] {
+    sidebarChildren(of: nil)
+  }
+
+  private func sidebarChildren(of parent: NodeID?) -> [SidebarNode] {
+    let ids = (try? catalog.children(of: parent)) ?? []
+    return ids.compactMap { id in
+      guard let entry = catalog.entry(for: id) else { return nil }
+      let isGroup: Bool = {
+        if case .group = entry.kind { return true }
+        return false
+      }()
+      let children = isGroup ? sidebarChildren(of: id) : nil
+      let validation: ServerValidation? = {
+        guard case .server(let fields) = entry.kind else { return nil }
+        return ServerValidation.evaluate(fields, credentials: credentials, plugins: plugins)
+      }()
+      return SidebarNode(
+        id: id,
+        name: displayName(for: id),
+        isGroup: isGroup,
+        source: entry.source,
+        validation: validation,
+        invalidDescendantCount: children?.reduce(0) { $0 + $1.invalidServerCount } ?? 0,
+        children: children)
+    }
+  }
+}
+
 /// 表单级校验失败（地址/端口/名称）；领域拒绝仍以 CatalogError 上抛。
 enum ServerFormError: Error, Equatable {
   case invalidAddress
   case invalidPort
+  case missingEncryptionMethod
+  case unsupportedEncryptionMethod(String)
+  case invalidPassword
   case emptyName
   /// 提交了受管集之外的插件选择（表单只能产生受管集内的选择，此为程序错误防线的显式拒绝）。
   case pluginNotManaged(String)

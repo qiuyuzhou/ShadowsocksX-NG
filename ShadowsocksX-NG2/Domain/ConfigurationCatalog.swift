@@ -87,17 +87,6 @@ extension ConfigurationCatalog {
     return parents
   }
 
-  /// 有效启用 = 节点及其全部祖先启用（CONTEXT.md「Enabled」）。
-  func isEffectivelyEnabled(_ id: NodeID) throws -> Bool {
-    guard entries[id] != nil else { throw CatalogError.nodeNotFound(id) }
-    let parents = parentIndex()
-    var current: NodeID? = id
-    while let nodeID = current {
-      guard let entry = entries[nodeID], entry.enabled else { return false }
-      current = parents[nodeID]
-    }
-    return true
-  }
 }
 
 // MARK: - 变更
@@ -117,7 +106,7 @@ extension ConfigurationCatalog {
       throw CatalogError.subscriptionServerAtRoot(id)
     }
     try place(id, source: source, parent: parent, index: index, excluding: nil)
-    entries[id] = CatalogEntry(id: id, source: source, enabled: true, kind: .server(fields))
+    entries[id] = CatalogEntry(id: id, source: source, kind: .server(fields))
     return id
   }
 
@@ -132,8 +121,7 @@ extension ConfigurationCatalog {
     let id = proposedID ?? .fresh()
     guard entries[id] == nil else { throw CatalogError.duplicateID(id) }
     try place(id, source: source, parent: parent, index: index, excluding: nil)
-    entries[id] = CatalogEntry(
-      id: id, source: source, enabled: true, kind: .group(GroupFields(name: name)))
+    entries[id] = CatalogEntry(id: id, source: source, kind: .group(GroupFields(name: name)))
     return id
   }
 
@@ -151,13 +139,6 @@ extension ConfigurationCatalog {
     guard entry.source == .manual else { throw CatalogError.subscriptionNodeImmutable(id) }
     guard case .server = entry.kind else { throw CatalogError.notAServer(id) }
     entry.kind = .server(fields)
-    entries[id] = entry
-  }
-
-  /// 本地资格状态开关；订阅节点同样允许（CONTEXT.md 仅保留 enabled 的本地覆盖）。
-  mutating func setEnabled(_ id: NodeID, _ enabled: Bool) throws {
-    guard var entry = entries[id] else { throw CatalogError.nodeNotFound(id) }
-    entry.enabled = enabled
     entries[id] = entry
   }
 
@@ -272,10 +253,8 @@ extension ConfigurationCatalog {
   }
 
   /// 订阅快照原子应用（CONTEXT.md 刷新契约）：以快照整体重建固定分组子树；
-  /// `enabled` 仅按节点身份精确匹配延续（无稳定 ID 的记录由解析器保证只有
-  /// 完全相同内容才得同身份）；固定分组自身身份与 `enabled` 保持不变，名称
-  /// 跟随远端（扩展缺失时由调用方给 URL host 兜底）。返回被移除的旧服务器
-  /// 叶子（供调用方清理凭据）。
+  /// 名称、结构、顺序和连接字段全部跟随远端（扩展缺失时由调用方给 URL host
+  /// 兜底）。返回被移除的旧服务器叶子（供调用方清理凭据）。
   @discardableResult
   mutating func applySubscriptionSnapshot(
     _ snapshot: CatalogSubscriptionSnapshot, into groupID: NodeID
@@ -287,12 +266,10 @@ extension ConfigurationCatalog {
       throw CatalogError.crossSourcePlacement(node: .subscription, container: fixed.source)
     }
 
-    // 先整树摘除旧成员（固定分组本身保留），收集 overlay 与被移除的服务器。
+    // 先整树摘除旧成员（固定分组本身保留），收集被移除的服务器。
     var removedServers: [CatalogEntry] = []
-    var oldEnabled: [NodeID: Bool] = [:]
     let oldSubtree = try subscriptionSubtree(of: groupID)
     for entry in oldSubtree {
-      oldEnabled[entry.id] = entry.enabled
       if case .server = entry.kind { removedServers.append(entry) }
     }
     for entry in oldSubtree where entry.id != groupID {
@@ -300,9 +277,9 @@ extension ConfigurationCatalog {
     }
     setChildren([], of: groupID)
 
-    // 远端权威重建：名称、结构、顺序、字段全按快照；本地只回填 enabled。
+    // 远端权威重建：名称、结构、顺序、字段全按快照。
     var fixedFields = GroupFields(name: snapshot.name, children: [])
-    try insertSnapshotChildren(of: snapshot.root, into: &fixedFields, overlay: oldEnabled)
+    try insertSnapshotChildren(of: snapshot.root, into: &fixedFields)
     entries[groupID]?.kind = .group(fixedFields)
     return removedServers
   }
@@ -311,8 +288,7 @@ extension ConfigurationCatalog {
   /// 分组的显子序。身份已由解析器按订阅作用域限定，与既有节点冲突即程序错误。
   private mutating func insertSnapshotChildren(
     of group: CatalogSubscriptionSnapshot.Group,
-    into fields: inout GroupFields,
-    overlay: [NodeID: Bool]
+    into fields: inout GroupFields
   ) throws {
     var childIDs: [NodeID] = []
     for child in group.children {
@@ -320,16 +296,14 @@ extension ConfigurationCatalog {
       case .server(let leaf):
         guard entries[leaf.id] == nil else { throw CatalogError.duplicateID(leaf.id) }
         entries[leaf.id] = CatalogEntry(
-          id: leaf.id, source: .subscription,
-          enabled: overlay[leaf.id] ?? true, kind: .server(leaf.fields))
+          id: leaf.id, source: .subscription, kind: .server(leaf.fields))
         childIDs.append(leaf.id)
       case .group(let nested):
         guard entries[nested.id] == nil else { throw CatalogError.duplicateID(nested.id) }
         var nestedFields = GroupFields(name: nested.name, children: [])
-        try insertSnapshotChildren(of: nested, into: &nestedFields, overlay: overlay)
+        try insertSnapshotChildren(of: nested, into: &nestedFields)
         entries[nested.id] = CatalogEntry(
-          id: nested.id, source: .subscription,
-          enabled: overlay[nested.id] ?? true, kind: .group(nestedFields))
+          id: nested.id, source: .subscription, kind: .group(nestedFields))
         childIDs.append(nested.id)
       }
     }

@@ -43,6 +43,8 @@ final class ProxyRuntimeController: ObservableObject {
   /// 非发布值的普通结构体，代理关闭路径的激活动作不会触碰 state，菜单的
   /// 「目标」行依赖这里的独立发布保持实时。
   @Published private(set) var activeTargetID: NodeID?
+  /// 最近一次激活预检在分组中跳过的服务器；仅记录 app 已知的本地阻塞原因。
+  @Published private(set) var skippedServers: [SkippedServer] = []
   private(set) var machine: ActivationStateMachine
 
   private var catalog: ConfigurationCatalog
@@ -163,6 +165,7 @@ final class ProxyRuntimeController: ObservableObject {
         timeout: settings.timeoutSeconds, verbose: settings.verboseLogging,
         pacUserRules: settings.pacUserRules)
       activeTargetID = target
+      skippedServers = configuration.skippedServers
       do {
         try activationFileStore.save(activeTargetID: target)
       } catch {
@@ -324,6 +327,7 @@ final class ProxyRuntimeController: ObservableObject {
     _ = await execute(.stop, document: nil)
     pacURL = nil
     lastDocument = nil
+    skippedServers = []
     let detail =
       "本地代理端口配置无法读取（\(reason)），已停止代理以避免静默改用出厂端口；请在设置区修复端口后重新启动"
     if let restoreError {
@@ -345,6 +349,7 @@ final class ProxyRuntimeController: ObservableObject {
     _ = await execute(.stop, document: nil)
     pacURL = nil
     lastDocument = nil
+    skippedServers = []
     if let restoreError {
       state = .systemProxyFailed(
         detail: "\(failure.presentedReason)；\(systemProxyDetail(restoreError))")
@@ -480,6 +485,7 @@ extension ProxyRuntimeController {
     state = .off
     pacURL = nil
     lastDocument = nil
+    skippedServers = []
 
     if let restored = try? settingsStore.load() {
       settings = restored
@@ -681,6 +687,14 @@ extension ProxyRuntimeController {
       timeout: settings.timeoutSeconds, verbose: settings.verboseLogging,
       pacUserRules: settings.pacUserRules)
     activeTargetID = machine.activeTargetID
+    switch effect {
+    case .deployed(let configuration):
+      skippedServers = configuration.skippedServers
+    case .clearedAndStopped:
+      skippedServers = []
+    case nil:
+      break
+    }
     return effect
   }
 

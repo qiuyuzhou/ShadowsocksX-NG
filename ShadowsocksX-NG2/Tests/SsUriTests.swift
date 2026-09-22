@@ -206,13 +206,18 @@ final class SsUriTests: XCTestCase {
         host: "203.0.113.7", port: 8388),
       // IPv6 往返。
       SsUri(method: "aes-256-gcm", password: "p", host: "2001:db8::1", port: 9101),
-      // 空密码合法（如占位）。
-      SsUri(method: "aes-256-gcm", password: "", host: "203.0.113.7", port: 8388),
     ]
     for original in corpus {
       let decoded = try SsUri.decode(original.encode())
       XCTAssertEqual(decoded, original, "往返失真：\(original)")
     }
+  }
+
+  func testDecodeRejectsEmptyPassword() {
+    let encoded = SsUri(
+      method: "aes-256-gcm", password: "", host: "203.0.113.7", port: 8388
+    ).encode()
+    XCTAssertThrowsError(try SsUri.decode(encoded))
   }
 
   func testCanonicalInputSurvivesDecodeEncodeVerbatim() throws {

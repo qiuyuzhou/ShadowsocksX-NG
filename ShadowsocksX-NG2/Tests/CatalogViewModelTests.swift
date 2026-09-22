@@ -87,6 +87,20 @@ final class CatalogViewModelTests: XCTestCase {
     XCTAssertEqual(try credentials.secret(for: optionsRef), "mode=websocket;host=example.com")
   }
 
+  func testImportUnsupportedMethodKeepsServerAsInvalidCandidate() async throws {
+    let uri = SsUri(
+      method: "future-cipher", password: "password", host: "203.0.113.7", port: 8388
+    ).encode()
+
+    let outcome = try await viewModel.addServers(fromURIs: uri, into: nil)
+
+    XCTAssertEqual(outcome.added, 1)
+    let id = try XCTUnwrap(viewModel.catalog.rootChildren.first)
+    XCTAssertEqual(
+      viewModel.validation(for: id)?.issues,
+      [.unsupportedEncryptionMethod("future-cipher")])
+  }
+
   func testImportIntoSelectedManualGroup() async throws {
     let groupID = try await viewModel.addGroup(named: "手动组", into: nil)
     let target = try XCTUnwrap(viewModel.importTargetParent(for: groupID))
@@ -177,7 +191,7 @@ final class CatalogViewModelTests: XCTestCase {
     XCTAssertTrue(viewModel.catalog.isEmpty)
   }
 
-  // MARK: - 订阅子树只读（夹具验证：结构操作被拒、启用开关可用）
+  // MARK: - 订阅子树只读（夹具验证：结构操作被拒）
 
   func testSubscriptionStructureOperationsRejected() async throws {
     try makeSubscriptionCatalog()
@@ -195,21 +209,6 @@ final class CatalogViewModelTests: XCTestCase {
     }
     // 手动节点移进订阅子树同样被拒（跨来源）。
     await expectThrowsAsync { try await viewModel.move(manualGroupID, to: fixture.groupID) }
-  }
-
-  func testSubscriptionEnableToggleAllowedAndPersisted() async throws {
-    try makeSubscriptionCatalog()
-    let fixture = try CatalogFixtures.makeSubscriptionFixture()
-    let server = fixture.serverIDs[0]
-    try await viewModel.setEnabled(server, false)
-    let entry = try XCTUnwrap(viewModel.entry(for: server))
-    XCTAssertFalse(entry.enabled, "启用开关是订阅节点唯一可写状态")
-    let commitCount = await commitCounter.count
-    XCTAssertEqual(commitCount, 1)
-    // 持久化到磁盘可读回。
-    let reloaded = try CatalogFileStore(fileURL: fileURL).load().catalog
-    XCTAssertFalse(try XCTUnwrap(reloaded.entry(for: server)).enabled)
-    XCTAssertTrue(try reloaded.isEffectivelyEnabled(fixture.serverIDs[1]), "兄弟节点不受影响")
   }
 
   // MARK: - 分享（与添加互逆）

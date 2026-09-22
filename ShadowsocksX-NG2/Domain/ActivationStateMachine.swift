@@ -45,7 +45,7 @@ struct ActivationStateMachine: Equatable, Sendable {
   }
 
   /// 目录已提交变更后的立即重展开。返回 `nil` 表示无事可做（无活动目标）；
-  /// 有效非空 → `.deployed`（原子更新）；目标被删除/禁用/变空/含无效叶子 →
+  /// 有效非空 → `.deployed`（原子更新）；目标被删除/变空/无有效叶子 →
   /// 清除目标并返回 `.clearedAndStopped`（点名原因）。任何目录提交（含与活动
   /// 目标无关的编辑）都整体重校验重展开：产出对相同输入幂等，由 #27 决定是否
   /// 跳过相同内容的运行时写入。
@@ -73,8 +73,9 @@ struct ActivationStateMachine: Equatable, Sendable {
 
   // MARK: - 展开、校验与派生
 
-  /// 单缝派生：目标存在 → 有效启用 → 显式子序深度优先展开叶子 → 非空 →
-  /// 逐叶校验并解析凭据。任何一步失败都返回点名原因，不产出部分结果。
+  /// 单缝派生：目标存在 → 显式子序深度优先展开全部叶子 → 逐叶进行 app
+  /// 可知的激活预检 → 解析凭据。单个服务器目标遇到阻塞原因时整体拒绝；
+  /// 分组目标则跳过已知无效叶子，至少保留一台服务器才产出运行时文档。
   private func derive(
     target: NodeID,
     in catalog: ConfigurationCatalog,
@@ -86,26 +87,45 @@ struct ActivationStateMachine: Equatable, Sendable {
     pacUserRules: String
   ) -> Result<RuntimeConfiguration, ActivationFailure> {
     guard catalog.contains(target) else { return .failure(.targetNotFound(target)) }
-    if let disabledNode = firstDisabledNode(from: target, in: catalog) {
-      return .failure(.targetDisabled(disabledNode))
-    }
+    let isGroup: Bool = {
+      guard let entry = catalog.entry(for: target) else { return false }
+      if case .group = entry.kind { return true }
+      return false
+    }()
     var leaves: [NodeID] = []
-    if case .server = catalog.entry(for: target)?.kind {
-      leaves = [target]
+    if isGroup {
+      collectServerLeaves(of: target, in: catalog, into: &leaves)
     } else {
-      collectEnabledLeaves(of: target, in: catalog, into: &leaves)
+      leaves = [target]
     }
     guard !leaves.isEmpty else { return .failure(.targetExpandsToNothing(target)) }
 
     var servers: [SslocalServerDocument] = []
+    var skippedServers: [SkippedServer] = []
     for leafID in leaves {
+      guard let entry = catalog.entry(for: leafID), case .server(let fields) = entry.kind else {
+        preconditionFailure("展开结果只含服务器叶子")
+      }
+      let validation = ServerValidation.evaluate(fields, credentials: credentials, plugins: plugins)
+      if let issue = validation.issues.first {
+        if isGroup {
+          skippedServers.append(SkippedServer(id: leafID, reason: issue))
+          continue
+        }
+        return .failure(.invalidLeaf(node: leafID, reason: issue))
+      }
       switch derivedServer(leafID, in: catalog, credentials: credentials, plugins: plugins) {
       case .success(let server):
         servers.append(server)
       case .failure(let failure):
-        return .failure(failure)
+        if isGroup, case .invalidLeaf(let node, let reason) = failure {
+          skippedServers.append(SkippedServer(id: node, reason: reason))
+        } else {
+          return .failure(failure)
+        }
       }
     }
+    guard !servers.isEmpty else { return .failure(.targetExpandsToNothing(target)) }
     return .success(
       RuntimeConfiguration(
         targetID: target,
@@ -114,19 +134,13 @@ struct ActivationStateMachine: Equatable, Sendable {
           listen: listen,
           timeout: timeout,
           verbose: verbose,
-          pacUserRules: pacUserRules)))
+          pacUserRules: pacUserRules),
+        skippedServers: skippedServers))
   }
 
-  /// 目标→根路径上第一个禁用节点；全部启用返回 `nil`。
-  private func firstDisabledNode(from target: NodeID, in catalog: ConfigurationCatalog) -> NodeID? {
-    ([target] + catalog.ancestors(of: target)).first {
-      catalog.entry(for: $0)?.enabled == false
-    }
-  }
-
-  /// 按显式子序深度优先收集有效启用的服务器叶子；禁用分组整棵跳过。
+  /// 按显式子序深度优先收集全部服务器叶子；有效性在派生阶段统一预检。
   /// 目录结构不变量（子引用必存在、目标必为分组）由构造校验保证，失约即程序错误。
-  private func collectEnabledLeaves(
+  private func collectServerLeaves(
     of groupID: NodeID,
     in catalog: ConfigurationCatalog,
     into leaves: inout [NodeID]
@@ -138,17 +152,16 @@ struct ActivationStateMachine: Equatable, Sendable {
       guard let entry = catalog.entry(for: child) else {
         preconditionFailure("目录结构不变量：子引用必存在")
       }
-      guard entry.enabled else { continue }
       switch entry.kind {
       case .server:
         leaves.append(child)
       case .group:
-        collectEnabledLeaves(of: child, in: catalog, into: &leaves)
+        collectServerLeaves(of: child, in: catalog, into: &leaves)
       }
     }
   }
 
-  /// 校验单个有效启用叶子并解析为上游条目；凭据在派生时从凭据存储解析（D5）。
+  /// 校验单个有效候选叶子并解析为上游条目；凭据在派生时从凭据存储解析（D5）。
   private func derivedServer(
     _ leafID: NodeID,
     in catalog: ConfigurationCatalog,
@@ -185,10 +198,10 @@ struct ActivationStateMachine: Equatable, Sendable {
       SslocalServerDocument(
         id: leafID.rawValue,
         remarks: fields.remark,
-        server: fields.address,
+        server: fields.address.trimmingCharacters(in: .whitespacesAndNewlines),
         serverPort: fields.port,
         password: password,
-        method: fields.encryptionMethod,
+        method: fields.encryptionMethod.trimmingCharacters(in: .whitespacesAndNewlines),
         plugin: pluginPath,
         pluginOpts: pluginOpts))
   }
@@ -200,7 +213,7 @@ struct ActivationStateMachine: Equatable, Sendable {
     credentials: CredentialStoring
   ) -> Result<String, ActivationFailure> {
     do {
-      guard let secret = try credentials.secret(for: reference) else {
+      guard let secret = try credentials.secret(for: reference), !secret.isEmpty else {
         return .failure(.invalidLeaf(node: leafID, reason: .credentialUnresolved(reference)))
       }
       return .success(secret)

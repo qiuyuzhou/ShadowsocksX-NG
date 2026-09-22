@@ -6,10 +6,18 @@ struct SidebarNode: Identifiable {
   let name: String
   let isGroup: Bool
   let source: NodeSource
-  let enabled: Bool
-  let effectivelyEnabled: Bool
+  /// 服务器叶子的 app 可知校验结果；分组为 nil。
+  let validation: ServerValidation?
+  /// 子树中已知无效的服务器数量，不包含当前叶子。
+  let invalidDescendantCount: Int
   /// 服务器叶子为 `nil`；分组持有子树快照。
   let children: [SidebarNode]?
+
+  var isInvalid: Bool { validation?.isValid == false }
+
+  var invalidServerCount: Int {
+    (isInvalid ? 1 : 0) + invalidDescendantCount
+  }
 }
 
 /// 服务器详情表单状态：凭据已解析为明文（仅本窗口内呈现）；插件区为受管

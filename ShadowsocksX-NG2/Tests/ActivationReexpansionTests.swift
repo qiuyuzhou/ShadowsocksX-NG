@@ -3,7 +3,8 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 /// 目录提交后的立即重展开缝（票 #26 验收项）：有效非空 → 原子更新；目标被
-/// 删除/禁用/变空/含无效叶子（含凭据不可解析）→ 清除目标并发出停止意图，
+/// 删除/变空/单服务器变无效/无有效叶子 → 清除目标并发出停止意图；分组中的
+/// 无效叶子会被跳过并保留有效子集，点名原因、无静默回退。
 /// 点名原因、无静默回退。
 final class ActivationReexpansionTests: XCTestCase {
   private var machine = ActivationStateMachine()
@@ -67,32 +68,44 @@ final class ActivationReexpansionTests: XCTestCase {
     XCTAssertNil(commit(catalog, credentials: credentials), "清除后不再产生效应")
   }
 
-  func testDisableActiveTargetClearsTargetAndStops() throws {
+  func testInvalidActiveServerClearsTargetAndStops() throws {
     var catalog = ConfigurationCatalog()
     let credentials = InMemoryCredentialStore()
     let leaf = try ActivationFixture.addPlainServer("a", in: &catalog, credentials: credentials)
     try activate(leaf, in: catalog, credentials: credentials)
 
-    try catalog.setEnabled(leaf, false)
+    var fields = try ActivationFixture.serverFields(of: leaf, in: catalog)
+    fields.encryptionMethod = "future-cipher"
+    try catalog.updateServer(leaf, with: fields)
 
     let failure = try ActivationFixture.requireCleared(commit(catalog, credentials: credentials))
-    XCTAssertEqual(failure, .targetDisabled(leaf))
+    XCTAssertEqual(
+      failure, .invalidLeaf(node: leaf, reason: .unsupportedEncryptionMethod("future-cipher")))
     XCTAssertNil(machine.activeTargetID)
   }
 
-  func testDisableAncestorOfActiveTargetClearsTargetAndStops() throws {
+  func testInvalidLeafInActiveGroupIsSkippedAndKeepsTarget() throws {
     var catalog = ConfigurationCatalog()
     let credentials = InMemoryCredentialStore()
     let group = try catalog.addGroup("组")
-    let leaf = try ActivationFixture.addPlainServer(
+    let valid = try ActivationFixture.addPlainServer(
       "a", to: group, in: &catalog, credentials: credentials)
-    try activate(leaf, in: catalog, credentials: credentials)
+    let broken = try ActivationFixture.addPlainServer(
+      "b", to: group, in: &catalog, credentials: credentials)
+    try activate(group, in: catalog, credentials: credentials)
 
-    try catalog.setEnabled(group, false)
+    var fields = try ActivationFixture.serverFields(of: broken, in: catalog)
+    fields.encryptionMethod = "future-cipher"
+    try catalog.updateServer(broken, with: fields)
 
-    let failure = try ActivationFixture.requireCleared(commit(catalog, credentials: credentials))
-    XCTAssertEqual(failure, .targetDisabled(group), "点名被禁用的祖先")
-    XCTAssertNil(machine.activeTargetID)
+    let configuration = try ActivationFixture.requireDeployed(
+      commit(catalog, credentials: credentials))
+    XCTAssertEqual(configuration.targetID, group)
+    XCTAssertEqual(configuration.document.servers.map(\.id), [valid.rawValue])
+    XCTAssertEqual(
+      configuration.skippedServers,
+      [SkippedServer(id: broken, reason: .unsupportedEncryptionMethod("future-cipher"))])
+    XCTAssertEqual(machine.activeTargetID, group)
   }
 
   func testEmptyingActiveGroupClearsTargetAndStops() throws {
@@ -110,7 +123,7 @@ final class ActivationReexpansionTests: XCTestCase {
     XCTAssertNil(machine.activeTargetID)
   }
 
-  func testUnprovidedPluginIntroducedIntoActiveSubtreeClearsTargetAndStops() throws {
+  func testUnprovidedPluginIntroducedIntoOnlyActiveGroupLeafClearsTarget() throws {
     var catalog = ConfigurationCatalog()
     let credentials = InMemoryCredentialStore()
     let group = try catalog.addGroup("组")
@@ -123,8 +136,7 @@ final class ActivationReexpansionTests: XCTestCase {
     try catalog.updateServer(leaf, with: fields)
 
     let failure = try ActivationFixture.requireCleared(commit(catalog, credentials: credentials))
-    XCTAssertEqual(
-      failure, .invalidLeaf(node: leaf, reason: .pluginNotProvided(program: "kcptun")))
+    XCTAssertEqual(failure, .targetExpandsToNothing(group))
     XCTAssertNil(machine.activeTargetID)
   }
 
@@ -170,10 +182,10 @@ final class ActivationReexpansionTests: XCTestCase {
     try activate(valid, in: catalog, credentials: credentials)
 
     ActivationFixture.assertThrows(
-      .invalidLeaf(node: broken, reason: .pluginNotProvided(program: "kcptun"))
-    ) {
-      try activate(group, in: catalog, credentials: credentials)
-    }
+      .invalidLeaf(node: broken, reason: .pluginNotProvided(program: "kcptun")),
+      {
+        try activate(broken, in: catalog, credentials: credentials)
+      })
 
     let configuration = try ActivationFixture.requireDeployed(
       commit(catalog, credentials: credentials))

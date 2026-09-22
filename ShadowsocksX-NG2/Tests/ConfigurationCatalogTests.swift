@@ -14,7 +14,6 @@ final class ConfigurationCatalogTests: XCTestCase {
     XCTAssertEqual(try catalog.children(of: nil), [first, second], "根子序按插入顺序")
     let entry = try XCTUnwrap(catalog.entry(for: first))
     XCTAssertEqual(entry.source, .manual)
-    XCTAssertEqual(entry.enabled, true, "新节点默认启用")
     guard case .server(let fields) = entry.kind else { return XCTFail("应为服务器叶子") }
     XCTAssertEqual(fields.remark, "香港 01")
     XCTAssertEqual(fields.address, "203.0.113.7")

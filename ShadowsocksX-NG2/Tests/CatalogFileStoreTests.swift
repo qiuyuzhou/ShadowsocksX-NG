@@ -125,7 +125,7 @@ final class CatalogFileStoreTests: XCTestCase {
     try store.save(CatalogDocument(catalog: original))
     let loaded = try store.load()
 
-    XCTAssertEqual(loaded.catalog, original, "结构、顺序、启停、字段与订阅夹具全部无损")
+    XCTAssertEqual(loaded.catalog, original, "结构、顺序、字段与订阅夹具全部无损")
 
     let serverID = NodeID(rawValue: "manual:server")
     let server = try XCTUnwrap(loaded.catalog.entry(for: serverID))
@@ -189,7 +189,7 @@ final class CatalogFileStoreTests: XCTestCase {
     XCTAssertTrue(raw.contains(optionsRef.rawValue))
   }
 
-  /// 富夹具：订阅子树 + 手动组嵌套 + 空组 + 停用节点 + 重排后子序。
+  /// 富夹具：订阅子树 + 手动组嵌套 + 空组 + 无效节点 + 重排后子序。
   static func makeRichCatalog() throws -> ConfigurationCatalog {
     var catalog = try CatalogFixtures.makeSubscriptionFixture(prefix: "sub9").catalog
     let group = NodeID(rawValue: "manual:group")
@@ -208,8 +208,7 @@ final class CatalogFileStoreTests: XCTestCase {
       id: server,
       to: group
     )
-    let disabled = try catalog.addTestServer("停用", to: group)
-    try catalog.setEnabled(disabled, false)
+    _ = try catalog.addTestServer("无效", to: group)
     try catalog.addGroup("空组", id: NodeID(rawValue: "manual:empty"))
     try catalog.move(server, to: group, index: 0)
     return catalog
@@ -245,6 +244,23 @@ final class CatalogFileStoreTests: XCTestCase {
 
     XCTAssertTrue(loaded.subscriptions.isEmpty, "v1 文档无订阅记录")
     XCTAssertTrue(loaded.catalog.isEmpty)
+  }
+
+  func testLegacyEnabledFieldIsIgnoredAndNextSaveWritesV3WithoutIt() throws {
+    let payload = """
+      {"version": 1, "rootChildren": ["g"], "entries": [
+        {"id": "g", "source": "manual", "enabled": false,
+         "kind": {"group": {"_0": {"name": "G", "children": []}}}}
+      ]}
+      """
+    try payload.write(to: store.fileURL, atomically: true, encoding: .utf8)
+
+    let loaded = try store.load()
+    try store.save(loaded)
+
+    let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
+    XCTAssertTrue(raw.contains("\"version\" : 3"))
+    XCTAssertFalse(raw.contains("\"enabled\""), "v3 不再写出节点级 enabled")
   }
 
   /// 订阅记录 JSON 用真编码器生成：枚举 Codable 形状是实现细节，不在测试里手写。

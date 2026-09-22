@@ -37,7 +37,7 @@ final class ConfigurationCatalogRejectionTests: XCTestCase {
     XCTAssertTrue(catalog.contains(fixture.groupID), "被拒删除不得产生任何变更")
   }
 
-  func testSubscriptionNodesRejectRenameAndFieldEditButAllowEnabledToggle() throws {
+  func testSubscriptionNodesRejectRenameAndFieldEdit() throws {
     let fixture = try CatalogFixtures.makeSubscriptionFixture()
     var catalog = fixture.catalog
     let subscriptionServer = fixture.serverIDs[0]
@@ -50,8 +50,6 @@ final class ConfigurationCatalogRejectionTests: XCTestCase {
     ) { error in
       XCTAssertEqual(error as? CatalogError, .subscriptionNodeImmutable(subscriptionServer))
     }
-    try catalog.setEnabled(subscriptionServer, false)
-    XCTAssertEqual(catalog.entry(for: subscriptionServer)?.enabled, false, "enabled 是唯一允许的本地覆盖")
   }
 
   func testMoveGroupIntoItsOwnSubtreeIsRejected() throws {
@@ -149,16 +147,10 @@ final class ConfigurationCatalogRejectionTests: XCTestCase {
     ) { error in
       XCTAssertEqual(error as? CatalogError, .nodeNotFound(missing))
     }
-    XCTAssertThrowsError(try catalog.setEnabled(missing, false)) { error in
-      XCTAssertEqual(error as? CatalogError, .nodeNotFound(missing))
-    }
     XCTAssertThrowsError(try catalog.move(missing, to: nil)) { error in
       XCTAssertEqual(error as? CatalogError, .nodeNotFound(missing))
     }
     XCTAssertThrowsError(try catalog.remove(missing)) { error in
-      XCTAssertEqual(error as? CatalogError, .nodeNotFound(missing))
-    }
-    XCTAssertThrowsError(try catalog.isEffectivelyEnabled(missing)) { error in
       XCTAssertEqual(error as? CatalogError, .nodeNotFound(missing))
     }
   }

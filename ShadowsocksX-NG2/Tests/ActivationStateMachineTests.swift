@@ -2,7 +2,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 激活主缝测试（票 #26 验收项）：单服务器激活、组展开顺序与有效启用过滤、
+/// 激活主缝测试（票 #26 验收项）：单服务器激活、组展开顺序与无效候选过滤、
 /// 原子失败点名原因、组目标身份保持。重展开与清除停止见 ActivationReexpansionTests。
 final class ActivationStateMachineTests: XCTestCase {
   private var machine = ActivationStateMachine()
@@ -43,21 +43,25 @@ final class ActivationStateMachineTests: XCTestCase {
     XCTAssertEqual(configuration.document.socksMode, "tcp_only")
   }
 
-  func testActivateGroupExpandsEnabledLeavesInExplicitOrderAndKeepsGroupIdentity() throws {
+  func testActivateGroupExpandsValidLeavesInExplicitOrderAndKeepsGroupIdentity() throws {
     var catalog = ConfigurationCatalog()
     let credentials = InMemoryCredentialStore()
     let group = try catalog.addGroup("自用")
     let first = try ActivationFixture.addPlainServer(
       "a", to: group, in: &catalog, credentials: credentials)
-    let disabledLeaf = try ActivationFixture.addPlainServer(
+    let invalidLeaf = try ActivationFixture.addPlainServer(
       "b", to: group, in: &catalog, credentials: credentials)
-    try catalog.setEnabled(disabledLeaf, false)
+    var invalidFields = try ActivationFixture.serverFields(of: invalidLeaf, in: catalog)
+    invalidFields.encryptionMethod = "future-cipher"
+    try catalog.updateServer(invalidLeaf, with: invalidFields)
     let nested = try catalog.addGroup("嵌套", to: group)
     let deepFirst = try ActivationFixture.addPlainServer(
       "c", to: nested, in: &catalog, credentials: credentials)
-    let deepDisabled = try ActivationFixture.addPlainServer(
+    let deepInvalid = try ActivationFixture.addPlainServer(
       "d", to: nested, in: &catalog, credentials: credentials)
-    try catalog.setEnabled(deepDisabled, false)
+    var deepInvalidFields = try ActivationFixture.serverFields(of: deepInvalid, in: catalog)
+    deepInvalidFields.encryptionMethod = "future-cipher"
+    try catalog.updateServer(deepInvalid, with: deepInvalidFields)
     let last = try ActivationFixture.addPlainServer(
       "e", to: group, in: &catalog, credentials: credentials)
 
@@ -69,24 +73,25 @@ final class ActivationStateMachineTests: XCTestCase {
     XCTAssertEqual(
       configuration.document.servers.map(\.id),
       [first.rawValue, deepFirst.rawValue, last.rawValue],
-      "显式子序深度优先展开，禁用子树整体排除")
+      "显式子序深度优先展开，已知无效叶子被跳过")
+    XCTAssertEqual(
+      configuration.skippedServers.map(\.id), [invalidLeaf, deepInvalid])
   }
 
-  func testActivateGroupInsideDisabledAncestorIsRejectedAtomically() throws {
+  func testActivateGroupWithAllInvalidLeavesIsRejected() throws {
     var catalog = ConfigurationCatalog()
     let credentials = InMemoryCredentialStore()
-    let outer = try catalog.addGroup("外层")
-    let inner = try catalog.addGroup("内层", to: outer)
+    let group = try catalog.addGroup("组")
     let leaf = try ActivationFixture.addPlainServer(
-      "a", to: inner, in: &catalog, credentials: credentials)
-    try activate(leaf, in: catalog, credentials: credentials)
+      "a", to: group, in: &catalog, credentials: credentials)
+    var fields = try ActivationFixture.serverFields(of: leaf, in: catalog)
+    fields.encryptionMethod = "future-cipher"
+    try catalog.updateServer(leaf, with: fields)
 
-    try catalog.setEnabled(outer, false)
-
-    ActivationFixture.assertThrows(.targetDisabled(outer)) {
-      try activate(inner, in: catalog, credentials: credentials)
+    ActivationFixture.assertThrows(.targetExpandsToNothing(group)) {
+      try activate(group, in: catalog, credentials: credentials)
     }
-    XCTAssertEqual(machine.activeTargetID, leaf, "原子失败：原目标与运行状态保留")
+    XCTAssertNil(machine.activeTargetID)
   }
 
   func testActivateEmptyGroupIsRejected() throws {
@@ -100,13 +105,15 @@ final class ActivationStateMachineTests: XCTestCase {
     XCTAssertNil(machine.activeTargetID)
   }
 
-  func testActivateGroupWhoseLeavesAreAllDisabledIsRejected() throws {
+  func testActivateGroupWhoseLeavesAreAllInvalidIsRejected() throws {
     var catalog = ConfigurationCatalog()
     let credentials = InMemoryCredentialStore()
     let group = try catalog.addGroup("组")
     let leaf = try ActivationFixture.addPlainServer(
       "a", to: group, in: &catalog, credentials: credentials)
-    try catalog.setEnabled(leaf, false)
+    var fields = try ActivationFixture.serverFields(of: leaf, in: catalog)
+    fields.encryptionMethod = "future-cipher"
+    try catalog.updateServer(leaf, with: fields)
 
     ActivationFixture.assertThrows(.targetExpandsToNothing(group)) {
       try activate(group, in: catalog, credentials: credentials)
@@ -129,7 +136,7 @@ final class ActivationStateMachineTests: XCTestCase {
     XCTAssertNil(machine.activeTargetID, "拒绝激活，不产生目标")
   }
 
-  func testActivateGroupContainingUnprovidedPluginLeafIsRejectedAtomically() throws {
+  func testActivateGroupContainingUnprovidedPluginLeafSkipsIt() throws {
     var catalog = ConfigurationCatalog()
     let credentials = InMemoryCredentialStore()
     let group = try catalog.addGroup("组")
@@ -140,14 +147,13 @@ final class ActivationStateMachineTests: XCTestCase {
     var brokenFields = try ActivationFixture.serverFields(of: broken, in: catalog)
     brokenFields.pluginProgram = "kcptun"
     try catalog.updateServer(broken, with: brokenFields)
-    try activate(valid, in: catalog, credentials: credentials)
+    let configuration = try activate(group, in: catalog, credentials: credentials)
 
-    ActivationFixture.assertThrows(
-      .invalidLeaf(node: broken, reason: .pluginNotProvided(program: "kcptun"))
-    ) {
-      try activate(group, in: catalog, credentials: credentials)
-    }
-    XCTAssertEqual(machine.activeTargetID, valid, "原子失败：原目标与运行状态保留")
+    XCTAssertEqual(configuration.document.servers.map(\.id), [valid.rawValue])
+    XCTAssertEqual(
+      configuration.skippedServers,
+      [SkippedServer(id: broken, reason: .pluginNotProvided(program: "kcptun"))])
+    XCTAssertEqual(machine.activeTargetID, group)
   }
 
   func testActivateServerWithManagedPluginWritesBundlePathAndResolvesOptions() throws {

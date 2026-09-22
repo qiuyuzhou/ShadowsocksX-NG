@@ -26,6 +26,12 @@ struct ProxyStatusMenu: View {
         .font(.caption)
         .foregroundStyle(.secondary)
     }
+    if !controller.skippedServers.isEmpty {
+      Text("已跳过 \(controller.skippedServers.count) 个无效服务器")
+        .font(.caption)
+        .foregroundStyle(.orange)
+        .help("激活时跳过了存在已知本地阻塞问题的服务器")
+    }
 
     Divider()
 

@@ -62,7 +62,7 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
         ?? "missing-b")
   }
 
-  /// b 停用 + a 改名 + b 移到根分组（远端改名/移动/排序跟随的对照文档）。
+  /// b 移到根 + a 改名 + 重排（远端改名/移动/排序跟随的对照文档）。
   private var treeDoc: Data { SubscriptionDocs.tree() }
   private var changedTreeDoc: Data { SubscriptionDocs.treeRenamedAndReordered() }
 
@@ -119,21 +119,19 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
 
   // MARK: 失败保留语义
 
-  func testFailedRefreshKeepsSnapshotOverlayAndStatus() async throws {
+  func testFailedRefreshKeepsSnapshotAndStatus() async throws {
     fetcher = FakeSubscriptionFetcher(behavior: .success(treeDoc))
     viewModel = makeViewModel()
     let record = try await viewModel.createSubscription(urlString: "https://p.example.com/s.json")
-    try await viewModel.setEnabled(serverBID, false)
     let commitsBefore = await commitCounter.count
 
     fetcher = FakeSubscriptionFetcher(behavior: .failure(.httpStatus(code: 503)))
     viewModel.subscriptionFetcher = fetcher
     await viewModel.refreshSubscription(record.id)
 
-    // 快照与 overlay 原样保留。
+    // 快照原样保留。
     XCTAssertNotNil(viewModel.entry(for: serverAID))
     XCTAssertNotNil(viewModel.entry(for: serverBID))
-    XCTAssertFalse(try viewModel.entry(for: serverBID)!.enabled)
     XCTAssertEqual(viewModel.displayName(for: serverAID), "香港 01")
     // 状态点名失败且原因脱敏。
     guard case .failed(_, let reason) = viewModel.subscriptions[0].status else {
@@ -231,20 +229,17 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
     }
   }
 
-  // MARK: overlay 与身份连续性
+  // MARK: 身份连续性
 
-  func testRemoteRenameMoveReorderFollowsWithOverlayRetained() async throws {
+  func testRemoteRenameMoveReorderFollowsWithoutLocalOverlay() async throws {
     fetcher = FakeSubscriptionFetcher(behavior: .success(treeDoc))
     viewModel = makeViewModel()
     let record = try await viewModel.createSubscription(urlString: "https://p.example.com/s.json")
-    try await viewModel.setEnabled(serverBID, false)
-
     viewModel.subscriptionFetcher = FakeSubscriptionFetcher(
       behavior: .success(changedTreeDoc))
     await viewModel.refreshSubscription(record.id)
 
-    // 身份不变：b 停用保留；名称/位置/顺序跟随远端。
-    XCTAssertFalse(try viewModel.entry(for: serverBID)!.enabled, "仅本地 enabled 延续")
+    // 身份不变；名称/位置/顺序跟随远端。
     XCTAssertEqual(viewModel.displayName(for: serverAID), "香港 01（新名）")
     guard case .group(let fields) = viewModel.entry(for: record.groupID)?.kind else {
       return XCTFail("固定分组应存在")
@@ -259,21 +254,17 @@ final class CatalogViewModelSubscriptionTests: XCTestCase {
     viewModel = makeViewModel()
     let record = try await viewModel.createSubscription(urlString: "https://p.example.com/s.json")
     let serverID = try XCTUnwrap(onlyServerChildID(ofGroup: record.groupID))
-    try await viewModel.setEnabled(serverID, false)
-
-    // 完全相同记录 → 身份延续，停用保留。
+    // 完全相同记录 → 身份延续。
     await viewModel.refreshSubscription(record.id)
     XCTAssertEqual(onlyServerChildID(ofGroup: record.groupID), serverID)
-    XCTAssertFalse(try viewModel.entry(for: serverID)!.enabled)
 
-    // 端口变化 → 新身份：旧节点删除（无墓碑），新节点默认启用。
+    // 端口变化 → 新身份：旧节点删除（无墓碑）。
     viewModel.subscriptionFetcher = FakeSubscriptionFetcher(
       behavior: .success(SubscriptionDocs.idLess(port: 9999)))
     await viewModel.refreshSubscription(record.id)
     XCTAssertNil(viewModel.entry(for: serverID), "无稳定 ID 且记录变化即不同节点")
     let newID = try XCTUnwrap(onlyServerChildID(ofGroup: record.groupID))
     XCTAssertNotEqual(newID, serverID)
-    XCTAssertTrue(try viewModel.entry(for: newID)!.enabled, "新记录默认启用")
   }
 
   // MARK: URL 编辑与删除

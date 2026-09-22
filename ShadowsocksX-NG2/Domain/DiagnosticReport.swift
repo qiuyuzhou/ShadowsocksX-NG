@@ -92,6 +92,8 @@ struct DiagnosticSnapshot: Sendable {
   /// `Redactor.documentSummary` 产出的契约脱敏摘要（数量与模式）。
   var runtimeDocumentSummary: String?
   var catalog: ConfigurationCatalog?
+  /// 由应用层用当前凭据与插件供应事实计算的已知无效服务器数。
+  var knownInvalidServerCount: Int?
   var fileFacts: [DiagnosticFileFacts] = []
   /// 渲染好的运行事件行（旧→新，调用方负责封顶）。
   var eventLines: [String] = []
@@ -118,7 +120,6 @@ enum DiagnosticReportBuilder {
   struct CatalogCounts: Equatable, Sendable {
     var servers = 0
     var groups = 0
-    var effectivelyEnabledServers = 0
     var serversWithPlugin = 0
     var manualServers = 0
     var subscriptionServers = 0
@@ -137,9 +138,6 @@ enum DiagnosticReportBuilder {
         }
         if fields.pluginProgram != nil {
           counts.serversWithPlugin += 1
-        }
-        if (try? catalog.isEffectivelyEnabled(entry.id)) == true {
-          counts.effectivelyEnabledServers += 1
         }
       case .group:
         counts.groups += 1
@@ -197,7 +195,9 @@ enum DiagnosticReportBuilder {
     lines.append("## 配置目录（数量）")
     lines.append("")
     if let catalog = snapshot.catalog {
-      lines.append(contentsOf: catalogCountLines(catalog))
+      lines.append(
+        contentsOf: catalogCountLines(
+          catalog, knownInvalidServerCount: snapshot.knownInvalidServerCount))
     } else {
       lines.append("- 配置目录不可用")
     }
@@ -229,10 +229,13 @@ enum DiagnosticReportBuilder {
     return lines
   }
 
-  private static func catalogCountLines(_ catalog: ConfigurationCatalog) -> [String] {
+  private static func catalogCountLines(
+    _ catalog: ConfigurationCatalog, knownInvalidServerCount: Int?
+  ) -> [String] {
     let counts = counts(in: catalog)
+    let invalid = knownInvalidServerCount.map { "已知无效 \($0)；" } ?? ""
     return [
-      "- 服务器：\(counts.servers)（有效启用 \(counts.effectivelyEnabledServers)；"
+      "- 服务器：\(counts.servers)（\(invalid)"
         + "配置插件 \(counts.serversWithPlugin)；"
         + "手动 \(counts.manualServers) / 订阅 \(counts.subscriptionServers)）",
       "- 分组：\(counts.groups)",

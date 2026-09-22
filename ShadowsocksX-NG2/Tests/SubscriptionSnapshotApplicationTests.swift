@@ -2,9 +2,8 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 订阅快照的目录应用语义（issue #35 验收「overlay 语义与身份连续性」）：
-/// enabled 仅按身份精确匹配延续；固定分组身份与 enabled 不变；远端删除不留
-/// 墓碑；结构与顺序远端权威。
+/// 订阅快照的目录应用语义（issue #35）：固定分组身份保留；远端删除不留
+/// 墓碑；结构、字段与顺序远端权威，不存在本地启用覆盖层。
 final class SubscriptionSnapshotApplicationTests: XCTestCase {
   private let groupID = NodeID(rawValue: "sub1:fixed-group")
 
@@ -39,10 +38,8 @@ final class SubscriptionSnapshotApplicationTests: XCTestCase {
 
   // MARK: 快照应用
 
-  func testSnapshotReplacesSubtreeAndCarriesEnabledOverlay() throws {
+  func testSnapshotReplacesSubtreeWithoutLocalEnableOverlay() throws {
     var catalog = try makeCatalog()
-    // 既有 overlay：a 停用、嵌套分组停用（其下 b 有效停用）。
-    try catalog.setEnabled(NodeID(rawValue: "sub1:id:a"), false)
 
     let document = CatalogSubscriptionSnapshot(
       name: "远端新名",
@@ -56,17 +53,14 @@ final class SubscriptionSnapshotApplicationTests: XCTestCase {
     let removed = try catalog.applySubscriptionSnapshot(document, into: groupID)
 
     XCTAssertEqual(removed.count, 2, "旧树两台服务器全部视为移除（b 从嵌套组移到根）")
-    // 固定分组身份与 enabled 保持不变，名称跟随远端；远端子序原样落目录。
+    // 固定分组身份保持不变，名称跟随远端；远端子序原样落目录。
     let fixed = try XCTUnwrap(catalog.entry(for: groupID))
     XCTAssertEqual(
       try catalog.children(of: groupID),
       [NodeID(rawValue: "sub1:id:b"), NodeID(rawValue: "sub1:g:jp")])
     guard case .group(let fields) = fixed.kind else { return XCTFail("固定分组应存在") }
     XCTAssertEqual(fields.name, "远端新名")
-    XCTAssertTrue(fixed.enabled)
-    // 精确匹配延续：a 停用保留；新节点默认启用。
-    XCTAssertFalse(try XCTUnwrap(catalog.entry(for: NodeID(rawValue: "sub1:id:a"))).enabled)
-    XCTAssertTrue(try XCTUnwrap(catalog.entry(for: NodeID(rawValue: "sub1:id:new"))).enabled)
+    XCTAssertEqual(fixed.source, .subscription)
     // 旧树已重建，无墓碑：固定分组 + 根序 b + 嵌套组 + a + 新节点。
     XCTAssertEqual(catalog.entries.count, 5)
   }
@@ -84,15 +78,14 @@ final class SubscriptionSnapshotApplicationTests: XCTestCase {
     XCTAssertEqual(catalog.entries.count, 2)
   }
 
-  func testFixedGroupDisabledStateSurvivesRefresh() throws {
+  func testFixedGroupStateIsFullyRemoteOwnedOnRefresh() throws {
     var catalog = try makeCatalog()
-    try catalog.setEnabled(groupID, false)
 
     let document = CatalogSubscriptionSnapshot(
       name: "新名", root: .init(id: groupID, name: "", children: [leaf("sub1:id:a")]))
     _ = try catalog.applySubscriptionSnapshot(document, into: groupID)
 
-    XCTAssertFalse(try XCTUnwrap(catalog.entry(for: groupID)).enabled, "固定分组本地开关保留")
+    XCTAssertEqual(try XCTUnwrap(catalog.entry(for: groupID)).displayName, "新名")
   }
 
   func testApplyToManualGroupRejected() throws {

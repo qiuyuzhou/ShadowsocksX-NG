@@ -23,15 +23,26 @@ struct GroupDetailView: View {
       }
       Section {
         LabeledContent("直接子节点", value: "\(directChildCount)")
+        if invalidServerCount > 0 {
+          LabeledContent("已知无效服务器", value: "\(invalidServerCount)")
+        }
         LabeledContent("来源", value: isManual ? "手动" : "订阅")
         Button {
           Task { await proxyController.activate(groupID) }
         } label: {
           Label("激活此分组", systemImage: "bolt.fill")
         }
-        .disabled(directChildCount == 0)
+        .disabled(validServerCount == 0)
         if directChildCount == 0 {
           Text("空分组保留可编辑，但不能激活。")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        } else if validServerCount == 0 {
+          Text("分组中没有可激活的有效服务器。")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        } else if invalidServerCount > 0 {
+          Text("激活时将跳过 \(invalidServerCount) 个存在已知阻塞问题的服务器。")
             .font(.footnote)
             .foregroundStyle(.secondary)
         }
@@ -45,6 +56,39 @@ struct GroupDetailView: View {
 
   private var directChildCount: Int {
     (try? viewModel.catalog.children(of: groupID))?.count ?? 0
+  }
+
+  private var invalidServerCount: Int {
+    groupNode?.invalidServerCount ?? 0
+  }
+
+  private var validServerCount: Int {
+    serverCount - invalidServerCount
+  }
+
+  private var serverCount: Int {
+    guard let node = groupNode else {
+      return 0
+    }
+    return countServers(in: node)
+  }
+
+  private var groupNode: SidebarNode? {
+    func find(_ nodes: [SidebarNode]) -> SidebarNode? {
+      for node in nodes {
+        if node.id == groupID { return node }
+        if let match = find(node.children ?? []) { return match }
+      }
+      return nil
+    }
+    return find(viewModel.sidebarNodes())
+  }
+
+  private func countServers(in node: SidebarNode) -> Int {
+    if node.isGroup {
+      return (node.children ?? []).reduce(0) { $0 + countServers(in: $1) }
+    }
+    return 1
   }
 
   private func loadName() {

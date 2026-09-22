@@ -13,6 +13,12 @@ extension Error {
         return "服务器地址不能为空"
       case .invalidPort:
         return "端口必须是 1–65535 之间的整数"
+      case .missingEncryptionMethod:
+        return "必须选择加密方法"
+      case .unsupportedEncryptionMethod(let method):
+        return "当前 sslocal 不支持加密方法「\(method)」"
+      case .invalidPassword:
+        return "密码不能为空"
       case .emptyName:
         return "名称不能为空"
       case .pluginNotManaged(let program):
@@ -69,7 +75,7 @@ extension CatalogError {
         ? "不能把手动节点移入订阅子树"
         : "不能把订阅节点移入手动子树"
     case .subscriptionNodeImmutable:
-      return "订阅节点由远端管理：结构、连接字段与名称只读，仅启用开关可调"
+      return "订阅节点由远端管理：结构、连接字段与名称只读"
     case .subscriptionServerAtRoot:
       return "订阅服务器不能移出其订阅分组"
     case .cycleDetected:

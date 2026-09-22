@@ -5,10 +5,8 @@ extension ActivationFailure {
     switch self {
     case .targetNotFound(let target):
       return "活动目标已被删除（\(shortNodeID(target))）"
-    case .targetDisabled(let node):
-      return "活动目标自身或其分组已被停用（\(shortNodeID(node))）"
     case .targetExpandsToNothing(let target):
-      return "活动目标没有可代理的启用服务器（\(shortNodeID(target))）"
+      return "活动目标没有可激活的有效服务器（\(shortNodeID(target))）"
     case .invalidLeaf(let node, let reason):
       return "服务器不可用：\(reason.presentedReason)（\(shortNodeID(node))）"
     }
@@ -18,6 +16,14 @@ extension ActivationFailure {
 extension LeafInvalidationReason {
   var presentedReason: String {
     switch self {
+    case .invalidAddress:
+      return "服务器地址为空"
+    case .invalidPort(let port):
+      return "端口无效（\(port)）"
+    case .missingEncryptionMethod:
+      return "未指定加密方法"
+    case .unsupportedEncryptionMethod(let method):
+      return "当前 sslocal 不支持加密方法「\(method)」"
     case .pluginNotProvided(let program):
       return "本版本未提供插件「\(program)」"
     case .credentialUnresolved:

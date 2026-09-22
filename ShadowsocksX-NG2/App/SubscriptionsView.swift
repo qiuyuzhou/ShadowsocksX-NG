@@ -49,7 +49,7 @@ struct SubscriptionsView: View {
       Button("取消", role: .cancel) { deleteTarget = nil }
     } message: {
       Text(
-        "将移除订阅源、固定分组、全部远端成员与本地启用状态；若代理正走此订阅，代理会停止。此操作不可撤销。"
+        "将移除订阅源、固定分组与全部远端成员；若代理正走此订阅，代理会停止。此操作不可撤销。"
       )
     }
   }
@@ -225,7 +225,7 @@ private struct EditSubscriptionURLSheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text("编辑订阅地址。订阅身份、固定分组与本地启用状态全部保留；新地址刷新成功前保留最后一次成功内容。")
+      Text("编辑订阅地址。订阅身份与固定分组全部保留；新地址刷新成功前保留最后一次成功内容。")
         .font(.callout)
         .foregroundStyle(.secondary)
       TextField("https://example.com/subscription.json", text: $urlString)

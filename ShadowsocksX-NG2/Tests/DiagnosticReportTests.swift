@@ -18,7 +18,7 @@ final class DiagnosticReportTests: XCTestCase {
   }
 
   /// 投毒目录：分组名、服务器地址、备注、插件参数全为敏感值；含订阅子树、
-  /// 停用祖先与插件节点，用于覆盖数量统计分支。
+  /// 插件节点，用于覆盖数量统计分支。
   private func poisonedCatalog() throws -> ConfigurationCatalog {
     var catalog = ConfigurationCatalog()
     let group = try catalog.addGroup(groupName)
@@ -44,7 +44,6 @@ final class DiagnosticReportTests: XCTestCase {
       ),
       source: .subscription,
       to: subscriptionGroup)
-    try catalog.setEnabled(group, false)
     return catalog
   }
 
@@ -111,7 +110,7 @@ final class DiagnosticReportTests: XCTestCase {
     XCTAssertTrue(report.contains("HTTP 端口 1087"))
     XCTAssertTrue(report.contains("PAC 端口 1089"))
     XCTAssertTrue(report.contains("servers=1 protocols=socks mode=tcp_only"), "缺少契约脱敏摘要")
-    XCTAssertTrue(report.contains("服务器：2（有效启用 1；配置插件 1；手动 1 / 订阅 1）"))
+    XCTAssertTrue(report.contains("服务器：2（配置插件 1；手动 1 / 订阅 1）"))
     XCTAssertTrue(report.contains("分组：2"))
     XCTAssertTrue(report.contains("| sslocal-active.json | 是 | 0600 | 512 |"))
     XCTAssertTrue(report.contains("| agent.pid | 否 | — | — |"))
@@ -202,7 +201,7 @@ final class DiagnosticReportTests: XCTestCase {
     assertNoSecrets(report)
   }
 
-  func testCountsCoverEffectiveEnablementAndPluginPresence() throws {
+  func testCountsCoverServerAndPluginPresence() throws {
     var catalog = ConfigurationCatalog()
     let group = try catalog.addGroup("g")
     _ = try catalog.addServer(
@@ -211,14 +210,12 @@ final class DiagnosticReportTests: XCTestCase {
         passwordRef: .fresh()
       ),
       to: group)
-    try catalog.setEnabled(group, false)
-
     let counts = DiagnosticReportBuilder.counts(in: catalog)
 
     XCTAssertEqual(
       counts,
       DiagnosticReportBuilder.CatalogCounts(
-        servers: 1, groups: 1, effectivelyEnabledServers: 0,
+        servers: 1, groups: 1,
         serversWithPlugin: 0, manualServers: 1, subscriptionServers: 0))
   }
 }

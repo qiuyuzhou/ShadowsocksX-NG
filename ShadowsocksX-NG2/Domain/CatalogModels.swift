@@ -48,8 +48,34 @@ struct CatalogEntry: Codable, Equatable, Sendable {
 
   let id: NodeID
   var source: NodeSource
-  var enabled: Bool
   var kind: Kind
+
+  private enum CodingKeys: String, CodingKey {
+    case id, source, enabled, kind
+  }
+
+  init(id: NodeID, source: NodeSource, kind: Kind) {
+    self.id = id
+    self.source = source
+    self.kind = kind
+  }
+
+  /// Reads the removed `enabled` field from v1/v2 documents only for migration;
+  /// its value has no meaning in the current domain model.
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(NodeID.self, forKey: .id)
+    source = try container.decode(NodeSource.self, forKey: .source)
+    _ = try container.decodeIfPresent(Bool.self, forKey: .enabled)
+    kind = try container.decode(Kind.self, forKey: .kind)
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(id, forKey: .id)
+    try container.encode(source, forKey: .source)
+    try container.encode(kind, forKey: .kind)
+  }
 }
 
 extension CatalogEntry {

@@ -98,13 +98,23 @@ extension SsUri {
   /// 不含分隔冒号时回退百分号编码明文（SIP022 形态）。
   private static func parseUserInfo(_ userInfo: String) throws -> (String, String) {
     if let decoded = base64FlexibleDecode(userInfo), let separator = decoded.firstIndex(of: ":") {
-      return (String(decoded[..<separator]), String(decoded[decoded.index(after: separator)...]))
+      let method = String(decoded[..<separator])
+      let password = String(decoded[decoded.index(after: separator)...])
+      guard !method.isEmpty, !password.isEmpty else {
+        throw SsUriError.malformed(detail: "method or password is empty")
+      }
+      return (method, password)
     }
     guard let plain = percentDecode(userInfo), let separator = plain.firstIndex(of: ":") else {
       throw SsUriError.malformed(
         detail: "userinfo is neither base64 nor percent-encoded method:password")
     }
-    return (String(plain[..<separator]), String(plain[plain.index(after: separator)...]))
+    let method = String(plain[..<separator])
+    let password = String(plain[plain.index(after: separator)...])
+    guard !method.isEmpty, !password.isEmpty else {
+      throw SsUriError.malformed(detail: "method or password is empty")
+    }
+    return (method, password)
   }
 
   /// Legacy 形态：整体 base64 → `method:password@host:port`。密码为明文
@@ -123,9 +133,14 @@ extension SsUri {
       throw SsUriError.malformed(detail: "legacy payload missing method separator")
     }
     let (host, port) = try parseHostPort(hostPort)
+    let method = String(credentials[..<colon])
+    let password = String(credentials[credentials.index(after: colon)...])
+    guard !method.isEmpty, !password.isEmpty else {
+      throw SsUriError.malformed(detail: "method or password is empty")
+    }
     return SsUri(
-      method: String(credentials[..<colon]),
-      password: String(credentials[credentials.index(after: colon)...]),
+      method: method,
+      password: password,
       host: host, port: port, remark: remark)
   }
 

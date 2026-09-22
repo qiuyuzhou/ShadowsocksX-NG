@@ -3,7 +3,7 @@ import SwiftUI
 /// 服务器详情表单（issue #32/#38）：连接字段与插件选择可编辑（仅手动节点）。
 /// 插件区为受管选择器（D10）——「无」+ 受管列表，选中受管项才显示参数输入；
 /// 集外引用以显式「本版本未提供」呈现并原样保留；分享区（二维码 + 复制 ss://）。
-/// 订阅服务器整表只读，仅树中启用开关可调。
+/// 订阅服务器整表只读。
 struct ServerDetailView: View {
   let viewModel: CatalogViewModel
   let serverID: NodeID
@@ -28,13 +28,9 @@ struct ServerDetailView: View {
     formState?.isEditable ?? false
   }
 
-  /// 常用加密方法（sslocal v1.25 支持）；目录里既有的非常见方法原样追加显示。
+  /// 当前 sslocal 能力目录；目录中既有的未知方法原样追加显示，便于用户修复。
   private var methodChoices: [String] {
-    var choices = [
-      "aes-128-gcm", "aes-256-gcm", "chacha20-ietf-poly1305",
-      "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm",
-      "2022-blake3-chacha20-poly1305", "none",
-    ]
+    var choices = EncryptionMethodCatalog.supported.sorted()
     if !encryptionMethod.isEmpty && !choices.contains(encryptionMethod) {
       choices.append(encryptionMethod)
     }
@@ -72,6 +68,15 @@ struct ServerDetailView: View {
           .disabled(!isEditable)
       }
 
+      if let validation = viewModel.validation(for: serverID), !validation.isValid {
+        Section("激活状态") {
+          ForEach(Array(validation.issues.enumerated()), id: \.offset) { _, issue in
+            Label(issue.presentedReason, systemImage: "exclamationmark.triangle.fill")
+              .foregroundStyle(.orange)
+          }
+        }
+      }
+
       Section("插件") {
         pluginSection
       }
@@ -82,7 +87,7 @@ struct ServerDetailView: View {
         }
       } else {
         Section {
-          Label("订阅节点由远端管理：连接字段只读，仅树中的启用开关可调。", systemImage: "info.circle")
+          Label("订阅节点由远端管理：连接字段只读。", systemImage: "info.circle")
             .font(.footnote)
             .foregroundStyle(.secondary)
         }
@@ -166,7 +171,7 @@ struct ServerDetailView: View {
     }
   }
 
-  /// 集外引用（Legacy 导入/订阅带入）：显式「本版本未提供」状态，原样保留。
+  /// 集外引用（Legacy 导入/订阅带入）：原样保留并明确指出当前 app 无法提供该插件。
   @ViewBuilder
   private func unknownPluginNotice(program: String, plugin: PluginSectionState) -> some View {
     Label(
