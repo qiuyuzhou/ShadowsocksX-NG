@@ -43,50 +43,31 @@ struct SMAppLaunchAtLoginService: LaunchAtLoginControlling {
 }
 
 /// Owns the GUI login-item intent independently from the proxy LaunchAgent.
-/// The setting is enabled by default; registration is attempted at launch and
-/// again whenever the user changes the toggle.
+/// The system's login-item registration is the only source of truth: the
+/// toggle is off until the user enables it, and enabling or disabling only
+/// issues the corresponding system call before re-reading the status.
 @MainActor
 final class LaunchAtLoginController: ObservableObject {
-  static let preferenceKey = "launchAtLogin.enabled"
-
-  @Published private(set) var isEnabled: Bool
   @Published private(set) var status: LoginItemStatus
   @Published private(set) var errorMessage: String?
 
   private let service: LaunchAtLoginControlling
-  private let defaults: UserDefaults
 
-  init(
-    service: LaunchAtLoginControlling = SMAppLaunchAtLoginService(),
-    defaults: UserDefaults = .standard
-  ) {
+  init(service: LaunchAtLoginControlling = SMAppLaunchAtLoginService()) {
     self.service = service
-    self.defaults = defaults
-    isEnabled = defaults.object(forKey: Self.preferenceKey) as? Bool ?? true
     status = service.status
+  }
+
+  /// 已注册或已请求注册待批准都算开启——两者都只来自系统 API 的状态。
+  var isEnabled: Bool {
+    status == .registered || status == .requiresApproval
   }
 
   var requiresApproval: Bool { status == .requiresApproval }
 
-  func syncAtLaunch() {
-    applyDesiredState()
-  }
-
   func setEnabled(_ enabled: Bool) {
-    isEnabled = enabled
-    defaults.set(enabled, forKey: Self.preferenceKey)
-    applyDesiredState()
-  }
-
-  func resetToDefaults() {
-    defaults.removeObject(forKey: Self.preferenceKey)
-    isEnabled = true
-    applyDesiredState()
-  }
-
-  private func applyDesiredState() {
     do {
-      if isEnabled {
+      if enabled {
         try service.register()
       } else {
         try service.unregister()

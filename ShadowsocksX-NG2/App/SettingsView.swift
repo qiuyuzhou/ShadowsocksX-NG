@@ -353,7 +353,6 @@ extension SettingsView {
     Task { @MainActor in
       do {
         try await proxyController.resetPreferences()
-        loginController.resetToDefaults()
         draft = proxyController.settings
         refreshPortOccupancy()
       } catch {

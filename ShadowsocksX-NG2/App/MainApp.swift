@@ -29,9 +29,6 @@ struct ShadowsocksXNG2App: App {
         postLegacyImport: { _ in
           await controller.legacyImportDidCommit()
         }))
-    Task { @MainActor in
-      loginController.syncAtLaunch()
-    }
     // GUI 事件接入内存环形缓冲（spec #21 D5，issue #34）：主窗口日志查看器与
     // 诊断导出的来源；wrapper 侧不注册，仍走 stderr → agent.log 收敛。
     RuntimeLog.setSink(RuntimeEventStore.shared)

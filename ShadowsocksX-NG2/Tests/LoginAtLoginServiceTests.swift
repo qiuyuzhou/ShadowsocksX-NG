@@ -4,62 +4,77 @@ import XCTest
 
 @MainActor
 final class LaunchAtLoginServiceTests: XCTestCase {
-  private var defaults: UserDefaults!
-  private var defaultsSuiteName: String!
-
-  override func setUpWithError() throws {
-    defaultsSuiteName = "ssxng-login-tests-\(UUID().uuidString)"
-    defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuiteName))
-  }
-
-  override func tearDownWithError() throws {
-    defaults.removePersistentDomain(forName: defaultsSuiteName)
-    defaults = nil
-    defaultsSuiteName = nil
-  }
-
-  func testDefaultIntentRegistersAtLaunch() {
+  func testStartsOffUntilTheUserEnablesIt() {
     let service = FakeLoginItemService()
-    let controller = LaunchAtLoginController(service: service, defaults: defaults)
+    let controller = LaunchAtLoginController(service: service)
 
-    controller.syncAtLaunch()
+    XCTAssertFalse(controller.isEnabled)
+    XCTAssertEqual(controller.status, .notRegistered)
+    XCTAssertEqual(service.registerCount, 0, "启动不自动注册,默认关闭")
+  }
+
+  func testEnablingRegistersAndReflectsSystemState() {
+    let service = FakeLoginItemService()
+    let controller = LaunchAtLoginController(service: service)
+
+    controller.setEnabled(true)
 
     XCTAssertTrue(controller.isEnabled)
     XCTAssertEqual(service.registerCount, 1)
     XCTAssertEqual(controller.status, .registered)
+    XCTAssertNil(controller.errorMessage)
   }
 
-  func testToggleUnregistersAndPersistsAcrossControllerInstances() {
+  func testDisablingUnregistersAndReflectsSystemState() {
     let service = FakeLoginItemService()
-    let controller = LaunchAtLoginController(service: service, defaults: defaults)
+    let controller = LaunchAtLoginController(service: service)
+    controller.setEnabled(true)
 
     controller.setEnabled(false)
 
     XCTAssertFalse(controller.isEnabled)
     XCTAssertEqual(service.unregisterCount, 1)
-    let restored = LaunchAtLoginController(service: service, defaults: defaults)
-    XCTAssertFalse(restored.isEnabled)
+    XCTAssertEqual(controller.status, .notRegistered)
   }
 
-  func testResetReturnsToEnabledDefault() {
+  func testApprovalPendingCountsAsEnabled() {
     let service = FakeLoginItemService()
-    let controller = LaunchAtLoginController(service: service, defaults: defaults)
-    controller.setEnabled(false)
-
-    controller.resetToDefaults()
+    service.status = .requiresApproval
+    let controller = LaunchAtLoginController(service: service)
 
     XCTAssertTrue(controller.isEnabled)
+    XCTAssertTrue(controller.requiresApproval)
+    XCTAssertEqual(service.registerCount, 0)
+  }
+
+  func testRegistrationFailureNamesErrorAndKeepsSystemState() {
+    let service = FakeLoginItemService()
+    service.registerError = FakeError.system
+    let controller = LaunchAtLoginController(service: service)
+
+    controller.setEnabled(true)
+
+    XCTAssertFalse(controller.isEnabled)
+    XCTAssertEqual(controller.status, .notRegistered)
     XCTAssertEqual(service.registerCount, 1)
-    XCTAssertNil(defaults.object(forKey: LaunchAtLoginController.preferenceKey))
+    XCTAssertTrue(controller.errorMessage?.contains("fake-system-error") == true)
+  }
+
+  private enum FakeError: Error, CustomStringConvertible {
+    case system
+
+    var description: String { "fake-system-error" }
   }
 
   private final class FakeLoginItemService: LaunchAtLoginControlling {
     var status: LoginItemStatus = .notRegistered
     var registerCount = 0
     var unregisterCount = 0
+    var registerError: Error?
 
     func register() throws {
       registerCount += 1
+      if let registerError { throw registerError }
       status = .registered
     }
 
