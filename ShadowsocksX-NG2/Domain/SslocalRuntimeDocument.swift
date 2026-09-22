@@ -219,13 +219,17 @@ extension SslocalLocalDocument {
 }
 
 /// 三个本地端点与单一监听范围的派生设置。HTTP 入站可独立关闭，但启用时与
-/// SOCKS、PAC 共用同一范围；默认端口沿用 Legacy 的 1086/1087/1089。
+/// SOCKS、PAC 共用同一范围；默认端口与 Legacy 隔离（11086/11087/11089）。
 struct SslocalListenSettings: Equatable, Sendable {
+  static let defaultSocksPort = 11086
+  static let defaultHTTPPort = 11087
+  static let defaultPACPort = 11089
+
   var scope: ListenScope = .loopback
-  var socksPort: Int = 1086
+  var socksPort: Int = Self.defaultSocksPort
   var httpProxyEnabled: Bool = true
-  var httpPort: Int = 1087
-  var pacPort: Int = 1089
+  var httpPort: Int = Self.defaultHTTPPort
+  var pacPort: Int = Self.defaultPACPort
   var udpRelayEnabled: Bool = false
 
   var bindAddress: String { scope.bindAddress }

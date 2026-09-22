@@ -125,11 +125,35 @@ private struct ListenSettingsRecord: Codable, Equatable, Sendable {
   var scopeKind: ListenScopeKind = .loopback
   /// 主机态的对外公布地址；回环态为 nil。
   var advertisedAddress: String?
-  var socksPort: Int = 1086
+  var socksPort: Int = SslocalListenSettings.defaultSocksPort
   var httpProxyEnabled: Bool = true
-  var httpPort: Int = 1087
-  var pacPort: Int = 1089
+  var httpPort: Int = SslocalListenSettings.defaultHTTPPort
+  var pacPort: Int = SslocalListenSettings.defaultPACPort
   var udpRelayEnabled: Bool = false
+
+  init() {}
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    scopeKind = try container.decode(ListenScopeKind.self, forKey: .scopeKind)
+    advertisedAddress = try container.decodeIfPresent(String.self, forKey: .advertisedAddress)
+    socksPort =
+      try container.decodeIfPresent(Int.self, forKey: .socksPort)
+      ?? SslocalListenSettings.defaultSocksPort
+    httpProxyEnabled = try container.decode(Bool.self, forKey: .httpProxyEnabled)
+    httpPort =
+      try container.decodeIfPresent(Int.self, forKey: .httpPort)
+      ?? SslocalListenSettings.defaultHTTPPort
+    pacPort =
+      try container.decodeIfPresent(Int.self, forKey: .pacPort)
+      ?? SslocalListenSettings.defaultPACPort
+    udpRelayEnabled = try container.decode(Bool.self, forKey: .udpRelayEnabled)
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case scopeKind, advertisedAddress, socksPort, httpProxyEnabled, httpPort, pacPort
+    case udpRelayEnabled
+  }
 }
 
 extension ListenSettingsFileStore {

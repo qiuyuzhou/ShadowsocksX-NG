@@ -19,16 +19,15 @@ struct ShadowsocksXNG2App: App {
     let loginController = LaunchAtLoginController()
     _loginController = StateObject(wrappedValue: loginController)
     // 组合根（issue #40/#41）：目录提交协调器与生产运行时适配器只在此接线一次，
-    // 各 scene 不再重复设置提交回调；Legacy 导入边界同为一次性注入。
+    // 各 scene 不再重复设置提交回调；Legacy 导入后的 2.0 运行时边界同为一次性注入。
     let coordinator = CatalogCommitCoordinator(
       fileStore: CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL()),
       runtime: ProxyRuntimeSyncAdapter(controller: controller))
     _catalogWorkflow = StateObject(
       wrappedValue: CatalogWorkflow(
         coordinator: coordinator,
-        postLegacyImport: { outcome in
+        postLegacyImport: { _ in
           await controller.legacyImportDidCommit()
-          loginController.applyImportedValue(outcome.loginAtLogin)
         }))
     Task { @MainActor in
       loginController.syncAtLaunch()

@@ -56,10 +56,10 @@ enum ProxyRuntimeFixture {
     password: String = "resolved-password",
     pluginOpts: String? = nil,
     localAddress: String = "127.0.0.1",
-    localPort: Int = 1086,
+    localPort: Int = 11086,
     inboundProtocol: String = "socks",
     mode: String = "tcp_only",
-    pacPort: Int = 1089
+    pacPort: Int = 11089
   ) -> SslocalRuntimeDocument {
     precondition(inboundProtocol == "socks")
     let scope: ListenScope =
@@ -82,7 +82,7 @@ enum ProxyRuntimeFixture {
         scope: scope,
         socksPort: localPort,
         httpProxyEnabled: false,
-        httpPort: 1087,
+        httpPort: 11087,
         pacPort: pacPort,
         udpRelayEnabled: mode == "tcp_and_udp"))
   }

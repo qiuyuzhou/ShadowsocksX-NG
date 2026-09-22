@@ -65,7 +65,7 @@ final class StatusMenuModelTests: XCTestCase {
   func testHTTPExportLineUsesLoopbackDefaults() {
     XCTAssertEqual(
       StatusMenuModel.httpExportLine(settings: SslocalListenSettings()),
-      "export http_proxy=http://127.0.0.1:1087;export https_proxy=http://127.0.0.1:1087;")
+      "export http_proxy=http://127.0.0.1:11087;export https_proxy=http://127.0.0.1:11087;")
   }
 
   func testHTTPExportLineUsesAdvertisedAddressAndPortInHostScope() {

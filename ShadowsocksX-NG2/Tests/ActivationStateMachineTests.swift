@@ -38,7 +38,7 @@ final class ActivationStateMachineTests: XCTestCase {
     XCTAssertNil(entry.plugin, "无插件时 plugin 字段整体省略")
     XCTAssertNil(entry.pluginOpts)
     XCTAssertEqual(configuration.document.socksAddress, "127.0.0.1")
-    XCTAssertEqual(configuration.document.socksPort, 1086)
+    XCTAssertEqual(configuration.document.socksPort, 11086)
     XCTAssertEqual(configuration.document.socksLocal?.inboundProtocol, "socks")
     XCTAssertEqual(configuration.document.socksMode, "tcp_only")
   }

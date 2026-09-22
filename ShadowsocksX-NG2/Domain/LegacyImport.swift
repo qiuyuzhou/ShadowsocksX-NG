@@ -17,70 +17,13 @@ struct LegacyServerSnapshot: Equatable, Sendable {
   let pluginOptions: String?
 }
 
-/// The historical switch-mode preferences were four independent booleans.
-/// Optional values distinguish an explicitly persisted value from a registered
-/// Legacy default, which is important for migration and re-import semantics.
-struct LegacyModeAvailability: Equatable, Sendable {
-  var pac: Bool?
-  var global: Bool?
-  var manual: Bool?
-  var externalPAC: Bool?
-
-  var hasPersistedValue: Bool {
-    pac != nil || global != nil || manual != nil || externalPAC != nil
-  }
-}
-
-/// Read-only snapshot of the persisted Legacy UserDefaults domain plus the
-/// optional PAC user-rule file. It contains no live UserDefaults object and is
-/// therefore safe to use as a deterministic import fixture.
+/// Read-only snapshot of the persisted Legacy server records. Legacy
+/// preferences are deliberately not part of the import projection.
 struct LegacySnapshot: Equatable, Sendable {
-  static let evidenceKeys: Set<String> = [
-    "ServerProfiles",
-    "ActiveServerProfileId",
-    "LocalSocks5.ListenPort",
-    "LocalSocks5.ListenAddress",
-    "PacServer.BindToLocalhost",
-    "PacServer.ListenPort",
-    "LocalSocks5.Timeout",
-    "LocalSocks5.EnableUDPRelay",
-    "LocalSocks5.EnableVerboseMode",
-    "GFWListURL",
-    "LocalHTTP.ListenAddress",
-    "LocalHTTP.ListenPort",
-    "LocalHTTPOn",
-    "ProxyExceptions",
-    "ExternalPACURL",
-    "ShadowsocksRunningMode",
-    "EnableSwitchMode.PAC",
-    "EnableSwitchMode.Global",
-    "EnableSwitchMode.Manual",
-    "EnableSwitchMode.ExternalPAC",
-    "LaunchAtLogin",
-  ]
-
   let profiles: [LegacyServerSnapshot]
-  let activeProfileID: String?
-  let socksPort: Int?
-  let socksAddress: String?
-  let pacBindsToLocalhost: Bool?
-  let pacPort: Int?
-  let timeoutSeconds: Int?
-  let udpRelayEnabled: Bool?
-  let verboseLogging: Bool?
-  let gfwListURL: String?
-  let httpAddress: String?
-  let httpPort: Int?
-  let httpEnabled: Bool?
-  let proxyExceptions: String?
-  let externalPACURL: String?
-  let runningMode: String?
-  let modeAvailability: LegacyModeAvailability
-  let loginAtLogin: Bool?
-  let pacUserRules: String?
-  let hasPersistedEvidence: Bool
+  let hasServerRecords: Bool
 
-  init(propertyList: [String: Any], userRules: String?) throws {
+  init(propertyList: [String: Any]) throws {
     if let rawProfiles = propertyList["ServerProfiles"] {
       guard let profileValues = rawProfiles as? [Any] else {
         throw LegacyImportError.malformedSnapshot("ServerProfiles 不是数组")
@@ -91,33 +34,9 @@ struct LegacySnapshot: Equatable, Sendable {
     } else {
       profiles = []
     }
-
-    activeProfileID = Self.stringValue(propertyList["ActiveServerProfileId"])
-    socksPort = Self.intValue(propertyList["LocalSocks5.ListenPort"])
-    socksAddress = Self.stringValue(propertyList["LocalSocks5.ListenAddress"])
-    pacBindsToLocalhost = Self.boolValue(propertyList["PacServer.BindToLocalhost"])
-    pacPort = Self.intValue(propertyList["PacServer.ListenPort"])
-    timeoutSeconds = Self.intValue(propertyList["LocalSocks5.Timeout"])
-    udpRelayEnabled = Self.boolValue(propertyList["LocalSocks5.EnableUDPRelay"])
-    verboseLogging = Self.boolValue(propertyList["LocalSocks5.EnableVerboseMode"])
-    gfwListURL = Self.stringValue(propertyList["GFWListURL"])
-    httpAddress = Self.stringValue(propertyList["LocalHTTP.ListenAddress"])
-    httpPort = Self.intValue(propertyList["LocalHTTP.ListenPort"])
-    httpEnabled = Self.boolValue(propertyList["LocalHTTPOn"])
-    proxyExceptions = Self.stringValue(propertyList["ProxyExceptions"])
-    externalPACURL = Self.stringValue(propertyList["ExternalPACURL"])
-    runningMode = Self.stringValue(propertyList["ShadowsocksRunningMode"])
-    modeAvailability = LegacyModeAvailability(
-      pac: Self.boolValue(propertyList["EnableSwitchMode.PAC"]),
-      global: Self.boolValue(propertyList["EnableSwitchMode.Global"]),
-      manual: Self.boolValue(propertyList["EnableSwitchMode.Manual"]),
-      externalPAC: Self.boolValue(propertyList["EnableSwitchMode.ExternalPAC"])
-    )
-    loginAtLogin = Self.boolValue(propertyList["LaunchAtLogin"])
-    pacUserRules = userRules
-    hasPersistedEvidence =
-      !propertyList.keys.filter(Self.evidenceKeys.contains).isEmpty
-      || userRules != nil
+    // An empty or preference-only Legacy domain is not an importable
+    // snapshot, so first launch does not offer a misleading empty migration.
+    hasServerRecords = !profiles.isEmpty
   }
 }
 
@@ -150,11 +69,6 @@ extension LegacySnapshot {
     guard let value = value as? NSNumber else { return nil }
     return value.intValue
   }
-
-  private static func boolValue(_ value: Any?) -> Bool? {
-    guard let value = value as? NSNumber else { return nil }
-    return value.boolValue
-  }
 }
 
 /// Source seam for discovery and fixture injection.
@@ -167,31 +81,22 @@ protocol LegacySnapshotProviding {
 /// user-owned Legacy installation.
 struct UserDefaultsLegacySnapshotProvider: LegacySnapshotProviding {
   static let legacyBundleIdentifier = "com.qiuyuzhou.ShadowsocksX-NG"
-  static let defaultUserRulesURL = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent(".ShadowsocksX-NG/user-rule.txt")
 
   let defaults: UserDefaults
   let bundleIdentifier: String
-  let userRulesURL: URL
 
   init(
     defaults: UserDefaults = .standard,
-    bundleIdentifier: String = Self.legacyBundleIdentifier,
-    userRulesURL: URL = Self.defaultUserRulesURL
+    bundleIdentifier: String = Self.legacyBundleIdentifier
   ) {
     self.defaults = defaults
     self.bundleIdentifier = bundleIdentifier
-    self.userRulesURL = userRulesURL
   }
 
   func readSnapshot() throws -> LegacySnapshot? {
     let values = defaults.persistentDomain(forName: bundleIdentifier) ?? [:]
-    var userRules: String?
-    if FileManager.default.fileExists(atPath: userRulesURL.path) {
-      userRules = try String(contentsOf: userRulesURL, encoding: .utf8)
-    }
-    let snapshot = try LegacySnapshot(propertyList: values, userRules: userRules)
-    return snapshot.hasPersistedEvidence ? snapshot : nil
+    let snapshot = try LegacySnapshot(propertyList: values)
+    return snapshot.hasServerRecords ? snapshot : nil
   }
 }
 
@@ -231,18 +136,6 @@ protocol LegacyCatalogStoring {
 
 extension CatalogFileStore: LegacyCatalogStoring {}
 
-protocol LegacyActivationStoring {
-  func loadActiveTargetID() throws -> NodeID?
-  func save(activeTargetID: NodeID?) throws
-}
-
-extension ActivationStateFileStore: LegacyActivationStoring {}
-
-enum LegacyActiveTargetResult: Equatable, Sendable {
-  case imported(NodeID)
-  case cleared(reason: String)
-}
-
 struct LegacySkippedRecord: Equatable, Sendable {
   let index: Int
   let description: String
@@ -254,16 +147,10 @@ struct LegacyImportReport: Equatable, Sendable {
   let importedServerCount: Int
   let skippedRecords: [LegacySkippedRecord]
   let regeneratedIdentityCount: Int
-  let migratedPreferences: [String]
-  let activeTarget: LegacyActiveTargetResult
-  let warnings: [String]
 }
 
 struct LegacyImportOutcome: Equatable, Sendable {
   let groupID: NodeID
-  let activeTargetID: NodeID?
-  let preferredMode: ProxyModeKind
-  let loginAtLogin: Bool?
   let report: LegacyImportReport
 }
 
@@ -290,54 +177,30 @@ enum LegacyImportError: Error, Equatable {
 struct LegacyImportPlan {
   let groupID: NodeID
   let document: CatalogDocument
-  let settings: ProxySettings
-  let activeTargetID: NodeID?
-  let preferredMode: ProxyModeKind
-  let loginAtLogin: Bool?
   let credentials: [CredentialReference: String]
   let report: LegacyImportReport
 }
 
 /// Pure planning seam: translates one immutable Legacy snapshot into a new
-/// manual subtree and a validated 2.0 preference snapshot. No writes occur here.
+/// manual subtree and credential references. No preferences or active target
+/// state enter the plan.
 struct LegacyImportPlanner {
   static func makePlan(
     snapshot: LegacySnapshot,
-    existingDocument: CatalogDocument,
-    existingSettings: ProxySettings
+    existingDocument: CatalogDocument
   ) throws -> LegacyImportPlan {
     var catalog = existingDocument.catalog
     let groupName = nextGroupName(in: catalog)
     let groupID = try catalog.addGroup(groupName)
     let serverImport = try importServers(snapshot.profiles, into: &catalog, groupID: groupID)
-    let active = activeTarget(
-      for: snapshot.activeProfileID, importedIDs: serverImport.importedIDsByLegacyID)
-
-    var settings = existingSettings
-    var migratedPreferences: [String] = []
-    var warnings: [String] = []
-    migrateListenSettings(
-      snapshot, into: &settings, migrated: &migratedPreferences, warnings: &warnings)
-    migrateGeneralSettings(
-      snapshot, into: &settings, migrated: &migratedPreferences, warnings: &warnings)
-    let preferredMode = migrateModeSettings(
-      snapshot, into: &settings, migrated: &migratedPreferences, warnings: &warnings)
-
     let report = LegacyImportReport(
       groupName: groupName,
       importedServerCount: serverImport.importedServerCount,
       skippedRecords: serverImport.skippedRecords,
-      regeneratedIdentityCount: serverImport.regeneratedIdentityCount,
-      migratedPreferences: migratedPreferences,
-      activeTarget: active.result,
-      warnings: warnings)
+      regeneratedIdentityCount: serverImport.regeneratedIdentityCount)
     return LegacyImportPlan(
       groupID: groupID,
       document: CatalogDocument(catalog: catalog, subscriptions: existingDocument.subscriptions),
-      settings: settings,
-      activeTargetID: active.id,
-      preferredMode: preferredMode,
-      loginAtLogin: snapshot.loginAtLogin,
       credentials: serverImport.credentials,
       report: report)
   }
@@ -345,7 +208,6 @@ struct LegacyImportPlanner {
 
 extension LegacyImportPlanner {
   private struct ServerImportResult {
-    let importedIDsByLegacyID: [String: [NodeID]]
     let credentials: [CredentialReference: String]
     let skippedRecords: [LegacySkippedRecord]
     let regeneratedIdentityCount: Int
@@ -361,7 +223,6 @@ extension LegacyImportPlanner {
     var skippedRecords: [LegacySkippedRecord] = []
     var regeneratedIdentityCount = 0
     var importedServerCount = 0
-    var importedIDsByLegacyID: [String: [NodeID]] = [:]
     var usedLegacyIDs: [String: Int] = [:]
 
     for profile in profiles {
@@ -438,32 +299,13 @@ extension LegacyImportPlanner {
         pluginOptionsRef: pluginOptionsRef)
       try catalog.addServer(fields, id: nodeID, to: groupID)
       importedServerCount += 1
-      if let rawID = profile.id {
-        importedIDsByLegacyID[legacyIdentityKey(rawID), default: []].append(nodeID)
-      }
     }
 
     return ServerImportResult(
-      importedIDsByLegacyID: importedIDsByLegacyID,
       credentials: credentials,
       skippedRecords: skippedRecords,
       regeneratedIdentityCount: regeneratedIdentityCount,
       importedServerCount: importedServerCount)
-  }
-
-  private static func activeTarget(
-    for legacyID: String?,
-    importedIDs: [String: [NodeID]]
-  ) -> (id: NodeID?, result: LegacyActiveTargetResult) {
-    guard let legacyID else {
-      return (nil, .cleared(reason: "Legacy 没有活动服务器"))
-    }
-    let matches = importedIDs[legacyIdentityKey(legacyID)] ?? []
-    guard matches.count == 1, let match = matches.first else {
-      let reason = matches.isEmpty ? "活动服务器未能唯一映射" : "活动服务器身份重复，无法唯一映射"
-      return (nil, .cleared(reason: reason))
-    }
-    return (match, .imported(match))
   }
 
   private static func legacyIdentityKey(_ rawID: String) -> String {
@@ -493,169 +335,6 @@ extension LegacyImportPlanner {
     return "\(base) \(suffix)"
   }
 
-  private static func migrateListenSettings(
-    _ snapshot: LegacySnapshot,
-    into settings: inout ProxySettings,
-    migrated: inout [String],
-    warnings: inout [String]
-  ) {
-    let originalListen = settings.listen
-    var listen = settings.listen
-    if let port = snapshot.socksPort {
-      listen.socksPort = port
-      migrated.append("SOCKS 端口")
-    }
-    if let port = snapshot.httpPort {
-      listen.httpPort = port
-      migrated.append("HTTP 端口")
-    }
-    if let port = snapshot.pacPort {
-      listen.pacPort = port
-      migrated.append("PAC 端口")
-    }
-    if let enabled = snapshot.httpEnabled {
-      listen.httpProxyEnabled = enabled
-      migrated.append("HTTP 监听开关")
-    }
-    if let enabled = snapshot.udpRelayEnabled {
-      listen.udpRelayEnabled = enabled
-      migrated.append("UDP 中继")
-    }
-    if !listen.portValidationErrors().isEmpty {
-      listen = originalListen
-      warnings.append("Legacy 端口配置无效，端口保持 2.0 当前值")
-    }
-
-    let addresses = [snapshot.socksAddress, snapshot.httpAddress].compactMap { $0 }
-    let nonLoopbackAddress = addresses.contains { !isLoopbackAddress($0) }
-    let inconsistentAddresses = Set(addresses.map { $0.lowercased() }).count > 1
-    if nonLoopbackAddress || inconsistentAddresses || snapshot.pacBindsToLocalhost == false {
-      warnings.append("Legacy 监听地址不是统一回环地址，已导入为回环监听")
-    }
-    // A Legacy import must never expose the new unauthenticated host scope by
-    // accident. The user can explicitly choose host scope later in Settings.
-    listen.scope = .loopback
-    settings.listen = listen
-  }
-
-  private static func migrateGeneralSettings(
-    _ snapshot: LegacySnapshot,
-    into settings: inout ProxySettings,
-    migrated: inout [String],
-    warnings: inout [String]
-  ) {
-    if let timeout = snapshot.timeoutSeconds {
-      if (1...86_400).contains(timeout) {
-        settings.timeoutSeconds = timeout
-        migrated.append("超时")
-      } else {
-        warnings.append("Legacy 超时无效，保持 2.0 当前值")
-      }
-    }
-    if let verbose = snapshot.verboseLogging {
-      settings.verboseLogging = verbose
-      migrated.append("verbose")
-    }
-    if let exceptions = snapshot.proxyExceptions {
-      settings.proxyExceptions = exceptions
-      migrated.append("绕过列表")
-    }
-    if let rules = snapshot.pacUserRules {
-      settings.pacUserRules = rules
-      migrated.append("PAC 用户规则")
-    }
-    if let externalPACURL = snapshot.externalPACURL {
-      if externalPACURL.isEmpty || validRemoteURL(externalPACURL, externalPAC: true) {
-        settings.externalPACURL = externalPACURL
-        migrated.append("外部 PAC URL")
-      } else {
-        warnings.append("Legacy 外部 PAC URL 不受 2.0 支持，未迁移")
-      }
-    }
-    if let gfwListURL = snapshot.gfwListURL {
-      if gfwListURL.isEmpty || validRemoteURL(gfwListURL, externalPAC: false) {
-        settings.gfwListURL = gfwListURL
-        migrated.append("GFW List URL")
-      } else {
-        warnings.append("Legacy GFW List URL 无效，未迁移")
-      }
-    }
-  }
-
-  private static func migrateModeSettings(
-    _ snapshot: LegacySnapshot,
-    into settings: inout ProxySettings,
-    migrated: inout [String],
-    warnings: inout [String]
-  ) -> ProxyModeKind {
-    var enabledModes = settings.enabledModes
-    if let value = snapshot.modeAvailability.pac {
-      if value { enabledModes.insert(.pac) } else { enabledModes.remove(.pac) }
-    }
-    if let value = snapshot.modeAvailability.global {
-      if value { enabledModes.insert(.global) } else { enabledModes.remove(.global) }
-    }
-    if let value = snapshot.modeAvailability.manual {
-      if value { enabledModes.insert(.manual) } else { enabledModes.remove(.manual) }
-    }
-    if let value = snapshot.modeAvailability.externalPAC {
-      if value { enabledModes.insert(.externalPAC) } else { enabledModes.remove(.externalPAC) }
-    }
-    if snapshot.modeAvailability.hasPersistedValue {
-      settings.enabledModes = enabledModes
-      migrated.append("可切换模式项")
-    }
-
-    guard let rawMode = snapshot.runningMode?.lowercased() else {
-      return settings.preferredMode
-    }
-    let preferredMode: ProxyModeKind?
-    switch rawMode {
-    case "auto", "pac": preferredMode = .pac
-    case "global": preferredMode = .global
-    case "manual": preferredMode = .manual
-    case "externalpac":
-      if snapshot.externalPACURL?.isEmpty == false,
-        validRemoteURL(snapshot.externalPACURL ?? "", externalPAC: true)
-      {
-        preferredMode = .externalPAC
-      } else {
-        preferredMode = nil
-        warnings.append("Legacy 当前模式是外部 PAC，但 URL 无法迁移；当前模式保持 PAC")
-      }
-    default:
-      preferredMode = nil
-      warnings.append("Legacy 当前代理模式未知，当前模式保持 2.0 当前值")
-    }
-    guard let preferredMode else { return settings.preferredMode }
-    settings.preferredMode = preferredMode
-    migrated.append("当前代理模式")
-    return preferredMode
-  }
-
-  private static func validRemoteURL(_ value: String, externalPAC: Bool) -> Bool {
-    guard let url = URL(string: value) else { return false }
-    if externalPAC {
-      return (try? ProxyMode.validateExternalPACURL(url)) != nil
-    }
-    guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
-      url.host != nil, url.user == nil, url.password == nil
-    else { return false }
-    return value.utf8.count <= 2_048
-  }
-
-  private static func isLoopbackAddress(_ value: String) -> Bool {
-    let normalized = value.lowercased()
-    if normalized == "localhost" || normalized == "::1" || normalized == "127.0.0.1" {
-      return true
-    }
-    var ipv4 = in_addr()
-    if normalized.withCString({ inet_pton(AF_INET, $0, &ipv4) }) == 1 {
-      return ipv4.s_addr == UInt32(0x0100_007F).bigEndian
-    }
-    return false
-  }
-
   private static func isValidHost(_ value: String) -> Bool {
     var ipv4 = in_addr()
     if value.withCString({ inet_pton(AF_INET, $0, &ipv4) }) == 1 { return true }
@@ -667,14 +346,12 @@ extension LegacyImportPlanner {
   }
 }
 
-/// Coordinates the pure plan with all persistent stores. Each store is written
-/// only after the plan is complete; any later failure restores every prior
-/// value, including Keychain entries and the completion marker.
+/// Coordinates the pure plan with the catalog, credential store, and import
+/// completion marker. Preferences and activation state are intentionally absent
+/// from this transaction.
 final class LegacyImportService {
   private let source: LegacySnapshotProviding
   private let catalogStore: LegacyCatalogStoring
-  private let settingsStore: ProxySettingsStoring
-  private let activationStore: LegacyActivationStoring
   private let credentials: CredentialStoring
   private let marker: LegacyImportMarkerStoring
 
@@ -682,16 +359,11 @@ final class LegacyImportService {
     source: LegacySnapshotProviding = UserDefaultsLegacySnapshotProvider(),
     catalogStore: LegacyCatalogStoring = CatalogFileStore(
       fileURL: CatalogFileStore.defaultFileURL()),
-    settingsStore: ProxySettingsStoring = ProxySettingsFileStore(),
-    activationStore: LegacyActivationStoring = ActivationStateFileStore(
-      fileURL: ActivationStateFileStore.defaultFileURL()),
     credentials: CredentialStoring = KeychainCredentialStore(),
     marker: LegacyImportMarkerStoring = UserDefaultsLegacyImportMarkerStore()
   ) {
     self.source = source
     self.catalogStore = catalogStore
-    self.settingsStore = settingsStore
-    self.activationStore = activationStore
     self.credentials = credentials
     self.marker = marker
   }
@@ -720,14 +392,9 @@ final class LegacyImportService {
     }
 
     let originalDocument = try catalogStore.load()
-    let originalSettings = try settingsStore.load()
-    let originalActiveTargetID = try activationStore.loadActiveTargetID()
     let plan = try LegacyImportPlanner.makePlan(
-      snapshot: snapshot, existingDocument: originalDocument, existingSettings: originalSettings)
-    let touchedReferences = Set(plan.credentials.keys).union([
-      ProxySettingsFileStore.externalPACReference,
-      ProxySettingsFileStore.gfwListReference,
-    ])
+      snapshot: snapshot, existingDocument: originalDocument)
+    let touchedReferences = Set(plan.credentials.keys)
     var originalSecrets: [CredentialReference: String?] = [:]
     for reference in touchedReferences {
       originalSecrets[reference] = try credentials.secret(for: reference)
@@ -738,14 +405,10 @@ final class LegacyImportService {
         try credentials.save(secret, for: reference)
       }
       try catalogStore.save(plan.document)
-      try settingsStore.save(plan.settings)
-      try activationStore.save(activeTargetID: plan.activeTargetID)
       try marker.setCompleted(true)
     } catch {
       let rollbackFailures = rollback(
         originalDocument: originalDocument,
-        originalSettings: originalSettings,
-        originalActiveTargetID: originalActiveTargetID,
         wasCompleted: wasCompleted,
         originalSecrets: originalSecrets)
       let details = [
@@ -757,9 +420,6 @@ final class LegacyImportService {
 
     return LegacyImportOutcome(
       groupID: plan.groupID,
-      activeTargetID: plan.activeTargetID,
-      preferredMode: plan.preferredMode,
-      loginAtLogin: plan.loginAtLogin,
       report: plan.report)
   }
 }
@@ -767,8 +427,6 @@ final class LegacyImportService {
 extension LegacyImportService {
   fileprivate func rollback(
     originalDocument: CatalogDocument,
-    originalSettings: ProxySettings,
-    originalActiveTargetID: NodeID?,
     wasCompleted: Bool,
     originalSecrets: [CredentialReference: String?]
   ) -> [String] {
@@ -777,16 +435,6 @@ extension LegacyImportService {
       try marker.setCompleted(wasCompleted)
     } catch {
       failures.append("完成标记：\(error)")
-    }
-    do {
-      try activationStore.save(activeTargetID: originalActiveTargetID)
-    } catch {
-      failures.append("活动目标：\(error)")
-    }
-    do {
-      try settingsStore.save(originalSettings)
-    } catch {
-      failures.append("偏好：\(error)")
     }
     do {
       try catalogStore.save(originalDocument)

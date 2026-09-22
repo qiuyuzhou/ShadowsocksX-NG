@@ -496,10 +496,10 @@ extension ProxyRuntimeController {
     }
   }
 
-  /// Applies the post-import runtime boundary without touching SystemConfiguration.
-  /// Legacy import is intentionally separate from handoff: importing data must
-  /// leave the user's system proxy dictionary untouched, while any currently
-  /// running 2.0 runtime is stopped and the new target/settings are reloaded.
+  /// Applies the post-import 2.0 runtime boundary without touching
+  /// SystemConfiguration. Importing data leaves the user's system proxy
+  /// dictionary untouched; any currently running 2.0 runtime is stopped and
+  /// the existing 2.0 target/settings are reloaded.
   func legacyImportDidCommit() async {
     cancelFirewallObservation()
     flowGeneration += 1

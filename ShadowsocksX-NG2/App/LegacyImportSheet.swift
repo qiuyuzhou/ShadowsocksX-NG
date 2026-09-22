@@ -2,12 +2,9 @@ import SwiftUI
 
 /// First-launch and explicit re-import surface for issue #36. The sheet never
 /// exposes passwords, plugin options, or remote URL values; it presents counts,
-/// named skipped records, identity regeneration, and migration warnings.
+/// named skipped records, and identity regeneration.
 struct LegacyImportSheet: View {
   @ObservedObject var workflow: CatalogWorkflow
-  /// 导入成功后的「切换到 2.0」第二阶段入口（issue #37：交接与导入分离，
-  /// 由用户显式发起）；nil 时隐藏。
-  var onHandoffRequested: (() -> Void)?
   @Environment(\.dismiss) private var dismiss
 
   @State private var isImporting = false
@@ -20,14 +17,14 @@ struct LegacyImportSheet: View {
       Text(
         workflow.legacyImportState.completed
           ? "再次导入会创建新的独立手动分组，不会合并或修改原 Legacy 数据。"
-          : "可以把旧版服务器和支持的偏好复制到 2.0。导入是一次快照提交；代理保持关闭，也不会写入系统代理。"
+          : "只复制旧版服务器记录，不迁移偏好或活动目标。导入是一次快照提交；代理保持关闭，也不会写入系统代理。"
       )
       .foregroundStyle(.secondary)
 
       if let report = workflow.legacyImportReport {
         reportView(report)
       } else {
-        Text("插件程序引用会原样保留，但不会复制 Legacy 插件二进制；本版本未提供的插件需要你之后处理。")
+        Text("密码和插件参数会进入 2.0 的凭据引用边界；插件程序引用会原样保留，但不会复制 Legacy 插件二进制。")
           .font(.callout)
           .foregroundStyle(.secondary)
       }
@@ -41,9 +38,6 @@ struct LegacyImportSheet: View {
       HStack {
         Button("暂不导入") { dismiss() }
         Spacer()
-        if workflow.legacyImportReport != nil, let onHandoffRequested {
-          Button("切换到 2.0…") { onHandoffRequested() }
-        }
         Button(workflow.legacyImportState.completed ? "再次导入" : "导入") {
           importLegacy()
         }
@@ -64,6 +58,13 @@ struct LegacyImportSheet: View {
           systemImage: "checkmark.circle.fill"
         )
         .foregroundStyle(.green)
+        Text(
+          "统计：导入 \(report.importedServerCount) 台，跳过 "
+            + "\(report.skippedRecords.count) 条，身份重生成 "
+            + "\(report.regeneratedIdentityCount) 个。"
+        )
+        .font(.callout)
+        .foregroundStyle(.secondary)
         Text("导入完成后代理保持关闭，系统代理未被写入。")
           .font(.callout)
           .foregroundStyle(.secondary)
@@ -71,13 +72,9 @@ struct LegacyImportSheet: View {
         if report.regeneratedIdentityCount > 0 {
           Text("有 \(report.regeneratedIdentityCount) 台服务器因 UUID 缺失、无效、重复或冲突而生成了新身份。")
         }
-
-        switch report.activeTarget {
-        case .imported:
-          Text("Legacy 活动服务器已唯一映射为 2.0 活动目标。")
-        case .cleared(let reason):
-          Text("Legacy 活动目标未保留：\(reason)。")
-        }
+        Text("Legacy 偏好和活动目标未导入；请在 2.0 中显式选择激活目标。")
+          .font(.callout)
+          .foregroundStyle(.secondary)
 
         if !report.skippedRecords.isEmpty {
           Text("未导入记录")
@@ -88,19 +85,6 @@ struct LegacyImportSheet: View {
           }
         }
 
-        if !report.migratedPreferences.isEmpty {
-          Text("已迁移偏好：" + report.migratedPreferences.joined(separator: "、"))
-            .font(.callout)
-        }
-        if !report.warnings.isEmpty {
-          Text("注意")
-            .font(.headline)
-          ForEach(report.warnings, id: \.self) { warning in
-            Text("• " + warning)
-              .font(.callout)
-              .foregroundStyle(.orange)
-          }
-        }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }

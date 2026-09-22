@@ -55,6 +55,26 @@ final class ListenSettingsFileStoreTests: XCTestCase {
     XCTAssertEqual(try permissions(of: store.fileURL), 0o600)
   }
 
+  func testLoadPreservesPersistedLegacyDefaultPortsWithoutImplicitMigration() throws {
+    try writeRaw(
+      #"{"scopeKind":"loopback","advertisedAddress":null,"socksPort":1086,"#
+        + #""httpProxyEnabled":true,"httpPort":1087,"pacPort":1089,"udpRelayEnabled":false}"#)
+
+    let settings = try store.load()
+
+    XCTAssertEqual(settings.socksPort, 1086)
+    XCTAssertEqual(settings.httpPort, 1087)
+    XCTAssertEqual(settings.pacPort, 1089)
+  }
+
+  func testMissingPortFieldsUseNewFactoryDefaults() throws {
+    try writeRaw(
+      #"{"scopeKind":"loopback","advertisedAddress":null,"httpProxyEnabled":true,"#
+        + #""udpRelayEnabled":false}"#)
+
+    XCTAssertEqual(try store.load(), SslocalListenSettings())
+  }
+
   func testSaveRejectsInvalidPortsWithoutTouchingExistingFile() throws {
     try store.save(SslocalListenSettings())
 

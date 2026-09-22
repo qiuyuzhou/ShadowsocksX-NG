@@ -6,14 +6,14 @@ import XCTest
 /// 端口语义（spec #21 D8，issue #30）主缝测试：出厂默认、占用校验、建议端口
 /// 算法与点名错误。bind 探测覆盖真实回环 socket；lsof 输出解析为纯函数夹具。
 final class ProxyPortSemanticsTests: XCTestCase {
-  // MARK: 出厂默认（D8：沿用 Legacy，任何路径不静默改端口）
+  // MARK: 出厂默认（与 Legacy 隔离，任何路径不静默改端口）
 
-  func testFactoryDefaultsInheritLegacyPortsAndValidateClean() {
+  func testFactoryDefaultsAvoidLegacyPortsAndValidateClean() {
     let settings = SslocalListenSettings()
 
-    XCTAssertEqual(settings.socksPort, 1086)
-    XCTAssertEqual(settings.httpPort, 1087)
-    XCTAssertEqual(settings.pacPort, 1089)
+    XCTAssertEqual(settings.socksPort, 11086)
+    XCTAssertEqual(settings.httpPort, 11087)
+    XCTAssertEqual(settings.pacPort, 11089)
     XCTAssertTrue(settings.portValidationErrors().isEmpty)
   }
 
@@ -136,7 +136,7 @@ final class ProxyPortSemanticsTests: XCTestCase {
 
     XCTAssertEqual(
       notice,
-      "PAC 端口将从 1089 改为 8080，已分享的 PAC URL 将失效，保存后需要重新分享")
+      "PAC 端口将从 11089 改为 8080，已分享的 PAC URL 将失效，保存后需要重新分享")
   }
 
   func testChangesNotTouchingPACPortProduceNoNotice() {

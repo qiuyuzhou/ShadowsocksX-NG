@@ -63,9 +63,6 @@ final class CatalogWorkflow: ObservableObject {
       legacyImportService
       ?? LegacyImportService(
         catalogStore: fileStore,
-        settingsStore: ProxySettingsFileStore(credentials: credentials),
-        activationStore: ActivationStateFileStore(
-          fileURL: ActivationStateFileStore.defaultFileURL()),
         credentials: credentials)
     tree = .build(
       from: coordinator.committedCatalog, credentials: credentials, plugins: plugins)

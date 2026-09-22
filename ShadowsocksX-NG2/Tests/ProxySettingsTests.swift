@@ -5,12 +5,12 @@ import XCTest
 /// #33 设置主缝：偏好校验、绕过列表解析与 PAC 用户规则只通过公开领域
 /// 入口断言，不依赖 SwiftUI 视图实现。
 final class ProxySettingsTests: XCTestCase {
-  func testFactoryDefaultsMatchLegacySettingsAndValidate() {
+  func testFactoryDefaultsAvoidLegacyPortsAndValidate() {
     let settings = ProxySettings()
 
-    XCTAssertEqual(settings.listen.socksPort, 1086)
-    XCTAssertEqual(settings.listen.httpPort, 1087)
-    XCTAssertEqual(settings.listen.pacPort, 1089)
+    XCTAssertEqual(settings.listen.socksPort, 11086)
+    XCTAssertEqual(settings.listen.httpPort, 11087)
+    XCTAssertEqual(settings.listen.pacPort, 11089)
     XCTAssertEqual(settings.timeoutSeconds, 60)
     XCTAssertFalse(settings.verboseLogging)
     XCTAssertTrue(settings.listen.udpRelayEnabled == false)
@@ -35,7 +35,7 @@ final class ProxySettingsTests: XCTestCase {
     XCTAssertEqual(
       settings.validationErrors,
       [
-        .duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 1087),
+        .duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 11087),
         .invalidTimeout(0),
         .invalidHostAddress("127.0.0.1"),
         .invalidExternalPACURL(.unsupportedExternalPACScheme("file")),

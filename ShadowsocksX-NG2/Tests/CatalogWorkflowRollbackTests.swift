@@ -9,6 +9,8 @@ import XCTest
 final class CatalogWorkflowRollbackTests: XCTestCase {
   private var workDir: URL!
   private var fileURL: URL!
+  private var settingsURL: URL!
+  private var activationURL: URL!
   private var credentials: InMemoryCredentialStore!
   private var runtime: FakeCatalogRuntime!
 
@@ -20,6 +22,8 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
     // 目录文件置于 gate 子目录:破坏持久化时把 gate 目录替换为同名文件,
     // 临时文件创建必失败(比替换目标更确定的失败注入)。
     fileURL = workDir.appendingPathComponent("gate/catalog.json")
+    settingsURL = workDir.appendingPathComponent("settings.json")
+    activationURL = workDir.appendingPathComponent("activation.json")
     credentials = InMemoryCredentialStore()
     runtime = FakeCatalogRuntime()
   }
@@ -165,9 +169,25 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
   // MARK: - story 33/34/35：Legacy 导入不驱动运行时，不自动重复
 
   func testLegacyImportCommitsGroupWithoutRuntimeSyncOrRepeat() async throws {
+    var existingSettings = ProxySettings()
+    existingSettings.listen.socksPort = 2086
+    existingSettings.listen.httpPort = 2087
+    existingSettings.listen.pacPort = 2089
+    existingSettings.preferredMode = .global
+    existingSettings.enabledModes = [.global]
+    let settingsStore = ProxySettingsFileStore(
+      fileURL: settingsURL,
+      legacyListenFileURL: workDir.appendingPathComponent("legacy-listen.json"),
+      credentials: credentials)
+    try settingsStore.save(existingSettings)
+    let existingTarget = NodeID(rawValue: "existing-target")
+    let activationStore = ActivationStateFileStore(fileURL: activationURL)
+    try activationStore.save(activeTargetID: existingTarget)
+
     let service = try makeLegacyService()
     var postCalls = 0
     let workflow = makeWorkflow(legacyImportService: service) { _ in postCalls += 1 }
+    XCTAssertTrue(workflow.legacyImportState.shouldOffer, "首启发现快照后应提供自动导入入口")
     // 有活动目标也不得触发运行时收敛（导入不启动代理、不写系统代理）。
     XCTAssertTrue(runtime.hasActiveTarget)
 
@@ -183,6 +203,10 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
     XCTAssertEqual(postCalls, 1, "导入后的运行时边界只经注入闭包（独立于普通提交）")
     XCTAssertEqual(workflow.legacyImportState.completed, true, "成功导入写完成标记")
     XCTAssertNotNil(workflow.legacyImportReport)
+    XCTAssertEqual(try settingsStore.load(), existingSettings, "工作流导入不得写入 2.0 偏好")
+    XCTAssertEqual(
+      try activationStore.loadActiveTargetID(), existingTarget,
+      "工作流导入不得写入或清除活动目标")
 
     // 首次导入成功后不再自动重复；显式再导入创建独立分组。
     workflow.refreshLegacyImportState()
@@ -204,8 +228,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
       "Remark": "旧服务器",
     ]
     return try LegacySnapshot(
-      propertyList: ["ServerProfiles": [profile], "ShadowsocksRunningMode": "manual"],
-      userRules: nil)
+      propertyList: ["ServerProfiles": [profile], "ShadowsocksRunningMode": "manual"])
   }
 
   private func makeLegacyService() throws -> LegacyImportService {
@@ -213,9 +236,6 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
     return LegacyImportService(
       source: FixedLegacySnapshotProvider(snapshot: snapshot),
       catalogStore: CatalogFileStore(fileURL: fileURL),
-      settingsStore: NoopProxySettingsStore(),
-      activationStore: ActivationStateFileStore(
-        fileURL: workDir.appendingPathComponent("activation.json")),
       credentials: credentials,
       marker: InMemoryLegacyImportMarker())
   }
@@ -230,15 +250,6 @@ private final class FixedLegacySnapshotProvider: LegacySnapshotProviding {
   }
 
   func readSnapshot() throws -> LegacySnapshot? { snapshot }
-}
-
-/// 不落盘的设置存储替身（导入的偏好迁移事实不进本测试断言面）。
-private final class NoopProxySettingsStore: ProxySettingsStoring {
-  private var settings = ProxySettings()
-
-  func load() throws -> ProxySettings { settings }
-  func save(_ settings: ProxySettings) throws { self.settings = settings }
-  func reset() throws {}
 }
 
 /// 内存完成标记替身。

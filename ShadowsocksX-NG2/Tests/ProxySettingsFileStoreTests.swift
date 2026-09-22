@@ -26,6 +26,11 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     try super.tearDownWithError()
   }
 
+  private func writeRaw(_ text: String) throws {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try Data(text.utf8).write(to: store.fileURL)
+  }
+
   func testRoundTripKeepsPreferencesButDoesNotWriteRemoteURLsToSettingsFile() throws {
     var settings = ProxySettings()
     settings.listen.scope = .host(advertisedAddress: "192.168.2.89")
@@ -52,6 +57,26 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     XCTAssertFalse(raw.contains("token=secret"))
     XCTAssertNotNil(try credentials.secret(for: ProxySettingsFileStore.externalPACReference))
     XCTAssertNotNil(try credentials.secret(for: ProxySettingsFileStore.gfwListReference))
+  }
+
+  func testLoadPreservesPersistedLegacyDefaultPortsWithoutImplicitMigration() throws {
+    var settings = ProxySettings()
+    settings.listen.socksPort = 1086
+    settings.listen.httpPort = 1087
+    settings.listen.pacPort = 1089
+    try store.save(settings)
+
+    let loaded = try store.load()
+
+    XCTAssertEqual(loaded.listen.socksPort, 1086)
+    XCTAssertEqual(loaded.listen.httpPort, 1087)
+    XCTAssertEqual(loaded.listen.pacPort, 1089)
+  }
+
+  func testMissingPortFieldsUseNewFactoryDefaults() throws {
+    try writeRaw("{}")
+
+    XCTAssertEqual(try store.load(), ProxySettings())
   }
 
   func testInvalidSaveDoesNotTouchExistingSettings() throws {

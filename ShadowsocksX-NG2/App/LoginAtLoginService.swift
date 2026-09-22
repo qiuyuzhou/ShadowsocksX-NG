@@ -84,13 +84,6 @@ final class LaunchAtLoginController: ObservableObject {
     applyDesiredState()
   }
 
-  /// Applies a Legacy value only when Legacy persisted the setting explicitly.
-  /// A missing Legacy key leaves the 2.0 default/user intent untouched.
-  func applyImportedValue(_ value: Bool?) {
-    guard let value else { return }
-    setEnabled(value)
-  }
-
   private func applyDesiredState() {
     do {
       if isEnabled {

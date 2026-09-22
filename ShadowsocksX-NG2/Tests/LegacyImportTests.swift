@@ -4,13 +4,13 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 /// Legacy 导入主缝：用属性列表快照模拟旧版 UserDefaults，通过导入结果与持久化
-/// 文档观察身份映射、偏好迁移、凭据引用和事务语义；不读取或修改真实 Legacy 数据。
+/// 文档观察身份映射、服务器记录、凭据引用和事务语义；不读取或修改真实 Legacy 数据。
 final class LegacyImportTests: XCTestCase {
   private var directory: URL!
   private var catalogURL: URL!
   private var activationURL: URL!
+  private var settingsURL: URL!
   private var credentials: InMemoryCredentialStore!
-  private var settingsStore: TestProxySettingsStore!
   private var marker: TestLegacyImportMarker!
   private var provider: FixedLegacySnapshotProvider!
 
@@ -21,8 +21,8 @@ final class LegacyImportTests: XCTestCase {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     catalogURL = directory.appendingPathComponent("catalog.json")
     activationURL = directory.appendingPathComponent("activation.json")
+    settingsURL = directory.appendingPathComponent("settings.json")
     credentials = InMemoryCredentialStore()
-    settingsStore = TestProxySettingsStore()
     marker = TestLegacyImportMarker()
     provider = FixedLegacySnapshotProvider(snapshot: try Self.makeSnapshot())
   }
@@ -32,7 +32,7 @@ final class LegacyImportTests: XCTestCase {
     try super.tearDownWithError()
   }
 
-  func testImportMapsProfilesPreferencesCredentialsAndActiveTarget() throws {
+  func testImportMapsProfilesAndCredentials() throws {
     let service = makeService()
 
     let outcome = try service.importCurrentSnapshot()
@@ -40,9 +40,6 @@ final class LegacyImportTests: XCTestCase {
     XCTAssertEqual(outcome.report.importedServerCount, 4)
     XCTAssertEqual(outcome.report.skippedRecords.map(\.index), [4, 5])
     XCTAssertEqual(outcome.report.regeneratedIdentityCount, 3)
-    XCTAssertEqual(outcome.report.activeTarget, .imported(NodeID(rawValue: Self.validID)))
-    XCTAssertEqual(outcome.loginAtLogin, false)
-    XCTAssertEqual(outcome.preferredMode, .externalPAC)
     XCTAssertTrue(marker.completed)
 
     let document = try CatalogFileStore(fileURL: catalogURL).load()
@@ -65,28 +62,36 @@ final class LegacyImportTests: XCTestCase {
     XCTAssertEqual(
       try credentials.secret(for: try XCTUnwrap(fields.pluginOptionsRef)),
       "mode=websocket;host=example.test")
+    XCTAssertNil(try ActivationStateFileStore(fileURL: activationURL).loadActiveTargetID())
+  }
 
-    let settings = try XCTUnwrap(settingsStore.savedSettings)
-    XCTAssertEqual(settings.listen.socksPort, 2086)
-    XCTAssertEqual(settings.listen.httpPort, 2087)
-    XCTAssertEqual(settings.listen.pacPort, 2089)
-    XCTAssertEqual(settings.listen.scope, .loopback)
-    XCTAssertTrue(settings.listen.udpRelayEnabled)
-    XCTAssertEqual(settings.timeoutSeconds, 120)
-    XCTAssertTrue(settings.verboseLogging)
-    XCTAssertEqual(settings.proxyExceptions, "localhost, example.test")
-    XCTAssertEqual(settings.externalPACURL, "https://pac.example.test/proxy.pac")
-    XCTAssertEqual(settings.gfwListURL, "https://gfw.example.test/list.txt")
-    XCTAssertEqual(settings.pacUserRules, "@@||example.test^")
-    XCTAssertEqual(settings.preferredMode, .externalPAC)
-    XCTAssertEqual(
-      settings.enabledModes,
-      Set([ProxyModeKind.pac, .global, .externalPAC]))
+  func testImportIgnoresLegacyPreferencesAndActiveTarget() throws {
+    var existingSettings = ProxySettings()
+    existingSettings.listen.socksPort = 2086
+    existingSettings.listen.httpPort = 2087
+    existingSettings.listen.pacPort = 2089
+    existingSettings.timeoutSeconds = 120
+    existingSettings.preferredMode = .global
+    existingSettings.enabledModes = [.global]
+    let settingsStore = ProxySettingsFileStore(
+      fileURL: settingsURL,
+      legacyListenFileURL: directory.appendingPathComponent("legacy-listen.json"),
+      credentials: credentials)
+    try settingsStore.save(existingSettings)
+
+    let existingTarget = NodeID(rawValue: "existing-target")
+    let activationStore = ActivationStateFileStore(fileURL: activationURL)
+    try activationStore.save(activeTargetID: existingTarget)
+
+    _ = try makeService().importCurrentSnapshot()
+
+    XCTAssertEqual(try settingsStore.load(), existingSettings)
+    XCTAssertEqual(try activationStore.loadActiveTargetID(), existingTarget)
   }
 
   func testExplicitReimportCreatesIndependentGroupAndDoesNotRepeatAutomatically() throws {
     let service = makeService()
-    _ = try service.importCurrentSnapshot()
+    let first = try service.importCurrentSnapshot()
 
     XCTAssertThrowsError(try service.importCurrentSnapshot()) { error in
       XCTAssertEqual(error as? LegacyImportError, .alreadyCompleted)
@@ -96,11 +101,11 @@ final class LegacyImportTests: XCTestCase {
     let document = try CatalogFileStore(fileURL: catalogURL).load()
     XCTAssertEqual(document.catalog.rootChildren.count, 2)
     XCTAssertNotEqual(document.catalog.rootChildren[0], document.catalog.rootChildren[1])
-    XCTAssertNotEqual(second.activeTargetID, Self.validIDNode)
+    XCTAssertNotEqual(second.groupID, first.groupID)
     XCTAssertTrue(marker.completed)
   }
 
-  func testFailedCommitRestoresCatalogSettingsActivationCredentialsAndMarker() throws {
+  func testFailedCommitRestoresCatalogCredentialsAndMarkerWithoutTouchingActivation() throws {
     let originalID = NodeID(rawValue: "existing-target")
     var originalCatalog = ConfigurationCatalog()
     let originalServer = try originalCatalog.addTestServer("原有节点", id: originalID)
@@ -112,9 +117,6 @@ final class LegacyImportTests: XCTestCase {
     try CatalogFileStore(fileURL: catalogURL).save(CatalogDocument(catalog: originalCatalog))
     try ActivationStateFileStore(fileURL: activationURL).save(activeTargetID: originalID)
 
-    settingsStore.settings = ProxySettings(
-      timeoutSeconds: 42, proxyExceptions: "original.example")
-    let originalSettings = settingsStore.settings
     marker.failWhenSettingCompleted = true
     let service = makeService()
 
@@ -125,7 +127,6 @@ final class LegacyImportTests: XCTestCase {
     }
 
     XCTAssertEqual(try CatalogFileStore(fileURL: catalogURL).load().catalog, originalCatalog)
-    XCTAssertEqual(settingsStore.settings, originalSettings)
     XCTAssertEqual(
       try ActivationStateFileStore(fileURL: activationURL).loadActiveTargetID(), originalID)
     XCTAssertEqual(
@@ -134,21 +135,17 @@ final class LegacyImportTests: XCTestCase {
     XCTAssertFalse(marker.completed)
   }
 
-  func testNonLoopbackLegacyListenersAreForcedToLoopbackAndReported() throws {
-    let snapshot = try LegacySnapshot(
-      propertyList: [
-        "ServerProfiles": [Self.validProfile()],
-        "LocalSocks5.ListenAddress": "192.168.1.20",
-        "LocalHTTP.ListenAddress": "127.0.0.1",
-        "PacServer.BindToLocalhost": false,
-      ],
-      userRules: nil)
-    provider.snapshot = snapshot
+  func testPreferenceOnlyLegacyDomainIsNotImportable() throws {
+    let defaults = UserDefaults(suiteName: "legacy-import-preferences-only")!
+    defaults.removePersistentDomain(forName: "legacy-import-preferences-only")
+    defer { defaults.removePersistentDomain(forName: "legacy-import-preferences-only") }
+    defaults.set("externalPAC", forKey: "ShadowsocksRunningMode")
+    defaults.set(false, forKey: "LaunchAtLogin")
 
-    let outcome = try makeService().importCurrentSnapshot()
+    let provider = UserDefaultsLegacySnapshotProvider(
+      defaults: defaults, bundleIdentifier: "legacy-import-preferences-only")
 
-    XCTAssertTrue(outcome.report.warnings.contains { $0.contains("回环") })
-    XCTAssertEqual(try XCTUnwrap(settingsStore.savedSettings).listen.scope, .loopback)
+    XCTAssertNil(try provider.readSnapshot())
   }
 }
 
@@ -157,18 +154,16 @@ extension LegacyImportTests {
     var profile = Self.validProfile()
     profile.removeValue(forKey: "Id")
     provider.snapshot = try LegacySnapshot(
-      propertyList: ["ServerProfiles": [profile]], userRules: nil)
+      propertyList: ["ServerProfiles": [profile]])
 
     let outcome = try makeService().importCurrentSnapshot()
 
     XCTAssertEqual(outcome.report.importedServerCount, 1)
     XCTAssertEqual(outcome.report.regeneratedIdentityCount, 1)
-    XCTAssertNil(outcome.activeTargetID)
   }
 
   fileprivate static let validID = "11111111-1111-4111-8111-111111111111"
   fileprivate static let duplicateID = "22222222-2222-4222-8222-222222222222"
-  fileprivate static let validIDNode = NodeID(rawValue: validID)
 
   fileprivate static func validProfile() -> [String: Any] {
     [
@@ -236,16 +231,13 @@ extension LegacyImportTests {
         "EnableSwitchMode.Manual": false,
         "EnableSwitchMode.ExternalPAC": true,
         "LaunchAtLogin": false,
-      ],
-      userRules: "@@||example.test^")
+      ])
   }
 
   fileprivate func makeService() -> LegacyImportService {
     LegacyImportService(
       source: provider,
       catalogStore: CatalogFileStore(fileURL: catalogURL),
-      settingsStore: settingsStore,
-      activationStore: ActivationStateFileStore(fileURL: activationURL),
       credentials: credentials,
       marker: marker)
   }
@@ -259,20 +251,6 @@ private final class FixedLegacySnapshotProvider: LegacySnapshotProviding {
   }
 
   func readSnapshot() throws -> LegacySnapshot? { snapshot }
-}
-
-private final class TestProxySettingsStore: ProxySettingsStoring {
-  var settings = ProxySettings()
-  var savedSettings: ProxySettings?
-
-  func load() throws -> ProxySettings { settings }
-
-  func save(_ settings: ProxySettings) throws {
-    self.settings = settings
-    savedSettings = settings
-  }
-
-  func reset() throws {}
 }
 
 private final class TestLegacyImportMarker: LegacyImportMarkerStoring {

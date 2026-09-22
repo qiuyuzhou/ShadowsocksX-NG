@@ -18,7 +18,6 @@ struct MainWindowView: View {
   @ObservedObject var proxyController: ProxyRuntimeController
   let eventStore: RuntimeEventStore
 
-  @StateObject private var legacyHandoffModel = LegacyHandoffViewModel()
   /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
   @StateObject private var errors = ErrorAlertPresenter()
 
@@ -34,7 +33,6 @@ struct MainWindowView: View {
   @State private var showImportURLSheet = false
   @State private var showQRImportSheet = false
   @State private var showLegacyImportSheet = false
-  @State private var showLegacyHandoffSheet = false
   @State private var didOfferLegacyImport = false
   @State private var rootDropHovering = false
 
@@ -94,22 +92,7 @@ struct MainWindowView: View {
       QRImportSheet(workflow: workflow, errors: errors, selection: $selection)
     }
     .sheet(isPresented: $showLegacyImportSheet) {
-      LegacyImportSheet(
-        workflow: workflow,
-        onHandoffRequested: {
-          showLegacyImportSheet = false
-          showLegacyHandoffSheet = true
-        })
-    }
-    .sheet(isPresented: $showLegacyHandoffSheet) {
-      LegacyHandoffSheet(viewModel: legacyHandoffModel)
-        .task {
-          // 交接成功后经正常启停入口启动 2.0（健康门禁、系统代理授权写入
-          // 全部走 #29 路径）；重跑交接前先停 2.0 以释放端口。
-          legacyHandoffModel.stopProxy = { await proxyController.setProxyEnabled(false) }
-          legacyHandoffModel.startProxy = { await proxyController.setProxyEnabled(true) }
-          await legacyHandoffModel.refresh()
-        }
+      LegacyImportSheet(workflow: workflow)
     }
     .sheet(
       item: Binding(
@@ -122,10 +105,6 @@ struct MainWindowView: View {
       guard !didOfferLegacyImport, workflow.legacyImportState.shouldOffer else { return }
       didOfferLegacyImport = true
       showLegacyImportSheet = true
-    }
-    .task {
-      // 交接入口可见性依赖交接完成标记（issue #37）。
-      await legacyHandoffModel.refresh()
     }
   }
 
@@ -293,16 +272,6 @@ struct MainWindowView: View {
             workflow.legacyImportState.completed ? "再次导入 Legacy 配置…" : "导入 Legacy 配置…"
           ) {
             showLegacyImportSheet = true
-          }
-        }
-        if workflow.legacyImportState.snapshotFound || !legacyHandoffModel.handoffCompleted
-          || legacyHandoffModel.hasLegacyEvidence
-        {
-          Button(
-            legacyHandoffModel.handoffCompleted
-              ? "Legacy 交接与残留…" : "切换到 2.0（交接旧版服务）…"
-          ) {
-            showLegacyHandoffSheet = true
           }
         }
         Divider()

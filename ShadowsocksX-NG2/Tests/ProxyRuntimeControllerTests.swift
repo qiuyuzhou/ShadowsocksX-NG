@@ -149,11 +149,11 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       systemProxy.applied,
       [
         SystemProxyConfiguration(
-          target: .pac(URL(string: "http://127.0.0.1:1089/v1/proxy.pac")!),
+          target: .pac(URL(string: "http://127.0.0.1:11089/v1/proxy.pac")!),
           exceptions: ProxySettings().proxyExceptionList)
       ],
       "PAC 只有在本地 SOCKS 与 PAC 健康后才写入系统代理")
-    XCTAssertEqual(probe.ports, [1086, 1087], "系统代理写入前必须探测 SOCKS 和 HTTP 入站")
+    XCTAssertEqual(probe.ports, [11086, 11087], "系统代理写入前必须探测 SOCKS 和 HTTP 入站")
   }
 
   func testExternalPACHealthFailureDoesNotWriteSystemProxy() async throws {
@@ -178,7 +178,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(
       pacProbe.urls,
       [
-        URL(string: "http://127.0.0.1:1089/v1/proxy.pac")!, externalURL,
+        URL(string: "http://127.0.0.1:11089/v1/proxy.pac")!, externalURL,
       ])
   }
 
@@ -193,7 +193,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       systemProxy.applied,
       [
         SystemProxyConfiguration(
-          target: .socks(host: "127.0.0.1", port: 1086),
+          target: .socks(host: "127.0.0.1", port: 11086),
           exceptions: ProxySettings().proxyExceptionList)
       ])
 
@@ -207,7 +207,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(
       systemProxy.applied.last,
       SystemProxyConfiguration(
-        target: .pac(URL(string: "http://127.0.0.1:1089/v1/proxy.pac")!),
+        target: .pac(URL(string: "http://127.0.0.1:11089/v1/proxy.pac")!),
         exceptions: ProxySettings().proxyExceptionList))
 
     await controller.setProxyEnabled(false)
@@ -228,7 +228,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       return
     }
     XCTAssertTrue(
-      detail.contains("127.0.0.1") && detail.contains("1086"),
+      detail.contains("127.0.0.1") && detail.contains("11086"),
       "启动失败必须点名端点与端口（D8）：\(detail)")
     XCTAssertTrue(systemProxy.applied.isEmpty, "端点不健康时不得写系统代理")
   }
@@ -258,7 +258,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
 
     XCTAssertEqual(controller.state, .running)
     XCTAssertTrue(firewall.checkedURLs.isEmpty, "回环态与应用防火墙零交互")
-    XCTAssertEqual(controller.pacURL?.absoluteString, "http://127.0.0.1:1089/v1/proxy.pac")
+    XCTAssertEqual(controller.pacURL?.absoluteString, "http://127.0.0.1:11089/v1/proxy.pac")
   }
 
   func testHostScopeBlockedByFirewallPresentsTargetedRepairAndKeepsPACURL() async throws {

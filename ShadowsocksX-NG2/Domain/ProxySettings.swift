@@ -19,8 +19,8 @@ struct ProxySettings: Equatable, Sendable {
   /// Mode selected after a restart. An external PAC URL is resolved from
   /// `externalPACURL` when this kind is `.externalPAC`.
   var preferredMode: ProxyModeKind
-  /// Legacy's `EnableSwitchMode.*` values land here. The set is also used by
-  /// the menu/settings views to keep disabled modes out of the cycle.
+  /// The set is used by the menu/settings views to keep disabled modes out of
+  /// the cycle.
   var enabledModes: Set<ProxyModeKind>
 
   init(
@@ -396,10 +396,10 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
 private struct ProxySettingsRecord: Codable, Equatable, Sendable {
   var scopeKind: ListenScopeKind = .loopback
   var advertisedAddress: String?
-  var socksPort: Int = 1086
+  var socksPort: Int = SslocalListenSettings.defaultSocksPort
   var httpProxyEnabled: Bool = true
-  var httpPort: Int = 1087
-  var pacPort: Int = 1089
+  var httpPort: Int = SslocalListenSettings.defaultHTTPPort
+  var pacPort: Int = SslocalListenSettings.defaultPACPort
   var udpRelayEnabled: Bool = false
   var timeoutSeconds: Int = 60
   var verboseLogging: Bool = false
@@ -419,10 +419,16 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     scopeKind = try container.decodeIfPresent(ListenScopeKind.self, forKey: .scopeKind) ?? .loopback
     advertisedAddress = try container.decodeIfPresent(String.self, forKey: .advertisedAddress)
-    socksPort = try container.decodeIfPresent(Int.self, forKey: .socksPort) ?? 1086
+    socksPort =
+      try container.decodeIfPresent(Int.self, forKey: .socksPort)
+      ?? SslocalListenSettings.defaultSocksPort
     httpProxyEnabled = try container.decodeIfPresent(Bool.self, forKey: .httpProxyEnabled) ?? true
-    httpPort = try container.decodeIfPresent(Int.self, forKey: .httpPort) ?? 1087
-    pacPort = try container.decodeIfPresent(Int.self, forKey: .pacPort) ?? 1089
+    httpPort =
+      try container.decodeIfPresent(Int.self, forKey: .httpPort)
+      ?? SslocalListenSettings.defaultHTTPPort
+    pacPort =
+      try container.decodeIfPresent(Int.self, forKey: .pacPort)
+      ?? SslocalListenSettings.defaultPACPort
     udpRelayEnabled = try container.decodeIfPresent(Bool.self, forKey: .udpRelayEnabled) ?? false
     timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds) ?? 60
     verboseLogging = try container.decodeIfPresent(Bool.self, forKey: .verboseLogging) ?? false
