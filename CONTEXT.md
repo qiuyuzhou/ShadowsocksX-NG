@@ -22,6 +22,9 @@
 - **Sensitive information**: Server passwords, plugin options (sensitive in their entirety), and nonempty user-provided remote URLs, including subscription, external PAC, and custom GFW List URLs.
 - **Credential exposure boundary**: This product reduces accidental disclosure and exposure to other user accounts, but does not guarantee protection against a compromised same-user process, root access, or APFS snapshots and backups; it does not promise secure erasure.
 - **Credential reference**: A non-secret association from a server configuration, subscription, or remote-URL setting to its durable credential; the credential value is kept outside the configuration tree and resolved only when needed.
+- **System-level shortcut**: A user-configurable keyboard action registered by the app that can trigger an app action even when the app has no focus.
+  _Avoid_: global hotkey, global shortcut.
+- **Window-local default action shortcut**: A keyboard action bound to the focused app window or form context, such as confirming a dialog; it is distinct from a system-level shortcut.
 
 ## Relationships and invariants
 

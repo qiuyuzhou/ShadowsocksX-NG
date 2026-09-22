@@ -83,31 +83,6 @@ final class StatusMenuModelTests: XCTestCase {
     XCTAssertNil(StatusMenuModel.httpExportLine(settings: settings))
   }
 
-  // MARK: - 全局快捷键「切换模式」循环
-
-  func testNextModeCyclesBuiltinModes() {
-    XCTAssertEqual(StatusMenuModel.nextMode(after: .pac), .global)
-    XCTAssertEqual(StatusMenuModel.nextMode(after: .global), .manual)
-    XCTAssertEqual(StatusMenuModel.nextMode(after: .manual), .pac)
-  }
-
-  func testNextModeFromExternalPACReturnsToPAC() {
-    XCTAssertEqual(
-      StatusMenuModel.nextMode(after: .externalPAC(URL(string: "http://example.com/pac")!)),
-      .pac)
-  }
-
-  func testNextModeSkipsLegacyDisabledModes() {
-    let enabledModes: Set<ProxyModeKind> = [.pac, .manual]
-
-    XCTAssertEqual(
-      StatusMenuModel.nextMode(after: .pac, availableModes: enabledModes),
-      .manual)
-    XCTAssertEqual(
-      StatusMenuModel.nextMode(after: .manual, availableModes: enabledModes),
-      .pac)
-  }
-
   // MARK: - 活动目标路径（目录树 projection 派生，issue #41）
 
   /// 目录树 projection 构建夹具（同工作流 module 的推导路径）。

@@ -1,5 +1,3 @@
-import AppKit
-import KeyboardShortcuts
 import SwiftUI
 
 /// Native macOS settings for issue #33. The view edits one local snapshot and
@@ -66,7 +64,7 @@ struct SettingsView: View {
       }
       Button("取消", role: .cancel) {}
     } message: {
-      Text("端口、监听范围、快捷键意图和 PAC 设置都会恢复为出厂值。")
+      Text("端口、监听范围和 PAC 设置都会恢复为出厂值。")
     }
   }
 
@@ -86,13 +84,6 @@ struct SettingsView: View {
         Text(loginError)
           .font(.caption)
           .foregroundStyle(.red)
-      }
-
-      LabeledContent("全局快捷键") {
-        VStack(alignment: .leading, spacing: 8) {
-          KeyboardShortcuts.Recorder("开关代理", name: .toggleProxy)
-          KeyboardShortcuts.Recorder("切换模式", name: .cycleProxyMode)
-        }
       }
 
       Picker("系统代理模式", selection: modeBinding) {
@@ -407,7 +398,6 @@ extension SettingsView {
     Task { @MainActor in
       do {
         try await proxyController.resetPreferences()
-        KeyboardShortcuts.reset(.toggleProxy, .cycleProxyMode)
         loginController.resetToDefaults()
         draft = proxyController.settings
         refreshPortOccupancy()

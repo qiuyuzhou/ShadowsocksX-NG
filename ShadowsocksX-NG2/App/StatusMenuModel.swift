@@ -58,8 +58,8 @@ enum StatusMenuModel {
       targetPath: targetPath)
   }
 
-  /// 代理开关的当前意图（菜单开关与全局快捷键共用的同一判定）：启动失败等
-  /// 中间态视为未开——两个入口的下一步动作都是「启动」。
+  /// 代理开关的当前意图（状态菜单与当前运行端口判断共用同一判定）：启动失败等
+  /// 中间态视为未开——状态菜单的下一步动作是「启动」。
   static func isOn(state: ProxyRuntimeController.ProxyState) -> Bool {
     switch state {
     case .off, .launchFailed, .activationFailed, .serviceFailed:
@@ -76,29 +76,6 @@ enum StatusMenuModel {
     guard settings.httpProxyEnabled else { return nil }
     let endpoint = "http://\(settings.scope.advertisedAddress):\(settings.httpPort)"
     return "export http_proxy=\(endpoint);export https_proxy=\(endpoint);"
-  }
-
-  /// 全局快捷键「切换模式」的循环序：仅内置三模式参与；外部 PAC 的 URL 只能
-  /// 在设置区配置（#33），不进循环——快捷键从外部 PAC 回到第一个可用内置模式。
-  static func nextMode(
-    after mode: ProxyMode,
-    availableModes: Set<ProxyModeKind> = ProxySettings.defaultEnabledModes
-  ) -> ProxyMode {
-    let cycle = [ProxyModeKind.pac, .global, .manual].filter(availableModes.contains)
-    guard !cycle.isEmpty else { return mode }
-    guard let currentIndex = cycle.firstIndex(of: mode.kind) else {
-      return proxyMode(for: cycle[0])
-    }
-    return proxyMode(for: cycle[(currentIndex + 1) % cycle.count])
-  }
-
-  private static func proxyMode(for kind: ProxyModeKind) -> ProxyMode {
-    switch kind {
-    case .pac: .pac
-    case .global: .global
-    case .manual: .manual
-    case .externalPAC: .pac
-    }
   }
 
   /// 活动目标的显示名路径（根 → 节点，" / " 连接）；基于目录树 projection
