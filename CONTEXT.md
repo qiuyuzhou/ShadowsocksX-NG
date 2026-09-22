@@ -12,6 +12,7 @@
 - **Activation candidate**: A server configuration with no known local blocking problem for proxy configuration generation. This status does not guarantee remote reachability or correctness of opaque plugin options.
 - **Managed plugin**: A SIP003 plugin executable that the product packages, hash-verifies, re-signs, and distributes only inside the app bundle. The managed set changes only with app releases; users cannot supply their own plugin executables.
 - **Proxy mode**: The user-facing way traffic is routed through the local proxy, such as PAC, global, manual, or an external PAC configuration.
+- **Proxy mode selector**: The common user action for choosing one mutually exclusive proxy mode; it is distinct from enabling or disabling the proxy runtime and from configuring an external PAC URL.
 - **HTTP proxy mode**: A local proxy mode that accepts HTTP/HTTPS proxy requests directly through the Shadowsocks runtime; it does not require a separate adapter process.
 - **Legacy Privoxy adapter**: The frozen implementation's HTTP(S)-to-local-SOCKS5 bridge. It is a Legacy-only dependency and is not migrated into 2.0.
 - **Listen scope**: A user-facing two-state choice of whether the locally provided proxy endpoints — the PAC HTTP endpoint and the external tunnel service's inbound listeners — bind to loopback only or to the host's network-facing address. The host-facing scope intentionally exposes an unauthenticated local proxy to other devices on the network, so users can share the PAC URL or proxy address to machines other than this one.

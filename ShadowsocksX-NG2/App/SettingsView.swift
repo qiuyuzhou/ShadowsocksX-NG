@@ -86,22 +86,6 @@ struct SettingsView: View {
           .foregroundStyle(.red)
       }
 
-      Picker("系统代理模式", selection: modeBinding) {
-        if isModeAvailable(.pac) {
-          Text(ProxyMode.pac.label).tag(ProxyMode.pac)
-        }
-        if isModeAvailable(.global) {
-          Text(ProxyMode.global.label).tag(ProxyMode.global)
-        }
-        if isModeAvailable(.manual) {
-          Text(ProxyMode.manual.label).tag(ProxyMode.manual)
-        }
-        if let externalMode = configuredExternalPACMode, isModeAvailable(externalMode.mode) {
-          Text("外部 PAC（" + externalMode.urlString + "）")
-            .tag(externalMode.mode)
-        }
-      }
-
       Toggle("启用 UDP 中继", isOn: $draft.listen.udpRelayEnabled)
       Stepper(value: $draft.timeoutSeconds, in: 1...86_400) {
         Text("超时：" + String(draft.timeoutSeconds) + " 秒")
@@ -221,35 +205,6 @@ extension SettingsView {
         }
         .font(.caption)
       }
-    }
-  }
-
-  private var modeBinding: Binding<ProxyMode> {
-    Binding(
-      get: { proxyController.proxyMode },
-      set: { mode in
-        Task { await proxyController.setProxyMode(mode) }
-      })
-  }
-
-  private func isModeAvailable(_ mode: ProxyMode) -> Bool {
-    if mode.kind == .externalPAC, configuredExternalPACMode != nil { return true }
-    return mode.kind == proxyController.proxyMode.kind
-      || proxyController.settings.enabledModes.contains(mode.kind)
-  }
-
-  private var configuredExternalPACMode: (mode: ProxyMode, urlString: String)? {
-    if case .externalPAC(let url) = proxyController.proxyMode {
-      return (.externalPAC(url), url.absoluteString)
-    }
-    guard let url = URL(string: draft.externalPACURL), !draft.externalPACURL.isEmpty else {
-      return nil
-    }
-    do {
-      try ProxyMode.validateExternalPACURL(url)
-      return (.externalPAC(url), url.absoluteString)
-    } catch {
-      return nil
     }
   }
 

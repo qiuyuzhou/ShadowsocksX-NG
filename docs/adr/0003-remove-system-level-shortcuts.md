@@ -9,6 +9,6 @@ NG2 no longer provides user-configurable system-level shortcuts for toggling the
 
 ## Consequences
 
-- Proxy enablement and mode selection remain available from the status menu and settings/window flows.
+- Proxy enablement and mode selection remain available from the status menu. Settings/window flows remain available for configuration and window-local default action shortcuts.
 - The `nextMode` helper and its tests are removed because no remaining product behavior needs implicit mode cycling.
 - Historical Legacy research and prior ADRs remain unchanged as historical records.
