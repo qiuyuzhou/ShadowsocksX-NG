@@ -70,7 +70,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     settingsStore: ProxySettingsStoring? = nil,
     settingsRestore: RestoredProxySettings? = nil,
     pacProbe: PACHealthProbing = ProxyRuntimeFixture.FakePACProbe(),
-    proxyMode: ProxyMode = .pac,
+    proxyMode: ProxyMode? = .pac,
     systemProxy: SystemProxyControlling? = nil,
     firewallChecker: FirewallStatusChecking = ProxyRuntimeFixture.FakeFirewallChecker(),
     firewallExecutableURLs: [URL] = [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
@@ -427,6 +427,67 @@ final class ProxyRuntimeControllerTests: XCTestCase {
 }
 
 extension ProxyRuntimeControllerTests {
+  func testSetProxyModePersistsTheChoiceAndARestoreRestoresIt() async throws {
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(), settingsStore: settingsStore)
+
+    await controller.setProxyMode(.global)
+
+    XCTAssertEqual(controller.proxyMode, .global)
+    XCTAssertEqual(controller.settings.preferredMode, .global)
+    XCTAssertEqual(settingsStore.saved?.preferredMode, .global, "模式选择随快照持久化")
+
+    // GUI 重启路径：恢复出的控制器不注入显式模式，从持久快照读回。
+    let restored = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsRestore: RestoredProxySettings(
+        settings: try XCTUnwrap(settingsStore.load()), unreadableError: nil),
+      proxyMode: nil)
+    XCTAssertEqual(restored.proxyMode, .global)
+  }
+
+  func testSetProxyModePersistenceFailureKeepsPreviousModeAndNamesReason() async throws {
+    let settingsStore = InMemoryProxySettingsStore()
+    settingsStore.saveError = FakeSettingsSaveError.system
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(), settingsStore: settingsStore)
+
+    await controller.setProxyMode(.global)
+
+    XCTAssertEqual(controller.proxyMode, .pac, "持久化失败保留旧模式")
+    XCTAssertEqual(controller.settings.preferredMode, .pac)
+    guard case .serviceFailed(let detail) = controller.state else {
+      XCTFail("应点名持久化失败，实际 \(controller.state)")
+      return
+    }
+    XCTAssertTrue(detail.contains("fake-save-error"))
+  }
+
+  func testUpdateSettingsWhileInExternalPACModeCommitsKindAndURLAsOneChange() async throws {
+    let settingsStore = InMemoryProxySettingsStore()
+    let externalURL = URL(string: "https://pac.example.test/proxy.pac")!
+    var external = ProxySettings()
+    external.externalPACURL = externalURL.absoluteString
+    external.preferredMode = .externalPAC
+    settingsStore.saved = external
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsStore: settingsStore,
+      settingsRestore: RestoredProxySettings(settings: external, unreadableError: nil),
+      proxyMode: nil)
+    XCTAssertEqual(controller.proxyMode, .externalPAC(externalURL))
+
+    // 清空外部 PAC URL：模式回落 PAC 且持久化的 kind 同步回落。
+    var cleared = external
+    cleared.externalPACURL = ""
+    try await controller.updateSettings(cleared)
+
+    XCTAssertEqual(controller.proxyMode, .pac)
+    XCTAssertEqual(settingsStore.saved?.preferredMode, .pac)
+    XCTAssertEqual(settingsStore.saved?.externalPACURL, "")
+  }
+
   func testLegacyImportBoundaryStopsRuntimeWithoutRestoringSystemProxy() async throws {
     let seeded = try makeSeededCatalog()
     let settingsStore = InMemoryProxySettingsStore()
@@ -497,14 +558,22 @@ extension ProxyRuntimeControllerTests {
       ["localhost", "127.0.0.1"])
   }
 
+  private enum FakeSettingsSaveError: Error, CustomStringConvertible {
+    case system
+
+    var description: String { "fake-save-error" }
+  }
+
   private final class InMemoryProxySettingsStore: ProxySettingsStoring {
     var saved: ProxySettings?
+    var saveError: Error?
 
     func load() throws -> ProxySettings {
       saved ?? ProxySettings()
     }
 
     func save(_ settings: ProxySettings) throws {
+      if let saveError { throw saveError }
       saved = settings
     }
 

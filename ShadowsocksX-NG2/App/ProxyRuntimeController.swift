@@ -208,8 +208,21 @@ final class ProxyRuntimeController: ObservableObject {
   /// Changes the current mode without rebuilding the tunnel runtime. A mode
   /// that writes system settings reuses the same endpoint health gate; manual
   /// mode restores the snapshot immediately and leaves system settings alone.
+  /// The choice persists with the settings snapshot first, so a GUI restart
+  /// restores it; a persistence failure keeps the previous mode in force and
+  /// names the reason instead of switching silently.
   func setProxyMode(_ mode: ProxyMode) async {
     guard mode != proxyMode else { return }
+    var next = settings
+    next.preferredMode = mode.kind
+    do {
+      try settingsStore.save(next)
+    } catch {
+      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+      state = .serviceFailed(detail: String(describing: error))
+      return
+    }
+    settings = next
     proxyMode = mode
     guard state != .off, let document = lastDocument ?? runtimeFileStore.loadDocument() else {
       return
@@ -456,21 +469,27 @@ extension ProxyRuntimeController {
   }
 
   /// Persists a fully validated settings snapshot and, when the proxy is
-  /// active, re-derives the same runtime path with the new snapshot.
-  func updateSettings(_ next: ProxySettings) async throws {
-    try settingsStore.save(next)
-    settings = next
-    listenUnreadableReason = nil
-    settingsUnreadableReason = nil
-
+  /// active, re-derives the same runtime path with the new snapshot. While the
+  /// live mode is external PAC, the mode is re-resolved from the new snapshot
+  /// before persistence, so the mode kind and its URL commit as one logical
+  /// change and a validation failure precedes the write.
+  func updateSettings(_ proposed: ProxySettings) async throws {
+    var next = proposed
+    var resolvedMode = proxyMode
     if case .externalPAC = proxyMode {
       if let url = URL(string: next.externalPACURL), !next.externalPACURL.isEmpty {
         try ProxyMode.validateExternalPACURL(url)
-        proxyMode = .externalPAC(url)
+        resolvedMode = .externalPAC(url)
       } else {
-        proxyMode = .pac
+        resolvedMode = .pac
+        next.preferredMode = .pac
       }
     }
+    try settingsStore.save(next)
+    settings = next
+    proxyMode = resolvedMode
+    listenUnreadableReason = nil
+    settingsUnreadableReason = nil
 
     guard state != .off else { return }
     switch reexpand() {

@@ -39,17 +39,12 @@ struct ProxyStatusMenu: View {
       Task { await controller.setProxyEnabled(!summary.isOn) }
     }
 
-    // ③ 模式选择（勾选态）
+    // ③ 模式选择（勾选态）：内置三模式恒可选；外部 PAC 仅在已配置有效 URL
+    // 时成为选项。
     Picker("模式", selection: modeBinding) {
-      if isModeAvailable(.pac) {
-        Text(ProxyMode.pac.label).tag(ProxyMode.pac)
-      }
-      if isModeAvailable(.global) {
-        Text(ProxyMode.global.label).tag(ProxyMode.global)
-      }
-      if isModeAvailable(.manual) {
-        Text(ProxyMode.manual.label).tag(ProxyMode.manual)
-      }
+      Text(ProxyMode.pac.label).tag(ProxyMode.pac)
+      Text(ProxyMode.global.label).tag(ProxyMode.global)
+      Text(ProxyMode.manual.label).tag(ProxyMode.manual)
       if let externalMode = configuredExternalPACMode {
         Text(externalMode.label).tag(externalMode)
       }
@@ -120,16 +115,12 @@ struct ProxyStatusMenu: View {
       set: { mode in Task { await controller.setProxyMode(mode) } })
   }
 
-  private func isModeAvailable(_ mode: ProxyMode) -> Bool {
-    mode.kind == controller.proxyMode.kind || controller.settings.enabledModes.contains(mode.kind)
-  }
-
+  /// 外部 PAC 仅在已配置有效 URL 时成为菜单选项；URL 的编辑面在设置区。
   private var configuredExternalPACMode: ProxyMode? {
     if case .externalPAC(let url) = controller.proxyMode {
       return .externalPAC(url)
     }
-    guard controller.settings.enabledModes.contains(.externalPAC),
-      let url = URL(string: controller.settings.externalPACURL),
+    guard let url = URL(string: controller.settings.externalPACURL),
       !controller.settings.externalPACURL.isEmpty,
       (try? ProxyMode.validateExternalPACURL(url)) != nil
     else { return nil }

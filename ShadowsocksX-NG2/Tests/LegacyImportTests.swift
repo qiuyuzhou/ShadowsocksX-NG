@@ -72,7 +72,6 @@ final class LegacyImportTests: XCTestCase {
     existingSettings.listen.pacPort = 2089
     existingSettings.timeoutSeconds = 120
     existingSettings.preferredMode = .global
-    existingSettings.enabledModes = [.global]
     let settingsStore = ProxySettingsFileStore(
       fileURL: settingsURL,
       legacyListenFileURL: directory.appendingPathComponent("legacy-listen.json"),

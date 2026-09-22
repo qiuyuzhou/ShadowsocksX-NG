@@ -174,7 +174,6 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
     existingSettings.listen.httpPort = 2087
     existingSettings.listen.pacPort = 2089
     existingSettings.preferredMode = .global
-    existingSettings.enabledModes = [.global]
     let settingsStore = ProxySettingsFileStore(
       fileURL: settingsURL,
       legacyListenFileURL: workDir.appendingPathComponent("legacy-listen.json"),
