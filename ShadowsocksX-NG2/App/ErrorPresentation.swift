@@ -153,6 +153,8 @@ extension AppPresentation {
     switch failure {
     case .store(let error): return settingsStore(error)
     case .mode(let error): return proxyMode(error)
+    case .runtime(let runtimeFailure):
+      return runtimeFailure.map { message(for: $0) } ?? unknownError
     case .unknown: return unknownError
     }
   }
@@ -321,6 +323,7 @@ extension AppPresentation {
     case .ioFailure: return "偏好文件读写失败"
     case .missingCredential: return "偏好中的敏感 URL 无法从钥匙串读取"
     case .credentialFailure: return "偏好中的敏感 URL 无法写入钥匙串"
+    case .rollbackFailed: return "偏好保存失败，旧设置或凭据未能完整恢复"
     case .legacyListenSettings(let error): return "旧版监听设置无法读取：\(listenStore(error))"
     }
   }

@@ -145,6 +145,20 @@ final class ProxyRuntimeController: ObservableObject {
   /// 两态呈现（D7）。
   var listenSettings: SslocalListenSettings { settings.listen }
 
+  /// 当前已部署 runtime 的完整监听身份。已停止或启动失败时没有有效的
+  /// runtime 例外，不能拿最后一次设置快照冒充仍在监听。
+  var effectiveRuntimeListenFacts: RuntimeListenFacts? {
+    let isListening: Bool
+    switch state {
+    case .running, .firewallBlocked, .systemProxyFailed:
+      isListening = true
+    case .off, .starting, .launchFailed, .activationFailed, .requiresApproval, .serviceFailed:
+      isListening = false
+    }
+    guard isListening, let lastDocument else { return nil }
+    return RuntimeListenFacts(document: lastDocument)
+  }
+
   /// 运行时契约的脱敏摘要（数量与协议元数据，D5）；契约缺失或无效返回 nil。
   /// 诊断导出不读契约内容，只携带此摘要。
   func runtimeDocumentSummary() -> String? {
@@ -475,16 +489,40 @@ extension ProxyRuntimeController {
     }
   }
 
+  /// SettingsWorkflow 只需要知道 runtime 是否独立收敛，以及失败的安全 typed
+  /// fact；它不消费控制器内部的 state machine。
+  private func settingsRuntimeOutcome() -> SettingsRuntimeOutcome {
+    switch state {
+    case .off:
+      return .notRunning
+    case .running:
+      return .converged
+    case .firewallBlocked(let facts):
+      return .failed(.firewallBlocked(facts))
+    case .launchFailed(let facts):
+      return .failed(.launch(facts))
+    case .activationFailed(let failure):
+      return .failed(.activation(failure))
+    case .requiresApproval:
+      return .failed(.requiresApproval)
+    case .serviceFailed(let facts):
+      return .failed(.service(facts))
+    case .systemProxyFailed(let facts):
+      return .failed(.systemProxy(facts))
+    case .starting:
+      return .failed(nil)
+    }
+  }
+
   /// Persists a fully validated settings snapshot and, when the proxy is
   /// active, re-derives the same runtime path with the new snapshot.
-  func updateSettings(_ proposed: ProxySettings) async throws {
+  func updateSettings(_ proposed: ProxySettings) async throws -> SettingsRuntimeOutcome {
     let catalog = catalogSnapshotReader.catalogSnapshot
     try settingsStore.save(proposed)
     settings = proposed
     listenSettingsUnreadable = false
     settingsUnreadable = false
-
-    guard state != .off else { return }
+    guard state != .off else { return .notRunning }
     switch reexpand(in: catalog) {
     case .deployed(let configuration):
       await deploy(configuration.document)
@@ -493,11 +531,12 @@ extension ProxyRuntimeController {
     case nil:
       break
     }
+    return settingsRuntimeOutcome()
   }
 
   /// Restores factory defaults, removes the persisted snapshot and stops any
   /// active runtime before the next user action can use the defaults.
-  func resetPreferences() async throws {
+  func resetPreferences() async throws -> SettingsRuntimeOutcome {
     try settingsStore.reset()
     settings = ProxySettings()
     listenSettingsUnreadable = false
@@ -505,7 +544,9 @@ extension ProxyRuntimeController {
     proxyMode = .pac
     if state != .off {
       await setProxyEnabled(false)
+      return state == .off ? .stopped : settingsRuntimeOutcome()
     }
+    return .notRunning
   }
 
   /// Applies the post-import 2.0 runtime boundary without touching

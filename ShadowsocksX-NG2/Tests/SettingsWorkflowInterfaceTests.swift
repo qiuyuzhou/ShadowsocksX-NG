@@ -88,7 +88,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
   func testPortFieldStateReportsFreeOccupiedAndUnknownFacts() async throws {
     probe = FakeOccupancyProbe(occupiedPorts: [11087], unknownPorts: [11089])
     let workflow = makeWorkflow()
-    workflow.reloadFromCommitted()
+    _ = await workflow.reloadFromCommitted()
     await waitUntil(workflow.portFieldState(for: .pac).occupancy != nil)
 
     XCTAssertEqual(workflow.portFieldState(for: .socks).occupancy, .free)
@@ -97,10 +97,28 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     XCTAssertEqual(workflow.portFieldState(for: .socks).draftValue, 11086)
   }
 
+  func testOccupancyProbeReceivesTheCompleteEffectiveListenIdentity() async throws {
+    let workflow = makeWorkflow()
+    workflow.draft.isHostScope = true
+    workflow.draft.advertisedAddress = "192.168.2.89"
+    let expected = RuntimeListenFacts(
+      scope: .host(advertisedAddress: "192.168.2.89"),
+      socksPort: 11086,
+      httpProxyEnabled: true,
+      httpPort: 11087,
+      pacPort: 11089,
+      udpRelayEnabled: false)
+
+    await waitUntil(probe.requests.contains { $0.listen == expected })
+
+    XCTAssertEqual(probe.requests.first(where: { $0.listen == expected })?.endpoint, .socks)
+    XCTAssertEqual(probe.requests.first(where: { $0.listen == expected })?.bindAddress, "0.0.0.0")
+  }
+
   func testOccupiedPortCarriesOccupierFact() async throws {
     probe = FakeOccupancyProbe(occupiedPorts: [11086])
     let workflow = makeWorkflow()
-    workflow.reloadFromCommitted()
+    _ = await workflow.reloadFromCommitted()
     await waitUntil(workflow.portFieldState(for: .socks).occupancy != nil)
 
     XCTAssertEqual(workflow.portFieldState(for: .socks).occupancy, .occupied(occupier: "other-app"))
@@ -124,7 +142,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     probe = FakeOccupancyProbe(occupiedPorts: [11086])
     committing.isProxyRunning = true
     let workflow = makeWorkflow()
-    workflow.reloadFromCommitted()
+    _ = await workflow.reloadFromCommitted()
     await waitUntil(workflow.portFieldState(for: .socks).occupancy != nil)
 
     XCTAssertTrue(workflow.portFieldState(for: .socks).isRuntimePortException)
@@ -136,7 +154,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     probe = FakeOccupancyProbe(occupiedPorts: [11086])
     committing.isProxyRunning = false
     let workflow = makeWorkflow()
-    workflow.reloadFromCommitted()
+    _ = await workflow.reloadFromCommitted()
     await waitUntil(workflow.portFieldState(for: .socks).occupancy != nil)
 
     XCTAssertFalse(workflow.portFieldState(for: .socks).isRuntimePortException)
@@ -163,18 +181,45 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     committing.committedSettings = committed
 
     let workflow = makeWorkflow()
-    workflow.reloadFromCommitted()
+    _ = await workflow.reloadFromCommitted()
     await waitUntil(workflow.portFieldState(for: .http).occupancy != nil)
 
     XCTAssertFalse(workflow.portFieldState(for: .http).isRuntimePortException)
   }
+
+  func testRuntimePortExceptionRequiresTheCompleteListenIdentity() async throws {
+    probe = FakeOccupancyProbe(occupiedPorts: [11086])
+    committing.isProxyRunning = true
+    let workflow = makeWorkflow()
+    _ = await workflow.reloadFromCommitted()
+    await waitUntil(workflow.portFieldState(for: .socks).occupancy != nil)
+    XCTAssertTrue(workflow.portFieldState(for: .socks).isRuntimePortException)
+
+    committing.runtimeListenFacts = RuntimeListenFacts(
+      scope: .host(advertisedAddress: "192.168.2.89"),
+      socksPort: 11086,
+      httpProxyEnabled: true,
+      httpPort: 11087,
+      pacPort: 11089,
+      udpRelayEnabled: false)
+    _ = await workflow.reloadFromCommitted()
+    await waitUntil(workflow.portFieldState(for: .socks).occupancy != nil)
+
+    XCTAssertFalse(
+      workflow.portFieldState(for: .socks).isRuntimePortException,
+      "同端口但 bind/public 地址不同不能作为当前 runtime 例外")
+    XCTAssertTrue(workflow.hasBlockingPortOccupancy)
+  }
+}
+
+extension SettingsWorkflowInterfaceTests {
 
   // MARK: - 建议空闲端口
 
   func testSuggestFreePortOnlyWritesThatPortFieldIntoDraft() async throws {
     let workflow = makeWorkflow()
 
-    workflow.suggestFreePort(for: .socks)
+    _ = await workflow.suggestFreePort(for: .socks)
     await waitUntil(workflow.draft.socksPort != 11086)
 
     XCTAssertEqual(workflow.draft.socksPort, 32768)
@@ -192,7 +237,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
 
     XCTAssertFalse(workflow.canSave)
 
-    workflow.save()
+    _ = await workflow.save()
     await waitUntil(!workflow.isCommitting && workflow.pendingConfirmation == nil)
     XCTAssertTrue(committing.updateCalls.isEmpty)
   }
@@ -206,7 +251,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     XCTAssertTrue(workflow.hasBlockingPortOccupancy)
     XCTAssertFalse(workflow.canSave)
 
-    workflow.save()
+    _ = await workflow.save()
     XCTAssertTrue(committing.updateCalls.isEmpty)
   }
 
@@ -215,10 +260,53 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     workflow.draft.timeoutSeconds = 120
 
     XCTAssertTrue(workflow.canSave)
-    workflow.save()
-    await waitUntil(!committing.updateCalls.isEmpty)
+    let outcome = await workflow.save()
 
+    XCTAssertEqual(outcome, .persisted(runtime: .notRunning))
     XCTAssertEqual(committing.updateCalls.first?.timeoutSeconds, 120)
+  }
+
+  func testSaveReturnsAValidationRejectionWithoutStartingACommit() async throws {
+    let workflow = makeWorkflow()
+    workflow.draft.timeoutSeconds = 0
+
+    let outcome = await workflow.save()
+
+    XCTAssertEqual(
+      outcome,
+      .rejected(.validation([.timeoutSeconds(error: .invalidTimeout(0))])))
+    XCTAssertFalse(workflow.isCommitting)
+    XCTAssertTrue(committing.updateCalls.isEmpty)
+  }
+
+  func testSaveReportsPersistedSettingsAndIndependentRuntimeFailure() async throws {
+    let runtimeFailure = RuntimeFailureFacts.service(.persistence)
+    committing.updateOutcome = .failed(runtimeFailure)
+    let workflow = makeWorkflow()
+    workflow.draft.timeoutSeconds = 120
+
+    let outcome = await workflow.save()
+
+    XCTAssertEqual(outcome, .persisted(runtime: .failed(runtimeFailure)))
+    XCTAssertEqual(workflow.lastFailure, .runtime(runtimeFailure))
+    XCTAssertEqual(committing.committedSettings.timeoutSeconds, 120)
+  }
+
+  func testRepeatedSaveReturnsAnInProgressRejection() async throws {
+    committing.updateGate = AsyncGate()
+    let workflow = makeWorkflow()
+    workflow.draft.timeoutSeconds = 120
+
+    let first = Task { await workflow.save() }
+    await Task.yield()
+    await waitUntil(workflow.isCommitting)
+    let second = await workflow.save()
+    committing.updateGate?.release()
+    let firstOutcome = await first.value
+
+    XCTAssertEqual(second, .rejected(.inProgress))
+    XCTAssertEqual(firstOutcome, .persisted(runtime: .notRunning))
+    XCTAssertEqual(committing.updateCalls.count, 1)
   }
 
   // MARK: - 脏态
@@ -230,11 +318,11 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     workflow.draft.timeoutSeconds = 120
     XCTAssertTrue(workflow.isDirty)
 
-    workflow.reloadFromCommitted()
+    _ = await workflow.reloadFromCommitted()
     XCTAssertFalse(workflow.isDirty)
 
     workflow.draft.timeoutSeconds = 120
-    workflow.save()
+    _ = await workflow.save()
     await waitUntil(!workflow.isCommitting)
     XCTAssertFalse(workflow.isDirty, "提交成功后草稿回到已提交快照")
     XCTAssertEqual(workflow.draft.timeoutSeconds, 120)
@@ -259,7 +347,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
 
     let workflow = makeWorkflow()
     workflow.draft.timeoutSeconds = 120
-    workflow.save()
+    _ = await workflow.save()
     await waitUntil(!workflow.isCommitting)
 
     XCTAssertEqual(committing.updateCalls.first?.preferredMode, .global, "草稿不编辑当前模式")
@@ -271,7 +359,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     let workflow = makeWorkflow()
     workflow.draft.pacPort = 13089
 
-    workflow.save()
+    _ = await workflow.save()
 
     guard case .pacInvalidation(_, let nextPort)? = workflow.pendingConfirmation else {
       return XCTFail("应挂起 PAC 失效确认，实际 \(String(describing: workflow.pendingConfirmation))")
@@ -282,7 +370,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
         .contains("13089"))
     XCTAssertTrue(committing.updateCalls.isEmpty, "未确认失效提示不得提交")
 
-    workflow.confirmPACNotice()
+    _ = await workflow.confirmPACNotice()
     await waitUntil(!workflow.isCommitting)
     XCTAssertNil(workflow.pendingConfirmation)
     XCTAssertEqual(committing.updateCalls.first?.listen.pacPort, 13089)
@@ -292,8 +380,8 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     let workflow = makeWorkflow()
     workflow.draft.pacPort = 13089
 
-    workflow.save()
-    workflow.cancelPACNotice()
+    _ = await workflow.save()
+    _ = await workflow.cancelPACNotice()
 
     XCTAssertNil(workflow.pendingConfirmation)
     XCTAssertTrue(committing.updateCalls.isEmpty)
@@ -304,10 +392,10 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
 
   // MARK: - 重置确认
 
-  func testResetArmsConfirmationWithScopeSummaryFromSeam() {
+  func testResetArmsConfirmationWithScopeSummaryFromSeam() async throws {
     let workflow = makeWorkflow()
 
-    workflow.reset()
+    _ = await workflow.reset()
 
     guard case .resetPreferences? = workflow.pendingConfirmation else {
       return XCTFail("应挂起重置确认，实际 \(String(describing: workflow.pendingConfirmation))")
@@ -326,8 +414,8 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     let workflow = makeWorkflow()
     workflow.draft.timeoutSeconds = 120
 
-    workflow.reset()
-    workflow.confirmReset()
+    _ = await workflow.reset()
+    _ = await workflow.confirmReset()
     await waitUntil(!workflow.isCommitting)
     XCTAssertEqual(committing.resetCallCount, 1)
 
@@ -336,11 +424,24 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     XCTAssertEqual(workflow.draft, SettingsDraftAdapter.draft(from: ProxySettings()))
   }
 
-  func testCancelingResetDoesNotCommit() {
+  func testResetReturnsPersistedDefaultsAndIndependentRuntimeFailure() async throws {
+    let runtimeFailure = RuntimeFailureFacts.systemProxy(.ownershipConflict)
+    committing.resetOutcome = .failed(runtimeFailure)
     let workflow = makeWorkflow()
 
-    workflow.reset()
-    workflow.cancelReset()
+    _ = await workflow.reset()
+    let outcome = await workflow.confirmReset()
+
+    XCTAssertEqual(outcome, .persisted(runtime: .failed(runtimeFailure)))
+    XCTAssertEqual(workflow.lastFailure, .runtime(runtimeFailure))
+    XCTAssertEqual(workflow.draft, SettingsDraftAdapter.draft(from: ProxySettings()))
+  }
+
+  func testCancelingResetDoesNotCommit() async throws {
+    let workflow = makeWorkflow()
+
+    _ = await workflow.reset()
+    _ = await workflow.cancelReset()
 
     XCTAssertNil(workflow.pendingConfirmation)
     XCTAssertEqual(committing.resetCallCount, 0)
@@ -354,7 +455,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     let workflow = makeWorkflow()
     workflow.draft.timeoutSeconds = 120
 
-    workflow.save()
+    _ = await workflow.save()
     await waitUntil(workflow.lastFailure != nil)
 
     XCTAssertEqual(workflow.lastFailure, .unknown)
@@ -370,7 +471,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     workflow.draft.timeoutSeconds = 120
 
     committing.updateError = ProxySettingsStoreError.ioFailure(detail: "disk full")
-    workflow.save()
+    _ = await workflow.save()
     await waitUntil(!workflow.isCommitting)
     XCTAssertEqual(
       workflow.lastFailure,
@@ -379,7 +480,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
 
     committing.updateError = ProxySettingsStoreError.missingCredential(
       ProxySettingsFileStore.gfwListReference)
-    workflow.save()
+    _ = await workflow.save()
     await waitUntil(
       workflow.lastFailure
         == .store(
@@ -390,15 +491,20 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
   }
 
   func testCommittingStateBlocksRepeatedSave() async throws {
+    committing.updateGate = AsyncGate()
     let workflow = makeWorkflow()
     workflow.draft.timeoutSeconds = 120
 
-    workflow.save()
+    let first = Task { await workflow.save() }
+    await Task.yield()
+    await waitUntil(workflow.isCommitting)
     XCTAssertTrue(workflow.isCommitting)
     XCTAssertFalse(workflow.canSave, "提交中保存门禁关闭")
 
-    workflow.save()
-    await waitUntil(!workflow.isCommitting)
+    let second = await workflow.save()
+    committing.updateGate?.release()
+    _ = await first.value
+    XCTAssertEqual(second, .rejected(.inProgress))
     XCTAssertEqual(committing.updateCalls.count, 1, "提交中不得重复触发")
   }
 
@@ -406,8 +512,8 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     committing.resetError = FakeCommitError.io
     let workflow = makeWorkflow()
 
-    workflow.reset()
-    workflow.confirmReset()
+    _ = await workflow.reset()
+    _ = await workflow.confirmReset()
     await waitUntil(workflow.lastFailure != nil)
 
     XCTAssertEqual(workflow.lastFailure, .unknown)
@@ -435,11 +541,11 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
   func testReloadWithUnlistenChangesStillRefreshesOccupancy() async throws {
     probe = FakeOccupancyProbe()
     let workflow = makeWorkflow()
-    workflow.reloadFromCommitted()
+    _ = await workflow.reloadFromCommitted()
     await waitUntil(workflow.portFieldState(for: .socks).occupancy == .free)
 
     probe.setAnswer(.occupied(occupier: "later"))
-    workflow.reloadFromCommitted()
+    _ = await workflow.reloadFromCommitted()
     await waitUntil(workflow.portFieldState(for: .socks).occupancy != .free)
 
     XCTAssertEqual(

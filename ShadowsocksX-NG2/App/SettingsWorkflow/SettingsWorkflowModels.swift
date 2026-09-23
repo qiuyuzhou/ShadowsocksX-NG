@@ -116,9 +116,50 @@ enum SettingsConfirmation: Equatable, Sendable {
   case resetPreferences
 }
 
+/// Typed reasons why a command cannot proceed. The workflow exposes facts,
+/// not localized strings or a Boolean that makes validation and occupancy
+/// failures indistinguishable.
+enum SettingsCommandRejection: Equatable, Sendable {
+  case inProgress
+  case confirmationPending
+  case superseded
+  case validation([SettingsFieldIssue])
+  case occupied([SettingsPortID])
+  case noPendingConfirmation
+  case noFreePort(SettingsPortID)
+}
+
+/// Runtime convergence is deliberately separate from settings persistence.
+/// A persisted snapshot can therefore be retained even when the runtime has
+/// an independent, safely projected failure.
+enum SettingsRuntimeOutcome: Equatable, Sendable {
+  case notRunning
+  case converged
+  case stopped
+  case failed(RuntimeFailureFacts?)
+}
+
+enum SettingsPersistenceFailure: Error, Equatable, Sendable {
+  case store(ProxySettingsStoreError)
+  case unknown
+}
+
+/// Result returned by every discrete SettingsWorkflow command. Confirmation,
+/// draft-only changes, persistence and runtime facts remain distinguishable.
+enum SettingsCommandOutcome: Equatable, Sendable {
+  case rejected(SettingsCommandRejection)
+  case confirmationRequired(SettingsConfirmation)
+  case confirmationCancelled
+  case draftUpdated(port: SettingsPortID, value: Int)
+  case reloaded
+  case persisted(runtime: SettingsRuntimeOutcome)
+  case persistenceFailed(SettingsPersistenceFailure)
+}
+
 /// Settings workflow 的最后失败仍是 typed；workflow 不提前渲染句子。
 enum SettingsWorkflowFailure: Error, Equatable, Sendable {
   case store(ProxySettingsStoreError)
   case mode(ProxyModeError)
+  case runtime(RuntimeFailureFacts?)
   case unknown
 }

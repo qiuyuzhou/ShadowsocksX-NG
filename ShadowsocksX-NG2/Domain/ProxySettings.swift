@@ -111,6 +111,7 @@ enum ProxySettingsStoreError: Error, Equatable {
   case ioFailure(detail: String)
   case missingCredential(CredentialReference)
   case credentialFailure(detail: String)
+  case rollbackFailed
   case legacyListenSettings(ListenSettingsStoreError)
 }
 
@@ -175,34 +176,53 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
   }
 
   func save(_ settings: ProxySettings) throws {
-    try validated(settings)
+    _ = try validated(settings)
+    var journal = CredentialWriteJournal(credentials: credentials)
     do {
-      try saveOrDelete(settings.gfwListURL, reference: Self.gfwListReference)
-    } catch let error as ProxySettingsStoreError {
-      throw error
-    } catch {
-      throw ProxySettingsStoreError.credentialFailure(detail: String(describing: error))
-    }
-
-    do {
+      if settings.gfwListURL.isEmpty {
+        try journal.deleteOrThrow(Self.gfwListReference)
+      } else {
+        try journal.save(settings.gfwListURL, for: Self.gfwListReference)
+      }
       let data = try Self.jsonEncoder.encode(record(from: settings))
       try AtomicFileWriter.write(data, to: fileURL)
+    } catch let error as ProxySettingsStoreError {
+      throw transactionalFailure(error, journal: journal)
     } catch let error as AtomicFileWriter.WriteError {
-      throw ProxySettingsStoreError.ioFailure(detail: String(describing: error))
+      throw transactionalFailure(
+        .ioFailure(detail: String(describing: error)), journal: journal)
+    } catch let error as CredentialStoreError {
+      throw transactionalFailure(
+        .credentialFailure(detail: String(describing: error)), journal: journal)
     } catch {
-      throw ProxySettingsStoreError.ioFailure(detail: String(describing: error))
+      throw transactionalFailure(
+        .ioFailure(detail: String(describing: error)), journal: journal)
     }
   }
 
   func reset() throws {
+    let settingsSnapshot = try fileSnapshot(at: fileURL)
+    let legacySnapshot = try fileSnapshot(at: legacyListenFileURL)
+    var journal = CredentialWriteJournal(credentials: credentials)
     do {
-      try credentials.delete(Self.gfwListReference)
-      for url in [fileURL, legacyListenFileURL]
-      where FileManager.default.fileExists(atPath: url.path) {
-        try FileManager.default.removeItem(at: url)
-      }
+      try journal.deleteOrThrow(Self.gfwListReference)
+      try removeIfPresent(fileURL)
+      try removeIfPresent(legacyListenFileURL)
     } catch {
-      throw ProxySettingsStoreError.ioFailure(detail: String(describing: error))
+      let filesRestored =
+        restore(settingsSnapshot, at: fileURL)
+        && restore(legacySnapshot, at: legacyListenFileURL)
+      let credentialsRestored: Bool
+      switch journal.rollback() {
+      case .partial:
+        credentialsRestored = false
+      case .nothingToRestore, .restored:
+        credentialsRestored = true
+      }
+      guard filesRestored && credentialsRestored else {
+        throw ProxySettingsStoreError.rollbackFailed
+      }
+      throw asStoreError(error)
     }
   }
 
@@ -225,18 +245,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     let errors = settings.validationErrors
     guard errors.isEmpty else { throw ProxySettingsStoreError.invalid(errors) }
     return settings
-  }
-
-  private func saveOrDelete(_ secret: String, reference: CredentialReference) throws {
-    do {
-      if secret.isEmpty {
-        try credentials.delete(reference)
-      } else {
-        try credentials.save(secret, for: reference)
-      }
-    } catch {
-      throw ProxySettingsStoreError.credentialFailure(detail: String(describing: error))
-    }
   }
 
   private func requiredSecret(for reference: CredentialReference) throws -> String {
@@ -314,6 +322,60 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     return encoder
   }()
+
+  private func transactionalFailure(
+    _ error: ProxySettingsStoreError,
+    journal: CredentialWriteJournal
+  ) -> ProxySettingsStoreError {
+    if case .partial = journal.rollback() {
+      return .rollbackFailed
+    }
+    return error
+  }
+
+  private func asStoreError(_ error: Error) -> ProxySettingsStoreError {
+    if let error = error as? ProxySettingsStoreError { return error }
+    if let error = error as? CredentialStoreError {
+      return .credentialFailure(detail: String(describing: error))
+    }
+    return .ioFailure(detail: String(describing: error))
+  }
+
+  private func fileSnapshot(at url: URL) throws -> Data? {
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    do {
+      return try Data(contentsOf: url)
+    } catch {
+      throw ProxySettingsStoreError.ioFailure(detail: String(describing: error))
+    }
+  }
+
+  private func removeIfPresent(_ url: URL) throws {
+    guard FileManager.default.fileExists(atPath: url.path) else { return }
+    do {
+      try FileManager.default.removeItem(at: url)
+    } catch {
+      throw ProxySettingsStoreError.ioFailure(detail: String(describing: error))
+    }
+  }
+
+  private func restore(_ snapshot: Data?, at url: URL) -> Bool {
+    guard let snapshot else {
+      guard FileManager.default.fileExists(atPath: url.path) else { return true }
+      do {
+        try FileManager.default.removeItem(at: url)
+        return true
+      } catch {
+        return false
+      }
+    }
+    do {
+      try AtomicFileWriter.write(snapshot, to: url)
+      return true
+    } catch {
+      return false
+    }
+  }
 }
 
 private struct ProxySettingsRecord: Codable, Equatable, Sendable {

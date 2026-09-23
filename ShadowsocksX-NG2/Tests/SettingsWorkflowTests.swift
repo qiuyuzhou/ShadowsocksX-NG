@@ -37,8 +37,7 @@ final class SettingsWorkflowTests: XCTestCase {
     let pair = makePair()
 
     pair.workflow.draft.timeoutSeconds = 120
-    pair.workflow.save()
-    await waitUntil(!pair.workflow.isCommitting)
+    _ = await pair.workflow.save()
 
     XCTAssertEqual(settingsStore.saved?.timeoutSeconds, 120)
     XCTAssertEqual(pair.controller.settings.timeoutSeconds, 120)
@@ -51,7 +50,7 @@ final class SettingsWorkflowTests: XCTestCase {
     probe = FakeOccupancyProbe(occupiedPorts: [11086])
     let pair = try await makeRunningPair()
 
-    pair.workflow.reloadFromCommitted()
+    _ = await pair.workflow.reloadFromCommitted()
     await waitUntil(pair.workflow.portFieldState(for: .socks).occupancy != nil)
 
     XCTAssertEqual(
@@ -63,8 +62,7 @@ final class SettingsWorkflowTests: XCTestCase {
     XCTAssertTrue(pair.workflow.canSave)
 
     pair.workflow.draft.timeoutSeconds = 120
-    pair.workflow.save()
-    await waitUntil(settingsStore.saved != nil)
+    _ = await pair.workflow.save()
     XCTAssertEqual(settingsStore.saved?.timeoutSeconds, 120)
   }
 
@@ -72,12 +70,11 @@ final class SettingsWorkflowTests: XCTestCase {
     let pair = makePair()
 
     pair.workflow.draft.pacPort = 13089
-    pair.workflow.save()
+    _ = await pair.workflow.save()
     XCTAssertNotNil(pair.workflow.pendingConfirmation)
     XCTAssertNil(settingsStore.saved, "未确认失效提示不得提交")
 
-    pair.workflow.confirmPACNotice()
-    await waitUntil(settingsStore.saved != nil)
+    _ = await pair.workflow.confirmPACNotice()
     XCTAssertNil(pair.workflow.pendingConfirmation)
     XCTAssertEqual(pair.controller.settings.listen.pacPort, 13089)
   }
@@ -87,8 +84,7 @@ final class SettingsWorkflowTests: XCTestCase {
     let pair = makePair()
 
     pair.workflow.draft.timeoutSeconds = 120
-    pair.workflow.save()
-    await waitUntil(pair.workflow.lastFailure != nil)
+    _ = await pair.workflow.save()
 
     XCTAssertEqual(pair.workflow.lastFailure, .unknown)
     XCTAssertEqual(pair.workflow.lastFailure?.presentableMessage, AppPresentation.unknownError)
@@ -101,13 +97,12 @@ final class SettingsWorkflowTests: XCTestCase {
     let pair = makePair()
     var custom = pair.controller.settings
     custom.timeoutSeconds = 120
-    try await pair.controller.updateSettings(custom)
+    _ = try await pair.controller.updateSettings(custom)
     XCTAssertEqual(pair.controller.settings.timeoutSeconds, 120)
 
-    pair.workflow.reset()
+    _ = await pair.workflow.reset()
     XCTAssertNotNil(pair.workflow.pendingConfirmation, "重置恒先经 seam 裁定的确认")
-    pair.workflow.confirmReset()
-    await waitUntil(pair.controller.settings == ProxySettings())
+    _ = await pair.workflow.confirmReset()
 
     XCTAssertEqual(pair.workflow.draft, SettingsDraftAdapter.draft(from: ProxySettings()))
     XCTAssertNil(settingsStore.saved)

@@ -10,16 +10,82 @@ enum PortOccupancy: Equatable, Sendable {
   case unknown(detail: String)
 }
 
+extension RuntimeListenFacts {
+  func port(for endpoint: ProxyEndpointKind) -> Int {
+    switch endpoint {
+    case .socks: socksPort
+    case .http: httpPort
+    case .pac: pacPort
+    }
+  }
+
+  func replacingPort(_ port: Int, for endpoint: ProxyEndpointKind) -> RuntimeListenFacts {
+    switch endpoint {
+    case .socks:
+      return RuntimeListenFacts(
+        scope: scope,
+        socksPort: port,
+        httpProxyEnabled: httpProxyEnabled,
+        httpPort: httpPort,
+        pacPort: pacPort,
+        udpRelayEnabled: udpRelayEnabled)
+    case .http:
+      return RuntimeListenFacts(
+        scope: scope,
+        socksPort: socksPort,
+        httpProxyEnabled: httpProxyEnabled,
+        httpPort: port,
+        pacPort: pacPort,
+        udpRelayEnabled: udpRelayEnabled)
+    case .pac:
+      return RuntimeListenFacts(
+        scope: scope,
+        socksPort: socksPort,
+        httpProxyEnabled: httpProxyEnabled,
+        httpPort: httpPort,
+        pacPort: port,
+        udpRelayEnabled: udpRelayEnabled)
+    }
+  }
+}
+
+/// A port probe request carries the complete effective listener identity. The
+/// requested port may differ from `listen.port(for:)` only for a suggested
+/// candidate; the rest of the listener facts remain part of the request.
+struct PortOccupancyProbeRequest: Equatable, Sendable {
+  let endpoint: ProxyEndpointKind
+  let listen: RuntimeListenFacts
+  let port: Int
+
+  init(
+    endpoint: ProxyEndpointKind,
+    listen: RuntimeListenFacts,
+    port: Int? = nil
+  ) {
+    self.endpoint = endpoint
+    self.listen = listen
+    self.port = port ?? listen.port(for: endpoint)
+  }
+
+  var bindAddress: String { listen.bindAddress }
+}
+
 /// 端口占用探测缝（issue #30）：设置编辑期的即时占用校验。激活是否成功
 /// 仍以 runtime 实际绑定为准（#29 健康门禁），本探测不构成权威判定。
 protocol PortOccupancyProbing: Sendable {
-  func occupancy(port: Int, bindAddress: String) -> PortOccupancy
+  func occupancy(for request: PortOccupancyProbeRequest) -> PortOccupancy
 }
 
 /// 系统实现：对 `bindAddress:port` 做一次不带复用选项的 TCP bind——能绑定
 /// 即空闲，`EADDRINUSE` 即占用；占用时尽力以 `lsof` 解析监听进程名。探测
 /// 不设置 SO_REUSEADDR/SO_REUSEPORT，避免 Legacy 式复用残留的假空闲。
 struct SystemPortOccupancyProbe: PortOccupancyProbing {
+  func occupancy(for request: PortOccupancyProbeRequest) -> PortOccupancy {
+    occupancy(port: request.port, bindAddress: request.bindAddress)
+  }
+
+  /// Compatibility helper for the lower-level probe tests. SettingsWorkflow
+  /// always uses `occupancy(for:)` so production requests retain full facts.
   func occupancy(port: Int, bindAddress: String) -> PortOccupancy {
     var address = sockaddr_in()
     address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)

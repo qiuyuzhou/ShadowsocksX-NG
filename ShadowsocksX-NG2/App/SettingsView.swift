@@ -20,7 +20,7 @@ struct SettingsView: View {
     .formStyle(.grouped)
     .padding()
     .onAppear {
-      workflow.reloadFromCommitted()
+      Task { _ = await workflow.reloadFromCommitted() }
     }
     .alert(
       workflow.pendingConfirmation.map { confirmationPresentation(for: $0).title } ?? "",
@@ -137,11 +137,11 @@ struct SettingsView: View {
       HStack {
         Spacer()
         Button("重置偏好") {
-          workflow.reset()
+          Task { _ = await workflow.reset() }
         }
         .disabled(workflow.isCommitting)
         Button(workflow.isCommitting ? "保存中…" : "保存") {
-          workflow.save()
+          Task { _ = await workflow.save() }
         }
         .keyboardShortcut(.defaultAction)
         .disabled(!workflow.canSave)
@@ -178,7 +178,7 @@ extension SettingsView {
       }
       if state.canSuggestFreePort {
         Button("建议空闲端口") {
-          workflow.suggestFreePort(for: id)
+          Task { _ = await workflow.suggestFreePort(for: id) }
         }
         .font(.caption)
       }
@@ -250,15 +250,15 @@ extension SettingsView {
         title: "PAC 地址将失效",
         confirmTitle: "继续保存",
         confirmRole: nil,
-        confirm: { workflow.confirmPACNotice() },
-        cancel: { workflow.cancelPACNotice() })
+        confirm: { Task { _ = await workflow.confirmPACNotice() } },
+        cancel: { Task { _ = await workflow.cancelPACNotice() } })
     case .resetPreferences:
       ConfirmationPresentation(
         title: "重置所有偏好？",
         confirmTitle: "重置",
         confirmRole: .destructive,
-        confirm: { workflow.confirmReset() },
-        cancel: { workflow.cancelReset() })
+        confirm: { Task { _ = await workflow.confirmReset() } },
+        cancel: { Task { _ = await workflow.cancelReset() } })
     }
   }
 

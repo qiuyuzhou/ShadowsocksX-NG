@@ -272,6 +272,67 @@ struct SslocalListenSettings: Equatable, Sendable {
   }
 }
 
+/// Typed effective listener facts exposed by the runtime boundary. This is the
+/// complete identity of the listeners that are actually intended to be bound:
+/// scope carries both bind and advertised addresses, while the endpoint flags
+/// and ports prevent a same-port comparison from masquerading as a match.
+struct RuntimeListenFacts: Equatable, Sendable {
+  let scope: ListenScope
+  let socksPort: Int
+  let httpProxyEnabled: Bool
+  let httpPort: Int
+  let pacPort: Int
+  let udpRelayEnabled: Bool
+
+  init(listen: SslocalListenSettings) {
+    self.init(
+      scope: listen.scope,
+      socksPort: listen.socksPort,
+      httpProxyEnabled: listen.httpProxyEnabled,
+      httpPort: listen.httpPort,
+      pacPort: listen.pacPort,
+      udpRelayEnabled: listen.udpRelayEnabled)
+  }
+
+  init(
+    scope: ListenScope,
+    socksPort: Int,
+    httpProxyEnabled: Bool,
+    httpPort: Int,
+    pacPort: Int,
+    udpRelayEnabled: Bool
+  ) {
+    self.scope = scope
+    self.socksPort = socksPort
+    self.httpProxyEnabled = httpProxyEnabled
+    self.httpPort = httpPort
+    self.pacPort = pacPort
+    self.udpRelayEnabled = udpRelayEnabled
+  }
+
+  init(document: SslocalRuntimeDocument) {
+    let scope: ListenScope
+    switch document.pac.listenScope {
+    case .loopback:
+      scope = .loopback
+    case .host:
+      scope = .host(advertisedAddress: document.pac.advertisedAddress)
+    }
+    let socks = document.locals.first { $0.inboundProtocol == "socks" }
+    let http = document.locals.first { $0.inboundProtocol == "http" }
+    self.init(
+      scope: scope,
+      socksPort: socks?.localPort ?? document.pac.socksPort,
+      httpProxyEnabled: http != nil,
+      httpPort: http?.localPort ?? SslocalListenSettings.defaultHTTPPort,
+      pacPort: document.pac.port,
+      udpRelayEnabled: socks?.mode == "tcp_and_udp")
+  }
+
+  var bindAddress: String { scope.bindAddress }
+  var advertisedAddress: String { scope.advertisedAddress }
+}
+
 /// 监听指纹（spec #21 D5/D7）：服务器列表变化可热重载；任一本地入站或 PAC
 /// endpoint 变化都必须由 wrapper 走优雅重启。
 struct SslocalListenFingerprint: Equatable, Sendable {

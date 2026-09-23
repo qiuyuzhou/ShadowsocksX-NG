@@ -22,22 +22,64 @@ func waitUntil(
 @MainActor
 final class FakeSettingsCommitter: SettingsCommitting {
   var committedSettings: ProxySettings = ProxySettings()
-  var isProxyRunning = false
+  var runtimeListenFacts: RuntimeListenFacts?
   var updateError: Error?
   var resetError: Error?
+  var updateOutcome: SettingsRuntimeOutcome = .notRunning
+  var resetOutcome: SettingsRuntimeOutcome = .notRunning
+  var updateGate: AsyncGate?
   private(set) var updateCalls: [ProxySettings] = []
   private(set) var resetCallCount = 0
 
-  func updateSettings(_ proposed: ProxySettings) async throws {
-    if let updateError { throw updateError }
-    updateCalls.append(proposed)
-    committedSettings = proposed
+  var isProxyRunning: Bool {
+    get { runtimeListenFacts != nil }
+    set {
+      runtimeListenFacts = newValue ? RuntimeListenFacts(listen: committedSettings.listen) : nil
+    }
   }
 
-  func resetPreferences() async throws {
+  func updateSettings(_ proposed: ProxySettings) async throws -> SettingsRuntimeOutcome {
+    if let updateError { throw updateError }
+    if let updateGate { await updateGate.wait() }
+    updateCalls.append(proposed)
+    committedSettings = proposed
+    return updateOutcome
+  }
+
+  func resetPreferences() async throws -> SettingsRuntimeOutcome {
     if let resetError { throw resetError }
     resetCallCount += 1
     committedSettings = ProxySettings()
+    return resetOutcome
+  }
+}
+
+/// 可重复使用的异步门闩，用于证明 workflow 在提交等待期间拒绝第二次命令。
+final class AsyncGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var released = false
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+
+  func wait() async {
+    await withCheckedContinuation { continuation in
+      lock.lock()
+      if released {
+        lock.unlock()
+        continuation.resume()
+      } else {
+        waiters.append(continuation)
+        lock.unlock()
+      }
+    }
+  }
+
+  func release() {
+    lock.lock()
+    released = true
+    let waiters = self.waiters
+    self.waiters.removeAll()
+    lock.unlock()
+    waiters.forEach { $0.resume() }
   }
 }
 
@@ -47,6 +89,7 @@ final class FakeOccupancyProbe: PortOccupancyProbing, @unchecked Sendable {
   private let occupiedPorts: Set<Int>
   private let unknownPorts: Set<Int>
   private var requestedPorts: [Int] = []
+  private var requestedRequests: [PortOccupancyProbeRequest] = []
   private var answerOverride: PortOccupancy?
 
   init(occupiedPorts: Set<Int> = [], unknownPorts: Set<Int> = []) {
@@ -66,6 +109,12 @@ final class FakeOccupancyProbe: PortOccupancyProbing, @unchecked Sendable {
     return requestedPorts.count
   }
 
+  var requests: [PortOccupancyProbeRequest] {
+    lock.lock()
+    defer { lock.unlock() }
+    return requestedRequests
+  }
+
   /// 覆盖全部端口的应答（占用代际测试用）。
   func setAnswer(_ answer: PortOccupancy?) {
     lock.lock()
@@ -73,15 +122,16 @@ final class FakeOccupancyProbe: PortOccupancyProbing, @unchecked Sendable {
     answerOverride = answer
   }
 
-  func occupancy(port: Int, bindAddress: String) -> PortOccupancy {
+  func occupancy(for request: PortOccupancyProbeRequest) -> PortOccupancy {
     lock.lock()
     defer { lock.unlock() }
-    requestedPorts.append(port)
+    requestedPorts.append(request.port)
+    requestedRequests.append(request)
     if let answerOverride { return answerOverride }
-    if unknownPorts.contains(port) {
+    if unknownPorts.contains(request.port) {
       return .unknown(detail: "无法判定")
     }
-    return occupiedPorts.contains(port) ? .occupied(occupier: "other-app") : .free
+    return occupiedPorts.contains(request.port) ? .occupied(occupier: "other-app") : .free
   }
 }
 
@@ -128,7 +178,7 @@ final class GatedOccupancyProbe: PortOccupancyProbing, @unchecked Sendable {
     }
   }
 
-  func occupancy(port: Int, bindAddress: String) -> PortOccupancy {
+  func occupancy(for request: PortOccupancyProbeRequest) -> PortOccupancy {
     lock.lock()
     enteredCount += 1
     let gated = isGated

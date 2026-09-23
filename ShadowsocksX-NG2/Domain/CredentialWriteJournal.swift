@@ -40,10 +40,16 @@ struct CredentialWriteJournal {
 
   /// 尽力删除（幂等）；回滚时恢复改动前的原值或「不存在」。
   mutating func delete(_ reference: CredentialReference) {
+    try? deleteOrThrow(reference)
+  }
+
+  /// 事务调用方需要知道删除是否成功；保留 `delete` 的既有尽力而为语义
+  /// 给目录工作流使用。
+  mutating func deleteOrThrow(_ reference: CredentialReference) throws {
     if originals[reference] == nil {
-      originals[reference] = OriginalValue(secret: (try? credentials.secret(for: reference)) ?? nil)
+      originals[reference] = OriginalValue(secret: try credentials.secret(for: reference))
     }
-    try? credentials.delete(reference)
+    try credentials.delete(reference)
   }
 
   /// 恢复全部触碰过的引用到改动前的值（尽力），返回逐引用结果。

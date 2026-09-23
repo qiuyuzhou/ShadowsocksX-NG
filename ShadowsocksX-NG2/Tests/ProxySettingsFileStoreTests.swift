@@ -31,6 +31,18 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     try Data(text.utf8).write(to: store.fileURL)
   }
 
+  private func makeWriteFailingStore(credentials: CredentialStoring) throws
+    -> ProxySettingsFileStore
+  {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let blockedParent = directory.appendingPathComponent("blocked")
+    try Data("not a directory".utf8).write(to: blockedParent)
+    return ProxySettingsFileStore(
+      fileURL: blockedParent.appendingPathComponent("settings.json"),
+      legacyListenFileURL: directory.appendingPathComponent("listen-settings.json"),
+      credentials: credentials)
+  }
+
   func testRoundTripKeepsPreferencesButDoesNotWriteRemoteURLsToSettingsFile() throws {
     var settings = ProxySettings()
     settings.listen.scope = .host(advertisedAddress: "192.168.2.89")
@@ -74,6 +86,15 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     XCTAssertEqual(try store.load(), ProxySettings())
   }
 
+  func testUnknownEnabledModesIsIgnoredAndNeverWrittenBack() throws {
+    try writeRaw("{\"enabledModes\":[\"global\"],\"preferredMode\":\"pac\"}")
+
+    XCTAssertEqual(try store.load().preferredMode, .pac)
+    try store.save(ProxySettings())
+    let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
+    XCTAssertFalse(raw.contains("enabledModes"))
+  }
+
   func testInvalidSaveDoesNotTouchExistingSettings() throws {
     try store.save(ProxySettings())
     var invalid = ProxySettings()
@@ -85,6 +106,34 @@ final class ProxySettingsFileStoreTests: XCTestCase {
         .invalid([.invalidTimeout(0)]))
     }
     XCTAssertEqual(try store.load(), ProxySettings())
+  }
+
+  func testSaveFailureRollsBackTheCredentialWhenTheSettingsDocumentCannotBeWritten() throws {
+    store = try makeWriteFailingStore(credentials: credentials)
+    var next = ProxySettings()
+    next.gfwListURL = "https://lists.example.test/new.txt"
+
+    XCTAssertThrowsError(try store.save(next)) { error in
+      guard case .ioFailure = error as? ProxySettingsStoreError else {
+        return XCTFail("文件写入失败应保留为 typed io failure，实际为 \(error)")
+      }
+    }
+    XCTAssertNil(try credentials.secret(for: ProxySettingsFileStore.gfwListReference))
+  }
+
+  func testPartialCredentialRollbackIsTypedAndNeverLooksLikeSuccess() throws {
+    let failingCredentials = SelectiveCredentialStore()
+    store = try makeWriteFailingStore(credentials: failingCredentials)
+    failingCredentials.failDelete = true
+    var next = ProxySettings()
+    next.gfwListURL = "https://lists.example.test/new.txt"
+
+    XCTAssertThrowsError(try store.save(next)) { error in
+      XCTAssertEqual(error as? ProxySettingsStoreError, .rollbackFailed)
+    }
+    XCTAssertEqual(
+      try failingCredentials.secret(for: ProxySettingsFileStore.gfwListReference),
+      next.gfwListURL)
   }
 
   func testMissingNewFileMigratesLegacyListenSettingsAndUsesNewDefaults() throws {
@@ -109,5 +158,25 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
     XCTAssertNil(try credentials.secret(for: ProxySettingsFileStore.gfwListReference))
     XCTAssertEqual(try store.load(), ProxySettings())
+  }
+}
+
+private final class SelectiveCredentialStore: CredentialStoring {
+  private var values: [CredentialReference: String] = [:]
+  var failDelete = false
+
+  func save(_ secret: String, for reference: CredentialReference) throws {
+    values[reference] = secret
+  }
+
+  func secret(for reference: CredentialReference) throws -> String? {
+    values[reference]
+  }
+
+  func delete(_ reference: CredentialReference) throws {
+    if failDelete {
+      throw CredentialStoreError.keychainStatus(-25300)
+    }
+    values.removeValue(forKey: reference)
   }
 }
