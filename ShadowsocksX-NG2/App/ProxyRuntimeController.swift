@@ -130,6 +130,12 @@ final class ProxyRuntimeController: ObservableObject {
 
   var isActiveTargetPresent: Bool { machine.activeTargetID != nil }
 
+  /// Stable app-facing projection for status-menu presentation. The menu does
+  /// not depend on this controller's nested state representation.
+  var runtimeFacts: ProxyRuntimeFacts {
+    ProxyRuntimeFacts(state: state)
+  }
+
   private static var defaultFirewallExecutableURLs: [URL] {
     let bundle = Bundle.main.bundleURL
     return [
@@ -212,6 +218,7 @@ final class ProxyRuntimeController: ObservableObject {
   /// restores it; a persistence failure keeps the previous mode in force and
   /// names the reason instead of switching silently.
   func setProxyMode(_ mode: ProxyMode) async {
+    guard ProxyMode.availableModes(for: settings).contains(mode) else { return }
     guard mode != proxyMode else { return }
     var next = settings
     next.preferredMode = mode.kind
@@ -846,18 +853,6 @@ extension ProxyRuntimeController {
 
 extension ProxyRuntimeController {
   fileprivate static func makeProxyMode(from settings: ProxySettings) -> ProxyMode {
-    switch settings.preferredMode {
-    case .pac:
-      return .pac
-    case .global:
-      return .global
-    case .manual:
-      return .manual
-    case .externalPAC:
-      guard let url = URL(string: settings.externalPACURL),
-        (try? ProxyMode.validateExternalPACURL(url)) != nil
-      else { return .pac }
-      return .externalPAC(url)
-    }
+    ProxyMode.availableModes(for: settings).first { $0.kind == settings.preferredMode } ?? .pac
   }
 }

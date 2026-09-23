@@ -81,6 +81,18 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
     }
   }
 
+  /// Returns every mode the current settings can support, in the product's
+  /// stable selector order. Built-in modes are always available; external PAC
+  /// is available only when its configured URL passes the existing validator.
+  static func availableModes(for settings: ProxySettings) -> [ProxyMode] {
+    let builtInModes: [ProxyMode] = [.pac, .global, .manual]
+    guard !settings.externalPACURL.isEmpty,
+      let url = URL(string: settings.externalPACURL),
+      (try? validateExternalPACURL(url)) != nil
+    else { return builtInModes }
+    return builtInModes + [.externalPAC(url)]
+  }
+
   /// Derives the only system-proxy state that this mode is allowed to own.
   /// `nil` means manual mode: restore the user's previous system settings and
   /// leave them under the user's control.

@@ -39,14 +39,10 @@ struct ProxyStatusMenu: View {
       Task { await controller.setProxyEnabled(!summary.isOn) }
     }
 
-    // ③ 模式选择（勾选态）：内置三模式恒可选；外部 PAC 仅在已配置有效 URL
-    // 时成为选项。
+    // ③ 模式选择（勾选态）：可选性与顺序由 Domain 唯一策略裁定。
     Picker("模式", selection: modeBinding) {
-      Text(ProxyMode.pac.label).tag(ProxyMode.pac)
-      Text(ProxyMode.global.label).tag(ProxyMode.global)
-      Text(ProxyMode.manual.label).tag(ProxyMode.manual)
-      if let externalMode = configuredExternalPACMode {
-        Text(externalMode.label).tag(externalMode)
+      ForEach(ProxyMode.availableModes(for: controller.settings), id: \.self) { mode in
+        Text(mode.label).tag(mode)
       }
     }
     .pickerStyle(.inline)
@@ -101,7 +97,7 @@ struct ProxyStatusMenu: View {
 
   private var presentation: StatusMenuModel.Summary {
     StatusMenuModel.summary(
-      state: controller.state,
+      facts: controller.runtimeFacts,
       mode: controller.proxyMode,
       targetPath: StatusMenuModel.targetPath(
         in: catalogWorkflow.tree.roots, activeTargetID: controller.activeTargetID))
@@ -113,18 +109,6 @@ struct ProxyStatusMenu: View {
     Binding(
       get: { controller.proxyMode },
       set: { mode in Task { await controller.setProxyMode(mode) } })
-  }
-
-  /// 外部 PAC 仅在已配置有效 URL 时成为菜单选项；URL 的编辑面在设置区。
-  private var configuredExternalPACMode: ProxyMode? {
-    if case .externalPAC(let url) = controller.proxyMode {
-      return .externalPAC(url)
-    }
-    guard let url = URL(string: controller.settings.externalPACURL),
-      !controller.settings.externalPACURL.isEmpty,
-      (try? ProxyMode.validateExternalPACURL(url)) != nil
-    else { return nil }
-    return .externalPAC(url)
   }
 
   /// 只读级联树：分组展开为子菜单，活动目标以勾选呈现；无编辑入口。

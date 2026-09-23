@@ -159,9 +159,13 @@ extension AppPresentation {
 
   static func message(for failure: RuntimeFailureFacts) -> String {
     switch failure {
+    case .firewallBlocked(let facts):
+      return
+        "macOS 防火墙已阻止 \(facts.executableName) 接受传入连接。请在系统设置中允许传入连接。"
     case .launch(let facts): return launchFailure(facts)
     case .service(let facts): return serviceFailure(facts)
     case .activation(let error): return activation(error)
+    case .requiresApproval: return "请在系统设置的登录项中允许代理后台服务"
     case .systemProxy(let facts): return systemProxyFailure(facts)
     }
   }
@@ -172,12 +176,14 @@ extension AppPresentation {
     case .starting: return "代理正在启动"
     case .running: return "代理运行中"
     case .firewallBlocked(let facts):
-      return "macOS 防火墙已阻止 \(facts.executableName) 接受传入连接。请在系统设置中允许传入连接。"
-    case .launchFailed(let facts): return launchFailure(facts)
-    case .activationFailed(let failure): return activation(failure)
-    case .requiresApproval: return "请在系统设置的登录项中允许代理后台服务"
-    case .serviceFailed(let facts): return serviceFailure(facts)
-    case .systemProxyFailed(let facts): return systemProxyFailure(facts)
+      return message(for: RuntimeFailureFacts.firewallBlocked(facts))
+    case .launchFailed(let facts): return message(for: RuntimeFailureFacts.launch(facts))
+    case .activationFailed(let failure):
+      return message(for: RuntimeFailureFacts.activation(failure))
+    case .requiresApproval: return message(for: RuntimeFailureFacts.requiresApproval)
+    case .serviceFailed(let facts): return message(for: RuntimeFailureFacts.service(facts))
+    case .systemProxyFailed(let facts):
+      return message(for: RuntimeFailureFacts.systemProxy(facts))
     }
   }
 

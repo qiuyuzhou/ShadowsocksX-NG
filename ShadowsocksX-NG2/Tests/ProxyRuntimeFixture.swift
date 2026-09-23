@@ -238,3 +238,21 @@ enum ProxyRuntimeFixture {
     }
   }
 }
+
+final class InMemoryProxySettingsStore: ProxySettingsStoring {
+  var saved: ProxySettings?
+  var saveError: Error?
+
+  func load() throws -> ProxySettings {
+    saved ?? ProxySettings()
+  }
+
+  func save(_ settings: ProxySettings) throws {
+    if let saveError { throw saveError }
+    saved = settings
+  }
+
+  func reset() throws {
+    saved = nil
+  }
+}

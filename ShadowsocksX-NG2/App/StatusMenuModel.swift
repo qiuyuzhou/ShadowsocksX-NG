@@ -18,43 +18,36 @@ enum StatusMenuModel {
 
   /// 运行状态 → 摘要映射（与主窗口诊断区口径一致）。
   static func summary(
-    state: ProxyRuntimeController.ProxyState,
+    facts: ProxyRuntimeFacts,
     mode: ProxyMode,
     targetPath: String?
   ) -> Summary {
     let status: String
-    let detail: String?
-    switch state {
+    switch facts.status {
     case .off:
       status = "代理未运行"
-      detail = nil
     case .starting:
       status = "正在启动代理…"
-      detail = nil
     case .running:
       status = "代理运行中"
-      detail = nil
     case .firewallBlocked:
       status = "代理运行中（局域网受阻）"
-      detail = AppPresentation.message(for: state)
     case .launchFailed:
       status = "启动失败"
-      detail = AppPresentation.message(for: state)
     case .activationFailed:
       status = "无法启动"
-      detail = AppPresentation.message(for: state)
     case .requiresApproval:
       status = "等待允许后台代理"
-      detail = AppPresentation.message(for: state)
     case .serviceFailed:
       status = "服务管理失败"
-      detail = AppPresentation.message(for: state)
     case .systemProxyFailed:
       status = "系统代理未应用"
-      detail = AppPresentation.message(for: state)
     }
     return Summary(
-      isOn: state.isOn, status: status, detail: detail, modeLabel: mode.label,
+      isOn: facts.isOn,
+      status: status,
+      detail: facts.failure.map { AppPresentation.message(for: $0) },
+      modeLabel: mode.label,
       targetPath: targetPath)
   }
 

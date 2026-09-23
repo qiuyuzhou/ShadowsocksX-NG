@@ -80,6 +80,16 @@ final class AppPresentationTests: XCTestCase {
       XCTAssertFalse(message.isEmpty, "每个 runtime fact 都应有呈现：\(state)")
     }
 
+    let runtimeFailures: [RuntimeFailureFacts] = [
+      .firewallBlocked(FirewallBlockedFacts(executableName: "sslocal")),
+      .requiresApproval,
+    ]
+    for failure in runtimeFailures {
+      XCTAssertFalse(
+        AppPresentation.message(for: failure).isEmpty,
+        "每个 typed runtime failure fact 都应有呈现：\(failure)")
+    }
+
     let issues: [SettingsFieldIssue] = [
       .port(.socks, error: .portOutOfRange(endpoint: .socks, port: 0)),
       .advertisedAddress(error: .invalidHostAddress("127.0.0.1")),

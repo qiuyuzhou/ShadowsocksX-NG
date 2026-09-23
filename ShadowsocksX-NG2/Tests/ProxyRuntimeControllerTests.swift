@@ -11,8 +11,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
   private var catalogFileURL: URL!
   private var activationFileURL: URL!
   private var credentials: InMemoryCredentialStore!
-  private var agent: ProxyRuntimeFixture.FakeLaunchAgent!
-  private var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
+  var agent: ProxyRuntimeFixture.FakeLaunchAgent!
+  var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
   private var signals: SignalRecorder!
 
   /// SIGUSR1 投递记录缝。
@@ -63,7 +63,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     return (catalog, server)
   }
 
-  private func makeController(
+  func makeController(
     probe: EndpointProbing,
     agentStatus: LaunchAgentStatus = .notRegistered,
     listen: SslocalListenSettings = ActivationFixture.listen,
@@ -563,21 +563,4 @@ extension ProxyRuntimeControllerTests {
     var description: String { "fake-save-error" }
   }
 
-  private final class InMemoryProxySettingsStore: ProxySettingsStoring {
-    var saved: ProxySettings?
-    var saveError: Error?
-
-    func load() throws -> ProxySettings {
-      saved ?? ProxySettings()
-    }
-
-    func save(_ settings: ProxySettings) throws {
-      if let saveError { throw saveError }
-      saved = settings
-    }
-
-    func reset() throws {
-      saved = nil
-    }
-  }
 }

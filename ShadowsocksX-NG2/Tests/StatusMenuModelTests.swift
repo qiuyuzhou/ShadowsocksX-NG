@@ -5,64 +5,101 @@ import XCTest
 /// 状态菜单八项白名单的纯呈现逻辑（spec #21 D11，issue #31）：头部状态摘要
 /// 映射、HTTP 导出行派生、「切换模式」循环、活动目标级联树快照。
 final class StatusMenuModelTests: XCTestCase {
+  private struct RuntimeSummaryCase {
+    let facts: ProxyRuntimeFacts
+    let expectedStatus: String
+    let expectedIsOn: Bool
+  }
+
+  private static let runtimeSummaryCases: [RuntimeSummaryCase] = [
+    RuntimeSummaryCase(
+      facts: ProxyRuntimeFacts(status: .starting, isOn: true),
+      expectedStatus: "正在启动代理…",
+      expectedIsOn: true),
+    RuntimeSummaryCase(
+      facts: ProxyRuntimeFacts(status: .running, isOn: true),
+      expectedStatus: "代理运行中",
+      expectedIsOn: true),
+    RuntimeSummaryCase(
+      facts: ProxyRuntimeFacts(
+        status: .firewallBlocked,
+        isOn: true,
+        failure: .firewallBlocked(FirewallBlockedFacts(executableName: "sslocal"))),
+      expectedStatus: "代理运行中（局域网受阻）",
+      expectedIsOn: true),
+    RuntimeSummaryCase(
+      facts: ProxyRuntimeFacts(
+        status: .launchFailed,
+        isOn: false,
+        failure: .launch(
+          .localEndpoint(
+            endpoint: "http", host: "127.0.0.1", port: 11087, cause: .refused))),
+      expectedStatus: "启动失败",
+      expectedIsOn: false),
+    RuntimeSummaryCase(
+      facts: ProxyRuntimeFacts(
+        status: .activationFailed,
+        isOn: false,
+        failure: .activation(.noActiveTarget)),
+      expectedStatus: "无法启动",
+      expectedIsOn: false),
+    RuntimeSummaryCase(
+      facts: ProxyRuntimeFacts(
+        status: .requiresApproval, isOn: true, failure: .requiresApproval),
+      expectedStatus: "等待允许后台代理",
+      expectedIsOn: true),
+    RuntimeSummaryCase(
+      facts: ProxyRuntimeFacts(
+        status: .serviceFailed,
+        isOn: false,
+        failure: .service(.persistence)),
+      expectedStatus: "服务管理失败",
+      expectedIsOn: false),
+    RuntimeSummaryCase(
+      facts: ProxyRuntimeFacts(
+        status: .systemProxyFailed,
+        isOn: true,
+        failure: .systemProxy(.operation(.applyFailed))),
+      expectedStatus: "系统代理未应用",
+      expectedIsOn: true),
+  ]
+
   // MARK: - 头部状态摘要
 
   func testSummaryRunningStateIsOnWithNoDetail() {
     let summary = StatusMenuModel.summary(
-      state: .running, mode: .pac, targetPath: "分组A / 香港 01")
+      facts: ProxyRuntimeFacts(status: .running, isOn: true),
+      mode: .pac,
+      targetPath: "分组A / 香港 01")
     XCTAssertTrue(summary.isOn)
     XCTAssertEqual(summary.status, "代理运行中")
     XCTAssertNil(summary.detail)
   }
 
   func testSummaryOffStateIsOff() {
-    let summary = StatusMenuModel.summary(state: .off, mode: .global, targetPath: nil)
+    let summary = StatusMenuModel.summary(
+      facts: ProxyRuntimeFacts(status: .off, isOn: false), mode: .global, targetPath: nil)
     XCTAssertFalse(summary.isOn)
     XCTAssertEqual(summary.status, "代理未运行")
     XCTAssertNil(summary.detail)
   }
 
-  func testSummaryFailureStatesCarryNamedDetail() {
-    // 启动/激活失败：代理未在运行，开关意图为「启动」。
-    let states: [(ProxyRuntimeController.ProxyState, String)] = [
-      (
-        .launchFailed(
-          .localEndpoint(
-            endpoint: "http", host: "127.0.0.1", port: 11087, cause: .refused)),
-        "启动失败"
-      ),
-      (.activationFailed(.noActiveTarget), "无法启动"),
-    ]
-    for (state, expectedStatus) in states {
-      let summary = StatusMenuModel.summary(state: state, mode: .manual, targetPath: nil)
-      XCTAssertFalse(summary.isOn)
-      XCTAssertEqual(summary.status, expectedStatus)
-      XCTAssertEqual(summary.detail, failureDetail(of: state))
-    }
-    // 系统代理失败：代理本体仍在运行，开关意图保持「停止」。
-    let systemProxyState: ProxyRuntimeController.ProxyState =
-      .systemProxyFailed(.operation(.applyFailed))
-    let summary = StatusMenuModel.summary(
-      state: systemProxyState, mode: .manual, targetPath: nil)
-    XCTAssertTrue(summary.isOn)
-    XCTAssertEqual(summary.status, "系统代理未应用")
-    XCTAssertEqual(summary.detail, AppPresentation.message(for: systemProxyState))
-  }
-
-  private func failureDetail(
-    of state: ProxyRuntimeController.ProxyState
-  ) -> String? {
-    switch state {
-    case .launchFailed, .activationFailed, .systemProxyFailed:
-      return AppPresentation.message(for: state)
-    default:
-      return nil
+  func testSummaryProjectsEveryStableRuntimeStatus() {
+    for testCase in Self.runtimeSummaryCases {
+      let summary = StatusMenuModel.summary(
+        facts: testCase.facts, mode: .manual, targetPath: nil)
+      XCTAssertEqual(summary.isOn, testCase.expectedIsOn)
+      XCTAssertEqual(summary.status, testCase.expectedStatus)
+      XCTAssertEqual(
+        summary.detail,
+        testCase.facts.failure.map { AppPresentation.message(for: $0) })
     }
   }
 
   func testSummaryCarriesModeLabelAndTargetPath() {
     let summary = StatusMenuModel.summary(
-      state: .running, mode: .externalPAC(URL(string: "http://example.com/pac")!),
+      facts: ProxyRuntimeFacts(status: .running, isOn: true),
+      mode: .externalPAC(URL(string: "http://example.com/pac")!),
       targetPath: "订阅分组 / 嵌套分组 / 日本 02")
     XCTAssertEqual(summary.modeLabel, "外部 PAC")
     XCTAssertEqual(summary.targetPath, "订阅分组 / 嵌套分组 / 日本 02")
