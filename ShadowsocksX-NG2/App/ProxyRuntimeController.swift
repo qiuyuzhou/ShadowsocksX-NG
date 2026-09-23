@@ -208,14 +208,14 @@ final class ProxyRuntimeController: ObservableObject {
     }
   }
 
-  /// Changes the current mode without rebuilding the tunnel runtime. A mode
-  /// that writes system settings reuses the same endpoint health gate; manual
-  /// mode restores the snapshot immediately and leaves system settings alone.
+  /// Changes the current mode without rebuilding the tunnel runtime. Every
+  /// supported mode reuses the same endpoint health gate before writing system
+  /// settings.
   /// The choice persists with the settings snapshot first, so a GUI restart
   /// restores it; a persistence failure keeps the previous mode in force and
   /// names the reason instead of switching silently.
   func setProxyMode(_ mode: ProxyMode) async {
-    guard ProxyMode.availableModes(for: settings).contains(mode) else { return }
+    guard ProxyMode.availableModes.contains(mode) else { return }
     guard mode != proxyMode else { return }
     var next = settings
     next.preferredMode = mode.kind
@@ -229,18 +229,6 @@ final class ProxyRuntimeController: ObservableObject {
     settings = next
     proxyMode = mode
     guard state != .off, let document = lastDocument ?? runtimeFileStore.loadDocument() else {
-      return
-    }
-
-    if case .manual = mode {
-      cancelFirewallObservation()
-      flowGeneration += 1
-      do {
-        try systemProxy.restore()
-        state = .running
-      } catch {
-        state = .systemProxyFailed(systemProxyFacts(for: error))
-      }
       return
     }
 
@@ -488,26 +476,11 @@ extension ProxyRuntimeController {
   }
 
   /// Persists a fully validated settings snapshot and, when the proxy is
-  /// active, re-derives the same runtime path with the new snapshot. While the
-  /// live mode is external PAC, the mode is re-resolved from the new snapshot
-  /// before persistence, so the mode kind and its URL commit as one logical
-  /// change and a validation failure precedes the write.
+  /// active, re-derives the same runtime path with the new snapshot.
   func updateSettings(_ proposed: ProxySettings) async throws {
     let catalog = catalogSnapshotReader.catalogSnapshot
-    var next = proposed
-    var resolvedMode = proxyMode
-    if case .externalPAC = proxyMode {
-      if let url = URL(string: next.externalPACURL), !next.externalPACURL.isEmpty {
-        try ProxyMode.validateExternalPACURL(url)
-        resolvedMode = .externalPAC(url)
-      } else {
-        resolvedMode = .pac
-        next.preferredMode = .pac
-      }
-    }
-    try settingsStore.save(next)
-    settings = next
-    proxyMode = resolvedMode
+    try settingsStore.save(proposed)
+    settings = proposed
     listenSettingsUnreadable = false
     settingsUnreadable = false
 
@@ -585,14 +558,6 @@ extension ProxyRuntimeController {
         }
         pacOutcome = await pacProbe.probe(url: healthURL, timeout: 1.5)
         if pacOutcome == .reachable {
-          if case .externalPAC(let externalURL) = proxyMode {
-            let externalOutcome = await pacProbe.probe(url: externalURL, timeout: 1.5)
-            if case .failed = externalOutcome {
-              state = .systemProxyFailed(
-                .externalPAC(runtimeEndpointFailure(from: externalOutcome)))
-              return
-            }
-          }
           guard generation == flowGeneration else { return }
           pacURL = document.pac.publicURL
           guard applySystemProxy(for: document) else { return }
@@ -764,13 +729,9 @@ extension ProxyRuntimeController {
 
   private func applySystemProxy(for document: SslocalRuntimeDocument) -> Bool {
     do {
-      if let configuration = try proxyMode.systemProxyConfiguration(
+      let configuration = try proxyMode.systemProxyConfiguration(
         for: document, exceptions: settings.proxyExceptionList)
-      {
-        try systemProxy.apply(configuration)
-      } else {
-        try systemProxy.restore()
-      }
+      try systemProxy.apply(configuration)
       return true
     } catch {
       state = .systemProxyFailed(systemProxyFacts(for: error))
@@ -846,6 +807,6 @@ extension ProxyRuntimeController {
 
 extension ProxyRuntimeController {
   fileprivate static func makeProxyMode(from settings: ProxySettings) -> ProxyMode {
-    ProxyMode.availableModes(for: settings).first { $0.kind == settings.preferredMode } ?? .pac
+    ProxyMode.availableModes.first { $0.kind == settings.preferredMode } ?? .pac
   }
 }

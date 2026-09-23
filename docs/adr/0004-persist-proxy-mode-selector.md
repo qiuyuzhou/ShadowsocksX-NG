@@ -4,7 +4,7 @@ The proxy mode selector (status menu, the single entry point since the settings-
 
 ## Status
 
-Accepted.
+Superseded by [ADR-0007](0007-remove-manual-and-external-pac.md).
 
 ## Considered options
 

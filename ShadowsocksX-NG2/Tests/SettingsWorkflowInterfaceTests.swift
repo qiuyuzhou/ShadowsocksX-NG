@@ -73,16 +73,6 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
       AppPresentation.message(for: workflow.issues(for: .advertisedAddress)[0]).contains("主机地址"))
   }
 
-  func testExternalPACURLIssueLandsOnItsField() {
-    let workflow = makeWorkflow()
-    workflow.draft.externalPACURL = "ftp://example.com/pac"
-
-    XCTAssertEqual(workflow.fieldIssues.map(\.field), [.externalPACURL])
-    XCTAssertTrue(
-      AppPresentation.message(for: workflow.issues(for: .externalPACURL)[0])
-        .contains("外部 PAC URL"))
-  }
-
   func testGFWListURLIssueLandsOnItsField() {
     let workflow = makeWorkflow()
     workflow.draft.gfwListURL = "not a url"
@@ -388,15 +378,15 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     XCTAssertTrue(workflow.lastFailure?.presentableMessage.contains("偏好文件") == true)
 
     committing.updateError = ProxySettingsStoreError.missingCredential(
-      ProxySettingsFileStore.externalPACReference)
+      ProxySettingsFileStore.gfwListReference)
     workflow.save()
     await waitUntil(
       workflow.lastFailure
         == .store(
-          .missingCredential(ProxySettingsFileStore.externalPACReference)))
+          .missingCredential(ProxySettingsFileStore.gfwListReference)))
     XCTAssertEqual(
       workflow.lastFailure,
-      .store(.missingCredential(ProxySettingsFileStore.externalPACReference)))
+      .store(.missingCredential(ProxySettingsFileStore.gfwListReference)))
   }
 
   func testCommittingStateBlocksRepeatedSave() async throws {

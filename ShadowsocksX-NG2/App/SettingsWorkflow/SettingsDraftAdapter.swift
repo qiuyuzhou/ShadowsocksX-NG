@@ -45,7 +45,6 @@ enum SettingsDraftAdapter {
       timeoutSeconds: settings.timeoutSeconds,
       verboseLogging: settings.verboseLogging,
       proxyExceptions: settings.proxyExceptions,
-      externalPACURL: settings.externalPACURL,
       gfwListURL: settings.gfwListURL,
       pacUserRules: settings.pacUserRules)
   }
@@ -67,7 +66,6 @@ enum SettingsDraftAdapter {
       timeoutSeconds: draft.timeoutSeconds,
       verboseLogging: draft.verboseLogging,
       proxyExceptions: draft.proxyExceptions,
-      externalPACURL: draft.externalPACURL,
       gfwListURL: draft.gfwListURL,
       pacUserRules: draft.pacUserRules,
       preferredMode: base.preferredMode)
@@ -98,8 +96,6 @@ enum SettingsDraftAdapter {
         return [.timeoutSeconds(error: error)]
       case .invalidHostAddress:
         return [.advertisedAddress(error: error)]
-      case .invalidExternalPACURL:
-        return [.externalPACURL(error: error)]
       case .invalidGFWListURL:
         return [.gfwListURL(error: error)]
       }

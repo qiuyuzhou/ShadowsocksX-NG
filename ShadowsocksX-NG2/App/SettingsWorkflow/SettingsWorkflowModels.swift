@@ -24,7 +24,6 @@ struct SettingsDraft: Equatable, Sendable {
   var timeoutSeconds: Int
   var verboseLogging: Bool
   var proxyExceptions: String
-  var externalPACURL: String
   var gfwListURL: String
   var pacUserRules: String
 
@@ -52,7 +51,6 @@ enum SettingsFieldID: Hashable, Sendable {
   case advertisedAddress
   case port(SettingsPortID)
   case timeoutSeconds
-  case externalPACURL
   case gfwListURL
 }
 
@@ -62,7 +60,6 @@ enum SettingsFieldIssue: Equatable, Sendable {
   case port(SettingsPortID, error: ProxySettingsValidationError)
   case advertisedAddress(error: ProxySettingsValidationError)
   case timeoutSeconds(error: ProxySettingsValidationError)
-  case externalPACURL(error: ProxySettingsValidationError)
   case gfwListURL(error: ProxySettingsValidationError)
 
   var field: SettingsFieldID {
@@ -70,7 +67,6 @@ enum SettingsFieldIssue: Equatable, Sendable {
     case .port(let id, _): .port(id)
     case .advertisedAddress: .advertisedAddress
     case .timeoutSeconds: .timeoutSeconds
-    case .externalPACURL: .externalPACURL
     case .gfwListURL: .gfwListURL
     }
   }
@@ -78,7 +74,7 @@ enum SettingsFieldIssue: Equatable, Sendable {
   var error: ProxySettingsValidationError {
     switch self {
     case .port(_, let error), .advertisedAddress(let error), .timeoutSeconds(let error),
-      .externalPACURL(let error), .gfwListURL(let error):
+      .gfwListURL(let error):
       error
     }
   }

@@ -87,7 +87,7 @@ final class StatusMenuModelTests: XCTestCase {
   func testSummaryProjectsEveryStableRuntimeStatus() {
     for testCase in Self.runtimeSummaryCases {
       let summary = StatusMenuModel.summary(
-        facts: testCase.facts, mode: .manual, targetPath: nil)
+        facts: testCase.facts, mode: .pac, targetPath: nil)
       XCTAssertEqual(summary.isOn, testCase.expectedIsOn)
       XCTAssertEqual(summary.status, testCase.expectedStatus)
       XCTAssertEqual(
@@ -99,9 +99,9 @@ final class StatusMenuModelTests: XCTestCase {
   func testSummaryCarriesModeLabelAndTargetPath() {
     let summary = StatusMenuModel.summary(
       facts: ProxyRuntimeFacts(status: .running, isOn: true),
-      mode: .externalPAC(URL(string: "http://example.com/pac")!),
+      mode: .global,
       targetPath: "订阅分组 / 嵌套分组 / 日本 02")
-    XCTAssertEqual(summary.modeLabel, "外部 PAC")
+    XCTAssertEqual(summary.modeLabel, "全局")
     XCTAssertEqual(summary.targetPath, "订阅分组 / 嵌套分组 / 日本 02")
   }
 

@@ -70,7 +70,6 @@ final class AppPresentationTests: XCTestCase {
       .serviceFailed(.unknown),
       .systemProxyFailed(.operation(.applyFailed)),
       .systemProxyFailed(.mode(.invalidSOCKSPort(0))),
-      .systemProxyFailed(.externalPAC(.invalidResponse)),
       .systemProxyFailed(.ownershipConflict),
       .systemProxyFailed(.unknown),
     ]
@@ -94,7 +93,6 @@ final class AppPresentationTests: XCTestCase {
       .port(.socks, error: .portOutOfRange(endpoint: .socks, port: 0)),
       .advertisedAddress(error: .invalidHostAddress("127.0.0.1")),
       .timeoutSeconds(error: .invalidTimeout(0)),
-      .externalPACURL(error: .invalidExternalPACURL(.unsupportedExternalPACScheme("ftp"))),
       .gfwListURL(error: .invalidGFWListURL("not a url")),
     ]
     for issue in issues {

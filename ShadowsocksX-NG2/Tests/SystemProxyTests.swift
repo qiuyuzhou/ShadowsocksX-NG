@@ -5,10 +5,9 @@ import XCTest
 /// System proxy mode mapping and ownership persistence are pure/testable seams;
 /// no test in this file writes the host's real SystemConfiguration state.
 final class SystemProxyTests: XCTestCase {
-  func testFourModesProduceMutuallyExclusiveSystemProxyIntent() throws {
+  func testSupportedModesProduceMutuallyExclusiveSystemProxyIntent() throws {
     let document = ProxyRuntimeFixture.makeDocument(
       localAddress: "192.168.2.89", localPort: 2086, pacPort: 2089)
-    let externalURL = URL(string: "https://pac.example.test/proxy.pac")!
 
     XCTAssertEqual(
       try ProxyMode.pac.systemProxyConfiguration(for: document),
@@ -17,10 +16,6 @@ final class SystemProxyTests: XCTestCase {
     XCTAssertEqual(
       try ProxyMode.global.systemProxyConfiguration(for: document),
       SystemProxyConfiguration(target: .socks(host: "127.0.0.1", port: 2086)))
-    XCTAssertNil(try ProxyMode.manual.systemProxyConfiguration(for: document))
-    XCTAssertEqual(
-      try ProxyMode.externalPAC(externalURL).systemProxyConfiguration(for: document),
-      SystemProxyConfiguration(target: .pac(externalURL)))
   }
 
   func testSystemConfigurationProjectionEnablesOnlyPACOrSOCKS() {
@@ -59,20 +54,7 @@ final class SystemProxyTests: XCTestCase {
       ["localhost", "127.0.0.1"])
   }
 
-  func testExternalPACRejectsUnverifiedSchemesAndCredentials() {
-    XCTAssertThrowsError(
-      try ProxyMode.validateExternalPACURL(URL(string: "file:///tmp/proxy.pac")!)
-    ) { error in
-      XCTAssertEqual(error as? ProxyModeError, .unsupportedExternalPACScheme("file"))
-    }
-    XCTAssertThrowsError(
-      try ProxyMode.validateExternalPACURL(URL(string: "https://user:pass@example.com/pac")!)
-    ) { error in
-      XCTAssertEqual(error as? ProxyModeError, .externalPACURLContainsCredentials)
-    }
-  }
-
-  func testHTTPExternalPACURLPassesTargetHealthProbe() async throws {
+  func testLocalPACPassesTargetHealthProbe() async throws {
     let port = try ProxyRuntimeFixture.unusedLoopbackPort()
     let settings = SslocalListenSettings(httpProxyEnabled: false, pacPort: port)
     let server = PACServer(configuration: settings.pac)

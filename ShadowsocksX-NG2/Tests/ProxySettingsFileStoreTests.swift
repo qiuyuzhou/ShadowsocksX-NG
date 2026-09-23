@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// #33 偏好持久化缝：敏感 URL 只进入凭据存储，设置文件只保存引用；重置
+/// #33 偏好持久化缝：GFW List URL 只进入凭据存储，设置文件只保存引用；重置
 /// 不触碰配置目录与活动目标使用的其他文件。
 final class ProxySettingsFileStoreTests: XCTestCase {
   private var directory: URL!
@@ -42,19 +42,15 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     settings.timeoutSeconds = 120
     settings.verboseLogging = true
     settings.proxyExceptions = "localhost, 127.0.0.1"
-    settings.externalPACURL = "https://pac.example.test/proxy.pac?token=secret"
     settings.gfwListURL = "https://lists.example.test/gfw.txt?token=secret"
     settings.pacUserRules = "@@||example.com^"
-    settings.preferredMode = .externalPAC
 
     try store.save(settings)
 
     XCTAssertEqual(try store.load(), settings)
     let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
-    XCTAssertFalse(raw.contains("pac.example.test"))
     XCTAssertFalse(raw.contains("lists.example.test"))
     XCTAssertFalse(raw.contains("token=secret"))
-    XCTAssertNotNil(try credentials.secret(for: ProxySettingsFileStore.externalPACReference))
     XCTAssertNotNil(try credentials.secret(for: ProxySettingsFileStore.gfwListReference))
   }
 
@@ -106,12 +102,12 @@ final class ProxySettingsFileStoreTests: XCTestCase {
 
   func testResetRemovesSettingsAndCredentialReferencesButLeavesFactoryDefaultsAvailable() throws {
     var settings = ProxySettings()
-    settings.externalPACURL = "https://pac.example.test/proxy.pac"
+    settings.gfwListURL = "https://lists.example.test/gfw.txt"
     try store.save(settings)
     try store.reset()
 
     XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
-    XCTAssertNil(try credentials.secret(for: ProxySettingsFileStore.externalPACReference))
+    XCTAssertNil(try credentials.secret(for: ProxySettingsFileStore.gfwListReference))
     XCTAssertEqual(try store.load(), ProxySettings())
   }
 }

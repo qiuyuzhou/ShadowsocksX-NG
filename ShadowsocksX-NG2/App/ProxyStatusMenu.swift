@@ -41,7 +41,7 @@ struct ProxyStatusMenu: View {
 
     // ③ 模式选择（勾选态）：可选性与顺序由 Domain 唯一策略裁定。
     Picker("模式", selection: modeBinding) {
-      ForEach(ProxyMode.availableModes(for: controller.settings), id: \.self) { mode in
+      ForEach(ProxyMode.availableModes, id: \.self) { mode in
         Text(mode.label).tag(mode)
       }
     }

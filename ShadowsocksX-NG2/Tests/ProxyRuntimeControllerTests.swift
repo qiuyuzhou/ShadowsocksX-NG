@@ -156,33 +156,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(probe.ports, [11086, 11087], "系统代理写入前必须探测 SOCKS 和 HTTP 入站")
   }
 
-  func testExternalPACHealthFailureDoesNotWriteSystemProxy() async throws {
-    let seeded = try makeSeededCatalog()
-    let externalURL = URL(string: "https://pac.example.test/proxy.pac")!
-    let pacProbe = ProxyRuntimeFixture.FakePACProbe(
-      outcomes: [.reachable, .failed(detail: "HTTP 状态异常")])
-    let controller = makeController(
-      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
-      pacProbe: pacProbe,
-      proxyMode: .externalPAC(externalURL))
-
-    try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
-
-    guard case .systemProxyFailed(.externalPAC(let cause)) = controller.state else {
-      XCTFail("外部 PAC 不健康时应阻止系统代理写入，实际 \(controller.state)")
-      return
-    }
-    XCTAssertEqual(cause, .invalidResponse)
-    XCTAssertTrue(systemProxy.applied.isEmpty)
-    XCTAssertEqual(
-      pacProbe.urls,
-      [
-        URL(string: "http://127.0.0.1:11089/v1/proxy.pac")!, externalURL,
-      ])
-  }
-
-  func testSwitchingGlobalAndManualModesIsImmediateAndRestoresOnStop() async throws {
+  func testSwitchingGlobalAndPACModesIsImmediateAndRestoresOnStop() async throws {
     let seeded = try makeSeededCatalog()
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(), proxyMode: .global)
@@ -197,10 +171,6 @@ final class ProxyRuntimeControllerTests: XCTestCase {
           exceptions: ProxySettings().proxyExceptionList)
       ])
 
-    await controller.setProxyMode(.manual)
-    XCTAssertEqual(controller.state, .running)
-    XCTAssertEqual(systemProxy.restoreCount, 1, "手动模式立即恢复原系统代理设置")
-
     await controller.setProxyMode(.pac)
     XCTAssertEqual(controller.state, .running)
     XCTAssertEqual(systemProxy.applied.count, 2)
@@ -212,7 +182,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
 
     await controller.setProxyEnabled(false)
     XCTAssertEqual(controller.state, .off)
-    XCTAssertEqual(systemProxy.restoreCount, 2, "停止代理撤除 2.0 写入的系统代理")
+    XCTAssertEqual(systemProxy.restoreCount, 1, "停止代理撤除 2.0 写入的系统代理")
   }
 
   func testEnableWhenProbeNeverSucceedsPresentsFailureNamingEndpointAndPort() async throws {
@@ -461,30 +431,6 @@ extension ProxyRuntimeControllerTests {
       XCTFail("应点名持久化失败，实际 \(controller.state)")
       return
     }
-  }
-
-  func testUpdateSettingsWhileInExternalPACModeCommitsKindAndURLAsOneChange() async throws {
-    let settingsStore = InMemoryProxySettingsStore()
-    let externalURL = URL(string: "https://pac.example.test/proxy.pac")!
-    var external = ProxySettings()
-    external.externalPACURL = externalURL.absoluteString
-    external.preferredMode = .externalPAC
-    settingsStore.saved = external
-    let controller = makeController(
-      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
-      settingsStore: settingsStore,
-      settingsRestore: RestoredProxySettings(settings: external, unreadableError: nil),
-      proxyMode: nil)
-    XCTAssertEqual(controller.proxyMode, .externalPAC(externalURL))
-
-    // 清空外部 PAC URL：模式回落 PAC 且持久化的 kind 同步回落。
-    var cleared = external
-    cleared.externalPACURL = ""
-    try await controller.updateSettings(cleared)
-
-    XCTAssertEqual(controller.proxyMode, .pac)
-    XCTAssertEqual(settingsStore.saved?.preferredMode, .pac)
-    XCTAssertEqual(settingsStore.saved?.externalPACURL, "")
   }
 
   func testLegacyImportBoundaryStopsRuntimeWithoutRestoringSystemProxy() async throws {

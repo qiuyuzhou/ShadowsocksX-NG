@@ -76,7 +76,6 @@ enum SystemProxyOperationFailure: Equatable, Sendable {
 enum SystemProxyFailureFacts: Equatable, Sendable {
   case operation(SystemProxyOperationFailure)
   case mode(ProxyModeError)
-  case externalPAC(RuntimeEndpointFailure)
   case ownershipConflict
   case unknown
 }

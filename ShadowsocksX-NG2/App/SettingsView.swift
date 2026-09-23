@@ -98,11 +98,9 @@ struct SettingsView: View {
       portRow(.pac)
 
       TextField("绕过列表（逗号或空格分隔）", text: $workflow.draft.proxyExceptions)
-      TextField("外部 PAC URL（可选）", text: $workflow.draft.externalPACURL)
-      fieldIssues(.externalPACURL)
       TextField("GFW List URL", text: $workflow.draft.gfwListURL)
       fieldIssues(.gfwListURL)
-      Text("外部内容只保存 URL；本设置页不负责远程内容校验或自动更新。")
+      Text("远程内容只保存 URL；本设置页不负责远程内容校验或自动更新。")
         .font(.caption)
         .foregroundStyle(.secondary)
 

@@ -134,7 +134,7 @@ extension AppPresentation {
   static func message(for issue: SettingsFieldIssue) -> String {
     switch issue {
     case .port(_, let error), .advertisedAddress(let error), .timeoutSeconds(let error),
-      .externalPACURL(let error), .gfwListURL(let error):
+      .gfwListURL(let error):
       return message(for: error)
     }
   }
@@ -288,11 +288,6 @@ extension AppPresentation {
     switch error {
     case .invalidLocalPACURL: return "本地 PAC URL 无效"
     case .invalidSOCKSPort: return "SOCKS 端口无效"
-    case .externalPACURLHasNoScheme: return "外部 PAC URL 缺少协议"
-    case .unsupportedExternalPACScheme: return "外部 PAC 不支持该协议"
-    case .externalPACURLHasNoHost: return "外部 PAC URL 缺少主机"
-    case .externalPACURLContainsCredentials: return "外部 PAC URL 不得包含凭据"
-    case .externalPACURLTooLong: return "外部 PAC URL 过长"
     }
   }
 
@@ -315,7 +310,6 @@ extension AppPresentation {
     case .invalidTimeout(let seconds):
       return "超时 \(seconds) 秒无效，必须是 1–86400 之间的整数"
     case .invalidHostAddress: return "主机地址无效，必须是非回环 IPv4 地址"
-    case .invalidExternalPACURL(let error): return "外部 PAC URL 无效：\(proxyMode(error))"
     case .invalidGFWListURL: return "GFW List URL 无效"
     }
   }
@@ -406,7 +400,6 @@ extension AppPresentation {
     switch facts {
     case .operation(let failure): return systemProxy(failure)
     case .mode(let error): return proxyMode(error)
-    case .externalPAC(let cause): return "外部 PAC 未就绪（\(endpointFailure(cause))）"
     case .ownershipConflict: return "系统代理配置已被其他设置改动，未覆盖"
     case .unknown: return "系统代理未能应用"
     }

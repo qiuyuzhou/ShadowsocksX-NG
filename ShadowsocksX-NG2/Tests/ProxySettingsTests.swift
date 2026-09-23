@@ -27,7 +27,6 @@ final class ProxySettingsTests: XCTestCase {
   func testInvalidAdvancedSettingsNameEveryProblem() {
     var settings = ProxySettings()
     settings.timeoutSeconds = 0
-    settings.externalPACURL = "file:///tmp/proxy.pac"
     settings.gfwListURL = "ftp://example.com/gfw.txt"
     settings.listen.scope = .host(advertisedAddress: "127.0.0.1")
     settings.listen.socksPort = settings.listen.httpPort
@@ -38,7 +37,6 @@ final class ProxySettingsTests: XCTestCase {
         .duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 11087),
         .invalidTimeout(0),
         .invalidHostAddress("127.0.0.1"),
-        .invalidExternalPACURL(.unsupportedExternalPACScheme("file")),
         .invalidGFWListURL("ftp://example.com/gfw.txt"),
       ])
   }

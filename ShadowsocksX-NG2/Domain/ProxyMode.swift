@@ -1,13 +1,9 @@
 import Foundation
 
-/// Persisted identity of a proxy mode. Unlike `ProxyMode`, this type does not
-/// carry the URL of an external PAC, so it is safe to use in preferences and
-/// mode-availability settings.
+/// Persisted identity of a proxy mode.
 enum ProxyModeKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
   case pac
   case global
-  case manual
-  case externalPAC
 }
 
 /// The mutually exclusive ways in which 2.0 exposes the local proxy to macOS.
@@ -15,19 +11,14 @@ enum ProxyModeKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable
 enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   case pac
   case global
-  case manual
-  case externalPAC(URL)
 
   private enum CodingKeys: String, CodingKey {
     case kind
-    case url
   }
 
   private enum Kind: String, Codable {
     case pac
     case global
-    case manual
-    case externalPAC
   }
 
   init(from decoder: Decoder) throws {
@@ -37,10 +28,6 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
       self = .pac
     case .global:
       self = .global
-    case .manual:
-      self = .manual
-    case .externalPAC:
-      self = .externalPAC(try container.decode(URL.self, forKey: .url))
     }
   }
 
@@ -51,11 +38,6 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
       try container.encode(Kind.pac, forKey: .kind)
     case .global:
       try container.encode(Kind.global, forKey: .kind)
-    case .manual:
-      try container.encode(Kind.manual, forKey: .kind)
-    case .externalPAC(let url):
-      try container.encode(Kind.externalPAC, forKey: .kind)
-      try container.encode(url, forKey: .url)
     }
   }
 
@@ -65,10 +47,6 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
       "PAC"
     case .global:
       "全局"
-    case .manual:
-      "手动"
-    case .externalPAC:
-      "外部 PAC"
     }
   }
 
@@ -76,30 +54,17 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
     switch self {
     case .pac: .pac
     case .global: .global
-    case .manual: .manual
-    case .externalPAC: .externalPAC
     }
   }
 
-  /// Returns every mode the current settings can support, in the product's
-  /// stable selector order. Built-in modes are always available; external PAC
-  /// is available only when its configured URL passes the existing validator.
-  static func availableModes(for settings: ProxySettings) -> [ProxyMode] {
-    let builtInModes: [ProxyMode] = [.pac, .global, .manual]
-    guard !settings.externalPACURL.isEmpty,
-      let url = URL(string: settings.externalPACURL),
-      (try? validateExternalPACURL(url)) != nil
-    else { return builtInModes }
-    return builtInModes + [.externalPAC(url)]
-  }
+  /// Returns every mode supported by the product in stable selector order.
+  static var availableModes: [ProxyMode] { [.pac, .global] }
 
   /// Derives the only system-proxy state that this mode is allowed to own.
-  /// `nil` means manual mode: restore the user's previous system settings and
-  /// leave them under the user's control.
   func systemProxyConfiguration(
     for document: SslocalRuntimeDocument,
     exceptions: [String]? = nil
-  ) throws -> SystemProxyConfiguration? {
+  ) throws -> SystemProxyConfiguration {
     switch self {
     case .pac:
       guard let url = document.pac.publicURL else {
@@ -112,29 +77,6 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
       }
       return SystemProxyConfiguration(
         target: .socks(host: "127.0.0.1", port: document.socksPort), exceptions: exceptions)
-    case .manual:
-      return nil
-    case .externalPAC(let url):
-      try Self.validateExternalPACURL(url)
-      return SystemProxyConfiguration(target: .pac(url), exceptions: exceptions)
-    }
-  }
-
-  static func validateExternalPACURL(_ url: URL) throws {
-    guard let scheme = url.scheme?.lowercased() else {
-      throw ProxyModeError.externalPACURLHasNoScheme
-    }
-    guard scheme == "http" || scheme == "https" else {
-      throw ProxyModeError.unsupportedExternalPACScheme(scheme)
-    }
-    guard url.host != nil else {
-      throw ProxyModeError.externalPACURLHasNoHost
-    }
-    guard url.user == nil && url.password == nil else {
-      throw ProxyModeError.externalPACURLContainsCredentials
-    }
-    guard url.absoluteString.utf8.count <= 2048 else {
-      throw ProxyModeError.externalPACURLTooLong
     }
   }
 }
@@ -160,9 +102,4 @@ struct SystemProxyConfiguration: Equatable, Sendable {
 enum ProxyModeError: Error, Equatable, Sendable {
   case invalidLocalPACURL
   case invalidSOCKSPort(Int)
-  case externalPACURLHasNoScheme
-  case unsupportedExternalPACScheme(String)
-  case externalPACURLHasNoHost
-  case externalPACURLContainsCredentials
-  case externalPACURLTooLong
 }

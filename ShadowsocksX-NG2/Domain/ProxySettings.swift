@@ -12,12 +12,10 @@ struct ProxySettings: Equatable, Sendable {
   var timeoutSeconds: Int
   var verboseLogging: Bool
   var proxyExceptions: String
-  var externalPACURL: String
   var gfwListURL: String
   var pacUserRules: String
   /// The persisted current mode: the mode selector's choice survives GUI
-  /// restarts. An external PAC URL is resolved from `externalPACURL` when
-  /// this kind is `.externalPAC`.
+  /// restarts.
   var preferredMode: ProxyModeKind
 
   init(
@@ -25,7 +23,6 @@ struct ProxySettings: Equatable, Sendable {
     timeoutSeconds: Int = 60,
     verboseLogging: Bool = false,
     proxyExceptions: String = ProxySettings.defaultProxyExceptions,
-    externalPACURL: String = "",
     gfwListURL: String = ProxySettings.defaultGFWListURL,
     pacUserRules: String = "",
     preferredMode: ProxyModeKind = .pac
@@ -34,7 +31,6 @@ struct ProxySettings: Equatable, Sendable {
     self.timeoutSeconds = timeoutSeconds
     self.verboseLogging = verboseLogging
     self.proxyExceptions = proxyExceptions
-    self.externalPACURL = externalPACURL
     self.gfwListURL = gfwListURL
     self.pacUserRules = pacUserRules
     self.preferredMode = preferredMode
@@ -63,27 +59,10 @@ struct ProxySettings: Equatable, Sendable {
     if case .host(let address) = listen.scope, !Self.isUsableHostAddress(address) {
       errors.append(.invalidHostAddress(address))
     }
-    if !externalPACURL.isEmpty, let error = Self.externalPACError(for: externalPACURL) {
-      errors.append(.invalidExternalPACURL(error))
-    }
     if !gfwListURL.isEmpty, !Self.isUsableRemoteURL(gfwListURL) {
       errors.append(.invalidGFWListURL(gfwListURL))
     }
     return errors
-  }
-
-  private static func externalPACError(for value: String) -> ProxyModeError? {
-    guard let url = URL(string: value) else {
-      return .externalPACURLHasNoScheme
-    }
-    do {
-      try ProxyMode.validateExternalPACURL(url)
-      return nil
-    } catch let error as ProxyModeError {
-      return error
-    } catch {
-      return .externalPACURLHasNoScheme
-    }
   }
 
   private static func isUsableRemoteURL(_ value: String) -> Bool {
@@ -107,7 +86,6 @@ enum ProxySettingsValidationError: Error, Equatable, Sendable {
   case duplicatePort(endpoint: ProxyEndpointKind, otherEndpoint: ProxyEndpointKind, port: Int)
   case invalidTimeout(Int)
   case invalidHostAddress(String)
-  case invalidExternalPACURL(ProxyModeError)
   case invalidGFWListURL(String)
 
   init(_ error: PortSettingError) {
@@ -141,11 +119,9 @@ struct RestoredProxySettings: Equatable {
   let unreadableError: ProxySettingsStoreError?
 }
 
-/// #33 偏好存储。非敏感字段写入受保护的 JSON；外部 PAC 与 GFW URL 只把
-/// 固定引用写入 JSON，真实值由 KeychainCredentialStore 持有。
+/// #33 偏好存储。非敏感字段写入受保护的 JSON；GFW URL 只把固定引用写入
+/// JSON，真实值由 KeychainCredentialStore 持有。
 struct ProxySettingsFileStore: ProxySettingsStoring {
-  static let externalPACReference =
-    CredentialReference(rawValue: "settings.external-pac-url")
   static let gfwListReference =
     CredentialReference(rawValue: "settings.gfw-list-url")
 
@@ -201,7 +177,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
   func save(_ settings: ProxySettings) throws {
     try validated(settings)
     do {
-      try saveOrDelete(settings.externalPACURL, reference: Self.externalPACReference)
       try saveOrDelete(settings.gfwListURL, reference: Self.gfwListReference)
     } catch let error as ProxySettingsStoreError {
       throw error
@@ -221,7 +196,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
 
   func reset() throws {
     do {
-      try credentials.delete(Self.externalPACReference)
       try credentials.delete(Self.gfwListReference)
       for url in [fileURL, legacyListenFileURL]
       where FileManager.default.fileExists(atPath: url.path) {
@@ -295,12 +269,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     listen.pacPort = record.pacPort
     listen.udpRelayEnabled = record.udpRelayEnabled
 
-    let externalPACURL =
-      if let reference = record.externalPACCredentialReference {
-        try requiredSecret(for: reference)
-      } else {
-        ""
-      }
     let gfwListURL: String
     if let reference = record.gfwListCredentialReference {
       gfwListURL = try requiredSecret(for: reference)
@@ -313,7 +281,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
         timeoutSeconds: record.timeoutSeconds,
         verboseLogging: record.verboseLogging,
         proxyExceptions: record.proxyExceptions,
-        externalPACURL: externalPACURL,
         gfwListURL: gfwListURL,
         pacUserRules: record.pacUserRules,
         preferredMode: record.preferredMode))
@@ -334,8 +301,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     record.timeoutSeconds = settings.timeoutSeconds
     record.verboseLogging = settings.verboseLogging
     record.proxyExceptions = settings.proxyExceptions
-    record.externalPACCredentialReference =
-      settings.externalPACURL.isEmpty ? nil : Self.externalPACReference
     record.gfwListCredentialReference =
       settings.gfwListURL.isEmpty ? nil : Self.gfwListReference
     record.gfwListURLConfigured = true
@@ -362,7 +327,6 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
   var timeoutSeconds: Int = 60
   var verboseLogging: Bool = false
   var proxyExceptions: String = ProxySettings.defaultProxyExceptions
-  var externalPACCredentialReference: CredentialReference?
   var gfwListCredentialReference: CredentialReference?
   var gfwListURLConfigured: Bool = false
   var pacUserRules: String = ""
@@ -390,8 +354,6 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
     proxyExceptions =
       try container.decodeIfPresent(String.self, forKey: .proxyExceptions)
       ?? ProxySettings.defaultProxyExceptions
-    externalPACCredentialReference = try container.decodeIfPresent(
-      CredentialReference.self, forKey: .externalPACCredentialReference)
     gfwListCredentialReference = try container.decodeIfPresent(
       CredentialReference.self, forKey: .gfwListCredentialReference)
     gfwListURLConfigured =
@@ -406,7 +368,7 @@ extension ProxySettingsRecord {
   fileprivate enum CodingKeys: String, CodingKey {
     case scopeKind, advertisedAddress, socksPort, httpProxyEnabled, httpPort, pacPort
     case udpRelayEnabled, timeoutSeconds, verboseLogging, proxyExceptions
-    case externalPACCredentialReference, gfwListCredentialReference, gfwListURLConfigured
+    case gfwListCredentialReference, gfwListURLConfigured
     case pacUserRules, preferredMode
   }
 }
