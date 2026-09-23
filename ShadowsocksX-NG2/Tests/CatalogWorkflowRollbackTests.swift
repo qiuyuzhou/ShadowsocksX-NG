@@ -90,13 +90,20 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
         draft: ServerEditDraft(
           address: "198.51.100.9", port: 9999, encryptionMethod: "aes-256-gcm",
           password: "新密码", remark: "", plugin: .none, pluginOptions: nil))
+    } onThrow: { error in
+      guard let commitError = error as? CommitError else {
+        XCTFail("预期 CommitError，收到 \(error)")
+        return
+      }
+      XCTAssertEqual(
+        commitError.credentialRollback,
+        .restored([CredentialReference(rawValue: "ref-pw")]),
+        "journal 回滚经 typed outcome 报出（story 13）")
     }
 
     let form = try XCTUnwrap(workflow.serverEditForm(for: id))
     XCTAssertEqual(form.address, "203.0.113.7", "目录提交失败则已发布状态不动")
     XCTAssertEqual(form.password, "旧密码", "旧凭据继续生效（journal 回滚，story 13）")
-    XCTAssertEqual(
-      try credentials.secret(for: CredentialReference(rawValue: "ref-pw")), "旧密码")
   }
 
   func testUpdateServerRollsBackPluginOptionsDeletionWhenPersistenceFails() async throws {
@@ -122,13 +129,42 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
         draft: ServerEditDraft(
           address: "203.0.113.7", port: 8388, encryptionMethod: "aes-256-gcm",
           password: "旧密码", remark: "", plugin: .none, pluginOptions: nil))
+    } onThrow: { error in
+      guard let commitError = error as? CommitError else {
+        XCTFail("预期 CommitError，收到 \(error)")
+        return
+      }
+      XCTAssertEqual(
+        commitError.credentialRollback,
+        .restored([
+          CredentialReference(rawValue: "ref-pw"),
+          CredentialReference(rawValue: "ref-opts"),
+        ]),
+        "密码覆盖写与参数删除都被回滚（story 13）")
     }
 
     let form = try XCTUnwrap(workflow.serverEditForm(for: id))
     XCTAssertEqual(form.plugin.selection, .managed(program: "v2ray-plugin"), "插件引用保留")
     XCTAssertEqual(form.plugin.options, "mode=websocket", "被删除的参数秘密已恢复")
-    XCTAssertEqual(
-      try credentials.secret(for: CredentialReference(rawValue: "ref-opts")), "mode=websocket")
+  }
+
+  func testCommitFailureWithoutCredentialTouchReportsNothingToRestore() async throws {
+    _ = try await seedServer(password: "旧密码")
+
+    // 节点不存在时提交在写凭据之前失败：无触碰即 nothingToRestore。
+    await expectThrowsAsync {
+      try await workflow.updateServer(
+        NodeID(rawValue: "missing"),
+        draft: ServerEditDraft(
+          address: "198.51.100.9", port: 9999, encryptionMethod: "aes-256-gcm",
+          password: "新密码", remark: "", plugin: .none, pluginOptions: nil))
+    } onThrow: { error in
+      guard let commitError = error as? CommitError else {
+        XCTFail("预期 CommitError，收到 \(error)")
+        return
+      }
+      XCTAssertEqual(commitError.credentialRollback, .nothingToRestore)
+    }
   }
 
   // MARK: - story 38：提交完成与运行时收敛是分离的观察面

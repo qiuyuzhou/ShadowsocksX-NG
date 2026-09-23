@@ -51,6 +51,10 @@ extension Error {
       return error.presentedMessage
     case let error as ImportLineFailureReason:
       return error.presentableMessage
+    case let error as CommitError:
+      // 提交失败的文案即 underlying 的文案；回滚结果是结构化数据，文案化
+      // 不在此边缘。
+      return error.underlying.presentableMessage
     default:
       return String(describing: self)
     }

@@ -147,7 +147,9 @@ extension CatalogWorkflow {
         }
       }
     } catch {
-      credentialJournal.rollback()
+      // story 29：尽力恢复旧秘密；typed outcome 的观测上提（经抛错或订阅
+      // 状态）待候选 4 拆开订阅失败文案与持久化 schema 字段后再做。
+      _ = credentialJournal.rollback()
       throw error
     }
     // 被移除节点的凭据引用不会被新树复用（身份已不在），提交成功后清理。

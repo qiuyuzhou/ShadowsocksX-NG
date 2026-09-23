@@ -202,6 +202,15 @@ struct ServerEditDraft: Equatable {
   var pluginOptions: String?
 }
 
+/// 提交失败的结构化抛错：配置与凭据是一个逻辑变更，表单校验通过后提交
+/// 管线的任一步失败都已触碰（或可能触碰）凭据，凭据半边的恢复结果随错
+/// 报出（story 13）。不含用户可见文案（文案归 presentation edge，从
+/// `underlying` 生成）；表单校验在建 journal 之前失败，保持裸 `ServerFormError`。
+struct CommitError: Error {
+  let underlying: any Error
+  let credentialRollback: CredentialRollbackOutcome
+}
+
 /// 插件选择器选中态（D10）：「无」、受管集内程序、受管集外引用。集外引用
 /// （Legacy 导入或订阅带入）以显式「本版本未提供」状态呈现并原样保留。
 /// Hashable 以直接充当 SwiftUI Picker 的选中值。

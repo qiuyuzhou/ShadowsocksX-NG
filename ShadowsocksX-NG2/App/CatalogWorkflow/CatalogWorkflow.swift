@@ -232,7 +232,8 @@ final class CatalogWorkflow: ObservableObject {
   }
 
   /// 服务器编辑提交（story 12/13）：配置与凭据作为一个逻辑变更；凭据写入经
-  /// journal 记录原值，目录持久化失败时全部恢复旧秘密。插件选择按 #38 语义
+  /// journal 记录原值，提交失败时全部恢复旧秘密，恢复结果经
+  /// `CommitError.credentialRollback` 报出。插件选择按 #38 语义
   /// 落盘（「无」整体清除、受管写程序名与参数、集外引用原样保留）。
   func updateServer(_ id: NodeID, draft: ServerEditDraft) async throws {
     let trimmedAddress = draft.address.trimmingCharacters(in: .whitespaces)
@@ -244,6 +245,12 @@ final class CatalogWorkflow: ObservableObject {
       throw ServerFormError.unsupportedEncryptionMethod(trimmedMethod)
     }
     guard !draft.password.isEmpty else { throw ServerFormError.invalidPassword }
+    // 插件表单校验与其它字段同处写入之前：表单拒绝不触碰凭据、不进提交管线。
+    if case .managed(let program) = draft.plugin,
+      ManagedPluginCatalog.info(forProgram: program) == nil
+    {
+      throw ServerFormError.pluginNotManaged(program)
+    }
     var journal = CredentialWriteJournal(credentials: credentials)
     do {
       try commit { [self] catalog in
@@ -261,8 +268,7 @@ final class CatalogWorkflow: ObservableObject {
         try catalog.updateServer(id, with: fields)
       }
     } catch {
-      journal.rollback()
-      throw error
+      throw CommitError(underlying: error, credentialRollback: journal.rollback())
     }
   }
 
@@ -401,6 +407,7 @@ final class CatalogWorkflow: ObservableObject {
   /// 插件选择落盘（issue #38，D10/CONTEXT.md 不变量）：「无」整体清除引用与
   /// 参数秘密；受管程序写引用、参数按空/非空经 journal 写删钥匙串；集外引用
   /// 原样保留（不因打开或保存表单而漂移，激活语义由状态机点名拒绝）。
+  /// 受管集校验已由 `updateServer` 的表单校验完成。
   private static func applyPluginSelection(
     _ selection: PluginSelection,
     options: String?,
@@ -416,9 +423,6 @@ final class CatalogWorkflow: ObservableObject {
       fields.pluginProgram = nil
       fields.pluginOptionsRef = nil
     case .managed(let program):
-      guard ManagedPluginCatalog.info(forProgram: program) != nil else {
-        throw ServerFormError.pluginNotManaged(program)
-      }
       fields.pluginProgram = program
       let trimmedOptions = (options ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
       if trimmedOptions.isEmpty {
@@ -446,46 +450,5 @@ final class CatalogWorkflow: ObservableObject {
 final class RejectingActivator: Activating {
   func activate(_ target: NodeID) async throws -> ActivationCommandOutcome {
     .rejectedActivation
-  }
-}
-
-/// 凭据写入日志：目录文件只有在全部凭据写入成功后才替换；如果任何凭据或
-/// 目录写入失败，则恢复改动前的每个引用值，避免旧秘密被覆盖或丢失
-/// （story 13/29）。
-struct CredentialWriteJournal {
-  private struct OriginalValue {
-    let secret: String?
-  }
-
-  let credentials: CredentialStoring
-  private var originals: [CredentialReference: OriginalValue] = [:]
-
-  init(credentials: CredentialStoring) {
-    self.credentials = credentials
-  }
-
-  mutating func save(_ secret: String, for reference: CredentialReference) throws {
-    if originals[reference] == nil {
-      originals[reference] = OriginalValue(secret: try credentials.secret(for: reference))
-    }
-    try credentials.save(secret, for: reference)
-  }
-
-  /// 尽力删除（幂等）；回滚时恢复改动前的原值或「不存在」。
-  mutating func delete(_ reference: CredentialReference) {
-    if originals[reference] == nil {
-      originals[reference] = OriginalValue(secret: (try? credentials.secret(for: reference)) ?? nil)
-    }
-    try? credentials.delete(reference)
-  }
-
-  func rollback() {
-    for (reference, original) in originals {
-      if let secret = original.secret {
-        try? credentials.save(secret, for: reference)
-      } else {
-        try? credentials.delete(reference)
-      }
-    }
   }
 }
