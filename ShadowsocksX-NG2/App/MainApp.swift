@@ -5,6 +5,7 @@ struct ShadowsocksXNG2App: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @StateObject private var proxyController: ProxyRuntimeController
   @StateObject private var catalogWorkflow: CatalogWorkflow
+  @StateObject private var proxyControl: ProxyControlWorkflow
   @StateObject private var loginController: LaunchAtLoginController
   @StateObject private var settingsWorkflow: SettingsWorkflow
   @StateObject private var diagnosticsWorkflow: DiagnosticsWorkflow
@@ -43,6 +44,13 @@ struct ShadowsocksXNG2App: App {
       },
       activator: controller)
     _catalogWorkflow = StateObject(wrappedValue: catalogWorkflow)
+    // 代理控制工作流 module（issue #47）：状态菜单等 UI 表面的唯一代理控制
+    // seam，组合根接线一次。生产 runtime adapter 包装既有控制器（不复制运行
+    // 时语义）；目录目标事实经窄缝从目录工作流读取。
+    _proxyControl = StateObject(
+      wrappedValue: ProxyControlWorkflow(
+        runtime: ControllerProxyRuntimeAdapter(controller: controller),
+        targetFacts: catalogWorkflow))
     // 设置工作流 module（Candidate 02）：设置窗口的唯一 seam，组合根接线一次；
     // 写入侧经窄缝 SettingsCommitting（issue #44），运行时控制器薄扩展即生产实现。
     _settingsWorkflow = StateObject(wrappedValue: SettingsWorkflow(committing: controller))
@@ -59,10 +67,10 @@ struct ShadowsocksXNG2App: App {
 
   var body: some Scene {
     MenuBarExtra("ShadowsocksX-NG 2.0", systemImage: "network") {
-      ProxyStatusMenu(controller: proxyController, catalogWorkflow: catalogWorkflow)
+      ProxyStatusMenu(control: proxyControl, catalogWorkflow: catalogWorkflow)
         .task {
           guard !ApplicationDependencies.isUnitTesting else { return }
-          await proxyController.resyncOnLaunch()
+          await proxyControl.resyncOnLaunch()
         }
     }
     .menuBarExtraStyle(.menu)

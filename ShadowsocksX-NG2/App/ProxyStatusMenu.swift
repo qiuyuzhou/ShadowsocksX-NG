@@ -1,20 +1,25 @@
 import AppKit
 import SwiftUI
 
-/// 状态菜单（spec #21 D11 八项白名单，issue #31/#41）：①头部状态摘要（运行
-/// 状态、当前模式、活动目标）②代理开关 ③模式选择（勾选态）④活动目标级联
-/// 选择器（组树子菜单、只读）⑤立即更新全部订阅 ⑥复制 HTTP 导出行 ⑦打开主
-/// 窗口 ⑧打开设置 ⑨退出（明示代理仍在后台运行）。白名单外操作一律不进菜单
-/// 栏；编辑类操作只在主窗口或设置窗口。目录事实来自目录工作流 projection。
+/// 状态菜单（spec #21 D11 八项白名单，issue #31/#41/#47）：①头部状态摘要
+/// （运行状态、当前模式、活动目标）②代理开关 ③模式选择（勾选态）④活动目标
+/// 级联选择器（组树子菜单、只读）⑤立即更新全部订阅 ⑥复制 HTTP 导出行 ⑦打开
+/// 主窗口 ⑧打开设置 ⑨退出（明示代理仍在后台运行）。白名单外操作一律不进菜单
+/// 栏；编辑类操作只在主窗口或设置窗口。运行时事实、开关、模式与导出能力全部
+/// 来自代理控制工作流的整体 snapshot（issue #47），菜单不直接读控制器字段；
+/// 目录树、激活与订阅动作仍走目录工作流，剪贴板写入等 AppKit 副作用留在呈现
+/// 边界。
 struct ProxyStatusMenu: View {
   @Environment(\.openWindow) private var openWindow
-  @ObservedObject var controller: ProxyRuntimeController
+  /// 代理控制唯一 seam（issue #47）：状态摘要与代理命令的唯一来源。
+  @ObservedObject var control: ProxyControlWorkflow
   @ObservedObject var catalogWorkflow: CatalogWorkflow
 
   var body: some View {
-    let summary = presentation
+    let snapshot = control.snapshot
+    let summary = StatusMenuModel.summary(from: snapshot)
     let targetTree = catalogWorkflow.tree.roots
-    let exportLine = StatusMenuModel.httpExportLine(settings: controller.listenSettings)
+    let exportLine = snapshot.httpExport?.copyableLine
 
     // ① 头部状态摘要
     Text(summary.status)
@@ -25,8 +30,8 @@ struct ProxyStatusMenu: View {
         .font(.caption)
         .foregroundStyle(.secondary)
     }
-    if !controller.skippedServers.isEmpty {
-      Text("已跳过 \(controller.skippedServers.count) 个无效服务器")
+    if snapshot.skippedInvalidServerCount > 0 {
+      Text("已跳过 \(snapshot.skippedInvalidServerCount) 个无效服务器")
         .font(.caption)
         .foregroundStyle(.orange)
         .help("激活时跳过了存在已知本地阻塞问题的服务器")
@@ -36,12 +41,12 @@ struct ProxyStatusMenu: View {
 
     // ② 代理开关
     Button(summary.isOn ? "停止代理" : "启动代理") {
-      Task { await controller.setProxyEnabled(!summary.isOn) }
+      Task { await control.setProxyEnabled(!summary.isOn) }
     }
 
-    // ③ 模式选择（勾选态）：可选性与顺序由 Domain 唯一策略裁定。
+    // ③ 模式选择（勾选态）：可选性与顺序来自 snapshot 的 Domain 单点策略。
     Picker("模式", selection: modeBinding) {
-      ForEach(ProxyMode.availableModes, id: \.self) { mode in
+      ForEach(snapshot.availableModes, id: \.self) { mode in
         Text(mode.label).tag(mode)
       }
     }
@@ -52,7 +57,7 @@ struct ProxyStatusMenu: View {
       if targetTree.isEmpty {
         Text("目录为空")
       } else {
-        TargetCascade(nodes: targetTree, activeTargetID: controller.activeTargetID)
+        TargetCascade(nodes: targetTree, activeTargetID: snapshot.activeTarget?.id)
       }
     }
 
@@ -64,7 +69,7 @@ struct ProxyStatusMenu: View {
     }
     .disabled(catalogWorkflow.subscriptions.isEmpty)
 
-    // ⑥ 复制 HTTP 导出行
+    // ⑥ 复制 HTTP 导出行：workflow 只提供安全能力，复制是 UI 副作用。
     Button("复制 HTTP 导出行") {
       if let exportLine {
         NSPasteboard.general.clearContents()
@@ -95,20 +100,12 @@ struct ProxyStatusMenu: View {
     }
   }
 
-  private var presentation: StatusMenuModel.Summary {
-    StatusMenuModel.summary(
-      facts: controller.runtimeFacts,
-      mode: controller.proxyMode,
-      targetPath: StatusMenuModel.targetPath(
-        in: catalogWorkflow.tree.roots, activeTargetID: controller.activeTargetID))
-  }
-
-  /// 模式选择走控制器同一入口：切换的系统代理语义（#29）与菜单勾选态由
-  /// 同一 @Published 事实来源保证一致。
+  /// 模式选择走同一控制 seam：切换语义与菜单勾选态由同一 snapshot 事实来源
+  /// 保证一致（issue #47）。
   private var modeBinding: Binding<ProxyMode> {
     Binding(
-      get: { controller.proxyMode },
-      set: { mode in Task { await controller.setProxyMode(mode) } })
+      get: { control.snapshot.proxyMode },
+      set: { mode in Task { await control.setProxyMode(mode) } })
   }
 
   /// 只读级联树：分组展开为子菜单，活动目标以勾选呈现；无编辑入口。

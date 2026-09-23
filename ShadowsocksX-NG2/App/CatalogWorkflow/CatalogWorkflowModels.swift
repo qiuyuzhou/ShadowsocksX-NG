@@ -73,6 +73,18 @@ struct CatalogTreeSnapshot: Equatable {
   /// 节点是否在树中（拖拽负载存在性校验）。
   func containsNode(_ id: NodeID) -> Bool { node(withID: id) != nil }
 
+  /// 活动目标的显示名路径（根 → 节点，" / " 连接）；目标不在树中为 nil。
+  /// 代理控制窄缝经此取安全路径摘要（issue #47），树结构不出目录 module。
+  func pathSummary(for id: NodeID) -> String? {
+    guard var node = self.node(withID: id) else { return nil }
+    var names = [node.name]
+    while let parentID = node.parentID, let parent = self.node(withID: parentID) {
+      names.insert(parent.name, at: 0)
+      node = parent
+    }
+    return names.joined(separator: " / ")
+  }
+
   /// 全树已知无效服务器总数（诊断计数）。
   var invalidServerCount: Int {
     roots.reduce(0) { $0 + $1.subtreeInvalidServerCount }

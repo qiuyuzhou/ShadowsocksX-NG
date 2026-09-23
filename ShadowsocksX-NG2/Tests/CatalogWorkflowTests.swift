@@ -144,6 +144,24 @@ final class CatalogWorkflowTests: XCTestCase {
     XCTAssertTrue(workflow.tree.containsNode(groupID))
   }
 
+  // MARK: - 活动目标路径摘要（代理控制窄缝取用，issue #47）
+
+  func testPathSummaryResolvesRootToLeafNames() async throws {
+    let groupID = try await workflow.createGroup(named: "组A", into: nil)
+    let nestedID = try await workflow.createGroup(named: "嵌套", into: groupID)
+    _ = try await workflow.createServers(
+      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: nestedID)
+    let leafID = try XCTUnwrap(workflow.tree.node(withID: nestedID)?.childNodes.first?.id)
+
+    XCTAssertEqual(workflow.tree.pathSummary(for: groupID), "组A")
+    XCTAssertEqual(workflow.tree.pathSummary(for: nestedID), "组A / 嵌套")
+    XCTAssertEqual(workflow.tree.pathSummary(for: leafID), "组A / 嵌套 / 203.0.113.7")
+  }
+
+  func testPathSummaryIsNilForMissingTarget() {
+    XCTAssertNil(workflow.tree.pathSummary(for: NodeID(rawValue: "gone")))
+  }
+
   // MARK: - 表单编辑与凭据生命周期
 
   func testUpdateServerPersistsFieldsAndPassword() async throws {
