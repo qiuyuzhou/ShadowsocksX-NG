@@ -2,7 +2,7 @@ import Foundation
 
 /// 设置工作流 module（issue #44）：设置窗口的唯一 UI-facing seam。以平坦的
 /// UI 形状草稿为编辑态唯一 source of truth，向 UI 只提供字段归位的校验问题、
-/// 端口 field state、保存门禁/脏态/提交中/失败文案投影、统一确认事实与具名
+/// 端口 field state、保存门禁/脏态/提交中/typed failure projection、统一确认事实与具名
 /// typed command。视图不再拆装 Domain 枚举、翻译占用事实、推导门禁或自备
 /// 确认文案；alert、sheet 与窗口状态仍由 UI 持有。登录启动项是独立偏好域，
 /// 不经本 module。
@@ -25,8 +25,8 @@ final class SettingsWorkflow: ObservableObject {
   @Published private var occupancyByPort: [SettingsPortID: SettingsPortOccupancy] = [:]
   /// 提交/重置进行中（按钮进入进行中状态且不可重复触发）。
   @Published private(set) var isCommitting = false
-  /// 最近一次提交/重置失败的点名原因（nil = 无）。
-  @Published private(set) var lastFailureMessage: String?
+  /// 最近一次提交/重置失败的 typed fact（nil = 无）。
+  @Published private(set) var lastFailure: SettingsWorkflowFailure?
   /// 等待用户裁定的确认事实（PAC 失效、重置偏好）；视图只持有 alert 呈现状态。
   @Published private(set) var pendingConfirmation: SettingsConfirmation?
 
@@ -73,9 +73,9 @@ final class SettingsWorkflow: ObservableObject {
     SettingsDraftAdapter.fieldIssues(from: makeSettings(from: draft).validationErrors)
   }
 
-  /// 按字段归位的问题点名文案。
-  func issues(for field: SettingsFieldID) -> [String] {
-    fieldIssues.filter { $0.field == field }.map(\.message)
+  /// 按字段归位的问题事实；文案由 presentation edge 派生。
+  func issues(for field: SettingsFieldID) -> [SettingsFieldIssue] {
+    fieldIssues.filter { $0.field == field }
   }
 
   // MARK: - 端口 field state
@@ -130,10 +130,12 @@ final class SettingsWorkflow: ObservableObject {
   func save() {
     guard canSave else { return }
     let proposed = makeSettings(from: draft)
-    if let notice = PortChangeNotice.pacInvalidation(
+    if PortChangeNotice.pacPortChanged(
       from: committing.committedSettings.listen, to: proposed.listen)
     {
-      pendingConfirmation = .pacInvalidation(summary: notice)
+      pendingConfirmation = .pacInvalidation(
+        previousPort: committing.committedSettings.listen.pacPort,
+        nextPort: proposed.listen.pacPort)
       return
     }
     commit(proposed)
@@ -157,7 +159,7 @@ final class SettingsWorkflow: ObservableObject {
   /// 一致）。登录启动项与快捷键意图是独立偏好域，不在此事务内。
   func reset() {
     guard !isCommitting else { return }
-    pendingConfirmation = .resetPreferences(summary: Self.resetSummary)
+    pendingConfirmation = .resetPreferences
   }
 
   /// 用户裁定重置后走重置提交入口：恢复出厂值并停止运行中的代理。
@@ -166,13 +168,13 @@ final class SettingsWorkflow: ObservableObject {
     pendingConfirmation = nil
     guard !isCommitting else { return }
     isCommitting = true
-    lastFailureMessage = nil
+    lastFailure = nil
     Task { @MainActor in
       do {
         try await committing.resetPreferences()
         adoptCommittedSettings()
       } catch {
-        lastFailureMessage = Self.presentedReason(for: error)
+        lastFailure = Self.failure(for: error)
       }
       isCommitting = false
     }
@@ -210,11 +212,6 @@ final class SettingsWorkflow: ObservableObject {
 
   // MARK: - 提交与占用探测（implementation，UI 不可见）
 
-  /// 重置事务的范围摘要（story 25）：与 `resetPreferences` 的实际事务一致——
-  /// 全部偏好（含端口、监听范围与 PAC 设置）回出厂值，运行中的代理停止。
-  private static let resetSummary =
-    "端口、监听范围和 PAC 设置等全部偏好都会恢复为出厂值，运行中的代理会停止。"
-
   private var committedListen: SslocalListenSettings {
     committing.committedSettings.listen
   }
@@ -240,13 +237,13 @@ final class SettingsWorkflow: ObservableObject {
 
   private func commit(_ proposed: ProxySettings) {
     isCommitting = true
-    lastFailureMessage = nil
+    lastFailure = nil
     Task { @MainActor in
       do {
         try await committing.updateSettings(proposed)
         adoptCommittedSettings()
       } catch {
-        lastFailureMessage = Self.presentedReason(for: error)
+        lastFailure = Self.failure(for: error)
       }
       isCommitting = false
     }
@@ -286,10 +283,13 @@ final class SettingsWorkflow: ObservableObject {
     }
   }
 
-  private static func presentedReason(for error: Error) -> String {
+  private static func failure(for error: Error) -> SettingsWorkflowFailure {
     if let error = error as? ProxySettingsStoreError {
-      return error.presentedReason
+      return .store(error)
     }
-    return String(describing: error)
+    if let error = error as? ProxyModeError {
+      return .mode(error)
+    }
+    return .unknown
   }
 }

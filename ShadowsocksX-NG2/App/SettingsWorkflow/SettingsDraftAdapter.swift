@@ -88,21 +88,20 @@ enum SettingsDraftAdapter {
     errors.flatMap { error -> [SettingsFieldIssue] in
       switch error {
       case .portOutOfRange(let endpoint, _):
-        return [.port(portID(for: endpoint), message: error.presentedReason)]
+        return [.port(portID(for: endpoint), error: error)]
       case .duplicatePort(let endpoint, let otherEndpoint, _):
-        let message = error.presentedReason
         return [
-          .port(portID(for: endpoint), message: message),
-          .port(portID(for: otherEndpoint), message: message),
+          .port(portID(for: endpoint), error: error),
+          .port(portID(for: otherEndpoint), error: error),
         ]
       case .invalidTimeout:
-        return [.timeoutSeconds(message: error.presentedReason)]
+        return [.timeoutSeconds(error: error)]
       case .invalidHostAddress:
-        return [.advertisedAddress(message: error.presentedReason)]
+        return [.advertisedAddress(error: error)]
       case .invalidExternalPACURL:
-        return [.externalPACURL(message: error.presentedReason)]
+        return [.externalPACURL(error: error)]
       case .invalidGFWListURL:
-        return [.gfwListURL(message: error.presentedReason)]
+        return [.gfwListURL(error: error)]
       }
     }
   }

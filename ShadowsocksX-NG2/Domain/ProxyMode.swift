@@ -153,23 +153,4 @@ enum ProxyModeError: Error, Equatable, Sendable {
   case externalPACURLHasNoHost
   case externalPACURLContainsCredentials
   case externalPACURLTooLong
-
-  var presentedReason: String {
-    switch self {
-    case .invalidLocalPACURL:
-      "本地 PAC URL 无效"
-    case .invalidSOCKSPort(let port):
-      "SOCKS 端口无效：\(port)"
-    case .externalPACURLHasNoScheme:
-      "外部 PAC URL 缺少协议"
-    case .unsupportedExternalPACScheme(let scheme):
-      "外部 PAC 不支持协议：\(scheme)"
-    case .externalPACURLHasNoHost:
-      "外部 PAC URL 缺少主机"
-    case .externalPACURLContainsCredentials:
-      "外部 PAC URL 不得包含凭据"
-    case .externalPACURLTooLong:
-      "外部 PAC URL 过长"
-    }
-  }
 }

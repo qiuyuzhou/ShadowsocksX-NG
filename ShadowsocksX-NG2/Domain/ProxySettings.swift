@@ -119,24 +119,6 @@ enum ProxySettingsValidationError: Error, Equatable, Sendable {
     }
   }
 
-  var presentedReason: String {
-    switch self {
-    case .portOutOfRange(let endpoint, let port):
-      return PortSettingError.portOutOfRange(endpoint: endpoint, port: port).presentedReason
-    case .duplicatePort(let endpoint, let otherEndpoint, let port):
-      return PortSettingError.duplicatePort(
-        endpoint: endpoint, otherEndpoint: otherEndpoint, port: port
-      ).presentedReason
-    case .invalidTimeout(let seconds):
-      return "超时 " + String(seconds) + " 秒无效，必须是 1–86400 之间的整数"
-    case .invalidHostAddress(let address):
-      return "主机地址 " + address + " 无效，必须是非回环 IPv4 地址"
-    case .invalidExternalPACURL(let error):
-      return "外部 PAC URL 无效：" + error.presentedReason
-    case .invalidGFWListURL(let value):
-      return "GFW List URL 无效：" + value
-    }
-  }
 }
 
 protocol ProxySettingsStoring {
@@ -152,23 +134,6 @@ enum ProxySettingsStoreError: Error, Equatable {
   case missingCredential(CredentialReference)
   case credentialFailure(detail: String)
   case legacyListenSettings(ListenSettingsStoreError)
-
-  var presentedReason: String {
-    switch self {
-    case .corrupt:
-      return "偏好文件损坏"
-    case .invalid(let errors):
-      return errors.map(\.presentedReason).joined(separator: "；")
-    case .ioFailure:
-      return "偏好文件读写失败"
-    case .missingCredential:
-      return "偏好中的敏感 URL 无法从钥匙串读取"
-    case .credentialFailure:
-      return "偏好中的敏感 URL 无法写入钥匙串"
-    case .legacyListenSettings(let error):
-      return "旧版监听设置无法读取：\(error.presentedReason)"
-    }
-  }
 }
 
 struct RestoredProxySettings: Equatable {

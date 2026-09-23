@@ -24,29 +24,37 @@ final class StatusMenuModelTests: XCTestCase {
 
   func testSummaryFailureStatesCarryNamedDetail() {
     // 启动/激活失败：代理未在运行，开关意图为「启动」。
-    for (state, expectedStatus) in [
-      (ProxyRuntimeController.ProxyState.launchFailed(detail: "HTTP 端点未就绪"), "启动失败"),
-      (.activationFailed(reason: "尚未激活任何服务器"), "无法启动"),
-    ] {
+    let states: [(ProxyRuntimeController.ProxyState, String)] = [
+      (
+        .launchFailed(
+          .localEndpoint(
+            endpoint: "http", host: "127.0.0.1", port: 11087, cause: .refused)),
+        "启动失败"
+      ),
+      (.activationFailed(.noActiveTarget), "无法启动"),
+    ]
+    for (state, expectedStatus) in states {
       let summary = StatusMenuModel.summary(state: state, mode: .manual, targetPath: nil)
       XCTAssertFalse(summary.isOn)
       XCTAssertEqual(summary.status, expectedStatus)
       XCTAssertEqual(summary.detail, failureDetail(of: state))
     }
     // 系统代理失败：代理本体仍在运行，开关意图保持「停止」。
+    let systemProxyState: ProxyRuntimeController.ProxyState =
+      .systemProxyFailed(.operation(.applyFailed))
     let summary = StatusMenuModel.summary(
-      state: .systemProxyFailed(detail: "系统代理写入失败"), mode: .manual, targetPath: nil)
+      state: systemProxyState, mode: .manual, targetPath: nil)
     XCTAssertTrue(summary.isOn)
     XCTAssertEqual(summary.status, "系统代理未应用")
-    XCTAssertEqual(summary.detail, "系统代理写入失败")
+    XCTAssertEqual(summary.detail, AppPresentation.message(for: systemProxyState))
   }
 
   private func failureDetail(
     of state: ProxyRuntimeController.ProxyState
   ) -> String? {
     switch state {
-    case .launchFailed(let detail), .activationFailed(let detail), .systemProxyFailed(let detail):
-      return detail
+    case .launchFailed, .activationFailed, .systemProxyFailed:
+      return AppPresentation.message(for: state)
     default:
       return nil
     }

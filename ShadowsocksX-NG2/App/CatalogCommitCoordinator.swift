@@ -16,9 +16,8 @@ enum RuntimeSyncOutcome: Equatable, Sendable {
   case revalidated
   /// 运行时已向提交快照收敛（部署已执行且启动健康通过）。
   case converged(skippedServers: [SkippedServer])
-  /// 部署已执行但运行时未收敛；细节为平台运行时的点名事实（nil 表示等待
-  /// 用户在系统设置批准等无额外细节的终态）。
-  case failed(detail: String?)
+  /// 部署已执行但运行时未收敛；失败信息是安全的 typed runtime fact。
+  case failed(failure: RuntimeFailureFacts?)
   /// 活动目标失效：目标已清除且代理已停止（无静默回退）。
   case clearedAndStopped(ActivationFailure)
 }

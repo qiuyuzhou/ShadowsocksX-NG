@@ -107,7 +107,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
 
     XCTAssertEqual(
       controller.state,
-      .activationFailed(reason: "尚未激活任何服务器或分组，请先在主窗口激活后再启动代理"))
+      .activationFailed(.noActiveTarget))
     XCTAssertEqual(agent.registerCount, 0, "无目标不触碰 launchd（无静默回退）")
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
   }
@@ -169,11 +169,11 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
-    guard case .systemProxyFailed(let detail) = controller.state else {
+    guard case .systemProxyFailed(.externalPAC(let cause)) = controller.state else {
       XCTFail("外部 PAC 不健康时应阻止系统代理写入，实际 \(controller.state)")
       return
     }
-    XCTAssertTrue(detail.contains("外部 PAC") && detail.contains("HTTP 状态异常"))
+    XCTAssertEqual(cause, .invalidResponse)
     XCTAssertTrue(systemProxy.applied.isEmpty)
     XCTAssertEqual(
       pacProbe.urls,
@@ -223,13 +223,12 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
-    guard case .launchFailed(let detail) = controller.state else {
+    guard case .launchFailed(.localEndpoint(_, _, let port, let cause)) = controller.state else {
       XCTFail("应呈现启动失败，实际 \(controller.state)")
       return
     }
-    XCTAssertTrue(
-      detail.contains("127.0.0.1") && detail.contains("11086"),
-      "启动失败必须点名端点与端口（D8）：\(detail)")
+    XCTAssertEqual(port, 11086)
+    XCTAssertEqual(cause, .refused)
     XCTAssertTrue(systemProxy.applied.isEmpty, "端点不健康时不得写系统代理")
   }
 
@@ -278,12 +277,12 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     try await controller.activate(seeded.server)
     await controller.setProxyEnabled(true)
 
-    guard case .firewallBlocked(let detail) = controller.state else {
+    guard case .firewallBlocked(let facts) = controller.state else {
       XCTFail("主机态被拒应呈现防火墙状态，实际 \(controller.state)")
       return
     }
-    XCTAssertTrue(detail.contains("sslocal"))
-    XCTAssertTrue(detail.contains("系统设置") && detail.contains("防火墙") && detail.contains("允许传入连接"))
+    XCTAssertEqual(facts.executableName, "sslocal")
+    XCTAssertTrue(AppPresentation.message(for: controller.state).contains("允许传入连接"))
     XCTAssertEqual(firewall.checkedURLs.map(\.lastPathComponent), ["sslocal"])
     XCTAssertEqual(controller.pacURL?.absoluteString, "http://192.168.2.89:1089/v1/proxy.pac")
   }
@@ -304,11 +303,12 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     while controller.state == .running && Date() < deadline {
       try await Task.sleep(nanoseconds: 5_000_000)
     }
-    guard case .firewallBlocked(let detail) = controller.state else {
+    guard case .firewallBlocked(let facts) = controller.state else {
       XCTFail("稍后发生的拒绝也必须被检测，实际 \(controller.state)")
       return
     }
-    XCTAssertTrue(detail.contains("sslocal") && detail.contains("允许传入连接"))
+    XCTAssertEqual(facts.executableName, "sslocal")
+    XCTAssertTrue(AppPresentation.message(for: controller.state).contains("允许传入连接"))
     XCTAssertGreaterThanOrEqual(firewall.checkedURLs.count, 2)
   }
 
@@ -457,11 +457,10 @@ extension ProxyRuntimeControllerTests {
 
     XCTAssertEqual(controller.proxyMode, .pac, "持久化失败保留旧模式")
     XCTAssertEqual(controller.settings.preferredMode, .pac)
-    guard case .serviceFailed(let detail) = controller.state else {
+    guard case .serviceFailed(.persistence) = controller.state else {
       XCTFail("应点名持久化失败，实际 \(controller.state)")
       return
     }
-    XCTAssertTrue(detail.contains("fake-save-error"))
   }
 
   func testUpdateSettingsWhileInExternalPACModeCommitsKindAndURLAsOneChange() async throws {

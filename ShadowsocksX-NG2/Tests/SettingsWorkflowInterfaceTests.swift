@@ -31,11 +31,11 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
       [
         .port(
           .socks,
-          message: PortSettingError.portOutOfRange(endpoint: .socks, port: 0).presentedReason)
+          error: .portOutOfRange(endpoint: .socks, port: 0))
       ])
     XCTAssertEqual(
       workflow.issues(for: .port(.socks)),
-      [PortSettingError.portOutOfRange(endpoint: .socks, port: 0).presentedReason])
+      [.port(.socks, error: .portOutOfRange(endpoint: .socks, port: 0))])
     XCTAssertTrue(workflow.issues(for: .port(.pac)).isEmpty)
   }
 
@@ -43,14 +43,13 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     let workflow = makeWorkflow()
     workflow.draft.httpPort = workflow.draft.socksPort
 
-    let message = PortSettingError.duplicatePort(
-      endpoint: .socks, otherEndpoint: .http, port: 11086
-    ).presentedReason
+    let error = ProxySettingsValidationError.duplicatePort(
+      endpoint: .socks, otherEndpoint: .http, port: 11086)
     XCTAssertEqual(
       workflow.fieldIssues,
-      [.port(.socks, message: message), .port(.http, message: message)])
-    XCTAssertEqual(workflow.issues(for: .port(.socks)), [message])
-    XCTAssertEqual(workflow.issues(for: .port(.http)), [message])
+      [.port(.socks, error: error), .port(.http, error: error)])
+    XCTAssertEqual(workflow.issues(for: .port(.socks)), [.port(.socks, error: error)])
+    XCTAssertEqual(workflow.issues(for: .port(.http)), [.port(.http, error: error)])
     XCTAssertTrue(workflow.issues(for: .port(.pac)).isEmpty)
   }
 
@@ -60,7 +59,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
 
     XCTAssertEqual(
       workflow.fieldIssues,
-      [.timeoutSeconds(message: ProxySettingsValidationError.invalidTimeout(0).presentedReason)])
+      [.timeoutSeconds(error: .invalidTimeout(0))])
     XCTAssertTrue(workflow.issues(for: .port(.socks)).isEmpty)
   }
 
@@ -70,7 +69,8 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     workflow.draft.advertisedAddress = "127.0.0.1"
 
     XCTAssertEqual(workflow.fieldIssues.map(\.field), [.advertisedAddress])
-    XCTAssertTrue(workflow.issues(for: .advertisedAddress)[0].contains("主机地址"))
+    XCTAssertTrue(
+      AppPresentation.message(for: workflow.issues(for: .advertisedAddress)[0]).contains("主机地址"))
   }
 
   func testExternalPACURLIssueLandsOnItsField() {
@@ -78,7 +78,9 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     workflow.draft.externalPACURL = "ftp://example.com/pac"
 
     XCTAssertEqual(workflow.fieldIssues.map(\.field), [.externalPACURL])
-    XCTAssertTrue(workflow.issues(for: .externalPACURL)[0].contains("外部 PAC URL"))
+    XCTAssertTrue(
+      AppPresentation.message(for: workflow.issues(for: .externalPACURL)[0])
+        .contains("外部 PAC URL"))
   }
 
   func testGFWListURLIssueLandsOnItsField() {
@@ -86,7 +88,9 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     workflow.draft.gfwListURL = "not a url"
 
     XCTAssertEqual(workflow.fieldIssues.map(\.field), [.gfwListURL])
-    XCTAssertTrue(workflow.issues(for: .gfwListURL)[0].contains("GFW List URL"))
+    XCTAssertTrue(
+      AppPresentation.message(for: workflow.issues(for: .gfwListURL)[0])
+        .contains("GFW List URL"))
   }
 
   // MARK: - 端口 field state
@@ -279,10 +283,13 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
 
     workflow.save()
 
-    guard case .pacInvalidation(let summary)? = workflow.pendingConfirmation else {
+    guard case .pacInvalidation(_, let nextPort)? = workflow.pendingConfirmation else {
       return XCTFail("应挂起 PAC 失效确认，实际 \(String(describing: workflow.pendingConfirmation))")
     }
-    XCTAssertTrue(summary.contains("13089"))
+    XCTAssertEqual(nextPort, 13089)
+    XCTAssertTrue(
+      AppPresentation.message(for: .pacInvalidation(previousPort: 11089, nextPort: nextPort))
+        .contains("13089"))
     XCTAssertTrue(committing.updateCalls.isEmpty, "未确认失效提示不得提交")
 
     workflow.confirmPACNotice()
@@ -312,9 +319,10 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
 
     workflow.reset()
 
-    guard case .resetPreferences(let summary)? = workflow.pendingConfirmation else {
+    guard case .resetPreferences? = workflow.pendingConfirmation else {
       return XCTFail("应挂起重置确认，实际 \(String(describing: workflow.pendingConfirmation))")
     }
+    let summary = AppPresentation.message(for: .resetPreferences)
     XCTAssertTrue(summary.contains("端口"))
     XCTAssertTrue(summary.contains("监听范围"))
     XCTAssertTrue(summary.contains("PAC"))
@@ -357,9 +365,10 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     workflow.draft.timeoutSeconds = 120
 
     workflow.save()
-    await waitUntil(workflow.lastFailureMessage != nil)
+    await waitUntil(workflow.lastFailure != nil)
 
-    XCTAssertTrue(workflow.lastFailureMessage?.contains("fake-io-error") == true)
+    XCTAssertEqual(workflow.lastFailure, .unknown)
+    XCTAssertEqual(workflow.lastFailure?.presentableMessage, AppPresentation.unknownError)
     XCTAssertFalse(workflow.isCommitting)
     XCTAssertEqual(workflow.draft.timeoutSeconds, 120, "失败不吞掉草稿")
     XCTAssertEqual(committing.committedSettings.timeoutSeconds, 60, "失败不半提交")
@@ -374,17 +383,20 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     workflow.save()
     await waitUntil(!workflow.isCommitting)
     XCTAssertEqual(
-      workflow.lastFailureMessage, ProxySettingsStoreError.ioFailure(detail: "x").presentedReason)
-    XCTAssertTrue(workflow.lastFailureMessage?.contains("偏好文件") == true)
+      workflow.lastFailure,
+      .store(.ioFailure(detail: "disk full")))
+    XCTAssertTrue(workflow.lastFailure?.presentableMessage.contains("偏好文件") == true)
 
     committing.updateError = ProxySettingsStoreError.missingCredential(
       ProxySettingsFileStore.externalPACReference)
     workflow.save()
-    await waitUntil(workflow.lastFailureMessage?.contains("钥匙串") == true)
+    await waitUntil(
+      workflow.lastFailure
+        == .store(
+          .missingCredential(ProxySettingsFileStore.externalPACReference)))
     XCTAssertEqual(
-      workflow.lastFailureMessage,
-      ProxySettingsStoreError.missingCredential(ProxySettingsFileStore.externalPACReference)
-        .presentedReason)
+      workflow.lastFailure,
+      .store(.missingCredential(ProxySettingsFileStore.externalPACReference)))
   }
 
   func testCommittingStateBlocksRepeatedSave() async throws {
@@ -406,9 +418,9 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
 
     workflow.reset()
     workflow.confirmReset()
-    await waitUntil(workflow.lastFailureMessage != nil)
+    await waitUntil(workflow.lastFailure != nil)
 
-    XCTAssertTrue(workflow.lastFailureMessage?.contains("fake-io-error") == true)
+    XCTAssertEqual(workflow.lastFailure, .unknown)
   }
 
   // MARK: - 占用探测代际

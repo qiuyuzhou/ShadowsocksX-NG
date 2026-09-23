@@ -13,9 +13,10 @@ struct CatalogFileStore {
   }
 
   /// v2 起携带订阅记录；v1（无订阅字段）仍可读取。v3 移除节点级 enabled
-  /// 语义；旧字段由 CatalogEntry 解码时丢弃，下一次保存统一写出 v3。
-  private static let supportedVersions: Set<Int> = [1, 2, 3]
-  private static let currentVersion = 3
+  /// 语义；v4 把订阅失败字符串替换为 typed facts。读取兼容 v1–v4，写入
+  /// 始终使用 v4。
+  private static let supportedVersions: Set<Int> = [1, 2, 3, 4]
+  private static let currentVersion = 4
   private static let jsonEncoder: JSONEncoder = {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -111,7 +112,8 @@ struct CatalogFileStore {
 }
 
 /// 落盘文档形态：版本号 + 根子序 + 全量节点表（顺序语义在根序与分组显子序中）
-/// + 订阅记录（v2 起携带；v1 缺省为空）。v3 节点条目不再写出 `enabled`。
+/// + 订阅记录（v2 起携带；v1 缺省为空）。v3 节点条目不再写出 `enabled`；
+/// v4 的失败状态只写 typed facts，不再写旧 `reason` 字段。
 private struct CatalogFilePayload: Codable {
   var version: Int
   var rootChildren: [NodeID]

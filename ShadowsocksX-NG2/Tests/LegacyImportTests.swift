@@ -39,6 +39,9 @@ final class LegacyImportTests: XCTestCase {
 
     XCTAssertEqual(outcome.report.importedServerCount, 4)
     XCTAssertEqual(outcome.report.skippedRecords.map(\.index), [4, 5])
+    XCTAssertEqual(
+      outcome.report.skippedRecords.map(\.reason),
+      [.invalidAddress, .notDictionary])
     XCTAssertEqual(outcome.report.regeneratedIdentityCount, 3)
     XCTAssertTrue(marker.completed)
 

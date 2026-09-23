@@ -1,6 +1,8 @@
 /// 激活失败的点名原因（spec #21 D3 无静默回退族）。激活被拒与活动目标清除
 /// 停止共用同一套原因：前者状态完全不动，后者清除目标并发出停止意图。
 enum ActivationFailure: Error, Equatable, Sendable {
+  /// Enable was requested without a selected target.
+  case noActiveTarget
   /// 活动目标已被删除（或从未存在）。
   case targetNotFound(NodeID)
   /// 组目标展开后没有可激活的服务器叶子（空组或全部候选无效）。

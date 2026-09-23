@@ -23,17 +23,17 @@ final class ProxyRuntimeController: ObservableObject {
     case starting
     case running
     /// 代理在本机运行，但主机地址态的入站被 macOS 防火墙拒绝。
-    case firewallBlocked(detail: String)
+    case firewallBlocked(FirewallBlockedFacts)
     /// 启动失败：携带点名端点与端口的事实（D8；端口语义细节 #30 接线）。
-    case launchFailed(detail: String)
+    case launchFailed(LaunchFailureFacts)
     /// 激活失败或活动目标清除（无静默回退族的呈现面）。
-    case activationFailed(reason: String)
+    case activationFailed(ActivationFailure)
     /// 需要用户在系统设置-登录项中允许后台项。
     case requiresApproval
     /// 服务管理或运行时文件本身失败。
-    case serviceFailed(detail: String)
+    case serviceFailed(ServiceFailureFacts)
     /// 运行时健康，但系统代理未能应用或恢复。
-    case systemProxyFailed(detail: String)
+    case systemProxyFailed(SystemProxyFailureFacts)
   }
 
   @Published private(set) var state: ProxyState = .off
@@ -56,9 +56,9 @@ final class ProxyRuntimeController: ObservableObject {
   private let settingsStore: ProxySettingsStoring
   /// 监听设置不可读时的点名原因（D8「任何路径不静默改端口」）；非 nil 时
   /// 设置只是占位出厂默认，禁止部署（见 `deploy`）。
-  private var listenUnreadableReason: String?
+  private var listenSettingsUnreadable: Bool
   /// 新版偏好不可读时同样禁止部署，不以出厂端口静默替代用户配置。
-  private var settingsUnreadableReason: String?
+  private var settingsUnreadable: Bool
   private let agent: LaunchAgentControlling
   private let probe: EndpointProbing
   private let pacProbe: PACHealthProbing
@@ -110,11 +110,9 @@ final class ProxyRuntimeController: ObservableObject {
           .legacyListenSettings($0)
         })
     settings = restoredSettings.settings
-    listenUnreadableReason =
-      settingsRestore == nil
-      ? listenRestore.unreadableError?.presentedReason
-      : nil
-    settingsUnreadableReason = restoredSettings.unreadableError?.presentedReason
+    listenSettingsUnreadable =
+      settingsRestore == nil && listenRestore.unreadableError != nil
+    settingsUnreadable = restoredSettings.unreadableError != nil
     self.agent = agent
     self.probe = probe
     self.pacProbe = pacProbe
@@ -150,9 +148,6 @@ final class ProxyRuntimeController: ObservableObject {
     runtimeFileStore.loadDocument().map { Redactor.documentSummary($0) }
   }
 
-  /// 无活动目标时启用代理的点名原因（无静默回退族的呈现面）。
-  private static let noActiveTargetReason = "尚未激活任何服务器或分组，请先在主窗口激活后再启动代理"
-
   // MARK: - 用户意图
 
   /// 激活一个服务器或分组目标（目录 UI 工单复用入口）：持久化目标；代理
@@ -171,7 +166,7 @@ final class ProxyRuntimeController: ObservableObject {
       do {
         try activationFileStore.save(activeTargetID: target)
       } catch {
-        state = .serviceFailed(detail: String(describing: error))
+        state = .serviceFailed(.persistence)
         throw error
       }
       if state != .off {
@@ -179,10 +174,10 @@ final class ProxyRuntimeController: ObservableObject {
       }
       return .activated(skippedInvalid: configuration.skippedServers.count)
     } catch let failure as ActivationFailure {
-      state = .activationFailed(reason: failure.presentedReason)
+      state = .activationFailed(failure)
       return .rejectedActivation
     } catch {
-      state = .serviceFailed(detail: String(describing: error))
+      state = .serviceFailed(.unknown)
       throw error
     }
   }
@@ -201,7 +196,7 @@ final class ProxyRuntimeController: ObservableObject {
       }
       _ = await execute(.stop, document: nil)
       if let restoreError {
-        state = .systemProxyFailed(detail: systemProxyDetail(restoreError))
+        state = .systemProxyFailed(systemProxyFacts(for: restoreError))
       } else {
         state = .off
       }
@@ -224,7 +219,7 @@ final class ProxyRuntimeController: ObservableObject {
       try settingsStore.save(next)
     } catch {
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-      state = .serviceFailed(detail: String(describing: error))
+      state = .serviceFailed(.persistence)
       return
     }
     settings = next
@@ -240,7 +235,7 @@ final class ProxyRuntimeController: ObservableObject {
         try systemProxy.restore()
         state = .running
       } catch {
-        state = .systemProxyFailed(detail: systemProxyDetail(error))
+        state = .systemProxyFailed(systemProxyFacts(for: error))
       }
       return
     }
@@ -266,7 +261,7 @@ final class ProxyRuntimeController: ObservableObject {
         let restoreError = restoreSystemProxyError()
         state =
           restoreError.map {
-            .systemProxyFailed(detail: systemProxyDetail($0))
+            .systemProxyFailed(systemProxyFacts(for: $0))
           } ?? .off
         pacURL = nil
       }
@@ -278,7 +273,7 @@ final class ProxyRuntimeController: ObservableObject {
       _ = await execute(.stop, document: nil)
       state =
         restoreError.map {
-          .systemProxyFailed(detail: systemProxyDetail($0))
+          .systemProxyFailed(systemProxyFacts(for: $0))
         } ?? .off
       pacURL = nil
     }
@@ -303,14 +298,14 @@ final class ProxyRuntimeController: ObservableObject {
   }
 
   private func presentNoActiveTarget() {
-    RuntimeLog.emit(.activationFailed(reason: Self.noActiveTargetReason))
-    state = .activationFailed(reason: Self.noActiveTargetReason)
+    RuntimeLog.emit(.activationFailed(reason: "no active target"))
+    state = .activationFailed(.noActiveTarget)
   }
 
   /// 把「运行定义档」意图推到运行时：计划动作 → 顺序执行 → 端点健康呈现。
   private func deploy(_ document: SslocalRuntimeDocument) async {
-    if let reason = listenUnreadableReason ?? settingsUnreadableReason {
-      await refuseDeployForUnreadableListenSettings(reason)
+    if listenSettingsUnreadable || settingsUnreadable {
+      await refuseDeployForUnreadableListenSettings()
       return
     }
     pacURL = nil
@@ -323,24 +318,22 @@ final class ProxyRuntimeController: ObservableObject {
 
   /// D8「任何路径不静默改端口」：监听设置不可读时以占位出厂端口部署等于
   /// 系统擅自改端口——停止运行时并点名呈现，等用户在设置区修复（#33 接线）。
-  private func refuseDeployForUnreadableListenSettings(_ reason: String) async {
-    RuntimeLog.emit(.activationFailed(reason: reason))
+  private func refuseDeployForUnreadableListenSettings() async {
+    RuntimeLog.emit(.activationFailed(reason: "listen settings unreadable"))
     let restoreError = restoreSystemProxyError()
     _ = await execute(.stop, document: nil)
     pacURL = nil
     lastDocument = nil
     skippedServers = []
-    let detail =
-      "本地代理端口配置无法读取（\(reason)），已停止代理以避免静默改用出厂端口；请在设置区修复端口后重新启动"
     if let restoreError {
-      state = .launchFailed(detail: "\(detail)；\(systemProxyDetail(restoreError))")
+      state = .systemProxyFailed(systemProxyFacts(for: restoreError))
     } else {
-      state = .launchFailed(detail: detail)
+      state = .launchFailed(.unreadableSettings)
     }
   }
 
   private func handleCleared(_ failure: ActivationFailure) async {
-    RuntimeLog.emit(.activationFailed(reason: failure.presentedReason))
+    RuntimeLog.emit(.activationFailed(reason: String(describing: failure)))
     do {
       try activationFileStore.save(activeTargetID: nil)
     } catch {
@@ -353,10 +346,9 @@ final class ProxyRuntimeController: ObservableObject {
     lastDocument = nil
     skippedServers = []
     if let restoreError {
-      state = .systemProxyFailed(
-        detail: "\(failure.presentedReason)；\(systemProxyDetail(restoreError))")
+      state = .systemProxyFailed(systemProxyFacts(for: restoreError))
     } else {
-      state = .activationFailed(reason: failure.presentedReason)
+      state = .activationFailed(failure)
     }
   }
 
@@ -384,14 +376,14 @@ final class ProxyRuntimeController: ObservableObject {
     switch action {
     case .writeContract:
       guard let document else {
-        state = .serviceFailed(detail: "缺少运行时文档")
+        state = .serviceFailed(.missingDocument)
         return false
       }
       do {
         try runtimeFileStore.write(document)
         RuntimeLog.emit(.contractWritten(serverCount: document.servers.count))
       } catch {
-        state = .serviceFailed(detail: String(describing: error))
+        state = .serviceFailed(.runtimeFile)
         return false
       }
     case .registerAgent:
@@ -405,7 +397,7 @@ final class ProxyRuntimeController: ObservableObject {
           return false
         }
         if agent.status != .registered {
-          state = .serviceFailed(detail: describe(error))
+          state = .serviceFailed(.agent)
           return false
         }
         // 注册与状态读取之间的竞态：已注册即达意图，不视为失败。
@@ -479,12 +471,16 @@ extension ProxyRuntimeController {
     switch state {
     case .running, .firewallBlocked:
       .converged(skippedServers: skippedServers)
-    case .launchFailed(let detail), .serviceFailed(let detail), .systemProxyFailed(let detail):
-      .failed(detail: detail)
-    case .activationFailed(let reason):
-      .failed(detail: reason)
+    case .launchFailed(let facts):
+      .failed(failure: .launch(facts))
+    case .serviceFailed(let facts):
+      .failed(failure: .service(facts))
+    case .systemProxyFailed(let facts):
+      .failed(failure: .systemProxy(facts))
+    case .activationFailed(let failure):
+      .failed(failure: .activation(failure))
     case .requiresApproval, .off, .starting:
-      .failed(detail: nil)
+      .failed(failure: nil)
     }
   }
 
@@ -508,8 +504,8 @@ extension ProxyRuntimeController {
     try settingsStore.save(next)
     settings = next
     proxyMode = resolvedMode
-    listenUnreadableReason = nil
-    settingsUnreadableReason = nil
+    listenSettingsUnreadable = false
+    settingsUnreadable = false
 
     guard state != .off else { return }
     switch reexpand() {
@@ -527,8 +523,8 @@ extension ProxyRuntimeController {
   func resetPreferences() async throws {
     try settingsStore.reset()
     settings = ProxySettings()
-    listenUnreadableReason = nil
-    settingsUnreadableReason = nil
+    listenSettingsUnreadable = false
+    settingsUnreadable = false
     proxyMode = .pac
     if state != .off {
       await setProxyEnabled(false)
@@ -550,8 +546,8 @@ extension ProxyRuntimeController {
 
     if let restored = try? settingsStore.load() {
       settings = restored
-      settingsUnreadableReason = nil
-      listenUnreadableReason = nil
+      settingsUnreadable = false
+      listenSettingsUnreadable = false
       proxyMode = Self.makeProxyMode(from: restored)
     }
     reloadCatalog()
@@ -580,15 +576,17 @@ extension ProxyRuntimeController {
       endpointFailure = await unhealthyLocalEndpoint(in: document)
       if endpointFailure == nil {
         guard let healthURL = document.pac.healthURL else {
-          state = .launchFailed(detail: "PAC URL 无效")
+          state = .launchFailed(
+            .pacEndpoint(port: document.pac.port, cause: .invalidResponse))
           return
         }
         pacOutcome = await pacProbe.probe(url: healthURL, timeout: 1.5)
         if pacOutcome == .reachable {
           if case .externalPAC(let externalURL) = proxyMode {
             let externalOutcome = await pacProbe.probe(url: externalURL, timeout: 1.5)
-            if case .failed(let detail) = externalOutcome {
-              state = .systemProxyFailed(detail: "外部 PAC 未就绪（\(detail)）")
+            if case .failed = externalOutcome {
+              state = .systemProxyFailed(
+                .externalPAC(runtimeEndpointFailure(from: externalOutcome)))
               return
             }
           }
@@ -606,15 +604,14 @@ extension ProxyRuntimeController {
       presentEndpointFailure(endpointFailure)
       return
     }
-    let pacDetail: String
+    let pacFailure: RuntimeEndpointFailure
     switch pacOutcome {
     case .reachable:
-      pacDetail = "未知错误"
-    case .failed(let reason):
-      pacDetail = reason
+      pacFailure = .unknown
+    case .failed:
+      pacFailure = runtimeEndpointFailure(from: pacOutcome)
     }
-    state = .launchFailed(
-      detail: "PAC 端点 \(document.pac.healthURL?.absoluteString ?? "") 未就绪（\(pacDetail)）")
+    state = .launchFailed(.pacEndpoint(port: document.pac.port, cause: pacFailure))
   }
 
   private func unhealthyLocalEndpoint(
@@ -632,21 +629,25 @@ extension ProxyRuntimeController {
 
   private func presentEndpointFailure(_ failure: LocalEndpointFailure) {
     let detail: String
+    let cause: RuntimeEndpointFailure
     switch failure.outcome {
     case .reachable:
       detail = "已连通"
+      cause = .unknown
     case .refused(let reason):
       detail = reason
+      cause = .refused
     case .timedOut:
       detail = "连接超时"
+      cause = .timedOut
     }
     RuntimeLog.emit(
       .endpointProbeFailed(
         host: failure.host, port: failure.local.localPort, detail: detail))
     let endpointName = failure.local.inboundProtocol.uppercased()
     state = .launchFailed(
-      detail:
-        "本地代理 \(endpointName) 端点 \(failure.host):\(failure.local.localPort) 未就绪（\(detail)）")
+      .localEndpoint(
+        endpoint: endpointName, host: failure.host, port: failure.local.localPort, cause: cause))
   }
 
   private func presentFirewallStatus(for document: SslocalRuntimeDocument) async {
@@ -672,9 +673,7 @@ extension ProxyRuntimeController {
 
   private func presentFirewallBlocked(_ executableURL: URL) {
     let name = executableURL.lastPathComponent
-    state = .firewallBlocked(
-      detail:
-        "macOS 防火墙已阻止 \(name) 接受传入连接。请前往“系统设置”→“网络”→“防火墙”→“选项”，将 \(name) 设为“允许传入连接”，或移除该条目后重启代理。")
+    state = .firewallBlocked(FirewallBlockedFacts(executableName: name))
   }
 
   private func observeFirewall(generation: Int) {
@@ -760,7 +759,7 @@ extension ProxyRuntimeController {
   }
 
   private func describe(_ error: Error) -> String {
-    (error as? ActivationFailure)?.presentedReason ?? String(describing: error)
+    String(describing: error)
   }
 
   private func applySystemProxy(for document: SslocalRuntimeDocument) -> Bool {
@@ -774,7 +773,7 @@ extension ProxyRuntimeController {
       }
       return true
     } catch {
-      state = .systemProxyFailed(detail: systemProxyDetail(error))
+      state = .systemProxyFailed(systemProxyFacts(for: error))
       return false
     }
   }
@@ -788,14 +787,60 @@ extension ProxyRuntimeController {
     }
   }
 
-  private func systemProxyDetail(_ error: Error) -> String {
+  private func systemProxyFacts(for error: Error) -> SystemProxyFailureFacts {
     if let error = error as? SystemProxyError {
-      return error.presentedReason
+      return Self.systemProxyFacts(for: error)
     }
     if let error = error as? ProxyModeError {
-      return error.presentedReason
+      return .mode(error)
     }
-    return String(describing: error)
+    return .unknown
+  }
+
+  private static func systemProxyFacts(
+    for error: SystemProxyError
+  ) -> SystemProxyFailureFacts {
+    switch error {
+    case .authorizationFailed: return .operation(.authorizationFailed)
+    case .preferencesUnavailable: return .operation(.preferencesUnavailable)
+    case .preferencesBusy: return .operation(.preferencesBusy)
+    case .noCurrentNetworkSet: return .operation(.noCurrentNetworkSet)
+    case .noProxyServices: return .operation(.noProxyServices)
+    case .unreadableService: return .operation(.unreadableService)
+    case .ownershipConflict: return .ownershipConflict
+    case .invalidStoredConfiguration: return .operation(.invalidStoredConfiguration)
+    case .cannotWriteService: return .operation(.cannotWriteService)
+    case .commitFailed: return .operation(.commitFailed)
+    case .applyFailed: return .operation(.applyFailed)
+    case .ownershipStoreFailed: return .operation(.ownershipStoreFailed)
+    }
+  }
+
+  private func runtimeEndpointFailure(from outcome: EndpointHealthProbe.Outcome)
+    -> RuntimeEndpointFailure
+  {
+    switch outcome {
+    case .reachable: return .unknown
+    case .refused: return .refused
+    case .timedOut: return .timedOut
+    }
+  }
+
+  private func runtimeEndpointFailure(from outcome: PACHealthOutcome)
+    -> RuntimeEndpointFailure
+  {
+    switch outcome {
+    case .reachable: return .unknown
+    case .failed(let detail):
+      let normalized = detail.lowercased()
+      if normalized.contains("timeout") || normalized.contains("timedout") {
+        return .timedOut
+      }
+      if normalized.contains("http") || normalized.contains("mime") || normalized.contains("内容") {
+        return .invalidResponse
+      }
+      return .unknown
+    }
   }
 }
 

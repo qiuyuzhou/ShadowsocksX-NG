@@ -67,12 +67,12 @@ final class UnreadableListenSettingsTests: XCTestCase {
     try await controller.activate(server)
     await controller.setProxyEnabled(true)
 
-    guard case .launchFailed(let detail) = controller.state else {
+    guard case .launchFailed(.unreadableSettings) = controller.state else {
       return XCTFail("应呈现启动失败，实际 \(controller.state)")
     }
     XCTAssertTrue(
-      detail.contains("端口配置无法读取") && detail.contains("1086"),
-      "失败必须点名监听设置不可读及原因：\(detail)")
+      AppPresentation.message(for: controller.state).contains("配置无法读取"),
+      "失败必须点名监听设置不可读：\(controller.state)")
     XCTAssertEqual(agent.registerCount, 0, "占位出厂端口不得部署")
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
     XCTAssertTrue(systemProxy.applied.isEmpty, "占位端口不得写系统代理")
@@ -88,10 +88,12 @@ final class UnreadableListenSettingsTests: XCTestCase {
 
     await controller.resyncOnLaunch()
 
-    guard case .launchFailed(let detail) = controller.state else {
+    guard case .launchFailed(.unreadableSettings) = controller.state else {
       return XCTFail("应呈现启动失败，实际 \(controller.state)")
     }
-    XCTAssertTrue(detail.contains("端口配置无法读取"), "必须点名监听设置不可读：\(detail)")
+    XCTAssertTrue(
+      AppPresentation.message(for: controller.state).contains("配置无法读取"),
+      "必须点名监听设置不可读：\(controller.state)")
     XCTAssertEqual(
       agent.unregisterCount, 1, "存续的上一会话 agent 必须停下，不得以占位端口重部署")
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))

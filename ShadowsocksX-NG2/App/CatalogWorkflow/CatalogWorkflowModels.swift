@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 // MARK: - 目录树 projection（非敏感）
 
@@ -244,6 +245,53 @@ struct SubscriptionSummary: Identifiable, Equatable {
   let host: String
   let status: SubscriptionRefreshStatus
   let serverCount: Int
+}
+
+/// Transient refresh result retained by the workflow. The durable status stores
+/// only `SubscriptionRefreshFailure` and a coarse rollback state; this value
+/// keeps the complete journal outcome available to the current UI/session.
+struct SubscriptionRefreshFailureResult: Equatable, Sendable {
+  let failure: SubscriptionRefreshFailure
+  let credentialRollback: CredentialRollbackOutcome?
+}
+
+/// Commit failure at the subscription workflow seam. The underlying storage
+/// error is intentionally reduced to a safe category, while the complete
+/// rollback outcome remains available in memory for the current operation.
+struct SubscriptionRefreshCommitError: Error, Equatable, Sendable {
+  let category: SubscriptionRefreshFailure.CommitCategory
+  let rollback: CredentialRollbackOutcome
+}
+
+extension SubscriptionRefreshFailure {
+  /// Single workflow conversion point from transient refresh errors to durable
+  /// safe facts. Presentation is intentionally not involved here.
+  static func from(error: Error) -> Self {
+    switch error {
+    case let error as SubscriptionFetchError:
+      return from(fetchError: error)
+    case let error as SubscriptionParseError:
+      return from(parseError: error)
+    case let error as CredentialStoreError:
+      let category: CredentialCategory
+      switch error {
+      case .keychainStatus(let status) where status == errSecItemNotFound:
+        category = .missing
+      default:
+        category = .read
+      }
+      return .credential(category: category)
+    case let error as SubscriptionFormError:
+      if case .invalidURL = error { return .invalidURL }
+      return .unknown
+    case let error as SubscriptionRefreshCommitError:
+      return .commit(
+        category: error.category,
+        rollback: rollbackStatus(for: error.rollback))
+    default:
+      return .unknown
+    }
+  }
 }
 
 // MARK: - 命令结果（structured outcome）

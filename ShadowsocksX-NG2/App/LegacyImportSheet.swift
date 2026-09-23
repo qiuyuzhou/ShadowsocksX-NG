@@ -80,8 +80,10 @@ struct LegacyImportSheet: View {
           Text("未导入记录")
             .font(.headline)
           ForEach(report.skippedRecords, id: \.index) { record in
-            Text("第 \(record.index + 1) 条（\(record.description)）：\(record.reason)")
-              .font(.callout)
+            Text(
+              "第 \(record.index + 1) 条（\(record.description)）：\(AppPresentation.message(for: record.reason))"
+            )
+            .font(.callout)
           }
         }
 
@@ -98,9 +100,9 @@ struct LegacyImportSheet: View {
       do {
         _ = try await workflow.importLegacy(reimport: reimport)
       } catch let error as LegacyImportError {
-        errorMessage = error.presentedReason
+        errorMessage = error.presentableMessage
       } catch {
-        errorMessage = String(describing: error)
+        errorMessage = error.presentableMessage
       }
       isImporting = false
     }

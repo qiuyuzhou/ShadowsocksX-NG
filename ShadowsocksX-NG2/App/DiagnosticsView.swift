@@ -144,7 +144,7 @@ struct DiagnosticsView: View {
         diagnostics.noteExportCompleted()
         exportedPath = url.path
       } catch {
-        errors.present(text: "导出失败：\(error.localizedDescription)")
+        errors.present(text: "导出失败：\(error.presentableMessage)")
       }
     case .failed:
       errors.present(text: "导出失败：诊断报告无法安全构造")

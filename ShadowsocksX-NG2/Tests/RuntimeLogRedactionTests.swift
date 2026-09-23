@@ -76,10 +76,10 @@ final class RuntimeLogRedactionTests: XCTestCase {
       .reloadRestarted,
       .endpointProbeFailed(host: "127.0.0.1", port: 1086, detail: "Connection refused"),
       .activationFailed(
-        reason: ActivationFailure.invalidLeaf(
-          node: NodeID(rawValue: "leaf-1"),
-          reason: .pluginNotProvided(program: "simple-obfs")
-        ).presentedReason),
+        reason: AppPresentation.message(
+          for: ActivationFailure.invalidLeaf(
+            node: NodeID(rawValue: "leaf-1"),
+            reason: .pluginNotProvided(program: "simple-obfs")))),
       .diagnosticsExported,
     ]
 

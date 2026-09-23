@@ -7,17 +7,6 @@ enum ListenSettingsStoreError: Error, Equatable {
   case invalidPorts([PortSettingError])
   /// 读取或写入时的文件系统错误。
   case ioFailure(detail: String)
-
-  var presentedReason: String {
-    switch self {
-    case .corrupt:
-      return "监听设置文件损坏"
-    case .invalidPorts(let errors):
-      return errors.map(\.presentedReason).joined(separator: "；")
-    case .ioFailure:
-      return "监听设置文件读取失败"
-    }
-  }
 }
 
 protocol ListenSettingsStoring {

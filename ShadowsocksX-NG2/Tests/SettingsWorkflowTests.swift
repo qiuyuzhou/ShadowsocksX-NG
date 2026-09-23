@@ -88,9 +88,10 @@ final class SettingsWorkflowTests: XCTestCase {
 
     pair.workflow.draft.timeoutSeconds = 120
     pair.workflow.save()
-    await waitUntil(pair.workflow.lastFailureMessage != nil)
+    await waitUntil(pair.workflow.lastFailure != nil)
 
-    XCTAssertTrue(pair.workflow.lastFailureMessage?.contains("fake-io-error") == true)
+    XCTAssertEqual(pair.workflow.lastFailure, .unknown)
+    XCTAssertEqual(pair.workflow.lastFailure?.presentableMessage, AppPresentation.unknownError)
     XCTAssertNil(settingsStore.saved)
     XCTAssertEqual(pair.controller.settings.timeoutSeconds, 60, "失败保留旧值")
     XCTAssertEqual(pair.workflow.draft.timeoutSeconds, 120, "草稿保留待修改值")

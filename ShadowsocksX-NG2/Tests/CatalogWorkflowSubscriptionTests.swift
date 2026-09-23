@@ -1,3 +1,4 @@
+import Security
 import XCTest
 
 @testable import ShadowsocksX_NG2
@@ -114,8 +115,7 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
     guard case .failed(_, let reason) = workflow.subscriptions[0].status else {
       return XCTFail("首刷失败应记失败态")
     }
-    XCTAssertTrue(reason.contains("URLError.timedOut"))
-    XCTAssertFalse(reason.contains("provider.example.com"), "失败原因不得携带订阅地址")
+    XCTAssertEqual(reason, .transport(.timedOut))
   }
 
   // MARK: 失败保留语义
@@ -135,35 +135,13 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
     XCTAssertEqual(workflow.tree, treeBefore, "传输失败不动最后成功快照（projection 等价）")
     XCTAssertEqual(findNode(withSuffix: "aaaaaaaa-0000-4000-8000-00000000000a")?.name, "香港 01")
     // 状态点名失败且原因脱敏。
-    guard case .failed(_, let reason) = workflow.subscriptions[0].status else {
+    guard case .failed(_, let failure) = workflow.subscriptions[0].status else {
       return XCTFail("应记失败态")
     }
-    XCTAssertTrue(reason.contains("503"))
+    XCTAssertEqual(failure, .httpStatus(code: 503))
     // 仅状态提交了一次（快照未动）。
     await waitUntilRuntimeSettles(runtime.convergeCount - convergesBefore == 1)
     XCTAssertEqual(runtime.convergeCount - convergesBefore, 1)
-  }
-
-  func testDecodeAndSchemaFailuresMarkFailedWithoutTouchingSnapshot() async throws {
-    let record = try await seedSuccessfulSubscription()
-
-    for behavior in [
-      FakeSubscriptionFetcher.Behavior.failure(.contentType(received: "text/plain")),
-      FakeSubscriptionFetcher.Behavior.success(Data("not json".utf8)),
-      FakeSubscriptionFetcher.Behavior.success(Data(#"{"version": 9, "servers": []}"#.utf8)),
-    ] {
-      let treeBefore = workflow.tree
-      workflow.subscriptionFetcher = FakeSubscriptionFetcher(behavior: behavior)
-      await workflow.refreshSubscription(record.id)
-
-      guard case .failed(_, let reason) = workflow.subscriptions[0].status else {
-        return XCTFail("应记失败态：\(behavior)")
-      }
-      XCTAssertFalse(reason.isEmpty)
-      XCTAssertEqual(workflow.tree, treeBefore, "解析类失败不动快照（projection 等价）")
-      // 失败原因不携带订阅 URL。
-      XCTAssertFalse(reason.lowercased().contains("p.example.com"))
-    }
   }
 
   func testDuplicateIDFailureKeepsSnapshot() async throws {
@@ -174,10 +152,10 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
       behavior: .success(SubscriptionDocs.duplicateIDs()))
     await workflow.refreshSubscription(record.id)
 
-    guard case .failed(_, let reason) = workflow.subscriptions[0].status else {
+    guard case .failed(_, let failure) = workflow.subscriptions[0].status else {
       return XCTFail("应记失败态")
     }
-    XCTAssertTrue(reason.contains("重复"), "点名重复 ID：\(reason)")
+    XCTAssertEqual(failure, .duplicateIdentity)
     XCTAssertEqual(workflow.tree, treeBefore)
   }
 
@@ -189,10 +167,10 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
       behavior: .success(SubscriptionDocs.invalidRecord()))
     await workflow.refreshSubscription(record.id)
 
-    guard case .failed(_, let reason) = workflow.subscriptions[0].status else {
+    guard case .failed(_, let failure) = workflow.subscriptions[0].status else {
       return XCTFail("应记失败态")
     }
-    XCTAssertTrue(reason.contains("server_port"), "点名无效字段：\(reason)")
+    XCTAssertEqual(failure, .recordValidation(index: 0, field: .port))
     XCTAssertEqual(workflow.tree, treeBefore)
   }
 
@@ -362,26 +340,6 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
     XCTAssertNotNil(reloaded.tree.node(withID: serverAID), "订阅子树跨持久化保留")
   }
 
-  // MARK: 卡片数据面
-
-  func testSubscriptionSummaryReflectsStatusAndCounts() async throws {
-    _ = try await seedSuccessfulSubscription()
-    let healthy = try XCTUnwrap(workflow.subscriptions.first)
-    XCTAssertEqual(healthy.name, "Example subscription")
-    XCTAssertEqual(healthy.host, "p.example.com", "卡片展示 host，不展示完整 URL（story 23）")
-    guard case .succeeded = healthy.status else { return XCTFail("应记成功态") }
-    XCTAssertEqual(healthy.serverCount, 2)
-
-    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
-      behavior: .failure(.transport(detail: "URLError.cannotConnectToHost")))
-    await workflow.refreshSubscription(healthy.id)
-
-    let failed = try XCTUnwrap(workflow.subscriptions.first)
-    XCTAssertTrue(failed.status.isFailed)
-    XCTAssertEqual(failed.status.failureDetail?.contains("URLError.cannotConnectToHost"), true)
-    XCTAssertEqual(failed.serverCount, 2, "失败保留最后成功的服务器数")
-  }
-
   // MARK: 并发守卫
 
   func testConcurrentRefreshOnSameSubscriptionDoesNotReenter() async throws {
@@ -428,6 +386,133 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
 
   private func createOnly(urlString: String) async throws -> SubscriptionSummary {
     try await workflow.createSubscription(urlString: urlString)
+  }
+}
+
+extension CatalogWorkflowSubscriptionTests {
+  // MARK: Typed failure projection
+
+  func testDecodeAndSchemaFailuresMarkFailedWithoutTouchingSnapshot() async throws {
+    let record = try await seedSuccessfulSubscription()
+
+    for (behavior, expected) in [
+      (
+        FakeSubscriptionFetcher.Behavior.failure(.contentType(received: "text/plain")),
+        SubscriptionRefreshFailure.contentType(.unsupported)
+      ),
+      (
+        FakeSubscriptionFetcher.Behavior.success(Data("not json".utf8)),
+        SubscriptionRefreshFailure.decodingFailure
+      ),
+      (
+        FakeSubscriptionFetcher.Behavior.success(Data(#"{"version": 9, "servers": []}"#.utf8)),
+        SubscriptionRefreshFailure.unsupportedSchemaVersion
+      ),
+    ] {
+      let treeBefore = workflow.tree
+      workflow.subscriptionFetcher = FakeSubscriptionFetcher(behavior: behavior)
+      await workflow.refreshSubscription(record.id)
+
+      guard case .failed(_, let failure) = workflow.subscriptions[0].status else {
+        return XCTFail("应记失败态：\(behavior)")
+      }
+      XCTAssertEqual(failure, expected)
+      XCTAssertEqual(workflow.tree, treeBefore, "解析类失败不动快照（projection 等价）")
+    }
+  }
+
+  func testSubscriptionSummaryReflectsStatusAndCounts() async throws {
+    _ = try await seedSuccessfulSubscription()
+    let healthy = try XCTUnwrap(workflow.subscriptions.first)
+    XCTAssertEqual(healthy.name, "Example subscription")
+    XCTAssertEqual(healthy.host, "p.example.com", "卡片展示 host，不展示完整 URL（story 23）")
+    guard case .succeeded = healthy.status else { return XCTFail("应记成功态") }
+    XCTAssertEqual(healthy.serverCount, 2)
+
+    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
+      behavior: .failure(.transport(detail: "URLError.cannotConnectToHost")))
+    await workflow.refreshSubscription(healthy.id)
+
+    let failed = try XCTUnwrap(workflow.subscriptions.first)
+    XCTAssertTrue(failed.status.isFailed)
+    guard case .failed(_, let failure) = failed.status else {
+      return XCTFail("应保留 typed 失败事实")
+    }
+    XCTAssertEqual(failure, .transport(.connection))
+    XCTAssertEqual(failed.status.failureDetail, "订阅连接失败")
+    XCTAssertEqual(failed.serverCount, 2, "失败保留最后成功的服务器数")
+  }
+
+  func testPartialCredentialRollbackIsTransientAndPersistedCoarsely() async throws {
+    let partialStore = SubscriptionRollbackCredentialStore()
+    runtime.hasActiveTarget = true
+    let partialWorkflow = CatalogWorkflow(
+      coordinator: CatalogCommitCoordinator(
+        fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime),
+      credentials: partialStore,
+      plugins: NoManagedPluginProvider(),
+      subscriptionFetcher: FakeSubscriptionFetcher(
+        behavior: .success(SubscriptionDocs.tree())))
+    let record = try await partialWorkflow.createSubscription(
+      urlString: "https://p.example.com/s.json")
+    let snapshotBefore = partialWorkflow.tree
+    let serverID = try XCTUnwrap(
+      partialWorkflow.tree.node(withID: record.groupID)?.children?.first(where: { !$0.isGroup })?.id
+    )
+    let loadedCatalog = try CatalogFileStore(fileURL: fileURL).load().catalog
+    let serverEntry = try XCTUnwrap(loadedCatalog.entry(for: serverID))
+    guard case .server(let fields) = serverEntry.kind else {
+      return XCTFail("订阅快照应包含服务器")
+    }
+    let otherPasswordRefs: Set<CredentialReference> = Set(
+      (try loadedCatalog.subscriptionSubtree(of: record.groupID)).compactMap { entry in
+        guard case .server(let candidate) = entry.kind,
+          candidate.passwordRef != fields.passwordRef
+        else {
+          return nil
+        }
+        return candidate.passwordRef
+      })
+    partialStore.failSave(for: fields.passwordRef)
+
+    await partialWorkflow.refreshSubscription(record.id)
+
+    XCTAssertEqual(partialWorkflow.tree, snapshotBefore, "提交失败保留最后成功快照")
+    guard case .failed(_, let failure) = partialWorkflow.subscriptions[0].status else {
+      return XCTFail("凭据提交失败应写入失败状态")
+    }
+    XCTAssertEqual(
+      failure,
+      .commit(category: .credentials, rollback: .incomplete))
+    XCTAssertEqual(
+      partialWorkflow.subscriptionRefreshFailure(for: record.id)?.credentialRollback,
+      .partial(restored: otherPasswordRefs, failed: [fields.passwordRef]))
+  }
+}
+
+/// Fails only when the existing password reference is touched during refresh
+/// and again when the journal tries to restore its old value.
+private final class SubscriptionRollbackCredentialStore: CredentialStoring {
+  private var values: [CredentialReference: String] = [:]
+  private var failingReference: CredentialReference?
+
+  func save(_ secret: String, for reference: CredentialReference) throws {
+    if reference == failingReference {
+      throw CredentialStoreError.keychainStatus(errSecInternalError)
+    }
+    values[reference] = secret
+  }
+
+  func secret(for reference: CredentialReference) throws -> String? {
+    values[reference]
+  }
+
+  func delete(_ reference: CredentialReference) throws {
+    values.removeValue(forKey: reference)
+  }
+
+  func failSave(for reference: CredentialReference) {
+    failingReference = reference
   }
 }
 

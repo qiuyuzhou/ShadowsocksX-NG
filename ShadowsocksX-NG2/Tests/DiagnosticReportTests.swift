@@ -52,10 +52,10 @@ final class DiagnosticReportTests: XCTestCase {
     snapshot.appVersion = "版本 2.0.0，构建 2"
     snapshot.systemSummary = "macOS Version 15.0（Build 24A335），arm64"
     snapshot.proxyState = .activationFailed(
-      reason: ActivationFailure.invalidLeaf(
-        node: NodeID(rawValue: "leaf-1"),
-        reason: .pluginNotProvided(program: "simple-obfs")
-      ).presentedReason)
+      reason: AppPresentation.message(
+        for: ActivationFailure.invalidLeaf(
+          node: NodeID(rawValue: "leaf-1"),
+          reason: .pluginNotProvided(program: "simple-obfs"))))
     snapshot.hasActiveTarget = true
     snapshot.listen = SslocalListenSettings()
     snapshot.runtimeDocumentSummary = Redactor.documentSummary(

@@ -318,7 +318,7 @@ extension ProxyRuntimeController: ProxyRuntimeDiagnosticFacts {
     case .launchFailed:
       return .launchFailed
     case .activationFailed(let reason):
-      return .activationFailed(reason: reason)
+      return .activationFailed(reason: AppPresentation.message(for: reason))
     case .requiresApproval:
       return .requiresApproval
     case .serviceFailed:

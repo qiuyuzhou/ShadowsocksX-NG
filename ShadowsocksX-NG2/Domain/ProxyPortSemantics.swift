@@ -24,16 +24,6 @@ enum PortSettingError: Error, Equatable, Sendable {
   case portOutOfRange(endpoint: ProxyEndpointKind, port: Int)
   /// 两个端点的配置端口相同；`endpoint` 在枚举序（socks → http → pac）中在前。
   case duplicatePort(endpoint: ProxyEndpointKind, otherEndpoint: ProxyEndpointKind, port: Int)
-
-  var presentedReason: String {
-    switch self {
-    case .portOutOfRange(let endpoint, let port):
-      return "\(endpoint.displayName) 端口 \(port) 无效，必须是 1–65535 之间的整数"
-    case .duplicatePort(let endpoint, let otherEndpoint, let port):
-      return
-        "\(endpoint.displayName) 端口与 \(otherEndpoint.displayName) 端口冲突（都是 \(port)），请为每个端点配置不同的端口"
-    }
-  }
 }
 
 /// 建议空闲端口算法（D8）：32768–65535 高位段升序扫描，跳过排除集合与不
@@ -91,14 +81,12 @@ extension SslocalListenSettings {
   ]
 }
 
-/// PAC 端口变更的失效提示（D8）：已分享出去的 PAC URL 内嵌端口，换端口即
-/// 失效，保存前必须提示。UI 呈现面在 #33 接线。
+/// PAC 端口变更的结构化判定（D8）：已分享出去的 PAC URL 内嵌端口，换端口即
+/// 失效，保存前必须提示。具体句子属于 App presentation edge。
 enum PortChangeNotice {
-  static func pacInvalidation(
+  static func pacPortChanged(
     from previous: SslocalListenSettings, to next: SslocalListenSettings
-  ) -> String? {
-    guard previous.pacPort != next.pacPort else { return nil }
-    return
-      "PAC 端口将从 \(previous.pacPort) 改为 \(next.pacPort)，已分享的 PAC URL 将失效，保存后需要重新分享"
+  ) -> Bool {
+    previous.pacPort != next.pacPort
   }
 }

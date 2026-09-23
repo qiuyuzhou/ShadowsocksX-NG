@@ -45,13 +45,15 @@ final class ProxyPortSemanticsTests: XCTestCase {
       "HTTP 停用时其配置端口仍参与互异校验，避免日后重新启用时才暴露冲突")
   }
 
-  func testPresentedReasonsNameEndpointAndPort() {
+  func testPresentationNamesEndpointAndPort() {
     XCTAssertEqual(
-      PortSettingError.portOutOfRange(endpoint: .http, port: 70000).presentedReason,
+      AppPresentation.message(
+        for: PortSettingError.portOutOfRange(endpoint: .http, port: 70000)),
       "HTTP 端口 70000 无效，必须是 1–65535 之间的整数")
     XCTAssertEqual(
-      PortSettingError.duplicatePort(endpoint: .pac, otherEndpoint: .socks, port: 1086)
-        .presentedReason,
+      AppPresentation.message(
+        for: PortSettingError.duplicatePort(
+          endpoint: .pac, otherEndpoint: .socks, port: 1086)),
       "PAC 端口与 SOCKS5 端口冲突（都是 1086），请为每个端点配置不同的端口")
   }
 
@@ -131,20 +133,18 @@ final class ProxyPortSemanticsTests: XCTestCase {
   // MARK: PAC 端口变更失效提示（D8；UI 面在 #33 接线）
 
   func testPACPortChangeProducesInvalidationNoticeNamingBothPorts() {
-    let notice = PortChangeNotice.pacInvalidation(
+    let notice = PortChangeNotice.pacPortChanged(
       from: SslocalListenSettings(), to: SslocalListenSettings(pacPort: 8080))
 
-    XCTAssertEqual(
-      notice,
-      "PAC 端口将从 11089 改为 8080，已分享的 PAC URL 将失效，保存后需要重新分享")
+    XCTAssertTrue(notice)
   }
 
   func testChangesNotTouchingPACPortProduceNoNotice() {
-    XCTAssertNil(
-      PortChangeNotice.pacInvalidation(
+    XCTAssertFalse(
+      PortChangeNotice.pacPortChanged(
         from: SslocalListenSettings(), to: SslocalListenSettings(socksPort: 2086)))
-    XCTAssertNil(
-      PortChangeNotice.pacInvalidation(
+    XCTAssertFalse(
+      PortChangeNotice.pacPortChanged(
         from: SslocalListenSettings(), to: SslocalListenSettings()))
   }
 }

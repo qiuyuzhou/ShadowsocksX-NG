@@ -123,7 +123,9 @@ extension SubscriptionRefreshStatus {
   }
 
   var failureDetail: String? {
-    if case .failed(_, let reason) = self { return reason }
+    if case .failed(_, let failure) = self {
+      return AppPresentation.message(for: failure)
+    }
     return nil
   }
 

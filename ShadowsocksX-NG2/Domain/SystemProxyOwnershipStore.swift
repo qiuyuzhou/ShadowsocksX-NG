@@ -12,7 +12,7 @@ struct SystemProxyOwnershipRecord: Codable, Equatable, Sendable {
   let entries: [Entry]
 }
 
-enum SystemProxyOwnershipStoreError: Error, Equatable {
+enum SystemProxyOwnershipStoreError: Error, Equatable, Sendable {
   case readFailed(String)
   case writeFailed(String)
   case invalidRecord

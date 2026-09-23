@@ -74,7 +74,7 @@ final class LaunchAtLoginController: ObservableObject {
       }
       errorMessage = nil
     } catch {
-      errorMessage = String(describing: error)
+      errorMessage = error.presentableMessage
     }
     status = service.status
   }

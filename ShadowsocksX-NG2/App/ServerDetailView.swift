@@ -76,8 +76,12 @@ struct ServerDetailView: View {
       if let node, node.isInvalid {
         Section("激活状态") {
           ForEach(Array(node.invalidReasons.enumerated()), id: \.offset) { _, reason in
-            Label(reason.presentedReason, systemImage: "exclamationmark.triangle.fill")
-              .foregroundStyle(.orange)
+            Label(
+              AppPresentation.message(
+                for: ActivationFailure.invalidLeaf(node: node.id, reason: reason)),
+              systemImage: "exclamationmark.triangle.fill"
+            )
+            .foregroundStyle(.orange)
           }
         }
       }

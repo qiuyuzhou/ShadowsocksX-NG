@@ -56,14 +56,14 @@ enum SettingsFieldID: Hashable, Sendable {
   case gfwListURL
 }
 
-/// 按字段归位的校验问题：每条载带点名文案（来自既有 Domain 错误的
-/// presentedReason；本次不收编文案归属）。
+/// 按字段归位的校验问题：每条保留 Domain 的 typed fact；文案由 App
+/// presentation edge 派生。
 enum SettingsFieldIssue: Equatable, Sendable {
-  case port(SettingsPortID, message: String)
-  case advertisedAddress(message: String)
-  case timeoutSeconds(message: String)
-  case externalPACURL(message: String)
-  case gfwListURL(message: String)
+  case port(SettingsPortID, error: ProxySettingsValidationError)
+  case advertisedAddress(error: ProxySettingsValidationError)
+  case timeoutSeconds(error: ProxySettingsValidationError)
+  case externalPACURL(error: ProxySettingsValidationError)
+  case gfwListURL(error: ProxySettingsValidationError)
 
   var field: SettingsFieldID {
     switch self {
@@ -75,11 +75,11 @@ enum SettingsFieldIssue: Equatable, Sendable {
     }
   }
 
-  var message: String {
+  var error: ProxySettingsValidationError {
     switch self {
-    case .port(_, let message), .advertisedAddress(let message), .timeoutSeconds(let message),
-      .externalPACURL(let message), .gfwListURL(let message):
-      message
+    case .port(_, let error), .advertisedAddress(let error), .timeoutSeconds(let error),
+      .externalPACURL(let error), .gfwListURL(let error):
+      error
     }
   }
 }
@@ -101,8 +101,8 @@ struct SettingsPortFieldState: Equatable, Sendable {
   let draftValue: Int
   /// 类型化占用事实；`nil` = 尚未探测。
   let occupancy: SettingsPortOccupancy?
-  /// 该端口的字段问题点名文案。
-  let issues: [String]
+  /// 该端口的字段问题事实；文案由 presentation edge 派生。
+  let issues: [SettingsFieldIssue]
   /// 是否为运行中端口例外（代理在跑且端口未变；保存其他设置不会触发冲突）。
   let isRuntimePortException: Bool
   /// 是否可建议空闲端口（被占用且不是运行中端口例外）。
@@ -114,15 +114,15 @@ struct SettingsPortFieldState: Equatable, Sendable {
 /// 确认事实（统一种类）：seam 裁定动作是否需要确认及摘要内容；视图只持有
 /// alert 呈现状态并把用户选择作为 typed command 发回。
 enum SettingsConfirmation: Equatable, Sendable {
-  /// PAC 地址将失效（摘要来自既有 PAC 失效判定的点名文案）。
-  case pacInvalidation(summary: String)
-  /// 重置偏好（摘要范围由 seam 裁定，与重置事务一致）。
-  case resetPreferences(summary: String)
+  /// PAC 地址将失效；仅携带前后端口事实。
+  case pacInvalidation(previousPort: Int, nextPort: Int)
+  /// 重置偏好；范围由这个 typed fact 固定，文案由 presentation edge 派生。
+  case resetPreferences
+}
 
-  var summary: String {
-    switch self {
-    case .pacInvalidation(let summary), .resetPreferences(let summary):
-      summary
-    }
-  }
+/// Settings workflow 的最后失败仍是 typed；workflow 不提前渲染句子。
+enum SettingsWorkflowFailure: Error, Equatable, Sendable {
+  case store(ProxySettingsStoreError)
+  case mode(ProxyModeError)
+  case unknown
 }

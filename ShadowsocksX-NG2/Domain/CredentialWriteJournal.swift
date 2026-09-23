@@ -2,7 +2,7 @@ import Foundation
 
 /// 凭据回滚的结构化结果：回滚是尽力恢复，存储失败不二次上抛，残局经此
 /// 显式报出。纯数据、不含用户可见文案（文案归 presentation edge）。
-enum CredentialRollbackOutcome: Equatable {
+enum CredentialRollbackOutcome: Equatable, Sendable {
   /// 本次未触碰任何凭据引用，无需恢复。
   case nothingToRestore
   /// 全部触碰过的引用恢复成功（集合非空）。

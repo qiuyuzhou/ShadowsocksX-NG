@@ -191,7 +191,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
   func testRuntimeConvergenceFailureDoesNotRollbackCatalog() async throws {
     let workflow = makeWorkflow()
     runtime.hasActiveTarget = true
-    runtime.enqueueOutcomes([.failed(detail: "sslocal exited before ready")])
+    runtime.enqueueOutcomes([.failed(failure: .launch(.missingRuntimeDocument))])
 
     let groupID = try await workflow.createGroup(named: "组", into: nil)
 
@@ -199,7 +199,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
     XCTAssertNotNil(workflow.tree.node(withID: groupID), "收敛失败不回滚已提交目录")
     XCTAssertEqual(
       workflow.runtimeSync,
-      .finished(generation: 1, outcome: .failed(detail: "sslocal exited before ready")))
+      .finished(generation: 1, outcome: .failed(failure: .launch(.missingRuntimeDocument))))
   }
 
   // MARK: - story 33/34/35：Legacy 导入不驱动运行时，不自动重复

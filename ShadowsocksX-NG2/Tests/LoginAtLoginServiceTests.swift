@@ -57,7 +57,7 @@ final class LaunchAtLoginServiceTests: XCTestCase {
     XCTAssertFalse(controller.isEnabled)
     XCTAssertEqual(controller.status, .notRegistered)
     XCTAssertEqual(service.registerCount, 1)
-    XCTAssertTrue(controller.errorMessage?.contains("fake-system-error") == true)
+    XCTAssertEqual(controller.errorMessage, AppPresentation.unknownError)
   }
 
   private enum FakeError: Error, CustomStringConvertible {

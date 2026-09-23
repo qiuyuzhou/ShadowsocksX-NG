@@ -32,7 +32,7 @@ struct SettingsView: View {
         presentation.confirmTitle, role: presentation.confirmRole, action: presentation.confirm)
       Button("取消", role: .cancel, action: presentation.cancel)
     } message: { confirmation in
-      Text(confirmation.summary)
+      Text(AppPresentation.message(for: confirmation))
     }
   }
 
@@ -121,8 +121,8 @@ struct SettingsView: View {
 
   private var actionSection: some View {
     Section {
-      if let failure = workflow.lastFailureMessage {
-        Text(failure)
+      if let failure = workflow.lastFailure {
+        Text(failure.presentableMessage)
           .foregroundStyle(.red)
       }
       if workflow.hasBlockingPortOccupancy {
@@ -168,8 +168,8 @@ extension SettingsView {
         .multilineTextAlignment(.trailing)
         .labelsHidden()
       }
-      ForEach(state.issues, id: \.self) { issue in
-        Text(issue)
+      ForEach(Array(state.issues.enumerated()), id: \.offset) { _, issue in
+        Text(AppPresentation.message(for: issue))
           .font(.caption)
           .foregroundStyle(.red)
       }
@@ -194,8 +194,8 @@ extension SettingsView {
   }
 
   private func fieldIssues(_ field: SettingsFieldID) -> some View {
-    ForEach(workflow.issues(for: field), id: \.self) { issue in
-      Text(issue)
+    ForEach(Array(workflow.issues(for: field).enumerated()), id: \.offset) { _, issue in
+      Text(AppPresentation.message(for: issue))
         .font(.caption)
         .foregroundStyle(.red)
     }

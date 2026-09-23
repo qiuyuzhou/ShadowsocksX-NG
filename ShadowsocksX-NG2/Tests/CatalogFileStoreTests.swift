@@ -222,7 +222,9 @@ final class CatalogFileStoreTests: XCTestCase {
       id: NodeID(rawValue: "sub2:source"),
       groupID: NodeID(rawValue: "sub2:group"),
       urlRef: CredentialReference(rawValue: "ref-sub-url"),
-      status: .failed(at: Date(timeIntervalSince1970: 1_789_000_000), reason: "HTTP 503"))
+      status: .failed(
+        at: Date(timeIntervalSince1970: 1_789_000_000),
+        failure: .httpStatus(code: 503)))
 
     try store.save(CatalogDocument(catalog: catalog, subscriptions: [record]))
     let loaded = try store.load()
@@ -232,6 +234,44 @@ final class CatalogFileStoreTests: XCTestCase {
     XCTAssertFalse(
       try String(contentsOf: store.fileURL, encoding: .utf8).contains("https://"),
       "订阅 URL 明文不得落盘（D5：只存凭据引用）")
+  }
+
+  func testV3FailureReasonMigratesToLegacyAndV4SaveRemovesReason() throws {
+    let fixture = try CatalogFixtures.makeSubscriptionFixture(prefix: "migration")
+    let record = SubscriptionRecord(
+      id: NodeID(rawValue: "migration:source"),
+      groupID: fixture.groupID,
+      urlRef: CredentialReference(rawValue: "ref-sub-url"),
+      status: .failed(at: Date(timeIntervalSince1970: 0), failure: .legacy))
+    try store.save(CatalogDocument(catalog: fixture.catalog, subscriptions: [record]))
+
+    var payload = try XCTUnwrap(
+      JSONSerialization.jsonObject(with: Data(contentsOf: store.fileURL)) as? [String: Any])
+    payload["version"] = 3
+    var records = try XCTUnwrap(payload["subscriptions"] as? [[String: Any]])
+    var migratedRecord = try XCTUnwrap(records.first)
+    var status = try XCTUnwrap(migratedRecord["status"] as? [String: Any])
+    var failed = try XCTUnwrap(status["failed"] as? [String: Any])
+    failed.removeValue(forKey: "failure")
+    failed["reason"] = "https://provider.example/subscription?token=secret"
+    status["failed"] = failed
+    migratedRecord["status"] = status
+    records[0] = migratedRecord
+    payload["subscriptions"] = records
+    try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+      .write(to: store.fileURL, options: .atomic)
+
+    let loaded = try store.load()
+    guard case .failed(_, let failure) = loaded.subscriptions[0].status else {
+      return XCTFail("v3 failed reason 应保留失败态")
+    }
+    XCTAssertEqual(failure, .legacy)
+
+    try store.save(loaded)
+    let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
+    XCTAssertTrue(raw.contains("\"version\" : 4"))
+    XCTAssertFalse(raw.contains("\"reason\""))
+    XCTAssertFalse(raw.contains("provider.example"))
   }
 
   func testV1PayloadLoadsWithEmptySubscriptions() throws {
@@ -246,7 +286,7 @@ final class CatalogFileStoreTests: XCTestCase {
     XCTAssertTrue(loaded.catalog.isEmpty)
   }
 
-  func testLegacyEnabledFieldIsIgnoredAndNextSaveWritesV3WithoutIt() throws {
+  func testLegacyEnabledFieldIsIgnoredAndNextSaveWritesV4WithoutIt() throws {
     let payload = """
       {"version": 1, "rootChildren": ["g"], "entries": [
         {"id": "g", "source": "manual", "enabled": false,
@@ -259,8 +299,8 @@ final class CatalogFileStoreTests: XCTestCase {
     try store.save(loaded)
 
     let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
-    XCTAssertTrue(raw.contains("\"version\" : 3"))
-    XCTAssertFalse(raw.contains("\"enabled\""), "v3 不再写出节点级 enabled")
+    XCTAssertTrue(raw.contains("\"version\" : 4"))
+    XCTAssertFalse(raw.contains("\"enabled\""), "v4 不再写出节点级 enabled")
   }
 
   /// 订阅记录 JSON 用真编码器生成：枚举 Codable 形状是实现细节，不在测试里手写。

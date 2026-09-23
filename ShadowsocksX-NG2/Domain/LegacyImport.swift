@@ -26,7 +26,7 @@ struct LegacySnapshot: Equatable, Sendable {
   init(propertyList: [String: Any]) throws {
     if let rawProfiles = propertyList["ServerProfiles"] {
       guard let profileValues = rawProfiles as? [Any] else {
-        throw LegacyImportError.malformedSnapshot("ServerProfiles 不是数组")
+        throw LegacyImportError.malformedSnapshot
       }
       profiles = profileValues.enumerated().map { index, rawValue in
         Self.profileSnapshot(index: index, rawValue: rawValue)
@@ -137,9 +137,17 @@ protocol LegacyCatalogStoring {
 extension CatalogFileStore: LegacyCatalogStoring {}
 
 struct LegacySkippedRecord: Equatable, Sendable {
+  enum Reason: Equatable, Sendable {
+    case notDictionary
+    case invalidAddress
+    case invalidPort
+    case invalidEncryptionMethod
+    case missingPassword
+  }
+
   let index: Int
   let description: String
-  let reason: String
+  let reason: Reason
 }
 
 struct LegacyImportReport: Equatable, Sendable {
@@ -157,21 +165,8 @@ struct LegacyImportOutcome: Equatable, Sendable {
 enum LegacyImportError: Error, Equatable {
   case noSnapshot
   case alreadyCompleted
-  case malformedSnapshot(String)
-  case commitFailed(detail: String)
-
-  var presentedReason: String {
-    switch self {
-    case .noSnapshot:
-      return "没有发现可导入的 Legacy 配置"
-    case .alreadyCompleted:
-      return "Legacy 配置已经导入；如需再次导入，请明确选择再次导入"
-    case .malformedSnapshot(let detail):
-      return "Legacy 快照无效：\(detail)"
-    case .commitFailed(let detail):
-      return "Legacy 导入未完成，已回滚 2.0 写入：\(detail)"
-    }
-  }
+  case malformedSnapshot
+  case commitFailed
 }
 
 struct LegacyImportPlan {
@@ -233,7 +228,8 @@ extension LegacyImportPlanner {
       guard profile.isDictionary else {
         skippedRecords.append(
           LegacySkippedRecord(
-            index: profile.index, description: "第 \(profile.index + 1) 条记录", reason: "记录不是字典"))
+            index: profile.index, description: "第 \(profile.index + 1) 条记录", reason: .notDictionary)
+        )
         continue
       }
       guard let address = profile.address?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -242,13 +238,13 @@ extension LegacyImportPlanner {
         skippedRecords.append(
           LegacySkippedRecord(
             index: profile.index, description: profile.address ?? "第 \(profile.index + 1) 条记录",
-            reason: "服务器地址缺失或无效"))
+            reason: .invalidAddress))
         continue
       }
       guard let port = profile.port, (1...65_535).contains(port) else {
         skippedRecords.append(
           LegacySkippedRecord(
-            index: profile.index, description: address, reason: "服务器端口缺失或无效"))
+            index: profile.index, description: address, reason: .invalidPort))
         continue
       }
       guard let method = profile.method?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -256,13 +252,13 @@ extension LegacyImportPlanner {
       else {
         skippedRecords.append(
           LegacySkippedRecord(
-            index: profile.index, description: address, reason: "加密方式缺失或无效"))
+            index: profile.index, description: address, reason: .invalidEncryptionMethod))
         continue
       }
       guard let password = profile.password, !password.isEmpty else {
         skippedRecords.append(
           LegacySkippedRecord(
-            index: profile.index, description: address, reason: "密码缺失或为空"))
+            index: profile.index, description: address, reason: .missingPassword))
         continue
       }
 
@@ -407,15 +403,11 @@ final class LegacyImportService {
       try catalogStore.save(plan.document)
       try marker.setCompleted(true)
     } catch {
-      let rollbackFailures = rollback(
+      _ = rollback(
         originalDocument: originalDocument,
         wasCompleted: wasCompleted,
         originalSecrets: originalSecrets)
-      let details = [
-        "提交：\(error)",
-        rollbackFailures.isEmpty ? nil : "回滚：" + rollbackFailures.joined(separator: "；"),
-      ].compactMap { $0 }.joined(separator: "；")
-      throw LegacyImportError.commitFailed(detail: details)
+      throw LegacyImportError.commitFailed
     }
 
     return LegacyImportOutcome(

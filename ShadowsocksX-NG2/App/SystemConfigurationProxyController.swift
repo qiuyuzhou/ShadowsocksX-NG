@@ -9,7 +9,7 @@ protocol SystemProxyControlling {
   func restore() throws
 }
 
-enum SystemProxyError: Error, Equatable {
+enum SystemProxyError: Error, Equatable, Sendable {
   case authorizationFailed(Int32)
   case preferencesUnavailable
   case preferencesBusy
@@ -22,35 +22,6 @@ enum SystemProxyError: Error, Equatable {
   case commitFailed(String)
   case applyFailed(String)
   case ownershipStoreFailed(String)
-
-  var presentedReason: String {
-    switch self {
-    case .authorizationFailed:
-      "没有获得修改系统代理所需的授权"
-    case .preferencesUnavailable:
-      "系统网络配置不可用"
-    case .preferencesBusy:
-      "系统网络配置正被其他设置操作占用"
-    case .noCurrentNetworkSet:
-      "没有当前网络位置"
-    case .noProxyServices:
-      "当前网络位置没有可写入的网络服务"
-    case .unreadableService(let serviceID):
-      "无法读取网络服务 \(serviceID) 的代理配置"
-    case .ownershipConflict(let serviceID):
-      "网络服务 \(serviceID) 的代理配置已被其他设置改动，未覆盖"
-    case .invalidStoredConfiguration:
-      "保存的系统代理配置无效"
-    case .cannotWriteService(let serviceID):
-      "无法写入网络服务 \(serviceID) 的代理配置"
-    case .commitFailed(let detail):
-      "系统代理提交失败：\(detail)"
-    case .applyFailed(let detail):
-      "系统代理应用失败：\(detail)"
-    case .ownershipStoreFailed(let detail):
-      "系统代理所有权记录失败：\(detail)"
-    }
-  }
 }
 
 /// Writes the Proxies entity of every service in the current network set.

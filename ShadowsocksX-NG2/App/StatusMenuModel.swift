@@ -34,24 +34,24 @@ enum StatusMenuModel {
     case .running:
       status = "代理运行中"
       detail = nil
-    case .firewallBlocked(let reason):
+    case .firewallBlocked:
       status = "代理运行中（局域网受阻）"
-      detail = reason
-    case .launchFailed(let reason):
+      detail = AppPresentation.message(for: state)
+    case .launchFailed:
       status = "启动失败"
-      detail = reason
-    case .activationFailed(let reason):
+      detail = AppPresentation.message(for: state)
+    case .activationFailed:
       status = "无法启动"
-      detail = reason
+      detail = AppPresentation.message(for: state)
     case .requiresApproval:
       status = "等待允许后台代理"
-      detail = "请在系统设置-登录项中允许 ShadowsocksX-NG 后台项"
-    case .serviceFailed(let reason):
+      detail = AppPresentation.message(for: state)
+    case .serviceFailed:
       status = "服务管理失败"
-      detail = reason
-    case .systemProxyFailed(let reason):
+      detail = AppPresentation.message(for: state)
+    case .systemProxyFailed:
       status = "系统代理未应用"
-      detail = reason
+      detail = AppPresentation.message(for: state)
     }
     return Summary(
       isOn: state.isOn, status: status, detail: detail, modeLabel: mode.label,

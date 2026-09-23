@@ -6,6 +6,11 @@ import Foundation
 /// 运行状态，仅标记来源失败（story 27/28）。每次提交都经目录提交协调器异步
 /// 触发运行时收敛（issue #40；订阅子树变更 → 活动目标原子跟随或清除停止）。
 extension CatalogWorkflow {
+  /// 当前会话中最近一次失败的完整结果；不会把凭据引用暴露到 durable catalog。
+  func subscriptionRefreshFailure(for id: NodeID) -> SubscriptionRefreshFailureResult? {
+    subscriptionRefreshFailures[id]
+  }
+
   /// 创建订阅（story 24）：校验 HTTPS URL → 落订阅记录与空固定分组 → 立即
   /// 首次刷新。首次刷新失败留空分组加错误态（状态在刷新内标记，创建本身总是
   /// 成功）。返回订阅 summary（状态在首次刷新中落定）。
@@ -46,10 +51,13 @@ extension CatalogWorkflow {
     defer { setRefreshInFlight(id, false) }
     do {
       try await performRefresh(id)
+      setSubscriptionRefreshFailure(nil, for: id)
     } catch is CancellationError {
       // 取消不构成失败：快照与状态都不动。
     } catch {
-      await markRefreshFailed(subscriptionID: id, reason: error.presentableMessage)
+      let result = Self.refreshFailureResult(from: error)
+      setSubscriptionRefreshFailure(result, for: id)
+      await markRefreshFailed(subscriptionID: id, failure: result.failure)
     }
   }
 
@@ -126,7 +134,7 @@ extension CatalogWorkflow {
     var removedServers: [CatalogEntry] = []
     var credentialJournal = CredentialWriteJournal(credentials: credentials)
     do {
-      try commitSubscriptionDocument { [self] catalog, subscriptions in
+      try commitSubscriptionDocument { catalog, subscriptions in
         // 凭据引用按节点身份复用：延续节点覆盖写秘密，不新增孤儿引用；
         // journal 保证快照提交失败时恢复旧秘密（story 29）。
         var reusedRefs: [NodeID: ServerCredentialRefs] = [:]
@@ -147,10 +155,12 @@ extension CatalogWorkflow {
         }
       }
     } catch {
-      // story 29：尽力恢复旧秘密；typed outcome 的观测上提（经抛错或订阅
-      // 状态）待候选 4 拆开订阅失败文案与持久化 schema 字段后再做。
-      _ = credentialJournal.rollback()
-      throw error
+      // story 29：尽力恢复旧秘密；完整 outcome 只随 transient error 留在
+      // 内存，durable status 只会保存粗粒度 rollback 状态。
+      let rollback = credentialJournal.rollback()
+      let category: SubscriptionRefreshFailure.CommitCategory =
+        error is CredentialStoreError ? .credentials : .persistence
+      throw SubscriptionRefreshCommitError(category: category, rollback: rollback)
     }
     // 被移除节点的凭据引用不会被新树复用（身份已不在），提交成功后清理。
     for ref in Self.credentialRefs(of: removedServers) {
@@ -158,15 +168,28 @@ extension CatalogWorkflow {
     }
   }
 
-  /// 失败点名写入订阅状态。`reason` 是 Domain 持久化 schema 的字段（D5 脱敏、
-  /// 不含订阅 URL），不是弹窗文案；其文案化沿用在同一 presentation 边缘的
-  /// `Error.presentableMessage`，独立编译 target 拆分时随该边缘外移。
-  private func markRefreshFailed(subscriptionID: NodeID, reason: String) async {
+  /// 失败点名写入订阅状态。持久化的是 typed durable facts，不是已经渲染的
+  /// 用户可见句子。
+  private func markRefreshFailed(
+    subscriptionID: NodeID, failure: SubscriptionRefreshFailure
+  ) async {
     try? commitSubscriptionDocument { _, subscriptions in
       if let index = subscriptions.firstIndex(where: { $0.id == subscriptionID }) {
-        subscriptions[index].status = .failed(at: Date(), reason: reason)
+        subscriptions[index].status = .failed(at: Date(), failure: failure)
       }
     }
+  }
+
+  private static func refreshFailureResult(from error: Error) -> SubscriptionRefreshFailureResult {
+    if let commit = error as? SubscriptionRefreshCommitError {
+      return SubscriptionRefreshFailureResult(
+        failure: .commit(
+          category: commit.category,
+          rollback: SubscriptionRefreshFailure.rollbackStatus(for: commit.rollback)),
+        credentialRollback: commit.rollback)
+    }
+    let failure = SubscriptionRefreshFailure.from(error: error)
+    return SubscriptionRefreshFailureResult(failure: failure, credentialRollback: nil)
   }
 
   /// 订阅原始记录查询（module 内部；投影不含凭据引用等原始形态）。

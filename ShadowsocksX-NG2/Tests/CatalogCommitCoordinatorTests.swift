@@ -205,7 +205,7 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
 
   func testRuntimeFailureKeepsCommittedCatalogAndDistinguishesResult() async throws {
     runtime.hasActiveTarget = true
-    runtime.defaultOutcome = .failed(detail: "agent register failed")
+    runtime.defaultOutcome = .failed(failure: .service(.agent))
 
     let added = try coordinator.commit { catalog, _ in
       try catalog.addTestServer("香港 01")
@@ -215,7 +215,7 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
     XCTAssertTrue(try persistedCatalog().contains(added), "运行时失败不回滚已提交目录")
     XCTAssertEqual(
       coordinator.syncStatus,
-      .finished(generation: 1, outcome: .failed(detail: "agent register failed")),
+      .finished(generation: 1, outcome: .failed(failure: .service(.agent))),
       "结果明确区分目录已提交与运行时未收敛")
   }
 
@@ -241,7 +241,7 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
     runtime.hasActiveTarget = true
     runtime.enqueueOutcomes([
       .converged(skippedServers: []),
-      .failed(detail: "最新代次的失败结果"),
+      .failed(failure: .service(.unknown)),
     ])
     runtime.armGate()
 
@@ -258,7 +258,7 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
       runtime.convergeSnapshots[1].catalog.rootChildren.count, 2, "最新代次使用最新快照")
     XCTAssertEqual(
       coordinator.syncStatus,
-      .finished(generation: 2, outcome: .failed(detail: "最新代次的失败结果")),
+      .finished(generation: 2, outcome: .failed(failure: .service(.unknown))),
       "迟到的旧代次结果不得覆盖最新代次")
   }
 

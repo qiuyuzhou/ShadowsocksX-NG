@@ -12,11 +12,60 @@ struct SubscriptionRecord: Codable, Equatable, Sendable, Identifiable {
   var status: SubscriptionRefreshStatus
 }
 
-/// 最近一次刷新结果。失败原因不含订阅 URL（D5 脱敏）。
+/// 最近一次刷新结果。失败只保存白名单事实，不保存订阅 URL、秘密、凭据引用
+/// 或任意错误 description（D5 脱敏）。
 enum SubscriptionRefreshStatus: Codable, Equatable, Sendable {
   case never
   case succeeded(at: Date)
-  case failed(at: Date, reason: String)
+  case failed(at: Date, failure: SubscriptionRefreshFailure)
+
+  private enum CodingKeys: String, CodingKey {
+    case never
+    case succeeded
+    case failed
+  }
+
+  private struct SucceededPayload: Codable {
+    let at: Date
+  }
+
+  private struct FailedPayload: Codable {
+    let at: Date
+    let failure: SubscriptionRefreshFailure?
+    let reason: String?
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    if container.contains(.never) {
+      self = .never
+      return
+    }
+    if let payload = try container.decodeIfPresent(SucceededPayload.self, forKey: .succeeded) {
+      self = .succeeded(at: payload.at)
+      return
+    }
+    if let payload = try container.decodeIfPresent(FailedPayload.self, forKey: .failed) {
+      // v4 uses typed facts. v1-v3 may contain only a rendered reason; loading it
+      // preserves failed status while deliberately discarding the old detail.
+      self = .failed(at: payload.at, failure: payload.failure ?? .legacy)
+      return
+    }
+    throw DecodingError.dataCorruptedError(
+      forKey: .never, in: container, debugDescription: "unknown refresh status")
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    switch self {
+    case .never:
+      try container.encode([String: String](), forKey: .never)
+    case .succeeded(let at):
+      try container.encode(SucceededPayload(at: at), forKey: .succeeded)
+    case .failed(let at, let failure):
+      try container.encode(FailedPayload(at: at, failure: failure, reason: nil), forKey: .failed)
+    }
+  }
 }
 
 /// 配置目录持久化文档的完整形态：结构树 + 订阅源记录。两者一次原子落盘，
