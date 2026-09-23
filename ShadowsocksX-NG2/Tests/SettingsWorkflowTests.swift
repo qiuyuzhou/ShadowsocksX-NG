@@ -116,8 +116,11 @@ final class SettingsWorkflowTests: XCTestCase {
   // MARK: - 夹具
 
   private func makePair() -> (controller: ProxyRuntimeController, workflow: SettingsWorkflow) {
+    let catalogSnapshotReader = CatalogCommitCoordinator.bootstrap(
+      fileStore: CatalogFileStore(fileURL: catalogFileURL)
+    ).catalogSnapshotReader
     let controller = ProxyRuntimeController(
-      catalogFileStore: CatalogFileStore(fileURL: catalogFileURL),
+      catalogSnapshotReader: catalogSnapshotReader,
       activationFileStore: ActivationStateFileStore(fileURL: activationFileURL),
       runtimeFileStore: RuntimeFileStore(fileURL: runtime.contract),
       credentials: credentials,

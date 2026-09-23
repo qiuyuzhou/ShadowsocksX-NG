@@ -11,8 +11,13 @@ struct ShadowsocksXNG2App: App {
 
   init() {
     let dependencies = ApplicationDependencies.make()
+    // The catalog document is read exactly once at startup. The coordinator
+    // publishes later committed snapshots; the controller receives read-only
+    // access to this same in-process source.
+    let catalogBootstrap = CatalogCommitCoordinator.bootstrap(
+      fileStore: dependencies.catalogFileStore)
     let controller = ProxyRuntimeController(
-      catalogFileStore: dependencies.catalogFileStore,
+      catalogSnapshotReader: catalogBootstrap.catalogSnapshotReader,
       activationFileStore: dependencies.activationFileStore,
       runtimeFileStore: dependencies.runtimeFileStore,
       credentials: dependencies.credentials,
@@ -27,7 +32,8 @@ struct ShadowsocksXNG2App: App {
     // 各 scene 不再重复设置提交回调；Legacy 导入后的 2.0 运行时边界同为一次性注入。
     let coordinator = CatalogCommitCoordinator(
       fileStore: dependencies.catalogFileStore,
-      runtime: ProxyRuntimeSyncAdapter(controller: controller))
+      runtime: ProxyRuntimeSyncAdapter(controller: controller),
+      bootstrap: catalogBootstrap)
     let catalogWorkflow = CatalogWorkflow(
       coordinator: coordinator,
       credentials: dependencies.credentials,

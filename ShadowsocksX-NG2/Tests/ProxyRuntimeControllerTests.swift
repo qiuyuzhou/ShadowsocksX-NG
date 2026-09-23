@@ -78,7 +78,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
   ) -> ProxyRuntimeController {
     agent.setStatus(agentStatus)
     return ProxyRuntimeController(
-      catalogFileStore: CatalogFileStore(fileURL: catalogFileURL),
+      catalogSnapshotReader: ProxyRuntimeFixture.catalogSnapshotReader(at: catalogFileURL),
       activationFileStore: ActivationStateFileStore(fileURL: activationFileURL),
       runtimeFileStore: RuntimeFileStore(fileURL: runtime.contract),
       credentials: credentials,

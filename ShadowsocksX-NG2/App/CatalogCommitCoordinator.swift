@@ -8,6 +8,45 @@ struct CommittedCatalogSnapshot: Equatable, Sendable {
   let subscriptions: [SubscriptionRecord]
 }
 
+/// Runtime commands read the latest committed catalog through this narrow seam.
+/// The catalog remains a value snapshot; a command captures it once and uses it
+/// for its full re-expansion operation.
+@MainActor
+protocol RuntimeCatalogSnapshotReading: AnyObject {
+  var catalogSnapshot: ConfigurationCatalog { get }
+}
+
+/// Shared in-process catalog value. Only the commit coordinator can publish
+/// after this file's bootstrap; runtime code receives the read-only protocol.
+@MainActor
+private final class CommittedCatalogState: RuntimeCatalogSnapshotReading {
+  private(set) var catalogSnapshot: ConfigurationCatalog
+
+  init(catalog: ConfigurationCatalog) {
+    catalogSnapshot = catalog
+  }
+
+  fileprivate func publish(_ catalog: ConfigurationCatalog) {
+    catalogSnapshot = catalog
+  }
+}
+
+/// One-time startup load shared by the controller and coordinator. The reader
+/// exposes only catalog data; subscription state remains coordinator-owned.
+@MainActor
+struct CatalogCommitBootstrap {
+  let catalogSnapshotReader: RuntimeCatalogSnapshotReading
+  fileprivate let committedCatalogState: CommittedCatalogState
+  fileprivate let subscriptions: [SubscriptionRecord]
+
+  fileprivate init(document: CatalogDocument) {
+    let state = CommittedCatalogState(catalog: document.catalog)
+    catalogSnapshotReader = state
+    committedCatalogState = state
+    subscriptions = document.subscriptions
+  }
+}
+
 /// 目录提交后一次运行时收敛的结构化结果（issue #40）。协调器不生成本地化
 /// 文案：失败细节原样携带平台运行时给出的点名事实，由上层 presentation 决定
 /// 如何呈现。
@@ -56,17 +95,37 @@ final class CatalogCommitCoordinator: ObservableObject {
 
   let fileStore: CatalogFileStore
   private let runtime: CatalogRuntimeSyncing
+  private let catalogState: CommittedCatalogState
   /// 提交代次：每次提交递增，用于丢弃被更新提交取代的旧同步结果。
   private var generation = 0
 
-  /// 已提交状态（协调器持有的内存快照；`commit` 成功后整体替换）。
-  private(set) var committedCatalog: ConfigurationCatalog
+  /// 目录在共享来源中只有一份；订阅状态仍由协调器持有。
+  var committedCatalog: ConfigurationCatalog { catalogState.catalogSnapshot }
   private(set) var committedSubscriptions: [SubscriptionRecord]
 
-  init(fileStore: CatalogFileStore, runtime: CatalogRuntimeSyncing) {
+  init(
+    fileStore: CatalogFileStore,
+    runtime: CatalogRuntimeSyncing,
+    bootstrap: CatalogCommitBootstrap
+  ) {
     self.fileStore = fileStore
     self.runtime = runtime
-    (committedCatalog, committedSubscriptions) = Self.loadCommitted(from: fileStore)
+    catalogState = bootstrap.committedCatalogState
+    committedSubscriptions = bootstrap.subscriptions
+  }
+
+  /// Test and isolated-module convenience: still performs exactly one document
+  /// load, then gives the coordinator sole publication authority.
+  convenience init(fileStore: CatalogFileStore, runtime: CatalogRuntimeSyncing) {
+    self.init(
+      fileStore: fileStore, runtime: runtime, bootstrap: Self.bootstrap(fileStore: fileStore))
+  }
+
+  /// Loads the initial document once so the composition root can share its
+  /// catalog with the runtime controller before constructing the adapter.
+  /// Direct out-of-band file edits are not observed during a GUI session.
+  static func bootstrap(fileStore: CatalogFileStore) -> CatalogCommitBootstrap {
+    CatalogCommitBootstrap(document: loadCommitted(from: fileStore))
   }
 
   /// 普通目录变更的唯一提交管线。任一同步步骤失败则已提交状态不动并原样
@@ -79,7 +138,7 @@ final class CatalogCommitCoordinator: ObservableObject {
     let result = try mutate(&workingCatalog, &workingSubscriptions)
     try fileStore.save(
       CatalogDocument(catalog: workingCatalog, subscriptions: workingSubscriptions))
-    committedCatalog = workingCatalog
+    catalogState.publish(workingCatalog)
     committedSubscriptions = workingSubscriptions
     scheduleRuntimeSync(
       CommittedCatalogSnapshot(catalog: workingCatalog, subscriptions: workingSubscriptions))
@@ -89,7 +148,9 @@ final class CatalogCommitCoordinator: ObservableObject {
   /// Legacy 导入等独立路径直接落盘后对齐已提交状态；不触发运行时收敛
   /// （导入的运行时边界由独立路径自行驱动，不经普通提交管线）。
   func reloadCommittedStateFromStore() {
-    (committedCatalog, committedSubscriptions) = Self.loadCommitted(from: fileStore)
+    let document = Self.loadCommitted(from: fileStore)
+    catalogState.publish(document.catalog)
+    committedSubscriptions = document.subscriptions
   }
 
   /// 异步收敛调度：无活动目标不调用运行时；同步开始前与结束后都以代次
@@ -114,9 +175,8 @@ final class CatalogCommitCoordinator: ObservableObject {
   /// 用户经由导入/设置路径修复。
   private static func loadCommitted(
     from fileStore: CatalogFileStore
-  ) -> (catalog: ConfigurationCatalog, subscriptions: [SubscriptionRecord]) {
-    let loaded = (try? fileStore.load()) ?? CatalogDocument()
-    return (loaded.catalog, loaded.subscriptions)
+  ) -> CatalogDocument {
+    (try? fileStore.load()) ?? CatalogDocument()
   }
 }
 

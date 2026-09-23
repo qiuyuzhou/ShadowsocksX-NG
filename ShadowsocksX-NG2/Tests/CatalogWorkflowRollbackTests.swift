@@ -13,6 +13,8 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
   private var activationURL: URL!
   private var credentials: InMemoryCredentialStore!
   private var runtime: FakeCatalogRuntime!
+  private var bootstrap: CatalogCommitBootstrap!
+  private var rootsSeenByLegacyPostImport: [NodeID]?
 
   override func setUp() async throws {
     try await super.setUp()
@@ -46,8 +48,10 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
     postLegacyImport: ((LegacyImportOutcome) async -> Void)? = nil
   ) -> CatalogWorkflow {
     runtime.hasActiveTarget = true
+    let fileStore = CatalogFileStore(fileURL: fileURL)
+    bootstrap = CatalogCommitCoordinator.bootstrap(fileStore: fileStore)
     let coordinator = CatalogCommitCoordinator(
-      fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime)
+      fileStore: fileStore, runtime: runtime, bootstrap: bootstrap)
     return CatalogWorkflow(
       coordinator: coordinator,
       credentials: credentials,
@@ -221,7 +225,13 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
 
     let service = try makeLegacyService()
     var postCalls = 0
-    let workflow = makeWorkflow(legacyImportService: service) { _ in postCalls += 1 }
+    rootsSeenByLegacyPostImport = nil
+    let workflow = makeWorkflow(legacyImportService: service) { [weak self] _ in
+      postCalls += 1
+      self?.rootsSeenByLegacyPostImport =
+        self?.bootstrap.catalogSnapshotReader
+        .catalogSnapshot.rootChildren
+    }
     XCTAssertTrue(workflow.legacyImportState.shouldOffer, "首启发现快照后应提供自动导入入口")
     // 有活动目标也不得触发运行时收敛（导入不启动代理、不写系统代理）。
     XCTAssertTrue(runtime.hasActiveTarget)
@@ -234,6 +244,9 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
     XCTAssertTrue(group.isGroup)
     XCTAssertTrue(group.isManual)
     XCTAssertEqual(group.childCount, 1)
+    XCTAssertEqual(
+      rootsSeenByLegacyPostImport, [group.id],
+      "独立导入先 reload 并发布共享目录快照，再进入运行时清理回调")
     XCTAssertEqual(runtime.convergeCount, 0, "导入不经提交管线触发运行时收敛")
     XCTAssertEqual(postCalls, 1, "导入后的运行时边界只经注入闭包（独立于普通提交）")
     XCTAssertEqual(workflow.legacyImportState.completed, true, "成功导入写完成标记")

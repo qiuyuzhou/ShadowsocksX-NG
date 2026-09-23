@@ -25,6 +25,12 @@ enum ProxyRuntimeFixture {
       pidFile: directory.appendingPathComponent("agent.pid"))
   }
 
+  @MainActor
+  static func catalogSnapshotReader(at fileURL: URL) -> RuntimeCatalogSnapshotReading {
+    CatalogCommitCoordinator.bootstrap(fileStore: CatalogFileStore(fileURL: fileURL))
+      .catalogSnapshotReader
+  }
+
   static func unusedLoopbackPort() throws -> Int {
     let descriptor = socket(AF_INET, SOCK_STREAM, 0)
     guard descriptor >= 0 else { throw POSIXError(.ENOTSOCK) }

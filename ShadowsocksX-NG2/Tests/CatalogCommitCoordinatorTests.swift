@@ -69,6 +69,7 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
   private var fileURL: URL!
   private var runtime: FakeCatalogRuntime!
   private var coordinator: CatalogCommitCoordinator!
+  private var bootstrap: CatalogCommitBootstrap!
 
   override func setUp() async throws {
     try await super.setUp()
@@ -87,7 +88,9 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
   }
 
   private func makeCoordinator() -> CatalogCommitCoordinator {
-    CatalogCommitCoordinator(fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime)
+    let fileStore = CatalogFileStore(fileURL: fileURL)
+    bootstrap = CatalogCommitCoordinator.bootstrap(fileStore: fileStore)
+    return CatalogCommitCoordinator(fileStore: fileStore, runtime: runtime, bootstrap: bootstrap)
   }
 
   /// 预置目录后重建协调器（模拟已落盘的既有状态）。
@@ -112,6 +115,9 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
     }
 
     XCTAssertTrue(coordinator.committedCatalog.contains(added), "提交后已发布新状态")
+    XCTAssertTrue(
+      bootstrap.catalogSnapshotReader.catalogSnapshot.contains(added),
+      "controller reader 与 coordinator 观察同一已提交目录")
     XCTAssertEqual(try persistedCatalog().rootChildren, [added], "变更已原子持久化")
     XCTAssertEqual(runtime.convergeCount, 0, "无活动目标不驱动运行时")
     XCTAssertEqual(coordinator.syncStatus, .idle)
@@ -281,7 +287,29 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
     coordinator.reloadCommittedStateFromStore()
 
     XCTAssertEqual(coordinator.committedCatalog.rootChildren, [groupID], "已提交状态对齐磁盘")
+    XCTAssertEqual(
+      bootstrap.catalogSnapshotReader.catalogSnapshot.rootChildren, [groupID],
+      "独立导入 reload 发布到共享目录来源")
     XCTAssertEqual(coordinator.committedSubscriptions.count, 1)
     XCTAssertEqual(runtime.convergeCount, 0, "对齐不触发运行时收敛")
+  }
+
+  func testFailedPersistenceDoesNotPublishSharedCatalog() throws {
+    let blocker = workDir.appendingPathComponent("not-a-directory")
+    try Data().write(to: blocker)
+    let blockedStore = CatalogFileStore(fileURL: blocker.appendingPathComponent("catalog.json"))
+    let blockedBootstrap = CatalogCommitCoordinator.bootstrap(fileStore: blockedStore)
+    let blockedCoordinator = CatalogCommitCoordinator(
+      fileStore: blockedStore, runtime: runtime, bootstrap: blockedBootstrap)
+    let original = blockedBootstrap.catalogSnapshotReader.catalogSnapshot
+
+    XCTAssertThrowsError(
+      try blockedCoordinator.commit { catalog, _ in
+        try catalog.addTestServer("不能发布")
+      })
+
+    XCTAssertEqual(blockedBootstrap.catalogSnapshotReader.catalogSnapshot, original)
+    XCTAssertEqual(blockedCoordinator.committedCatalog, original)
+    XCTAssertEqual(runtime.convergeCount, 0, "持久化失败不驱动运行时")
   }
 }

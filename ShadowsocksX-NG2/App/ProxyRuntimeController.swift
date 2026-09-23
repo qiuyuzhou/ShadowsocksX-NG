@@ -47,8 +47,7 @@ final class ProxyRuntimeController: ObservableObject {
   @Published private(set) var skippedServers: [SkippedServer] = []
   private(set) var machine: ActivationStateMachine
 
-  private var catalog: ConfigurationCatalog
-  private let catalogFileStore: CatalogFileStore
+  private let catalogSnapshotReader: RuntimeCatalogSnapshotReading
   private let activationFileStore: ActivationStateFileStore
   private let runtimeFileStore: RuntimeFileStore
   private let credentials: CredentialStoring
@@ -76,8 +75,7 @@ final class ProxyRuntimeController: ObservableObject {
   @Published private(set) var proxyMode: ProxyMode
 
   init(
-    catalogFileStore: CatalogFileStore = CatalogFileStore(
-      fileURL: CatalogFileStore.defaultFileURL()),
+    catalogSnapshotReader: RuntimeCatalogSnapshotReading,
     activationFileStore: ActivationStateFileStore = ActivationStateFileStore(
       fileURL: ActivationStateFileStore.defaultFileURL()),
     runtimeFileStore: RuntimeFileStore = RuntimeFileStore(),
@@ -96,7 +94,7 @@ final class ProxyRuntimeController: ObservableObject {
     firewallPollIntervalNanoseconds: UInt64 = 2_000_000_000,
     sendSignal: @escaping @Sendable (Int32, Int32) -> Int32 = { kill($0, $1) }
   ) {
-    self.catalogFileStore = catalogFileStore
+    self.catalogSnapshotReader = catalogSnapshotReader
     self.activationFileStore = activationFileStore
     self.runtimeFileStore = runtimeFileStore
     self.credentials = credentials
@@ -121,7 +119,6 @@ final class ProxyRuntimeController: ObservableObject {
     self.firewallExecutableURLs = firewallExecutableURLs ?? Self.defaultFirewallExecutableURLs
     self.firewallPollIntervalNanoseconds = firewallPollIntervalNanoseconds
     self.sendSignal = sendSignal
-    catalog = (try? catalogFileStore.load().catalog) ?? ConfigurationCatalog()
     let persistedTarget = try? activationFileStore.loadActiveTargetID()
     machine = ActivationStateMachine(activeTargetID: persistedTarget)
     activeTargetID = machine.activeTargetID
@@ -161,7 +158,7 @@ final class ProxyRuntimeController: ObservableObject {
   /// `.rejectedActivation`；意外错误 throws 并进入 `serviceFailed`。
   @discardableResult
   func activate(_ target: NodeID) async throws -> ActivationCommandOutcome {
-    reloadCatalog()
+    let catalog = catalogSnapshotReader.catalogSnapshot
     do {
       let configuration = try machine.activate(
         target, in: catalog, credentials: credentials, plugins: plugins, listen: settings.listen,
@@ -255,8 +252,8 @@ final class ProxyRuntimeController: ObservableObject {
   /// 事实来源——注册过即视为开启并重校验；随后与磁盘契约对齐（相同内容跳
   /// 过写入）。GUI 崩溃期间 agent 与 wrapper 均不受影响。
   func resyncOnLaunch() async {
-    reloadCatalog()
-    switch reexpand() {
+    let catalog = catalogSnapshotReader.catalogSnapshot
+    switch reexpand(in: catalog) {
     case .deployed(let configuration):
       let status = agent.status
       if status == .registered || status == .requiresApproval {
@@ -293,8 +290,8 @@ final class ProxyRuntimeController: ObservableObject {
       presentNoActiveTarget()
       return
     }
-    reloadCatalog()
-    switch reexpand() {
+    let catalog = catalogSnapshotReader.catalogSnapshot
+    switch reexpand(in: catalog) {
     case .deployed(let configuration):
       await deploy(configuration.document)
     case .clearedAndStopped(let failure):
@@ -454,8 +451,7 @@ extension ProxyRuntimeController {
   /// → 原子更新运行时；目标失效 → 清除目标并停止代理。返回结构化收敛结果，
   /// 健康检查耗时属于本调用的异步收敛阶段，不改变「目录已提交」的事实。
   func catalogDidCommit(snapshot catalog: ConfigurationCatalog) async -> RuntimeSyncOutcome {
-    self.catalog = catalog
-    switch reexpand() {
+    switch reexpand(in: catalog) {
     case .deployed(let configuration):
       guard state != .off else {
         return .revalidated
@@ -497,6 +493,7 @@ extension ProxyRuntimeController {
   /// before persistence, so the mode kind and its URL commit as one logical
   /// change and a validation failure precedes the write.
   func updateSettings(_ proposed: ProxySettings) async throws {
+    let catalog = catalogSnapshotReader.catalogSnapshot
     var next = proposed
     var resolvedMode = proxyMode
     if case .externalPAC = proxyMode {
@@ -515,7 +512,7 @@ extension ProxyRuntimeController {
     settingsUnreadable = false
 
     guard state != .off else { return }
-    switch reexpand() {
+    switch reexpand(in: catalog) {
     case .deployed(let configuration):
       await deploy(configuration.document)
     case .clearedAndStopped(let failure):
@@ -557,7 +554,6 @@ extension ProxyRuntimeController {
       listenSettingsUnreadable = false
       proxyMode = Self.makeProxyMode(from: restored)
     }
-    reloadCatalog()
     let persistedTarget = try? activationFileStore.loadActiveTargetID()
     machine = ActivationStateMachine(activeTargetID: persistedTarget ?? nil)
     activeTargetID = machine.activeTargetID
@@ -743,12 +739,9 @@ extension ProxyRuntimeController {
 
   // MARK: - 目录同步
 
-  private func reloadCatalog() {
-    catalog = (try? catalogFileStore.load().catalog) ?? catalog
-  }
-
-  /// 目录以磁盘为事实来源重载后重展开；目标被清除时一并发布。
-  private func reexpand() -> ActivationEffect? {
+  /// Re-expands one command-start snapshot; a concurrently published catalog
+  /// is intentionally observed by the next command, not halfway through this one.
+  private func reexpand(in catalog: ConfigurationCatalog) -> ActivationEffect? {
     let effect = machine.catalogDidCommit(
       catalog, credentials: credentials, plugins: plugins, listen: settings.listen,
       timeout: settings.timeoutSeconds, verbose: settings.verboseLogging,

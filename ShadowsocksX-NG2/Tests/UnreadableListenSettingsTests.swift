@@ -33,8 +33,11 @@ final class UnreadableListenSettingsTests: XCTestCase {
     listenUnreadable: ListenSettingsStoreError
   ) -> ProxyRuntimeController {
     agent.setStatus(agentStatus)
+    let catalogSnapshotReader = CatalogCommitCoordinator.bootstrap(
+      fileStore: CatalogFileStore(fileURL: catalogFileURL)
+    ).catalogSnapshotReader
     return ProxyRuntimeController(
-      catalogFileStore: CatalogFileStore(fileURL: catalogFileURL),
+      catalogSnapshotReader: catalogSnapshotReader,
       activationFileStore: ActivationStateFileStore(fileURL: activationFileURL),
       runtimeFileStore: RuntimeFileStore(fileURL: runtime.contract),
       credentials: credentials,
