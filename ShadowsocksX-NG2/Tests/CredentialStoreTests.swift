@@ -4,24 +4,58 @@ import XCTest
 
 /// 凭据存储缝：Keychain 写入/读出一致（票 #25 验收项）。
 final class KeychainCredentialStoreTests: XCTestCase {
-  private var service: String!
   private var store: KeychainCredentialStore!
 
   override func setUpWithError() throws {
     try super.setUpWithError()
     // 每个用例独立 service 命名空间：避免并行/重复运行互相污染
-    service = "test.ShadowsocksX-NG2.credentials.\(UUID().uuidString)"
+    let service = "test.ShadowsocksX-NG2.credentials.\(UUID().uuidString)"
     store = KeychainCredentialStore(service: service)
+    addTeardownBlock { [service] in
+      Self.removeKeychainItems(for: service)
+    }
   }
 
-  override func tearDown() {
-    // 按 service 整体清理本用例创建的全部条目
-    let query: [String: Any] = [
+  private static func removeKeychainItems(for service: String) {
+    // 先枚举本用例 service 下的全部 account，再逐条删除。先解包为 String，
+    // 避免将 `Optional<String>` 桥接进 Security query；逐条删除则不会遗漏同一
+    // service 下多个凭据引用的记录。
+    let lookup: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
-      kSecAttrService as String: service as Any,
+      kSecAttrService as String: service,
+      kSecReturnAttributes as String: kCFBooleanTrue as Any,
+      kSecMatchLimit as String: kSecMatchLimitAll,
     ]
-    SecItemDelete(query as CFDictionary)
-    super.tearDown()
+    var result: AnyObject?
+    let lookupStatus = SecItemCopyMatching(lookup as CFDictionary, &result)
+    guard lookupStatus == errSecSuccess || lookupStatus == errSecItemNotFound else {
+      XCTFail("查找测试 Keychain 记录失败，status=\(lookupStatus)")
+      return
+    }
+
+    let items = (result as? [[String: Any]]) ?? []
+    for item in items {
+      guard let account = item[kSecAttrAccount as String] as? String else {
+        XCTFail("测试 Keychain 记录缺少 account")
+        continue
+      }
+      let deleteQuery: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
+      ]
+      let deleteStatus = SecItemDelete(deleteQuery as CFDictionary)
+      XCTAssertTrue(
+        deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound,
+        "清理测试 Keychain 记录失败，status=\(deleteStatus)")
+    }
+
+    var remaining: AnyObject?
+    let remainingStatus = SecItemCopyMatching(lookup as CFDictionary, &remaining)
+    let remainingItems = (remaining as? [[String: Any]]) ?? []
+    XCTAssertTrue(
+      remainingStatus == errSecItemNotFound || remainingItems.isEmpty,
+      "测试 Keychain 记录未完全清理，status=\(remainingStatus)")
   }
 
   func testSaveThenReadIsConsistent() throws {
