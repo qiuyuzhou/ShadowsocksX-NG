@@ -22,7 +22,7 @@ extension CatalogWorkflow {
       groupID: .fresh(),
       urlRef: .fresh(),
       status: .never)
-    try credentials.save(url.absoluteString, for: record.urlRef)
+    try dependencies.credentials.save(url.absoluteString, for: record.urlRef)
     do {
       try commitSubscriptionDocument { catalog, subscriptions in
         // 固定分组挂在目录根（CONTEXT.md「Subscription group」）；名称以 host
@@ -31,7 +31,7 @@ extension CatalogWorkflow {
         subscriptions.append(record)
       }
     } catch {
-      try? credentials.delete(record.urlRef)
+      try? dependencies.credentials.delete(record.urlRef)
       throw error
     }
     await refreshSubscription(record.id)
@@ -77,7 +77,7 @@ extension CatalogWorkflow {
     let url = try Self.validatedSubscriptionURL(urlString)
     // 覆盖写同一引用；URL 编辑不落目录文档（引用与身份不变），新地址刷新
     // 成功才有新快照——写入失败不触碰目录状态。
-    try credentials.save(url.absoluteString, for: record.urlRef)
+    try dependencies.credentials.save(url.absoluteString, for: record.urlRef)
     await refreshSubscription(record.id)
   }
 
@@ -94,7 +94,7 @@ extension CatalogWorkflow {
       subscriptions.removeAll { $0.id == id }
     }
     for ref in [record.urlRef] + Self.credentialRefs(of: removedEntries) {
-      try? credentials.delete(ref)
+      try? dependencies.credentials.delete(ref)
     }
     return RemovalOutcome(removedNodeIDs: Set(removedEntries.map(\.id)))
   }
@@ -104,7 +104,7 @@ extension CatalogWorkflow {
     guard let record = subscriptionRecord(withID: id) else {
       throw SubscriptionFormError.notFound
     }
-    guard let stored = try credentials.secret(for: record.urlRef) else {
+    guard let stored = try dependencies.credentials.secret(for: record.urlRef) else {
       throw CredentialStoreError.keychainStatus(errSecItemNotFound)
     }
     return stored
@@ -118,7 +118,7 @@ extension CatalogWorkflow {
     // 缺凭据是命名失败（区别于地址格式无效），不静默当作空 URL。
     let urlString = try subscriptionURL(for: record.id)
     let url = try Self.validatedSubscriptionURL(urlString)
-    let data = try await subscriptionFetcher.fetch(url)
+    let data = try await dependencies.subscriptionFetcher.fetch(url)
     let snapshot = try SubscriptionDocumentParser.parse(data, subscriptionID: record.id)
     let summary =
       subscriptions.first(where: { $0.id == record.id })
@@ -132,7 +132,7 @@ extension CatalogWorkflow {
     _ snapshot: SubscriptionSnapshot, summary: SubscriptionSummary, fallbackName: String
   ) async throws {
     var removedServers: [CatalogEntry] = []
-    var credentialJournal = CredentialWriteJournal(credentials: credentials)
+    var credentialJournal = CredentialWriteJournal(credentials: dependencies.credentials)
     do {
       try commitSubscriptionDocument { catalog, subscriptions in
         // 凭据引用按节点身份复用：延续节点覆盖写秘密，不新增孤儿引用；
@@ -164,7 +164,7 @@ extension CatalogWorkflow {
     }
     // 被移除节点的凭据引用不会被新树复用（身份已不在），提交成功后清理。
     for ref in Self.credentialRefs(of: removedServers) {
-      try? credentials.delete(ref)
+      try? dependencies.credentials.delete(ref)
     }
   }
 
@@ -194,7 +194,7 @@ extension CatalogWorkflow {
 
   /// 订阅原始记录查询（module 内部；投影不含凭据引用等原始形态）。
   private func subscriptionRecord(withID id: NodeID) -> SubscriptionRecord? {
-    coordinator.committedSubscriptions.first { $0.id == id }
+    dependencies.coordinator.committedSubscriptions.first { $0.id == id }
   }
 
   /// 订阅卡片 projection 推导（module 内部）：名称、URL host、结构化状态、
@@ -268,7 +268,7 @@ extension CatalogWorkflow {
   }
 
   /// 订阅地址门禁：必须是带主机的 HTTPS URL（宽松模式永不提供）。
-  static func validatedSubscriptionURL(_ string: String) throws -> URL {
+  private static func validatedSubscriptionURL(_ string: String) throws -> URL {
     let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let url = URL(string: trimmed),
       url.scheme?.lowercased() == "https",
@@ -280,8 +280,8 @@ extension CatalogWorkflow {
   }
 }
 
-/// 一台服务器叶子的凭据引用对（密码 + 可选插件参数）。
-struct ServerCredentialRefs: Sendable {
+/// 一台服务器叶子的凭据引用对（密码 + 可选插件参数；仅本实现文件使用）。
+private struct ServerCredentialRefs: Sendable {
   var password: CredentialReference
   var options: CredentialReference?
 }

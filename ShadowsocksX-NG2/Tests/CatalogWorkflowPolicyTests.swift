@@ -35,7 +35,7 @@ final class CatalogWorkflowPolicyTests: XCTestCase {
     runtime.hasActiveTarget = true
     let coordinator = CatalogCommitCoordinator(
       fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime)
-    return CatalogWorkflow(
+    return makeCatalogWorkflow(
       coordinator: coordinator,
       credentials: credentials,
       plugins: NoManagedPluginProvider(),

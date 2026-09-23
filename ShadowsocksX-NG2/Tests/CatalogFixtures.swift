@@ -100,3 +100,70 @@ func expectThrowsAsync(
     errorHandler(error)
   }
 }
+
+// MARK: - 目录工作流测试夹具（issue #49）
+
+/// 中性激活替身：不关心激活语义的测试场景，激活命令原子拒绝。
+final class RejectingActivator: Activating {
+  func activate(_ target: NodeID) async throws -> ActivationCommandOutcome {
+    .rejectedActivation
+  }
+}
+
+/// 永不提供快照的 Legacy 来源替身（测试不读用户 Legacy 偏好）。
+struct EmptyLegacySnapshotProvider: LegacySnapshotProviding {
+  func readSnapshot() throws -> LegacySnapshot? { nil }
+}
+
+/// 固定快照提供缝替身（可中途改写快照，供重读场景断言）。
+final class FixedLegacySnapshotProvider: LegacySnapshotProviding {
+  var snapshot: LegacySnapshot?
+
+  init(snapshot: LegacySnapshot?) {
+    self.snapshot = snapshot
+  }
+
+  func readSnapshot() throws -> LegacySnapshot? { snapshot }
+}
+
+/// 内存完成标记替身（测试不写 UserDefaults）。
+final class InMemoryLegacyImportMarker: LegacyImportMarkerStoring {
+  private(set) var completed = false
+
+  func isCompleted() throws -> Bool { completed }
+
+  func setCompleted(_ completed: Bool) throws {
+    self.completed = completed
+  }
+}
+
+/// 目录工作流测试组装缝（issue #49）：经依赖束显式装配全部 hermetic fake，
+/// 不触碰生产 Keychain、UserDefaults、网络或激活边界。各测试按需覆盖任一
+/// adapter；未指定 Legacy 服务时用「空快照 + 内存标记」的组合（工作流 init
+/// 的发现状态读取仍被观察，但只触替身）。
+@MainActor
+func makeCatalogWorkflow(
+  coordinator: CatalogCommitCoordinator,
+  credentials: CredentialStoring,
+  plugins: ManagedPluginProviding = NoManagedPluginProvider(),
+  subscriptionFetcher: SubscriptionFetching = FakeSubscriptionFetcher(
+    behavior: .success(Data())),
+  legacyImportService: LegacyImportService? = nil,
+  postLegacyImport: ((LegacyImportOutcome) async -> Void)? = nil,
+  activator: Activating = RejectingActivator()
+) -> CatalogWorkflow {
+  CatalogWorkflow(
+    dependencies: CatalogWorkflowDependencies(
+      coordinator: coordinator,
+      credentials: credentials,
+      plugins: plugins,
+      subscriptionFetcher: subscriptionFetcher,
+      legacyImportService: legacyImportService
+        ?? LegacyImportService(
+          source: EmptyLegacySnapshotProvider(),
+          catalogStore: coordinator.fileStore,
+          credentials: credentials,
+          marker: InMemoryLegacyImportMarker()),
+      postLegacyImport: postLegacyImport,
+      activator: activator))
+}

@@ -113,6 +113,6 @@ extension CatalogWorkflow {
   /// 激活命令（typed command surface）：经 `Activating` port 发出；编排与
   /// 运行时收敛留在 port 背后。意外错误 throws。
   func activate(_ id: NodeID) async throws -> ActivationCommandOutcome {
-    try await activator.activate(id)
+    try await dependencies.activator.activate(id)
   }
 }

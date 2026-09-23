@@ -33,16 +33,16 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
     try await super.tearDown()
   }
 
-  private func makeWorkflow() -> CatalogWorkflow {
+  private func makeWorkflow(fetcher override: SubscriptionFetching? = nil) -> CatalogWorkflow {
     // 计数即提交计数：提交后的运行时收敛由协调器异步调度（issue #40）。
     runtime.hasActiveTarget = true
     let coordinator = CatalogCommitCoordinator(
       fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime)
-    return CatalogWorkflow(
+    return makeCatalogWorkflow(
       coordinator: coordinator,
       credentials: credentials,
       plugins: NoManagedPluginProvider(),
-      subscriptionFetcher: fetcher!)
+      subscriptionFetcher: override ?? fetcher!)
   }
 
   /// 文档稳定 ID 后缀在树 projection 中定位节点（订阅前缀随机）。
@@ -127,8 +127,7 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
     let convergesBefore = runtime.convergeCount
     let treeBefore = workflow.tree
 
-    fetcher = FakeSubscriptionFetcher(behavior: .failure(.httpStatus(code: 503)))
-    workflow.subscriptionFetcher = fetcher
+    fetcher.setBehavior(.failure(.httpStatus(code: 503)))
     await workflow.refreshSubscription(record.id)
 
     // 快照原样保留。
@@ -148,8 +147,7 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
     let record = try await seedSuccessfulSubscription()
     let treeBefore = workflow.tree
 
-    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
-      behavior: .success(SubscriptionDocs.duplicateIDs()))
+    fetcher.setBehavior(.success(SubscriptionDocs.duplicateIDs()))
     await workflow.refreshSubscription(record.id)
 
     guard case .failed(_, let failure) = workflow.subscriptions[0].status else {
@@ -163,8 +161,7 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
     let record = try await seedSuccessfulSubscription()
     let treeBefore = workflow.tree
 
-    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
-      behavior: .success(SubscriptionDocs.invalidRecord()))
+    fetcher.setBehavior(.success(SubscriptionDocs.invalidRecord()))
     await workflow.refreshSubscription(record.id)
 
     guard case .failed(_, let failure) = workflow.subscriptions[0].status else {
@@ -179,8 +176,7 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
   func testEmptySnapshotIsSuccessAndClearsSubtree() async throws {
     let record = try await seedSuccessfulSubscription()
 
-    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
-      behavior: .success(SubscriptionDocs.flat(serverCount: 0)))
+    fetcher.setBehavior(.success(SubscriptionDocs.flat(serverCount: 0)))
     await workflow.refreshSubscription(record.id)
 
     let group = try XCTUnwrap(workflow.tree.node(withID: record.groupID))
@@ -194,8 +190,7 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
   func testCycleDocumentFallsBackToFlatAndSucceeds() async throws {
     let record = try await seedSuccessfulSubscription()
 
-    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
-      behavior: .success(SubscriptionDocs.cycleExtension()))
+    fetcher.setBehavior(.success(SubscriptionDocs.cycleExtension()))
     await workflow.refreshSubscription(record.id)
 
     let group = try XCTUnwrap(workflow.tree.node(withID: record.groupID))
@@ -212,8 +207,7 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
     fetcher = FakeSubscriptionFetcher(behavior: .success(treeDoc))
     workflow = makeWorkflow()
     let record = try await workflow.createSubscription(urlString: "https://p.example.com/s.json")
-    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
-      behavior: .success(changedTreeDoc))
+    fetcher.setBehavior(.success(changedTreeDoc))
     await workflow.refreshSubscription(record.id)
 
     // 身份不变；名称/位置/顺序跟随远端。
@@ -235,8 +229,7 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
     XCTAssertEqual(onlyServerChildID(ofGroup: record.groupID), serverID)
 
     // 端口变化 → 新身份：旧节点删除（无墓碑）。
-    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
-      behavior: .success(SubscriptionDocs.idLess(port: 9999)))
+    fetcher.setBehavior(.success(SubscriptionDocs.idLess(port: 9999)))
     await workflow.refreshSubscription(record.id)
     XCTAssertNil(workflow.tree.node(withID: serverID), "无稳定 ID 且记录变化即不同节点")
     let newID = try XCTUnwrap(onlyServerChildID(ofGroup: record.groupID))
@@ -251,20 +244,18 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
     let originalGroupID = record.groupID
 
     // 新地址先失败：快照保留、身份不动。
-    let failing = FakeSubscriptionFetcher(behavior: .failure(.httpStatus(code: 404)))
-    workflow.subscriptionFetcher = failing
+    fetcher.setBehavior(.failure(.httpStatus(code: 404)))
     try await workflow.editSubscriptionURL(
       record.id, urlString: "https://other.example.com/v2.json")
     XCTAssertEqual(workflow.subscriptions[0].id, originalRecordID, "订阅身份保留")
     guard case .failed = workflow.subscriptions[0].status else {
       return XCTFail("新地址失败应记失败态")
     }
-    XCTAssertEqual(failing.lastURL?.host, "other.example.com")
+    XCTAssertEqual(fetcher.lastURL?.host, "other.example.com")
     XCTAssertNotNil(findNode(withSuffix: "aaaaaaaa-0000-4000-8000-00000000000a"), "失败保留最后成功快照")
 
     // 新地址成功：同一身份命名空间下应用新内容。
-    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
-      behavior: .success(SubscriptionDocs.flat(serverCount: 1)))
+    fetcher.setBehavior(.success(SubscriptionDocs.flat(serverCount: 1)))
     await workflow.refreshSubscription(record.id)
     XCTAssertEqual(workflow.subscriptions[0].groupID, originalGroupID)
     guard case .succeeded = workflow.subscriptions[0].status else {
@@ -327,11 +318,10 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
   func testSubscriptionsPersistAcrossWorkflowReload() async throws {
     let record = try await seedSuccessfulSubscription()
 
-    let reloaded = CatalogWorkflow(
+    let reloaded = makeCatalogWorkflow(
       coordinator: CatalogCommitCoordinator(
         fileStore: CatalogFileStore(fileURL: fileURL), runtime: FakeCatalogRuntime()),
-      credentials: credentials,
-      plugins: NoManagedPluginProvider())
+      credentials: credentials)
     XCTAssertEqual(reloaded.subscriptions.count, 1)
     XCTAssertEqual(reloaded.subscriptions[0].id, record.id)
     guard case .succeeded = reloaded.subscriptions[0].status else {
@@ -344,8 +334,9 @@ final class CatalogWorkflowSubscriptionTests: XCTestCase {
 
   func testConcurrentRefreshOnSameSubscriptionDoesNotReenter() async throws {
     let record = try await seedSuccessfulSubscription()
+    // 用门控获取器重建工作流：刷新停在 fetch 内部，验证并发守卫。
     let gated = GatedFetcher()
-    workflow.subscriptionFetcher = gated
+    workflow = makeWorkflow(fetcher: gated)
 
     async let first: Void = workflow.refreshSubscription(record.id)
     // 轮询而非阻塞等待：主线程阻塞会饿死继承 MainActor 的 async let 子任务。
@@ -410,7 +401,7 @@ extension CatalogWorkflowSubscriptionTests {
       ),
     ] {
       let treeBefore = workflow.tree
-      workflow.subscriptionFetcher = FakeSubscriptionFetcher(behavior: behavior)
+      fetcher.setBehavior(behavior)
       await workflow.refreshSubscription(record.id)
 
       guard case .failed(_, let failure) = workflow.subscriptions[0].status else {
@@ -429,8 +420,7 @@ extension CatalogWorkflowSubscriptionTests {
     guard case .succeeded = healthy.status else { return XCTFail("应记成功态") }
     XCTAssertEqual(healthy.serverCount, 2)
 
-    workflow.subscriptionFetcher = FakeSubscriptionFetcher(
-      behavior: .failure(.transport(detail: "URLError.cannotConnectToHost")))
+    fetcher.setBehavior(.failure(.transport(detail: "URLError.cannotConnectToHost")))
     await workflow.refreshSubscription(healthy.id)
 
     let failed = try XCTUnwrap(workflow.subscriptions.first)
@@ -446,11 +436,10 @@ extension CatalogWorkflowSubscriptionTests {
   func testPartialCredentialRollbackIsTransientAndPersistedCoarsely() async throws {
     let partialStore = SubscriptionRollbackCredentialStore()
     runtime.hasActiveTarget = true
-    let partialWorkflow = CatalogWorkflow(
+    let partialWorkflow = makeCatalogWorkflow(
       coordinator: CatalogCommitCoordinator(
         fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime),
       credentials: partialStore,
-      plugins: NoManagedPluginProvider(),
       subscriptionFetcher: FakeSubscriptionFetcher(
         behavior: .success(SubscriptionDocs.tree())))
     let record = try await partialWorkflow.createSubscription(

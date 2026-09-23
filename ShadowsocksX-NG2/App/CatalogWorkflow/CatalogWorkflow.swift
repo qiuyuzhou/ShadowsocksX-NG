@@ -1,17 +1,20 @@
 import Combine
 import Foundation
 
-/// 目录工作流 module（issue #41）：主窗口与配置 UI 的唯一 UI-facing seam。
-/// 隐藏配置目录、凭据存储、订阅快照、Legacy 导入细节、持久化协调与运行时
-/// 收敛，向 UI 提供不含秘密值的树/详情/订阅 projection、opaque 节点身份查询、
-/// typed command、typed error 与 structured outcome。选择、pane、sheet、alert
-/// 等窗口状态仍由 UI 持有；本类不生成用户可见文案。
+/// 目录工作流 module（issue #41，#49 深化为 application module）：主窗口与
+/// 配置 UI 的唯一 UI-facing seam。隐藏配置目录、凭据存储、订阅快照、Legacy
+/// 导入细节、持久化协调与运行时收敛，向 UI 提供不含秘密值的树/详情/订阅
+/// projection、opaque 节点身份查询、typed command、typed error 与 structured
+/// outcome。选择、pane、sheet、alert 等窗口状态仍由 UI 持有；本类不生成
+/// 用户可见文案。
 ///
 /// 内部沿用既有深 module：`ConfigurationCatalog` 的结构约束、
 /// `ActivationStateMachine` 经 `CatalogCommitCoordinator` 的激活语义与目录
 /// 持久化/runtime sync 协调，以及既有凭据、订阅获取与 Legacy 导入缝。
 /// 「目录已提交」与「运行时已收敛」是分离的观察面（story 38/39）：提交在
 /// 持久化成功即完成，`runtimeSync` 单独呈现收敛阶段，失败不回滚目录。
+/// 实现 adapter 全部经组合根注入的 `CatalogWorkflowDependencies` 装配
+/// （issue #49），本类不自行创建生产默认实现。
 @MainActor
 final class CatalogWorkflow: ObservableObject {
   /// 目录树 projection（侧栏、级联、移动目的地、删除确认共用）。
@@ -31,52 +34,25 @@ final class CatalogWorkflow: ObservableObject {
     snapshotFound: false, completed: false)
   /// 最近一次 Legacy 导入报告（story 31）。
   @Published private(set) var legacyImportReport: LegacyImportReport?
+
+  /// 组合根与测试装配的全部实现 adapter（issue #49）：coordinator、凭据、
+  /// 插件、订阅获取、Legacy 导入服务、导入后回调与激活缝只经此束持有，
+  /// 不再作为 workflow 属性暴露。仅供组合根与测试构造；视图不得访问——
+  /// 独立 target 拆分前由 architecture deletion check 守护残余可见性。
+  let dependencies: CatalogWorkflowDependencies
   /// 启动时发现的 Legacy 快照（导入编排用；秘密值不进 projection）。
   var discoveredLegacySnapshot: LegacySnapshot?
 
-  // module 内部协作成员：UI-facing seam 之外的实现细节（issue #41）。在拆出
-  // 独立编译 target 之前访问级别只到 internal，seam 纪律由约定与 deletion
-  // test 维护——视图不得直接触碰目录、凭据与协调器。
-  /// 提交管线与运行时收敛的唯一入口（组合根注入，沿用 #40）。
-  let coordinator: CatalogCommitCoordinator
-  private let fileStore: CatalogFileStore
-  /// 凭据存储只在 module 内出现（story 11）；UI 不得持有。
-  let credentials: CredentialStoring
-  let plugins: ManagedPluginProviding
-  /// 订阅获取缝（默认 URLSession 实现；测试注入夹具）。
-  var subscriptionFetcher: SubscriptionFetching
-  /// Legacy 导入提交后的运行时边界（组合根一次性接线；独立于普通提交管线）。
-  let postLegacyImport: ((LegacyImportOutcome) async -> Void)?
-  let legacyImportService: LegacyImportService
-  /// 激活缝（issue #41）：生产 adapter 为 `ProxyRuntimeController`，测试注入假 adapter。
-  let activator: Activating
-
-  init(
-    coordinator: CatalogCommitCoordinator,
-    credentials: CredentialStoring = KeychainCredentialStore(),
-    plugins: ManagedPluginProviding = BundleManagedPluginProvider(),
-    subscriptionFetcher: SubscriptionFetching = HTTPSSubscriptionFetcher(),
-    legacyImportService: LegacyImportService? = nil,
-    postLegacyImport: ((LegacyImportOutcome) async -> Void)? = nil,
-    activator: Activating = RejectingActivator()
-  ) {
-    self.coordinator = coordinator
-    fileStore = coordinator.fileStore
-    self.credentials = credentials
-    self.plugins = plugins
-    self.subscriptionFetcher = subscriptionFetcher
-    self.postLegacyImport = postLegacyImport
-    self.activator = activator
-    self.legacyImportService =
-      legacyImportService
-      ?? LegacyImportService(
-        catalogStore: fileStore,
-        credentials: credentials)
+  /// 组合根注入依赖束；workflow 不自行创建任何生产 adapter（issue #49）。
+  init(dependencies: CatalogWorkflowDependencies) {
+    self.dependencies = dependencies
+    let coordinator = dependencies.coordinator
     tree = .build(
-      from: coordinator.committedCatalog, credentials: credentials, plugins: plugins)
+      from: coordinator.committedCatalog,
+      credentials: dependencies.credentials, plugins: dependencies.plugins)
     subscriptions = Self.subscriptionSummaries(
       coordinator.committedSubscriptions, catalog: coordinator.committedCatalog,
-      credentials: credentials)
+      credentials: dependencies.credentials)
     runtimeSync = coordinator.syncStatus
     coordinator.$syncStatus.assign(to: &$runtimeSync)
     refreshLegacyImportState()
@@ -86,7 +62,7 @@ final class CatalogWorkflow: ObservableObject {
 
   /// 行显示名（导航标题、重命名预填等）；节点不存在为空串。
   func displayName(for id: NodeID) -> String {
-    coordinator.committedCatalog.entry(for: id)?.displayName ?? ""
+    dependencies.coordinator.committedCatalog.entry(for: id)?.displayName ?? ""
   }
 
   /// 服务器叶子的已知阻塞原因（typed；编辑面「激活状态」区）。
@@ -97,10 +73,10 @@ final class CatalogWorkflow: ObservableObject {
   /// 服务器编辑面（显式命令，story 11）：解析密码与受管插件参数明文。
   /// 节点不存在或不是服务器叶子为 `nil`。
   func serverEditForm(for id: NodeID) -> ServerEditForm? {
-    guard let entry = coordinator.committedCatalog.entry(for: id),
+    guard let entry = dependencies.coordinator.committedCatalog.entry(for: id),
       case .server(let fields) = entry.kind
     else { return nil }
-    let password = (try? credentials.secret(for: fields.passwordRef)) ?? ""
+    let password = (try? dependencies.credentials.secret(for: fields.passwordRef)) ?? ""
     return ServerEditForm(
       address: fields.address,
       port: fields.port,
@@ -126,8 +102,10 @@ final class CatalogWorkflow: ObservableObject {
     var provided = false
     var options = ""
     if case .managed(let program) = selection {
-      provided = plugins.executablePath(forProgram: program) != nil
-      options = fields.pluginOptionsRef.flatMap { (try? credentials.secret(for: $0)) ?? "" } ?? ""
+      provided = dependencies.plugins.executablePath(forProgram: program) != nil
+      options =
+        fields.pluginOptionsRef.flatMap { (try? dependencies.credentials.secret(for: $0)) ?? "" }
+        ?? ""
     }
     return PluginSectionState(
       selection: selection,
@@ -139,17 +117,14 @@ final class CatalogWorkflow: ObservableObject {
 
   /// 添加落点：选中手动分组 → 组内；选中服务器 → 其父组（仅手动）；其余 → 根。
   func importTargetParent(for selection: NodeID?) -> NodeID? {
-    guard let selection, let entry = coordinator.committedCatalog.entry(for: selection) else {
-      return nil
-    }
+    let catalog = dependencies.coordinator.committedCatalog
+    guard let selection, let entry = catalog.entry(for: selection) else { return nil }
     switch entry.kind {
     case .group:
       return entry.source == .manual ? selection : nil
     case .server:
-      guard let parent = (try? coordinator.committedCatalog.parentID(of: selection)) ?? nil else {
-        return nil
-      }
-      return coordinator.committedCatalog.entry(for: parent)?.source == .manual ? parent : nil
+      guard let parent = (try? catalog.parentID(of: selection)) ?? nil else { return nil }
+      return catalog.entry(for: parent)?.source == .manual ? parent : nil
     }
   }
 
@@ -166,7 +141,7 @@ final class CatalogWorkflow: ObservableObject {
     for (index, line) in text.split(whereSeparator: \.isNewline).enumerated() {
       do {
         let uri = try SsUri.decode(String(line))
-        let fields = try Self.serverFields(from: uri, credentials: credentials)
+        let fields = try Self.serverFields(from: uri, credentials: dependencies.credentials)
         prepared.append((uri: uri, fields: fields))
       } catch {
         let reason: ImportLineFailureReason
@@ -189,7 +164,7 @@ final class CatalogWorkflow: ObservableObject {
       }
     } catch {
       for item in prepared {
-        Self.deleteCredentialRefs(for: item.fields, credentials: credentials)
+        Self.deleteCredentialRefs(for: item.fields, credentials: dependencies.credentials)
       }
       throw error
     }
@@ -230,7 +205,7 @@ final class CatalogWorkflow: ObservableObject {
       try catalog.remove(id)
     }
     for ref in Self.credentialRefs(of: removed) {
-      try? credentials.delete(ref)
+      try? dependencies.credentials.delete(ref)
     }
     return RemovalOutcome(removedNodeIDs: Set(removed.map(\.id)))
   }
@@ -255,7 +230,7 @@ final class CatalogWorkflow: ObservableObject {
     {
       throw ServerFormError.pluginNotManaged(program)
     }
-    var journal = CredentialWriteJournal(credentials: credentials)
+    var journal = CredentialWriteJournal(credentials: dependencies.credentials)
     do {
       try commit { [self] catalog in
         guard let entry = catalog.entry(for: id), case .server(var fields) = entry.kind else {
@@ -268,7 +243,7 @@ final class CatalogWorkflow: ObservableObject {
         fields.remark = draft.remark.trimmingCharacters(in: .whitespaces)
         try Self.applyPluginSelection(
           draft.plugin, options: draft.pluginOptions, to: &fields,
-          credentials: credentials, journal: &journal)
+          credentials: dependencies.credentials, journal: &journal)
         try catalog.updateServer(id, with: fields)
       }
     } catch {
@@ -281,15 +256,15 @@ final class CatalogWorkflow: ObservableObject {
   /// 服务器 → ss://（SIP002，story 22）：凭据从存储解析；无凭据即点名失败
   /// （不分享空档）。仅在用户明确请求分享时调用。
   func shareURI(for id: NodeID) throws -> String {
-    guard let entry = coordinator.committedCatalog.entry(for: id),
+    guard let entry = dependencies.coordinator.committedCatalog.entry(for: id),
       case .server(let fields) = entry.kind
     else { throw CatalogError.notAServer(id) }
-    guard let password = try credentials.secret(for: fields.passwordRef) else {
+    guard let password = try dependencies.credentials.secret(for: fields.passwordRef) else {
       throw CredentialStoreError.keychainStatus(errSecItemNotFound)
     }
     var pluginOptions: String?
     if let optionsRef = fields.pluginOptionsRef {
-      pluginOptions = try credentials.secret(for: optionsRef) ?? ""
+      pluginOptions = try dependencies.credentials.secret(for: optionsRef) ?? ""
     }
     return SsUri(
       method: fields.encryptionMethod,
@@ -302,7 +277,7 @@ final class CatalogWorkflow: ObservableObject {
     ).encode()
   }
 
-  // MARK: - 提交管线（module 内部；UI 不得调用，拆独立 target 前靠约定）
+  // MARK: - 提交管线（module 内部；UI 不得调用，独立 target 拆分前靠 deletion check）
 
   /// 仅目录变更的提交便捷入口（订阅扩展经 `commitSubscriptionDocument`）。
   private func commit<T>(
@@ -318,7 +293,7 @@ final class CatalogWorkflow: ObservableObject {
   private func commitDocument<T>(
     _ mutate: (inout ConfigurationCatalog, inout [SubscriptionRecord]) throws -> T
   ) throws -> T {
-    let result = try coordinator.commit(mutate)
+    let result = try dependencies.coordinator.commit(mutate)
     republishCommittedState()
     return result
   }
@@ -332,11 +307,13 @@ final class CatalogWorkflow: ObservableObject {
 
   /// 提交成功后的 projection 重建（树 + 订阅卡片）。
   func republishCommittedState() {
+    let coordinator = dependencies.coordinator
     tree = .build(
-      from: coordinator.committedCatalog, credentials: credentials, plugins: plugins)
+      from: coordinator.committedCatalog,
+      credentials: dependencies.credentials, plugins: dependencies.plugins)
     subscriptions = Self.subscriptionSummaries(
       coordinator.committedSubscriptions, catalog: coordinator.committedCatalog,
-      credentials: credentials)
+      credentials: dependencies.credentials)
   }
 
   // MARK: - module 内部发布缝（扩展文件经此更新只读投影，setter 保持 private）
@@ -411,7 +388,7 @@ final class CatalogWorkflow: ObservableObject {
     }
   }
 
-  static func deleteCredentialRefs(
+  private static func deleteCredentialRefs(
     for fields: ServerFields, credentials: CredentialStoring
   ) {
     try? credentials.delete(fields.passwordRef)
@@ -457,12 +434,5 @@ final class CatalogWorkflow: ObservableObject {
       // supported plugin explicitly.
       break
     }
-  }
-}
-
-/// 默认激活 adapter：未接线时原子拒绝（测试不触激活的场景）。
-final class RejectingActivator: Activating {
-  func activate(_ target: NodeID) async throws -> ActivationCommandOutcome {
-    .rejectedActivation
   }
 }

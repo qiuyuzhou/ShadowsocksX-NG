@@ -12,33 +12,34 @@ extension CatalogWorkflow {
   func importLegacy(reimport: Bool = false) async throws -> LegacyImportReport {
     let snapshot: LegacySnapshot
     if reimport {
-      guard let current = try legacyImportService.readSnapshot() else {
+      guard let current = try dependencies.legacyImportService.readSnapshot() else {
         throw LegacyImportError.noSnapshot
       }
       snapshot = current
     } else if let discoveredLegacySnapshot {
       snapshot = discoveredLegacySnapshot
     } else {
-      guard let current = try legacyImportService.readSnapshot() else {
+      guard let current = try dependencies.legacyImportService.readSnapshot() else {
         throw LegacyImportError.noSnapshot
       }
       snapshot = current
     }
-    let outcome = try legacyImportService.importSnapshot(snapshot, reimport: reimport)
+    let outcome = try dependencies.legacyImportService.importSnapshot(
+      snapshot, reimport: reimport)
     // 导入服务独立落盘各 store 后对齐内存已提交状态；不经普通提交管线，
     // 因此不触发运行时收敛。
-    coordinator.reloadCommittedStateFromStore()
+    dependencies.coordinator.reloadCommittedStateFromStore()
     republishCommittedState()
     publishLegacyImportReport(outcome.report)
     refreshLegacyImportState()
-    await postLegacyImport?(outcome)
+    await dependencies.postLegacyImport?(outcome)
     return outcome.report
   }
 
   /// 重读磁盘发现状态，不写任何标记或 Legacy 数据。
   func refreshLegacyImportState() {
-    let completed = (try? legacyImportService.isCompleted()) ?? false
-    discoveredLegacySnapshot = try? legacyImportService.readSnapshot()
+    let completed = (try? dependencies.legacyImportService.isCompleted()) ?? false
+    discoveredLegacySnapshot = try? dependencies.legacyImportService.readSnapshot()
     publishLegacyImportState(
       LegacyImportAvailability(
         snapshotFound: discoveredLegacySnapshot != nil, completed: completed))

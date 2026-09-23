@@ -52,7 +52,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
     bootstrap = CatalogCommitCoordinator.bootstrap(fileStore: fileStore)
     let coordinator = CatalogCommitCoordinator(
       fileStore: fileStore, runtime: runtime, bootstrap: bootstrap)
-    return CatalogWorkflow(
+    return makeCatalogWorkflow(
       coordinator: coordinator,
       credentials: credentials,
       plugins: NoManagedPluginProvider(),
@@ -286,27 +286,5 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
       catalogStore: CatalogFileStore(fileURL: fileURL),
       credentials: credentials,
       marker: InMemoryLegacyImportMarker())
-  }
-}
-
-/// 固定快照提供缝（与 LegacyImportTests 同型的最小替身）。
-private final class FixedLegacySnapshotProvider: LegacySnapshotProviding {
-  let snapshot: LegacySnapshot?
-
-  init(snapshot: LegacySnapshot?) {
-    self.snapshot = snapshot
-  }
-
-  func readSnapshot() throws -> LegacySnapshot? { snapshot }
-}
-
-/// 内存完成标记替身。
-private final class InMemoryLegacyImportMarker: LegacyImportMarkerStoring {
-  private(set) var completed = false
-
-  func isCompleted() throws -> Bool { completed }
-
-  func setCompleted(_ completed: Bool) throws {
-    self.completed = completed
   }
 }

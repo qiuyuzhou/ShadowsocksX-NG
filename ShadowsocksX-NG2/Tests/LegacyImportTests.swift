@@ -245,16 +245,6 @@ extension LegacyImportTests {
   }
 }
 
-private final class FixedLegacySnapshotProvider: LegacySnapshotProviding {
-  var snapshot: LegacySnapshot?
-
-  init(snapshot: LegacySnapshot?) {
-    self.snapshot = snapshot
-  }
-
-  func readSnapshot() throws -> LegacySnapshot? { snapshot }
-}
-
 private final class TestLegacyImportMarker: LegacyImportMarkerStoring {
   var completed = false
   var failWhenSettingCompleted = false

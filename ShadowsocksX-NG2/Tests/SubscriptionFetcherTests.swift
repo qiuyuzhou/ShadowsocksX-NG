@@ -149,6 +149,13 @@ final class FakeSubscriptionFetcher: SubscriptionFetching, @unchecked Sendable {
     self.behavior = behavior
   }
 
+  /// 中途切换预设结果（工作流不再暴露可替换的获取器属性，issue #49）。
+  func setBehavior(_ behavior: Behavior) {
+    lock.lock()
+    defer { lock.unlock() }
+    self.behavior = behavior
+  }
+
   var lastURL: URL? {
     lock.lock()
     defer { lock.unlock() }

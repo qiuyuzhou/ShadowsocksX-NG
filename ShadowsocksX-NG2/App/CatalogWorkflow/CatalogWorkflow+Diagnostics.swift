@@ -7,7 +7,7 @@ extension CatalogWorkflow {
   /// 当前目录的聚合诊断事实（服务器/分组/来源/插件计数与已知无效数）。
   var diagnosticCatalogFacts: DiagnosticCatalogFacts {
     DiagnosticCatalogFacts(
-      counts: DiagnosticReportBuilder.counts(in: coordinator.committedCatalog),
+      counts: DiagnosticReportBuilder.counts(in: dependencies.coordinator.committedCatalog),
       knownInvalidServerCount: tree.invalidServerCount)
   }
 }

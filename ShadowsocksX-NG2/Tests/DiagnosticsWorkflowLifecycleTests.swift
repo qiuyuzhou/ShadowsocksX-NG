@@ -135,7 +135,7 @@ final class DiagnosticsWorkflowLifecycleTests: DiagnosticsWorkflowTestCase {
     let fileURL = workDir.appendingPathComponent("catalog.json")
     let coordinator = CatalogCommitCoordinator(
       fileStore: CatalogFileStore(fileURL: fileURL), runtime: FakeCatalogRuntime())
-    let catalogWorkflow = CatalogWorkflow(
+    let catalogWorkflow = makeCatalogWorkflow(
       coordinator: coordinator,
       credentials: InMemoryCredentialStore(),
       plugins: ActivationFixture.TestManagedPlugins(pathsByProgram: [:]))

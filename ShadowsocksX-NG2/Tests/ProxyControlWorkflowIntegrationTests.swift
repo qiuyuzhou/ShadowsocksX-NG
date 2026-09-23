@@ -71,7 +71,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
       sendSignal: { _, _ in 0 })
     let fileStore = CatalogFileStore(fileURL: catalogFileURL)
     let bootstrap = CatalogCommitCoordinator.bootstrap(fileStore: fileStore)
-    let catalogWorkflow = CatalogWorkflow(
+    let catalogWorkflow = makeCatalogWorkflow(
       coordinator: CatalogCommitCoordinator(
         fileStore: fileStore,
         runtime: ProxyRuntimeSyncAdapter(controller: controller),

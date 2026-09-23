@@ -45,7 +45,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
   }
 
   private func makeWorkflow() -> CatalogWorkflow {
-    CatalogWorkflow(
+    makeCatalogWorkflow(
       coordinator: CatalogCommitCoordinator(
         fileStore: CatalogFileStore(fileURL: fileURL), runtime: FakeCatalogRuntime()),
       credentials: credentials,

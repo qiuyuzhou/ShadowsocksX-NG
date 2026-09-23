@@ -29,20 +29,25 @@ struct ShadowsocksXNG2App: App {
     _proxyController = StateObject(wrappedValue: controller)
     let loginController = LaunchAtLoginController(service: dependencies.loginService)
     _loginController = StateObject(wrappedValue: loginController)
-    // 组合根（issue #40/#41）：目录提交协调器与生产运行时适配器只在此接线一次，
-    // 各 scene 不再重复设置提交回调；Legacy 导入后的 2.0 运行时边界同为一次性注入。
+    // 组合根（issue #40/#41/#49）：目录提交协调器与全部生产运行时适配器只在
+    // 此接线一次，各 scene 不再重复设置提交回调；目录工作流的实现依赖经
+    // CatalogWorkflowDependencies 显式装配（workflow 不自行创建生产默认实现）；
+    // Legacy 导入后的 2.0 运行时边界同为一次性注入。
     let coordinator = CatalogCommitCoordinator(
       fileStore: dependencies.catalogFileStore,
       runtime: ProxyRuntimeSyncAdapter(controller: controller),
       bootstrap: catalogBootstrap)
     let catalogWorkflow = CatalogWorkflow(
-      coordinator: coordinator,
-      credentials: dependencies.credentials,
-      legacyImportService: dependencies.legacyImportService,
-      postLegacyImport: { _ in
-        await controller.legacyImportDidCommit()
-      },
-      activator: controller)
+      dependencies: CatalogWorkflowDependencies(
+        coordinator: coordinator,
+        credentials: dependencies.credentials,
+        plugins: BundleManagedPluginProvider(),
+        subscriptionFetcher: HTTPSSubscriptionFetcher(),
+        legacyImportService: dependencies.legacyImportService,
+        postLegacyImport: { _ in
+          await controller.legacyImportDidCommit()
+        },
+        activator: controller))
     _catalogWorkflow = StateObject(wrappedValue: catalogWorkflow)
     // 代理控制工作流 module（issue #47）：状态菜单等 UI 表面的唯一代理控制
     // seam，组合根接线一次。生产 runtime adapter 包装既有控制器（不复制运行
@@ -108,7 +113,7 @@ private struct ApplicationDependencies {
   let settingsStore: ProxySettingsFileStore
   let settingsRestore: RestoredProxySettings
   let listenRestore: RestoredListenSettings
-  let legacyImportService: LegacyImportService?
+  let legacyImportService: LegacyImportService
   let launchAgent: LaunchAgentControlling
   let loginService: LaunchAtLoginControlling
 
@@ -119,25 +124,32 @@ private struct ApplicationDependencies {
   }
 
   static func make() -> ApplicationDependencies {
-    guard isUnitTesting else {
-      let credentials = KeychainCredentialStore()
-      let settingsStore = ProxySettingsFileStore(credentials: credentials)
-      let restoredSettings = ProxySettingsFileStore.restored(store: settingsStore)
-      return ApplicationDependencies(
-        credentials: credentials,
-        catalogFileStore: CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL()),
-        activationFileStore: ActivationStateFileStore(
-          fileURL: ActivationStateFileStore.defaultFileURL()),
-        runtimeFileStore: RuntimeFileStore(),
-        settingsStore: settingsStore,
-        settingsRestore: restoredSettings,
-        listenRestore: RestoredListenSettings(
-          settings: restoredSettings.settings.listen, unreadableError: nil),
-        legacyImportService: nil,
-        launchAgent: SMAppLaunchAgentService(),
-        loginService: SMAppLaunchAtLoginService())
-    }
+    guard isUnitTesting else { return makeProduction() }
+    return makeTesting()
+  }
 
+  private static func makeProduction() -> ApplicationDependencies {
+    let credentials = KeychainCredentialStore()
+    let catalogFileStore = CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL())
+    let settingsStore = ProxySettingsFileStore(credentials: credentials)
+    let restoredSettings = ProxySettingsFileStore.restored(store: settingsStore)
+    return ApplicationDependencies(
+      credentials: credentials,
+      catalogFileStore: catalogFileStore,
+      activationFileStore: ActivationStateFileStore(
+        fileURL: ActivationStateFileStore.defaultFileURL()),
+      runtimeFileStore: RuntimeFileStore(),
+      settingsStore: settingsStore,
+      settingsRestore: restoredSettings,
+      listenRestore: RestoredListenSettings(
+        settings: restoredSettings.settings.listen, unreadableError: nil),
+      legacyImportService: LegacyImportService(
+        catalogStore: catalogFileStore, credentials: credentials),
+      launchAgent: SMAppLaunchAgentService(),
+      loginService: SMAppLaunchAtLoginService())
+  }
+
+  private static func makeTesting() -> ApplicationDependencies {
     let directory = FileManager.default.temporaryDirectory
       .appendingPathComponent("ShadowsocksX-NG2-test-host-\(UUID().uuidString)", isDirectory: true)
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

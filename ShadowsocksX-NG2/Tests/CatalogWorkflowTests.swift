@@ -37,7 +37,7 @@ final class CatalogWorkflowTests: XCTestCase {
     runtime.hasActiveTarget = true
     let coordinator = CatalogCommitCoordinator(
       fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime)
-    return CatalogWorkflow(
+    return makeCatalogWorkflow(
       coordinator: coordinator,
       credentials: credentials,
       plugins: NoManagedPluginProvider())
@@ -325,5 +325,82 @@ final class CatalogWorkflowTests: XCTestCase {
     let reloaded = makeWorkflow()
     XCTAssertTrue(reloaded.tree.containsNode(groupID))
     XCTAssertEqual(reloaded.displayName(for: groupID), "持久组")
+  }
+}
+
+/// 组合根 fakes 装配覆盖（issue #49 story 11）：工作流可以完全经依赖束以
+/// hermetic fake 组装——init 的发现状态、目录命令、激活命令与 Legacy 导入
+/// 全部命中注入替身，不触碰生产 Keychain、app 数据、LaunchAgent、代理进程
+/// 或 SystemConfiguration。
+@MainActor
+final class CatalogWorkflowHermeticAssemblyTests: XCTestCase {
+  private var workDir: URL!
+
+  override func setUp() async throws {
+    try await super.setUp()
+    workDir = FileManager.default.temporaryDirectory
+      .appendingPathComponent("catalog-assembly-tests-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+  }
+
+  override func tearDown() async throws {
+    try? FileManager.default.removeItem(at: workDir)
+    try await super.tearDown()
+  }
+
+  func testWorkflowAssemblesFromFakesWithoutProductionSideEffects() async throws {
+    let fileURL = workDir.appendingPathComponent("catalog.json")
+    let credentials = InMemoryCredentialStore()
+    let runtime = FakeCatalogRuntime()
+    let marker = InMemoryLegacyImportMarker()
+    let dependencies = CatalogWorkflowDependencies(
+      coordinator: CatalogCommitCoordinator(
+        fileStore: CatalogFileStore(fileURL: fileURL), runtime: runtime),
+      credentials: credentials,
+      plugins: NoManagedPluginProvider(),
+      subscriptionFetcher: FakeSubscriptionFetcher(behavior: .success(Data())),
+      legacyImportService: LegacyImportService(
+        source: FixedLegacySnapshotProvider(snapshot: try makeLegacySnapshot()),
+        catalogStore: CatalogFileStore(fileURL: fileURL),
+        credentials: credentials,
+        marker: marker),
+      postLegacyImport: nil,
+      activator: RejectingActivator())
+
+    let workflow = CatalogWorkflow(dependencies: dependencies)
+
+    // init 的发现状态来自注入的 Legacy 服务，而非生产缺省实现。
+    XCTAssertEqual(
+      workflow.legacyImportState,
+      LegacyImportAvailability(snapshotFound: true, completed: false))
+
+    // 目录命令落在注入的内存凭据与文件存储上；激活命令命中注入替身。
+    let groupID = try await workflow.createGroup(named: "组装组", into: nil)
+    XCTAssertTrue(workflow.tree.containsNode(groupID))
+    let activation = try await workflow.activate(groupID)
+    XCTAssertEqual(activation, .rejectedActivation)
+
+    // Legacy 导入走注入服务：报告、完成标记与凭据写入都落在注入的 fake 上；
+    // 不经提交管线触发运行时收敛。
+    let report = try await workflow.importLegacy()
+    XCTAssertEqual(report.importedServerCount, 1)
+    XCTAssertEqual(try marker.isCompleted(), true)
+    XCTAssertEqual(
+      credentials.storageSnapshot.values.contains("legacy-pw"), true,
+      "导入凭据写入注入的内存存储，而非生产 Keychain")
+    XCTAssertEqual(runtime.convergeCount, 0, "导入不经提交管线触发运行时收敛")
+  }
+
+  private func makeLegacySnapshot() throws -> LegacySnapshot {
+    let profile: [String: Any] = [
+      "Id": "11111111-2222-4333-8444-555555555555",
+      "ServerHost": "203.0.113.9",
+      "ServerPort": 8388,
+      "Method": "aes-256-gcm",
+      "Password": "legacy-pw",
+      "Remark": "旧服务器",
+    ]
+    return try LegacySnapshot(
+      propertyList: ["ServerProfiles": [profile], "ShadowsocksRunningMode": "manual"])
   }
 }
