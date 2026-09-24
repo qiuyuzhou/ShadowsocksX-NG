@@ -4,7 +4,7 @@ import SwiftUI
 /// 状态菜单（spec #21 D11 八项白名单，issue #31/#41/#47）：①头部状态摘要
 /// （运行状态、当前模式、活动目标）②代理开关 ③模式选择（勾选态）④活动目标
 /// 级联选择器（组树子菜单、只读）⑤立即更新全部订阅 ⑥复制 HTTP 导出行 ⑦打开
-/// 主窗口 ⑧打开设置 ⑨退出（明示代理仍在后台运行）。白名单外操作一律不进菜单
+/// 主窗口 ⑧退出（明示代理仍在后台运行）。白名单外操作一律不进菜单
 /// 栏；编辑类操作只在主 workspace。运行时事实、开关、模式与导出能力全部
 /// 来自代理控制工作流的整体 snapshot（issue #47），菜单不直接读控制器字段；
 /// 目录树、激活与订阅动作仍走目录工作流，剪贴板写入等 AppKit 副作用留在呈现
@@ -111,16 +111,9 @@ struct ProxyStatusMenu: View {
         using: WorkspaceWindowOpeningAdapter(openWindow: openWindow))
     }
 
-    // 通过同一 workspace route 选择设置，再由 focused adapter 确保主窗口可见。
-    Button("打开设置…") {
-      route.handle(
-        .present(destination: .settings),
-        using: WorkspaceWindowOpeningAdapter(openWindow: openWindow))
-    }
-
     Divider()
 
-    // ⑨ 退出：仅退 GUI；agent 由 launchd 持有，代理不受影响（构造上成立）。
+    // ⑧ 退出：仅退 GUI；agent 由 launchd 持有，代理不受影响（构造上成立）。
     Button("退出 ShadowsocksX-NG 2.0（代理仍在后台运行）") {
       NSApp.terminate(nil)
     }
