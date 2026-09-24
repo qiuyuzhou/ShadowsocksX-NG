@@ -17,6 +17,9 @@ struct MainWindowView: View {
   let diagnosticReportExporter: any DiagnosticReportExporter
 
   @State private var selection: NodeID?
+  /// 订阅分区头动作（票 #56）：添加订阅 sheet 由壳持有。
+  @State private var showAddSubscription = false
+  @StateObject private var shellActionErrors = ErrorAlertPresenter()
 
   var body: some View {
     NavigationSplitView {
@@ -31,6 +34,19 @@ struct MainWindowView: View {
       }
     }
     .frame(minWidth: 920, minHeight: 580)
+    .sheet(isPresented: $showAddSubscription) {
+      AddSubscriptionSheet(workflow: workflow, errors: shellActionErrors)
+    }
+    .alert(
+      "操作失败",
+      isPresented: Binding(
+        get: { shellActionErrors.isPresented },
+        set: { if !$0 { shellActionErrors.dismiss() } })
+    ) {
+      Button("好", role: .cancel) {}
+    } message: {
+      Text(shellActionErrors.message ?? "")
+    }
   }
 
   // MARK: - 分区标题与动作槽位
@@ -56,11 +72,25 @@ struct MainWindowView: View {
     }
   }
 
-  /// 分区头动作槽位：各分区票落地时把页级动作（添加、保存、导出等）迁入。
+  /// 分区头动作槽位（票 #53/#56）：页级动作放在分区大标题右侧。
   @ViewBuilder
   private var headerActions: some View {
     switch route.destination {
-    case .home, .servers, .subscriptions, .settings, .diagnostics:
+    case .subscriptions:
+      HStack(spacing: 8) {
+        if !workflow.refreshingSubscriptionIDs.isEmpty {
+          ProgressView()
+            .controlSize(.small)
+        }
+        Button("添加订阅", systemImage: "plus") {
+          showAddSubscription = true
+        }
+        Button("更新全部", systemImage: "arrow.triangle.2.circlepath") {
+          Task { await workflow.refreshAllSubscriptions() }
+        }
+        .disabled(workflow.subscriptions.isEmpty)
+      }
+    case .home, .servers, .settings, .diagnostics:
       EmptyView()
     }
   }

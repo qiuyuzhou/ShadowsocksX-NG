@@ -1,44 +1,47 @@
 import SwiftUI
 
-/// 订阅分区（spec #21 D11，issue #35/#41）：每订阅一卡片（名称、URL host、
-/// 状态、上次刷新、服务器数）+ 单个/全部更新 + 编辑 URL + 删除确认；新建即
-/// 粘贴 URL。卡片数据来自订阅 projection（非敏感）；结构化刷新状态在呈现层
-/// 本地化（story 42）。
+/// 订阅分区（spec #21 D11，issue #35/#41，地图 #52 票 #56）：每订阅一张卡片
+/// （图标 + 名称 + 「HTTPS 订阅地址已隐藏」+ 状态徽标 + 更新/重试 + 「…」菜单 +
+/// 三列元数据 + 脱敏说明行），失败卡警告色描边。添加订阅与更新全部在分区头
+/// 动作槽位（由主窗口壳提供）。卡片数据来自订阅 projection（非敏感）；结构化
+/// 刷新状态在呈现层本地化（story 42）。
 struct SubscriptionsView: View {
   @ObservedObject var workflow: CatalogWorkflow
   let errors: ErrorAlertPresenter
   /// 删除完成后回调（被删身份集合；主窗口据此清除失效选择）。
   let onNodesRemoved: (Set<NodeID>) -> Void
 
-  @State private var showAddSheet = false
   @State private var editTarget: SubscriptionSummary?
   @State private var deleteTarget: SubscriptionSummary?
-  @State private var isRefreshingAll = false
 
   var body: some View {
-    List {
-      ForEach(workflow.subscriptions) { summary in
-        SubscriptionCard(
-          summary: summary,
-          isRefreshing: workflow.refreshingSubscriptionIDs.contains(summary.id),
-          onRefresh: { Task { await workflow.refreshSubscription(summary.id) } },
-          onEdit: { editTarget = summary },
-          onDelete: { deleteTarget = summary })
+    ScrollView {
+      VStack(spacing: 14) {
+        ForEach(workflow.subscriptions) { summary in
+          SubscriptionCard(
+            summary: summary,
+            groupName: workflow.displayName(for: summary.groupID),
+            isRefreshing: workflow.refreshingSubscriptionIDs.contains(summary.id),
+            onRefresh: { Task { await workflow.refreshSubscription(summary.id) } },
+            onEdit: { editTarget = summary },
+            onDelete: { deleteTarget = summary })
+        }
       }
+      .frame(maxWidth: 960, alignment: .leading)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.leading, 28)
+      .padding(.trailing, 32)
+      .padding(.top, 24)
+      .padding(.bottom, 36)
     }
-    .listStyle(.inset)
     .overlay {
       if workflow.subscriptions.isEmpty {
         ContentUnavailableView(
           "暂无订阅", systemImage: "arrow.triangle.2.circlepath",
-          description: Text("用「添加订阅…」粘贴 HTTPS 订阅地址（SIP-008 JSON）")
+          description: Text("用分区头「添加订阅」粘贴 HTTPS 订阅地址（SIP-008 JSON）")
         )
         .allowsHitTesting(false)
       }
-    }
-    .safeAreaInset(edge: .bottom) { bottomBar }
-    .sheet(isPresented: $showAddSheet) {
-      AddSubscriptionSheet(workflow: workflow, errors: errors)
     }
     .sheet(item: $editTarget) { summary in
       EditSubscriptionURLSheet(workflow: workflow, errors: errors, summary: summary)
@@ -56,37 +59,6 @@ struct SubscriptionsView: View {
       Text(
         "将移除订阅源、固定分组与全部远端成员；若代理正走此订阅，代理会停止。此操作不可撤销。"
       )
-    }
-  }
-
-  private var bottomBar: some View {
-    HStack {
-      Button {
-        showAddSheet = true
-      } label: {
-        Label("添加订阅…", systemImage: "plus")
-      }
-      Spacer()
-      Button {
-        refreshAll()
-      } label: {
-        if isRefreshingAll {
-          ProgressView().controlSize(.small)
-        } else {
-          Label("立即更新全部", systemImage: "arrow.triangle.2.circlepath")
-        }
-      }
-      .disabled(workflow.subscriptions.isEmpty || isRefreshingAll)
-    }
-    .padding(12)
-    .background(.bar)
-  }
-
-  private func refreshAll() {
-    isRefreshingAll = true
-    Task {
-      await workflow.refreshAllSubscriptions()
-      isRefreshingAll = false
     }
   }
 
@@ -109,7 +81,7 @@ extension SubscriptionRefreshStatus {
   var badgeText: String {
     switch self {
     case .never: "尚未刷新"
-    case .succeeded: "正常"
+    case .succeeded: "已同步"
     case .failed: "刷新失败"
     }
   }
@@ -133,88 +105,179 @@ extension SubscriptionRefreshStatus {
     if case .failed = self { return true }
     return false
   }
+
+  /// 脱敏说明行（票 #56）：失败卡说明保留快照语义。
+  var footerNote: String {
+    isFailed
+      ? "保留最后一次成功快照 · 不会清空现有节点"
+      : "远端结构由订阅管理，本地仅保留启用状态"
+  }
 }
 
-/// 单张订阅卡片。
+/// 单张订阅卡片（票 #56）：头部、三列元数据与脱敏说明；失败态警告色描边。
 private struct SubscriptionCard: View {
   let summary: SubscriptionSummary
+  let groupName: String
   let isRefreshing: Bool
   let onRefresh: () -> Void
   let onEdit: () -> Void
   let onDelete: () -> Void
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      HStack(spacing: 8) {
-        Image(systemName: "arrow.triangle.2.circlepath")
-          .foregroundStyle(summary.status.isFailed ? Color.red : Color.secondary)
-        Text(summary.name)
-          .font(.headline)
-          .lineLimit(1)
-        Spacer()
-        statusBadge
-        if isRefreshing {
-          ProgressView().controlSize(.small)
-        } else {
-          Button {
-            onRefresh()
-          } label: {
-            Image(systemName: "arrow.clockwise")
-          }
-          .buttonStyle(.borderless)
-          .help("立即更新此订阅")
-        }
-      }
-      Text(summary.host)
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .truncationMode(.middle)
-        .help("订阅主机（完整地址不入诊断与日志）")
-      HStack(spacing: 12) {
-        Label("\(summary.serverCount) 台服务器", systemImage: "server.rack")
-        Label(summary.status.lastRefreshText, systemImage: "clock")
-      }
-      .font(.caption)
-      .foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: 0) {
+      header
+      Divider()
+        .padding(.top, 16)
+      meta
+        .padding(.top, 14)
       if let detail = summary.status.failureDetail {
         Text(detail)
-          .font(.caption)
+          .font(.footnote)
           .foregroundStyle(.red)
           .lineLimit(2)
+          .padding(.top, 10)
       }
-      HStack {
-        Spacer()
-        Button("编辑 URL…", action: onEdit)
-          .controlSize(.small)
-        Button("删除…", role: .destructive, action: onDelete)
-          .controlSize(.small)
-      }
-      .buttonStyle(.borderless)
+      footer
+        .padding(.top, 14)
     }
-    .padding(.vertical, 4)
+    .padding(20)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(
+      .background.secondary,
+      in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .strokeBorder(summary.status.isFailed ? Color.orange.opacity(0.55) : Color.clear)
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .strokeBorder(.quaternary)
+    )
   }
 
-  @ViewBuilder
-  private var statusBadge: some View {
-    if summary.status.isFailed {
-      Text(summary.status.badgeText)
-        .font(.caption2)
-        .fontWeight(.medium)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(Capsule().fill(Color.red.opacity(0.15)))
-        .foregroundStyle(.red)
-    } else {
-      Text(summary.status.badgeText)
-        .font(.caption2)
+  private var header: some View {
+    HStack(alignment: .top, spacing: 12) {
+      ZStack {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+          .fill(
+            summary.status.isFailed ? Color.orange.opacity(0.14) : Color.accentColor.opacity(0.12))
+        Image(systemName: "arrow.triangle.2.circlepath")
+          .font(.system(size: 15, weight: .medium))
+          .foregroundStyle(summary.status.isFailed ? Color.orange : Color.accentColor)
+      }
+      .frame(width: 38, height: 38)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(summary.name)
+          .font(.title3.weight(.semibold))
+          .lineLimit(1)
+        Text("HTTPS 订阅地址已隐藏")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .help("订阅主机：\(summary.host)（完整地址不入诊断与日志）")
+      }
+      Spacer(minLength: 12)
+      badge
+      if isRefreshing {
+        ProgressView()
+          .controlSize(.small)
+          .padding(.horizontal, 6)
+      } else {
+        Button(summary.status.isFailed ? "重试" : "更新", action: onRefresh)
+          .buttonStyle(.plain)
+          .foregroundStyle(.tint)
+          .font(.callout.weight(.medium))
+      }
+      Menu {
+        Button("编辑 URL…", action: onEdit)
+        Button("删除…", role: .destructive, action: onDelete)
+      } label: {
+        Image(systemName: "ellipsis")
+          .font(.callout.weight(.medium))
+          .foregroundStyle(.secondary)
+          .frame(width: 24, height: 24)
+          .contentShape(Rectangle())
+      }
+      .menuStyle(.borderlessButton)
+      .fixedSize()
+      .accessibilityLabel("订阅操作")
+    }
+  }
+
+  private var badge: some View {
+    Text(summary.status.badgeText)
+      .font(.caption.weight(.semibold))
+      .foregroundStyle(badgeForeground)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 3)
+      .background(badgeBackground, in: Capsule())
+  }
+
+  private var badgeForeground: Color {
+    switch summary.status {
+    case .succeeded: .green
+    case .failed: .orange
+    case .never: .secondary
+    }
+  }
+
+  private var badgeBackground: Color {
+    switch summary.status {
+    case .succeeded: Color.green.opacity(0.14)
+    case .failed: Color.orange.opacity(0.14)
+    case .never: Color(nsColor: .quaternaryLabelColor).opacity(0.3)
+    }
+  }
+
+  /// 三列元数据（票 #56）：固定分组 | 服务器 | 上次成功刷新。
+  private var meta: some View {
+    HStack(alignment: .top, spacing: 24) {
+      metaColumn("固定分组") {
+        Text(groupName)
+          .lineLimit(1)
+          .help(groupName)
+      }
+      metaColumn("服务器") {
+        Text("\(summary.serverCount) 台")
+      }
+      metaColumn("上次成功刷新") {
+        Text(summary.status.lastRefreshText)
+      }
+      Spacer(minLength: 0)
+    }
+  }
+
+  private func metaColumn<Content: View>(
+    _ label: String, @ViewBuilder content: () -> Content
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 3) {
+      Text(label)
+        .font(.caption)
         .foregroundStyle(.secondary)
+      content()
+        .font(.callout.weight(.medium))
+        .foregroundStyle(.primary)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var footer: some View {
+    HStack(spacing: 6) {
+      Image(systemName: "checkmark.shield")
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+      Text(summary.status.footerNote)
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+      Spacer(minLength: 0)
     }
   }
 }
 
-/// 「添加订阅」表单：粘贴 HTTPS 订阅地址；创建后立即首次刷新。
-private struct AddSubscriptionSheet: View {
+/// 「添加订阅」表单（分区头入口）：粘贴 HTTPS 订阅地址；创建后立即首次刷新。
+struct AddSubscriptionSheet: View {
   let workflow: CatalogWorkflow
   let errors: ErrorAlertPresenter
   @Environment(\.dismiss) private var dismiss
