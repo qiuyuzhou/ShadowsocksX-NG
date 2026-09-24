@@ -72,7 +72,7 @@ struct MainWindowView: View {
     }
   }
 
-  /// 分区头动作槽位（票 #53/#56）：页级动作放在分区大标题右侧。
+  /// 分区头动作槽位（票 #53/#56/#57）：页级动作放在分区大标题右侧。
   @ViewBuilder
   private var headerActions: some View {
     switch route.destination {
@@ -90,7 +90,19 @@ struct MainWindowView: View {
         }
         .disabled(workflow.subscriptions.isEmpty)
       }
-    case .home, .servers, .settings, .diagnostics:
+    case .settings:
+      HStack(spacing: 8) {
+        Button("恢复默认") {
+          Task { _ = await settingsWorkflow.reset() }
+        }
+        .disabled(settingsWorkflow.isCommitting)
+        Button(settingsWorkflow.isCommitting ? "保存中…" : "保存设置") {
+          Task { _ = await settingsWorkflow.save() }
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(!settingsWorkflow.canSave)
+      }
+    case .home, .servers, .diagnostics:
       EmptyView()
     }
   }
