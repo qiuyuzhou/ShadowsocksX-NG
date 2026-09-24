@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// 主窗口外壳（地图 #52，票 #53）：NavigationSplitView 侧栏承载五项导航与
-/// 底部常驻代理状态卡；详情区按 route destination 承载既有五个分区视图，
-/// 顶部是系统设置风格的分区大标题（动作槽位留给各分区票填充）。路由状态
-/// 仍由 WorkspaceRoute 持有；代理状态卡的开关、模式与摘要只来自代理控制
-/// 工作流的整体 snapshot（issue #47），与状态菜单同一口径。
+/// 底部常驻代理状态卡；详情区按 route destination 承载各分区视图，顶部是
+/// 系统设置风格的分区大标题（动作槽位留给各分区票填充）。路由状态仍由
+/// WorkspaceRoute 持有；代理状态卡的开关、模式与摘要只来自代理控制工作流
+/// 的整体 snapshot（issue #47），与状态菜单同一口径。
 struct MainWindowView: View {
   @ObservedObject var route: WorkspaceRoute
   @ObservedObject var workflow: CatalogWorkflow
@@ -17,8 +17,9 @@ struct MainWindowView: View {
   let diagnosticReportExporter: any DiagnosticReportExporter
 
   @State private var selection: NodeID?
-  /// 订阅分区头动作（票 #56）：添加订阅 sheet 由壳持有。
+  /// 分区头动作（票 #56/#58）：添加订阅 sheet 与诊断导出的呈现状态由壳持有。
   @State private var showAddSubscription = false
+  @State private var exportedDiagnosticsPath: String?
   @StateObject private var shellActionErrors = ErrorAlertPresenter()
 
   var body: some View {
@@ -46,6 +47,16 @@ struct MainWindowView: View {
       Button("好", role: .cancel) {}
     } message: {
       Text(shellActionErrors.message ?? "")
+    }
+    .alert(
+      "诊断已导出",
+      isPresented: Binding(
+        get: { exportedDiagnosticsPath != nil },
+        set: { if !$0 { exportedDiagnosticsPath = nil } })
+    ) {
+      Button("好", role: .cancel) {}
+    } message: {
+      Text(exportedDiagnosticsPath ?? "")
     }
   }
 
@@ -102,8 +113,31 @@ struct MainWindowView: View {
         .keyboardShortcut(.defaultAction)
         .disabled(!settingsWorkflow.canSave)
       }
-    case .home, .servers, .diagnostics:
+    case .diagnostics:
+      Button("导出诊断…", systemImage: "square.and.arrow.up") {
+        exportDiagnostics()
+      }
+    case .home, .servers:
       EmptyView()
+    }
+  }
+
+  /// 诊断导出（票 #58）：沿用 DiagnosticReportExportAction 既有入口；文件写
+  /// 入成功后才登记导出完成事件。
+  private func exportDiagnostics() {
+    switch DiagnosticReportExportAction(
+      diagnostics: diagnostics, exporter: diagnosticReportExporter
+    ).perform()
+    {
+    case .preparationFailed(let failure):
+      shellActionErrors.present(failure)
+    case .cancelled:
+      break
+    case .saved(let url):
+      diagnostics.noteExportCompleted()
+      exportedDiagnosticsPath = url.path
+    case .exportFailed(let failure):
+      shellActionErrors.present(failure)
     }
   }
 
@@ -134,111 +168,13 @@ struct MainWindowView: View {
     case .diagnostics:
       WorkspaceDiagnosticsView(
         diagnostics: diagnostics,
-        clipboard: clipboard,
-        reportExporter: diagnosticReportExporter)
+        clipboard: clipboard)
     }
   }
 
   private func clearSelectionIfInvalidated(_ removed: Set<NodeID>) {
     if let selection, removed.contains(selection) {
       self.selection = nil
-    }
-  }
-}
-
-// MARK: - 分区包装（票 #53）
-
-private struct WorkspaceHomeView: View {
-  @ObservedObject var workflow: CatalogWorkflow
-  @ObservedObject var control: ProxyControlWorkflow
-  let clipboard: any TextClipboard
-  let onManageServers: () -> Void
-  @StateObject private var errors = ErrorAlertPresenter()
-
-  @State private var showLegacyImportSheet = false
-  @State private var didOfferLegacyImport = false
-
-  var body: some View {
-    HomeView(
-      workflow: workflow,
-      control: control,
-      clipboard: clipboard,
-      onManageServers: onManageServers,
-      errors: errors
-    )
-    .sheet(isPresented: $showLegacyImportSheet) {
-      LegacyImportSheet(workflow: workflow)
-    }
-    .onAppear {
-      guard !didOfferLegacyImport, workflow.legacyImportState.shouldOffer else { return }
-      didOfferLegacyImport = true
-      showLegacyImportSheet = true
-    }
-    .alert(
-      "操作失败",
-      isPresented: Binding(
-        get: { errors.isPresented },
-        set: { if !$0 { errors.dismiss() } })
-    ) {
-      Button("好", role: .cancel) {}
-    } message: {
-      Text(errors.message ?? "")
-    }
-  }
-}
-
-private struct WorkspaceSubscriptionsView: View {
-  @ObservedObject var workflow: CatalogWorkflow
-  let onNodesRemoved: (Set<NodeID>) -> Void
-  @StateObject private var errors = ErrorAlertPresenter()
-
-  var body: some View {
-    SubscriptionsView(
-      workflow: workflow,
-      errors: errors,
-      onNodesRemoved: onNodesRemoved
-    )
-    .alert(
-      "操作失败",
-      isPresented: Binding(
-        get: { errors.isPresented },
-        set: { if !$0 { errors.dismiss() } })
-    ) {
-      Button("好", role: .cancel) {}
-    } message: {
-      Text(errors.message ?? "")
-    }
-  }
-}
-
-private struct WorkspaceDiagnosticsView: View {
-  @ObservedObject var diagnostics: DiagnosticsWorkflow
-  let clipboard: any TextClipboard
-  let reportExporter: any DiagnosticReportExporter
-  @StateObject private var errors = ErrorAlertPresenter()
-
-  var body: some View {
-    HStack(spacing: 0) {
-      DiagnosticsSummarySidebar(workflow: diagnostics)
-        .frame(width: 220)
-      Divider()
-      DiagnosticsView(
-        diagnostics: diagnostics,
-        errors: errors,
-        clipboard: clipboard,
-        reportExporter: reportExporter
-      )
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
-      .alert(
-        "操作失败",
-        isPresented: Binding(
-          get: { errors.isPresented },
-          set: { if !$0 { errors.dismiss() } })
-      ) {
-        Button("好", role: .cancel) {}
-      } message: {
-        Text(errors.message ?? "")
-      }
     }
   }
 }
