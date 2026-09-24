@@ -136,8 +136,7 @@ private struct AppComposition {
       loginController: loginController,
       clipboard: textClipboard,
       diagnosticReportExporter: diagnosticReportExporter)
-    let windowOpening = WorkspaceWindowOpeningAdapter(
-      makeContentView: { NSHostingView(rootView: workspaceContent) })
+    let windowOpening = makeWindowOpening(content: workspaceContent, route: workspaceRoute)
     return AppComposition(
       controller: controller,
       catalogWorkflow: catalogWorkflow,
@@ -149,6 +148,18 @@ private struct AppComposition {
       textClipboard: textClipboard,
       diagnosticReportExporter: diagnosticReportExporter,
       windowOpening: windowOpening)
+  }
+
+  /// 主窗口开窗器装配：AppKit 直控窗口（见 adapter 文档），窗口标题跟随当前
+  /// 分区（首页/服务器/订阅/设置/诊断）——组合根一次性接线，@Published 订阅
+  /// 立即发出当前值，开窗前即完成标题缓存。
+  private static func makeWindowOpening(
+    content: MainWindowView, route: WorkspaceRoute
+  ) -> WorkspaceWindowOpeningAdapter {
+    let windowOpening = WorkspaceWindowOpeningAdapter(
+      makeContentView: { NSHostingView(rootView: content) })
+    windowOpening.bindTitle(route.$destination.map(\.label).eraseToAnyPublisher())
+    return windowOpening
   }
 
   /// 目录工作流接线（issue #40/#41/#49）：提交协调器与生产运行时适配器在此

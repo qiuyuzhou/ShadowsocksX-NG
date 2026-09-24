@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// 设置分区（issue #33/#44，地图 #52 票 #57）：按原型重排为常规 / 代理端点 /
-/// 高级三张分组卡，行式呈现（主文案 + 次说明 + 行尾控件）；保存/恢复默认动作
-/// 在分区头动作槽位（由主窗口壳提供，确认弹窗仍由本视图的 alert 呈现）。
+/// 高级三张分组卡，行式呈现（主文案 + 次说明 + 行尾控件）；保存/恢复默认是
+/// 表单级提交动作，固定在本视图内容顶部行（不进窗口工具栏，避免动作与表单
+/// 脱节），确认弹窗由本视图的 alert 呈现。
 /// 字段绑定编辑 workflow 的扁平 UI-shaped draft；issues 按字段渲染；端口行读
 /// typed field state；是否需要确认及摘要来自 seam 的统一事实；登录项开关
 /// 绑定独立控制器。
@@ -11,12 +12,15 @@ struct SettingsView: View {
   @ObservedObject var loginController: LaunchAtLoginController
 
   var body: some View {
-    Form {
-      generalSection
-      endpointSection
-      advancedSection
+    VStack(spacing: 0) {
+      commitActionsRow
+      Form {
+        generalSection
+        endpointSection
+        advancedSection
+      }
+      .formStyle(.grouped)
     }
-    .formStyle(.grouped)
     .padding(.leading, 20)
     .padding(.trailing, 24)
     .onAppear {
@@ -34,6 +38,28 @@ struct SettingsView: View {
     } message: { confirmation in
       Text(AppPresentation.message(for: confirmation))
     }
+  }
+
+  // MARK: - 提交动作行（内容顶部，固定不随表单滚动）
+
+  /// 保存/恢复默认（原壳动作槽位，票 #57）：表单级提交动作与表单同置；
+  /// 保存走 Return 默认键位。恢复默认的确认与保存的 PAC 失效确认都经
+  /// pendingConfirmation 由本视图 alert 呈现。
+  private var commitActionsRow: some View {
+    HStack(spacing: 8) {
+      Spacer(minLength: 0)
+      Button("恢复默认") {
+        Task { _ = await workflow.reset() }
+      }
+      .disabled(workflow.isCommitting)
+      Button(workflow.isCommitting ? "保存中…" : "保存设置") {
+        Task { _ = await workflow.save() }
+      }
+      .keyboardShortcut(.defaultAction)
+      .disabled(!workflow.canSave)
+    }
+    .padding(.top, 12)
+    .padding(.bottom, 8)
   }
 
   // MARK: - 常规
@@ -171,7 +197,7 @@ struct SettingsView: View {
           .foregroundStyle(.orange)
       }
       if workflow.isDirty {
-        Label("存在未保存的修改；点击分区头「保存设置」生效。", systemImage: "pencil")
+        Label("存在未保存的修改；点击顶部「保存设置」生效。", systemImage: "pencil")
           .font(.footnote)
           .foregroundStyle(.secondary)
       }
@@ -182,7 +208,7 @@ struct SettingsView: View {
 
   // MARK: - 呈现组件
 
-  /// 分区头：标题 + 副题 + 可选尾随徽标（票 #57）。
+  /// 分组卡标题行：标题 + 副题 + 可选尾随徽标（票 #57）。
   private func sectionHeader(_ title: String, subtitle: String, trailing: String? = nil)
     -> some View
   {
@@ -231,14 +257,6 @@ struct SettingsView: View {
 
   // MARK: - 确认 alert 呈现（视图只持有呈现状态，事实来自 seam）
 
-  private struct ConfirmationPresentation {
-    let title: String
-    let confirmTitle: String
-    let confirmRole: ButtonRole?
-    let confirm: () -> Void
-    let cancel: () -> Void
-  }
-
   private func confirmationPresentation(
     for confirmation: SettingsConfirmation
   ) -> ConfirmationPresentation {
@@ -268,6 +286,18 @@ struct SettingsView: View {
           confirmationPresentation(for: confirmation).cancel()
         }
       })
+  }
+}
+
+// MARK: - 确认 alert 呈现（同文件扩展，保持 private 访问）
+
+extension SettingsView {
+  private struct ConfirmationPresentation {
+    let title: String
+    let confirmTitle: String
+    let confirmRole: ButtonRole?
+    let confirm: () -> Void
+    let cancel: () -> Void
   }
 }
 

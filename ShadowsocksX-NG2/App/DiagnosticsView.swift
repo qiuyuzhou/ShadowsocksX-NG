@@ -3,7 +3,7 @@ import SwiftUI
 /// 主窗口诊断区（spec #21 D11，issue #34/#43，地图 #52 票 #58）：按原型重排
 /// 为状态摘要卡（代理状态、活动目标）+ 日志卡（GUI 事件流实时呈现 + wrapper
 /// 收敛日志尾部，来源切换 segmented、可复制）+ 底部脱敏说明行。导出诊断动作
-/// 在分区头动作槽位（由主窗口壳提供，保持 DiagnosticReportExportAction 既有
+/// 在窗口工具栏（由主窗口壳提供，保持 DiagnosticReportExportAction 既有
 /// 入口）。事实采样、轮询代际与报告准备全部经 DiagnosticsWorkflow（issue #43
 /// 的唯一 UI-facing seam）；本视图只负责生命周期触发、呈现与复制动作。
 struct DiagnosticsView: View {

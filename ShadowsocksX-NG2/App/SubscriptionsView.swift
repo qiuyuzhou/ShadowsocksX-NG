@@ -2,8 +2,8 @@ import SwiftUI
 
 /// 订阅分区（spec #21 D11，issue #35/#41，地图 #52 票 #56）：每订阅一张卡片
 /// （图标 + 名称 + 「HTTPS 订阅地址已隐藏」+ 状态徽标 + 更新/重试 + 「…」菜单 +
-/// 三列元数据 + 脱敏说明行），失败卡警告色描边。添加订阅与更新全部在分区头
-/// 动作槽位（由主窗口壳提供）。卡片数据来自订阅 projection（非敏感）；结构化
+/// 三列元数据 + 脱敏说明行），失败卡警告色描边。添加订阅与更新全部在窗口
+/// 工具栏（由主窗口壳提供）。卡片数据来自订阅 projection（非敏感）；结构化
 /// 刷新状态在呈现层本地化（story 42）。
 struct SubscriptionsView: View {
   @ObservedObject var workflow: CatalogWorkflow
@@ -38,7 +38,7 @@ struct SubscriptionsView: View {
       if workflow.subscriptions.isEmpty {
         ContentUnavailableView(
           "暂无订阅", systemImage: "arrow.triangle.2.circlepath",
-          description: Text("用分区头「添加订阅」粘贴 HTTPS 订阅地址（SIP-008 JSON）")
+          description: Text("用工具栏「添加订阅」粘贴 HTTPS 订阅地址（SIP-008 JSON）")
         )
         .allowsHitTesting(false)
       }
@@ -276,7 +276,7 @@ private struct SubscriptionCard: View {
   }
 }
 
-/// 「添加订阅」表单（分区头入口）：粘贴 HTTPS 订阅地址；创建后立即首次刷新。
+/// 「添加订阅」表单（工具栏入口）：粘贴 HTTPS 订阅地址；创建后立即首次刷新。
 struct AddSubscriptionSheet: View {
   let workflow: CatalogWorkflow
   let errors: ErrorAlertPresenter

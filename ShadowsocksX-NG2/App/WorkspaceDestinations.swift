@@ -72,7 +72,7 @@ struct WorkspaceDiagnosticsView: View {
   @StateObject private var errors = ErrorAlertPresenter()
 
   var body: some View {
-    // 导出诊断动作在分区头动作槽位（票 #58）；本包装只承载复制错误呈现。
+    // 导出诊断动作在窗口工具栏（票 #58）；本包装只承载复制错误呈现。
     DiagnosticsView(
       diagnostics: diagnostics,
       errors: errors,

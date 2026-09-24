@@ -1,8 +1,11 @@
 import SwiftUI
 
 /// 主窗口外壳（地图 #52，票 #53）：NavigationSplitView 侧栏承载五项导航与
-/// 底部常驻代理状态卡；详情区按 route destination 承载各分区视图，顶部是
-/// 系统设置风格的分区大标题（动作槽位留给各分区票填充）。路由状态仍由
+/// 底部常驻代理状态卡；详情区按 route destination 承载各分区视图。分区大
+/// 标题由窗口标题承担（组合根把 destination label 推给开窗器，见
+/// WorkspaceWindowOpeningAdapter.bindTitle）；订阅/诊断的页级动作经 .toolbar
+/// 桥接进窗口工具栏右端（票 #56/#58 的槽位仅呈现位置变化），设置的表单级
+/// 提交动作在其视图内容顶部（见 SettingsView）。路由状态仍由
 /// WorkspaceRoute 持有；代理状态卡的开关、模式与摘要只来自代理控制工作流
 /// 的整体 snapshot（issue #47），与状态菜单同一口径。
 struct MainWindowView: View {
@@ -17,7 +20,7 @@ struct MainWindowView: View {
   let diagnosticReportExporter: any DiagnosticReportExporter
 
   @State private var selection: NodeID?
-  /// 分区头动作（票 #56/#58）：添加订阅 sheet 与诊断导出的呈现状态由壳持有。
+  /// 分区动作的呈现状态（票 #56/#58）：添加订阅 sheet 与诊断导出由壳持有。
   @State private var showAddSubscription = false
   @State private var exportedDiagnosticsPath: String?
   @StateObject private var shellActionErrors = ErrorAlertPresenter()
@@ -27,14 +30,14 @@ struct MainWindowView: View {
       sidebar
         .navigationSplitViewColumnWidth(min: 200, ideal: 236, max: 300)
     } detail: {
-      VStack(spacing: 0) {
-        destinationHeader(route.destination.label) {
-          headerActions
-        }
-        destinationView
-      }
+      destinationView
     }
     .frame(minWidth: 920, minHeight: 580)
+    .toolbar {
+      ToolbarItemGroup(placement: .primaryAction) {
+        destinationActions
+      }
+    }
     .sheet(isPresented: $showAddSubscription) {
       AddSubscriptionSheet(workflow: workflow, errors: shellActionErrors)
     }
@@ -60,32 +63,15 @@ struct MainWindowView: View {
     }
   }
 
-  // MARK: - 分区标题与动作槽位
+  // MARK: - 分区动作槽位
 
+  /// 分区动作（票 #53/#56/#57）：页级动作随 destination 切换，经工具栏桥接
+  /// 出现在窗口工具栏右端；首页/服务器无页级动作。例外：设置的保存/恢复
+  /// 默认是表单级提交动作，由 SettingsView 内容顶部行承载（动作与表单同置，
+  /// 工具栏呈现效果差）。sheet/alert 呈现状态仍由壳持有，本处只负责动作的
+  /// 呈现。
   @ViewBuilder
-  private func destinationHeader<ActionContent: View>(
-    _ title: String,
-    @ViewBuilder actions: () -> ActionContent
-  ) -> some View {
-    VStack(spacing: 0) {
-      HStack(alignment: .center) {
-        Text(title)
-          .font(.system(size: 28, weight: .bold))
-          .lineLimit(1)
-        Spacer(minLength: 16)
-        actions()
-      }
-      .padding(.leading, 28)
-      .padding(.trailing, 32)
-      .padding(.top, 18)
-      .padding(.bottom, 14)
-      Divider()
-    }
-  }
-
-  /// 分区头动作槽位（票 #53/#56/#57）：页级动作放在分区大标题右侧。
-  @ViewBuilder
-  private var headerActions: some View {
+  private var destinationActions: some View {
     switch route.destination {
     case .subscriptions:
       HStack(spacing: 8) {
@@ -101,23 +87,11 @@ struct MainWindowView: View {
         }
         .disabled(workflow.subscriptions.isEmpty)
       }
-    case .settings:
-      HStack(spacing: 8) {
-        Button("恢复默认") {
-          Task { _ = await settingsWorkflow.reset() }
-        }
-        .disabled(settingsWorkflow.isCommitting)
-        Button(settingsWorkflow.isCommitting ? "保存中…" : "保存设置") {
-          Task { _ = await settingsWorkflow.save() }
-        }
-        .keyboardShortcut(.defaultAction)
-        .disabled(!settingsWorkflow.canSave)
-      }
     case .diagnostics:
       Button("导出诊断…", systemImage: "square.and.arrow.up") {
         exportDiagnostics()
       }
-    case .home, .servers:
+    case .home, .servers, .settings:
       EmptyView()
     }
   }
