@@ -29,11 +29,23 @@ final class WorkspaceWindowOpeningAdapter: WorkspaceWindowOpening {
   private func makeWindow() -> NSWindow {
     let window = NSWindow(
       contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
-      styleMask: [.titled, .closable, .miniaturizable, .resizable],
+      styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
       backing: .buffered, defer: false)
     window.title = "ShadowsocksX-NG 2.0"
+    window.titlebarAppearsTransparent = true
     window.identifier = Self.workspaceWindowID
     window.isReleasedWhenClosed = false
+    // SwiftUI scene 窗口的 chrome 需在此手动补齐，两件缺一不可：
+    // ① 空 NSToolbar + .unified：NavigationSplitView 桥接把侧栏切换按钮与
+    //    toolbar item 装进真实工具栏，并给内容正确安全区。没有工具栏时桥接
+    //    只装一半——玻璃背景画进内容区顶部而内容不缩进，分区大标题被糊成
+    //    色块。
+    // ② .fullSizeContentView + titlebarAppearsTransparent：侧栏通顶、窗口
+    //    标题呈现在内容区前缘（scene 版外观）。缺省标题栏会把标题挤在
+    //    红绿灯旁截断成「ShadowsocksX-N…」。
+    let toolbar = NSToolbar(identifier: "workspace")
+    window.toolbar = toolbar
+    window.toolbarStyle = .unified
     window.contentView = makeContentView()
     window.center()
     self.window = window
