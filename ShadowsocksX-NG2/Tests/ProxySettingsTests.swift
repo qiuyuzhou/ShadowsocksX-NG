@@ -13,7 +13,7 @@ final class ProxySettingsTests: XCTestCase {
     XCTAssertEqual(settings.listen.pacPort, 11089)
     XCTAssertEqual(settings.timeoutSeconds, 60)
     XCTAssertFalse(settings.verboseLogging)
-    XCTAssertTrue(settings.listen.udpRelayEnabled == false)
+    XCTAssertEqual(settings.listen.mode, "tcp_and_udp")
     XCTAssertTrue(settings.validationErrors.isEmpty)
   }
 

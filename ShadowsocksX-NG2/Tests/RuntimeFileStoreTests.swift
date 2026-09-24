@@ -156,4 +156,16 @@ final class RuntimeFileStoreTests: XCTestCase {
       base.listenFingerprint, listenChanged.listenFingerprint,
       "监听端口变化改变指纹（走优雅重启）")
   }
+
+  func testValidatedRuntimeRequiresFixedTCPAndUDPModeForSOCKS() throws {
+    let base = ProxyRuntimeFixture.makeDocument()
+    var object = try XCTUnwrap(
+      try JSONSerialization.jsonObject(with: base.jsonData()) as? [String: Any])
+    var locals = try XCTUnwrap(object["locals"] as? [[String: Any]])
+    locals[0]["mode"] = "tcp_only"
+    object["locals"] = locals
+    let data = try JSONSerialization.data(withJSONObject: object)
+
+    XCTAssertNil(SslocalRuntimeDocument.decodeValidated(data))
+  }
 }

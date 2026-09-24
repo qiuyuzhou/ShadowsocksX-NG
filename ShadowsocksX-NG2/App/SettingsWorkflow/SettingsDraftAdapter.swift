@@ -41,7 +41,6 @@ enum SettingsDraftAdapter {
       httpProxyEnabled: settings.listen.httpProxyEnabled,
       httpPort: settings.listen.httpPort,
       pacPort: settings.listen.pacPort,
-      udpRelayEnabled: settings.listen.udpRelayEnabled,
       timeoutSeconds: settings.timeoutSeconds,
       verboseLogging: settings.verboseLogging,
       proxyExceptions: settings.proxyExceptions,
@@ -60,7 +59,6 @@ enum SettingsDraftAdapter {
     listen.httpProxyEnabled = draft.httpProxyEnabled
     listen.httpPort = draft.httpPort
     listen.pacPort = draft.pacPort
-    listen.udpRelayEnabled = draft.udpRelayEnabled
     return ProxySettings(
       listen: listen,
       timeoutSeconds: draft.timeoutSeconds,
@@ -81,7 +79,6 @@ enum SettingsDraftAdapter {
     listen.httpProxyEnabled = draft.httpProxyEnabled
     listen.httpPort = draft.httpPort
     listen.pacPort = draft.pacPort
-    listen.udpRelayEnabled = draft.udpRelayEnabled
     return RuntimeListenFacts(listen: listen)
   }
 

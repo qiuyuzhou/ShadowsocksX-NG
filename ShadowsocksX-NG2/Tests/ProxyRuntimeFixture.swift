@@ -64,7 +64,6 @@ enum ProxyRuntimeFixture {
     localAddress: String = "127.0.0.1",
     localPort: Int = 11086,
     inboundProtocol: String = "socks",
-    mode: String = "tcp_only",
     pacPort: Int = 11089
   ) -> SslocalRuntimeDocument {
     precondition(inboundProtocol == "socks")
@@ -89,8 +88,7 @@ enum ProxyRuntimeFixture {
         socksPort: localPort,
         httpProxyEnabled: false,
         httpPort: 11087,
-        pacPort: pacPort,
-        udpRelayEnabled: mode == "tcp_and_udp"))
+        pacPort: pacPort))
   }
 
   /// LaunchAgent 注册态可编程替身，记录全部调用。

@@ -106,8 +106,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
       socksPort: 11086,
       httpProxyEnabled: true,
       httpPort: 11087,
-      pacPort: 11089,
-      udpRelayEnabled: false)
+      pacPort: 11089)
 
     await waitUntil(probe.requests.contains { $0.listen == expected })
 
@@ -200,8 +199,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
       socksPort: 11086,
       httpProxyEnabled: true,
       httpPort: 11087,
-      pacPort: 11089,
-      udpRelayEnabled: false)
+      pacPort: 11089)
     _ = await workflow.reloadFromCommitted()
     await waitUntil(workflow.portFieldState(for: .socks).occupancy != nil)
 

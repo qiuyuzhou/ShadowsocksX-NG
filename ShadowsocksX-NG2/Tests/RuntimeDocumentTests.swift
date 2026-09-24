@@ -42,7 +42,7 @@ final class RuntimeDocumentTests: XCTestCase {
     XCTAssertEqual(locals[0]["local_address"] as? String, "127.0.0.1")
     XCTAssertEqual(locals[0]["local_port"] as? Int, 11086)
     XCTAssertEqual(locals[0]["protocol"] as? String, "socks")
-    XCTAssertEqual(locals[0]["mode"] as? String, "tcp_only")
+    XCTAssertEqual(locals[0]["mode"] as? String, "tcp_and_udp")
     XCTAssertEqual(locals[1]["local_port"] as? Int, 11087)
     XCTAssertEqual(locals[1]["protocol"] as? String, "http")
     let pac = try XCTUnwrap(dictionary["x_shadowsocksx_ng_pac"] as? [String: Any])
@@ -77,12 +77,11 @@ final class RuntimeDocumentTests: XCTestCase {
 
   // MARK: 监听设置透传
 
-  func testListenSettingsMapUDPRelayToUpstreamMode() {
-    let tcpOnly = SslocalListenSettings(udpRelayEnabled: false)
-    let tcpAndUDP = SslocalListenSettings(udpRelayEnabled: true)
+  func testListenSettingsUseTCPAndUDPForSOCKSAndTCPOnlyForHTTP() {
+    let listen = SslocalListenSettings()
 
-    XCTAssertEqual(tcpOnly.mode, "tcp_only")
-    XCTAssertEqual(tcpAndUDP.mode, "tcp_and_udp")
+    XCTAssertEqual(listen.mode, "tcp_and_udp")
+    XCTAssertEqual(listen.locals.map(\.mode), ["tcp_and_udp", "tcp_only"])
   }
 
   func testRuntimeDocumentCarriesTimeoutVerboseAndPACUserRules() throws {
@@ -111,8 +110,7 @@ final class RuntimeDocumentTests: XCTestCase {
       socksPort: 1086,
       httpProxyEnabled: true,
       httpPort: 1087,
-      pacPort: 1089,
-      udpRelayEnabled: true)
+      pacPort: 1089)
 
     XCTAssertEqual(listen.bindAddress, "127.0.0.1")
     XCTAssertEqual(listen.advertisedAddress, "127.0.0.1")

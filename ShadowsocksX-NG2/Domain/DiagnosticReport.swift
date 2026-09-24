@@ -268,7 +268,6 @@ enum DiagnosticReportBuilder {
     parts.append(
       listen.httpProxyEnabled ? "HTTP 端口 \(listen.httpPort)" : "HTTP 入站关")
     parts.append("PAC 端口 \(listen.pacPort)")
-    parts.append("UDP 中继\(listen.udpRelayEnabled ? "开" : "关")")
     return parts.joined(separator: "；")
   }
 

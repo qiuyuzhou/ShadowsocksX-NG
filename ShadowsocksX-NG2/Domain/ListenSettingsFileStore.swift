@@ -25,7 +25,7 @@ struct RestoredListenSettings: Equatable {
   let unreadableError: ListenSettingsStoreError?
 }
 
-/// 用户监听设置（端口、HTTP 启用、UDP、监听范围）的磁盘持久化，落盘
+/// 用户监听设置（端口、HTTP 启用、监听范围）的磁盘持久化，落盘
 /// `~/Library/Application Support/ShadowsocksX-NG2/listen-settings.json`。
 /// 只承载用户显式确认过的配置；与运行时契约文件分离。监听范围只按
 /// 原样保留，有效性由派生文档的读取侧校验兜底。
@@ -118,7 +118,6 @@ private struct ListenSettingsRecord: Codable, Equatable, Sendable {
   var httpProxyEnabled: Bool = true
   var httpPort: Int = SslocalListenSettings.defaultHTTPPort
   var pacPort: Int = SslocalListenSettings.defaultPACPort
-  var udpRelayEnabled: Bool = false
 
   init() {}
 
@@ -136,12 +135,10 @@ private struct ListenSettingsRecord: Codable, Equatable, Sendable {
     pacPort =
       try container.decodeIfPresent(Int.self, forKey: .pacPort)
       ?? SslocalListenSettings.defaultPACPort
-    udpRelayEnabled = try container.decode(Bool.self, forKey: .udpRelayEnabled)
   }
 
   private enum CodingKeys: String, CodingKey {
     case scopeKind, advertisedAddress, socksPort, httpProxyEnabled, httpPort, pacPort
-    case udpRelayEnabled
   }
 }
 
@@ -156,7 +153,6 @@ extension ListenSettingsFileStore {
     record.httpProxyEnabled = settings.httpProxyEnabled
     record.httpPort = settings.httpPort
     record.pacPort = settings.pacPort
-    record.udpRelayEnabled = settings.udpRelayEnabled
     return record
   }
 
@@ -169,7 +165,6 @@ extension ListenSettingsFileStore {
     settings.httpProxyEnabled = record.httpProxyEnabled
     settings.httpPort = record.httpPort
     settings.pacPort = record.pacPort
-    settings.udpRelayEnabled = record.udpRelayEnabled
     return settings
   }
 }

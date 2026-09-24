@@ -46,16 +46,17 @@ final class ListenSettingsFileStoreTests: XCTestCase {
     settings.httpProxyEnabled = false
     settings.httpPort = 2087
     settings.pacPort = 2089
-    settings.udpRelayEnabled = true
 
     try store.save(settings)
 
     XCTAssertEqual(try store.load(), settings)
+    let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
+    XCTAssertFalse(raw.contains("udpRelayEnabled"))
     XCTAssertEqual(try permissions(of: directory), 0o700)
     XCTAssertEqual(try permissions(of: store.fileURL), 0o600)
   }
 
-  func testLoadPreservesPersistedLegacyDefaultPortsWithoutImplicitMigration() throws {
+  func testLoadIgnoresRemovedUDPRelayPreferenceAndPreservesLegacyDefaultPorts() throws {
     try writeRaw(
       #"{"scopeKind":"loopback","advertisedAddress":null,"socksPort":1086,"#
         + #""httpProxyEnabled":true,"httpPort":1087,"pacPort":1089,"udpRelayEnabled":false}"#)
@@ -65,6 +66,7 @@ final class ListenSettingsFileStoreTests: XCTestCase {
     XCTAssertEqual(settings.socksPort, 1086)
     XCTAssertEqual(settings.httpPort, 1087)
     XCTAssertEqual(settings.pacPort, 1089)
+    XCTAssertEqual(settings.mode, "tcp_and_udp")
   }
 
   func testMissingPortFieldsUseNewFactoryDefaults() throws {

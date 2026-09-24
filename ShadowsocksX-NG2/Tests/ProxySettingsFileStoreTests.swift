@@ -50,7 +50,6 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     settings.listen.httpProxyEnabled = false
     settings.listen.httpPort = 2087
     settings.listen.pacPort = 2089
-    settings.listen.udpRelayEnabled = true
     settings.timeoutSeconds = 120
     settings.verboseLogging = true
     settings.proxyExceptions = "localhost, 127.0.0.1"
@@ -63,6 +62,8 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
     XCTAssertFalse(raw.contains("lists.example.test"))
     XCTAssertFalse(raw.contains("token=secret"))
+    XCTAssertFalse(raw.contains("udpRelayEnabled"))
+    XCTAssertEqual(try store.load().listen.mode, "tcp_and_udp")
     XCTAssertNotNil(try credentials.secret(for: ProxySettingsFileStore.gfwListReference))
   }
 

@@ -36,7 +36,7 @@ final class DiagnosticsReportWorkflowTests: DiagnosticsWorkflowTestCase {
       homePath: { self.home })
     facts.proxyState = .running
     facts.hasActiveTarget = true
-    facts.contractSummary = "servers=1 protocols=socks mode=tcp_only"
+    facts.contractSummary = "servers=1 protocols=socks mode=tcp_and_udp"
 
     let report = try reportText(workflow.prepareReport())
 
@@ -48,7 +48,7 @@ final class DiagnosticsReportWorkflowTests: DiagnosticsWorkflowTestCase {
     XCTAssertTrue(report.contains("- 监听范围：回环"))
     XCTAssertTrue(report.contains("SOCKS5 端口 11086"))
     XCTAssertTrue(report.contains("PAC 端口 11089"))
-    XCTAssertTrue(report.contains("servers=1 protocols=socks mode=tcp_only"))
+    XCTAssertTrue(report.contains("servers=1 protocols=socks mode=tcp_and_udp"))
     XCTAssertTrue(report.contains("服务器：2（配置插件 1；手动 1 / 订阅 1）"))
     XCTAssertTrue(report.contains("分组：2"))
     XCTAssertTrue(report.contains("- v2ray-plugin v1.3.2：已提供"))

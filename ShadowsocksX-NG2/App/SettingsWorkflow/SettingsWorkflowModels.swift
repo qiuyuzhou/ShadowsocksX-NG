@@ -20,7 +20,6 @@ struct SettingsDraft: Equatable, Sendable {
   var httpProxyEnabled: Bool
   var httpPort: Int
   var pacPort: Int
-  var udpRelayEnabled: Bool
   var timeoutSeconds: Int
   var verboseLogging: Bool
   var proxyExceptions: String

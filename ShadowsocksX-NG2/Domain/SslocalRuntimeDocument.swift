@@ -230,11 +230,10 @@ struct SslocalListenSettings: Equatable, Sendable {
   var httpProxyEnabled: Bool = true
   var httpPort: Int = Self.defaultHTTPPort
   var pacPort: Int = Self.defaultPACPort
-  var udpRelayEnabled: Bool = false
 
   var bindAddress: String { scope.bindAddress }
   var advertisedAddress: String { scope.advertisedAddress }
-  var mode: String { udpRelayEnabled ? "tcp_and_udp" : "tcp_only" }
+  var mode: String { "tcp_and_udp" }
 
   var locals: [SslocalLocalDocument] {
     var result = [
@@ -282,7 +281,6 @@ struct RuntimeListenFacts: Equatable, Sendable {
   let httpProxyEnabled: Bool
   let httpPort: Int
   let pacPort: Int
-  let udpRelayEnabled: Bool
 
   init(listen: SslocalListenSettings) {
     self.init(
@@ -290,8 +288,7 @@ struct RuntimeListenFacts: Equatable, Sendable {
       socksPort: listen.socksPort,
       httpProxyEnabled: listen.httpProxyEnabled,
       httpPort: listen.httpPort,
-      pacPort: listen.pacPort,
-      udpRelayEnabled: listen.udpRelayEnabled)
+      pacPort: listen.pacPort)
   }
 
   init(
@@ -299,15 +296,13 @@ struct RuntimeListenFacts: Equatable, Sendable {
     socksPort: Int,
     httpProxyEnabled: Bool,
     httpPort: Int,
-    pacPort: Int,
-    udpRelayEnabled: Bool
+    pacPort: Int
   ) {
     self.scope = scope
     self.socksPort = socksPort
     self.httpProxyEnabled = httpProxyEnabled
     self.httpPort = httpPort
     self.pacPort = pacPort
-    self.udpRelayEnabled = udpRelayEnabled
   }
 
   init(document: SslocalRuntimeDocument) {
@@ -325,8 +320,7 @@ struct RuntimeListenFacts: Equatable, Sendable {
       socksPort: socks?.localPort ?? document.pac.socksPort,
       httpProxyEnabled: http != nil,
       httpPort: http?.localPort ?? SslocalListenSettings.defaultHTTPPort,
-      pacPort: document.pac.port,
-      udpRelayEnabled: socks?.mode == "tcp_and_udp")
+      pacPort: document.pac.port)
   }
 
   var bindAddress: String { scope.bindAddress }
@@ -395,15 +389,17 @@ extension SslocalRuntimeDocument {
       return false
     }
     guard socks[0].localPort == pac.socksPort else { return false }
+    guard socks[0].mode == "tcp_and_udp" else { return false }
     guard http.allSatisfy({ $0.mode == "tcp_only" }) else { return false }
 
     let localPorts = locals.map(\.localPort)
     guard Set(localPorts + [pac.port]).count == localPorts.count + 1 else { return false }
     guard
       locals.allSatisfy({ local in
-        local.localAddress == expectedBind
+        let expectedMode = local.inboundProtocol == "socks" ? "tcp_and_udp" : "tcp_only"
+        return local.localAddress == expectedBind
           && (1...65535).contains(local.localPort)
-          && (local.mode == "tcp_only" || local.mode == "tcp_and_udp")
+          && local.mode == expectedMode
       })
     else { return false }
 

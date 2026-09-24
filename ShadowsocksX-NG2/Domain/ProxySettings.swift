@@ -275,7 +275,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     listen.httpProxyEnabled = record.httpProxyEnabled
     listen.httpPort = record.httpPort
     listen.pacPort = record.pacPort
-    listen.udpRelayEnabled = record.udpRelayEnabled
 
     let gfwListURL: String
     if let reference = record.gfwListCredentialReference {
@@ -305,7 +304,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     record.httpProxyEnabled = settings.listen.httpProxyEnabled
     record.httpPort = settings.listen.httpPort
     record.pacPort = settings.listen.pacPort
-    record.udpRelayEnabled = settings.listen.udpRelayEnabled
     record.timeoutSeconds = settings.timeoutSeconds
     record.verboseLogging = settings.verboseLogging
     record.proxyExceptions = settings.proxyExceptions
@@ -385,7 +383,6 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
   var httpProxyEnabled: Bool = true
   var httpPort: Int = SslocalListenSettings.defaultHTTPPort
   var pacPort: Int = SslocalListenSettings.defaultPACPort
-  var udpRelayEnabled: Bool = false
   var timeoutSeconds: Int = 60
   var verboseLogging: Bool = false
   var proxyExceptions: String = ProxySettings.defaultProxyExceptions
@@ -410,7 +407,6 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
     pacPort =
       try container.decodeIfPresent(Int.self, forKey: .pacPort)
       ?? SslocalListenSettings.defaultPACPort
-    udpRelayEnabled = try container.decodeIfPresent(Bool.self, forKey: .udpRelayEnabled) ?? false
     timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds) ?? 60
     verboseLogging = try container.decodeIfPresent(Bool.self, forKey: .verboseLogging) ?? false
     proxyExceptions =
@@ -429,7 +425,7 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
 extension ProxySettingsRecord {
   fileprivate enum CodingKeys: String, CodingKey {
     case scopeKind, advertisedAddress, socksPort, httpProxyEnabled, httpPort, pacPort
-    case udpRelayEnabled, timeoutSeconds, verboseLogging, proxyExceptions
+    case timeoutSeconds, verboseLogging, proxyExceptions
     case gfwListCredentialReference, gfwListURLConfigured
     case pacUserRules, preferredMode
   }

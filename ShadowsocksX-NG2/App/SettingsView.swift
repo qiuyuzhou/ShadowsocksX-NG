@@ -61,10 +61,6 @@ struct SettingsView: View {
         }
       }
       .padding(.vertical, 4)
-      Toggle(isOn: $workflow.draft.udpRelayEnabled) {
-        settingCopy("启用 UDP 中继", note: "为支持 UDP 的服务器转发数据报")
-      }
-      .toggleStyle(.switch)
       settingRow("超时", note: "连接超时秒数（1–86400）") {
         Stepper(value: $workflow.draft.timeoutSeconds, in: 1...86_400) {
           Text("\(workflow.draft.timeoutSeconds) 秒")

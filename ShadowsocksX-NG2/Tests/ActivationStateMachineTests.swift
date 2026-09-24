@@ -40,7 +40,7 @@ final class ActivationStateMachineTests: XCTestCase {
     XCTAssertEqual(configuration.document.socksAddress, "127.0.0.1")
     XCTAssertEqual(configuration.document.socksPort, 11086)
     XCTAssertEqual(configuration.document.socksLocal?.inboundProtocol, "socks")
-    XCTAssertEqual(configuration.document.socksMode, "tcp_only")
+    XCTAssertEqual(configuration.document.socksMode, "tcp_and_udp")
   }
 
   func testActivateGroupExpandsValidLeavesInExplicitOrderAndKeepsGroupIdentity() throws {
