@@ -24,7 +24,7 @@ struct ProxyStatusMenu: View {
         guard !isUnitTesting else { return }
         await control.resyncOnLaunch()
         route.handle(
-          .launch(legacyImportOffer: catalogWorkflow.legacyImportState.shouldOffer),
+          .launch,
           using: WorkspaceWindowOpeningAdapter(openWindow: openWindow))
       }
       .alert(

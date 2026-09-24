@@ -15,7 +15,7 @@ enum WorkspaceDestination: String, CaseIterable, Hashable, Identifiable, Sendabl
 /// workspace 的跨入口意图。呈现意图会要求主 workspace 可见；workspace 内部
 /// 导航只改变 destination，不重复执行窗口 effect。
 enum WorkspaceRouteIntent: Equatable, Sendable {
-  case launch(legacyImportOffer: Bool)
+  case launch
   case navigate(destination: WorkspaceDestination)
   case present(destination: WorkspaceDestination)
   case reopen
@@ -34,7 +34,15 @@ protocol WorkspaceWindowOpening {
 final class WorkspaceRoute: ObservableObject {
   @Published private(set) var destination: WorkspaceDestination = .home
 
+  /// 启动是否呈现主 workspace：登录项拉起为 false（静默驻留纯后台形态），
+  /// 其余启动为 true（前台形态开窗）。判定来源见 LaunchContext。
+  private let opensWorkspaceAtLaunch: Bool
+
   private var didApplyLaunchPolicy = false
+
+  init(opensWorkspaceAtLaunch: Bool) {
+    self.opensWorkspaceAtLaunch = opensWorkspaceAtLaunch
+  }
 
   /// workspace 内部导航只改变 route destination，不请求新的窗口呈现。
   func navigate(to destination: WorkspaceDestination) {
@@ -48,10 +56,10 @@ final class WorkspaceRoute: ObservableObject {
     using windowOpening: any WorkspaceWindowOpening
   ) {
     switch intent {
-    case .launch(let legacyImportOffer):
+    case .launch:
       guard !didApplyLaunchPolicy else { return }
       didApplyLaunchPolicy = true
-      if legacyImportOffer {
+      if opensWorkspaceAtLaunch {
         windowOpening.ensureWorkspaceVisible()
       }
     case .navigate(let destination):

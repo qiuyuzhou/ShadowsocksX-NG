@@ -17,7 +17,7 @@ final class WorkspaceRouteTests: XCTestCase {
   }
 
   func testFreshRouteStartsAtHomeWithoutPersistedState() {
-    XCTAssertEqual(WorkspaceRoute().destination, .home)
+    XCTAssertEqual(WorkspaceRoute(opensWorkspaceAtLaunch: true).destination, .home)
   }
 
   func testDestinationVocabularyIsFiniteAndStable() {
@@ -26,45 +26,56 @@ final class WorkspaceRouteTests: XCTestCase {
       [.home, .servers, .subscriptions, .settings, .diagnostics])
   }
 
-  func testFirstLaunchWithLegacyOfferPresentsHome() {
-    let route = WorkspaceRoute()
+  func testRegularLaunchPresentsWorkspaceAtHome() {
+    let route = WorkspaceRoute(opensWorkspaceAtLaunch: true)
     let opening = RecordingWindowOpening()
     opening.onOpen = { opening.destinationAtOpen = route.destination }
 
-    route.handle(.launch(legacyImportOffer: true), using: opening)
+    route.handle(.launch, using: opening)
 
     XCTAssertEqual(route.destination, .home)
     XCTAssertEqual(opening.openCount, 1)
     XCTAssertEqual(opening.destinationAtOpen, .home)
   }
 
-  func testFirstLaunchWithoutLegacyOfferDoesNotPresentWorkspace() {
-    let route = WorkspaceRoute()
+  func testLoginItemLaunchStaysSilent() {
+    let route = WorkspaceRoute(opensWorkspaceAtLaunch: false)
     let opening = RecordingWindowOpening()
 
-    route.handle(.launch(legacyImportOffer: false), using: opening)
+    route.handle(.launch, using: opening)
 
     XCTAssertEqual(route.destination, .home)
     XCTAssertEqual(opening.openCount, 0)
   }
 
-  func testLaunchPolicyIsAppliedOnlyOnce() {
-    let route = WorkspaceRoute()
+  func testSilentLaunchStillAllowsExplicitPresentation() {
+    let route = WorkspaceRoute(opensWorkspaceAtLaunch: false)
     let opening = RecordingWindowOpening()
 
-    route.handle(.launch(legacyImportOffer: true), using: opening)
-    route.handle(.launch(legacyImportOffer: true), using: opening)
+    route.handle(.launch, using: opening)
+    route.handle(.present(destination: .settings), using: opening)
+
+    XCTAssertEqual(route.destination, .settings)
+    XCTAssertEqual(opening.openCount, 1)
+  }
+
+  func testLaunchPolicyIsAppliedOnlyOnce() {
+    let route = WorkspaceRoute(opensWorkspaceAtLaunch: true)
+    let opening = RecordingWindowOpening()
+
+    route.handle(.launch, using: opening)
+    route.handle(.launch, using: opening)
 
     XCTAssertEqual(opening.openCount, 1)
   }
 
   func testDelayedLaunchPolicyDoesNotOverwriteExplicitDestination() {
-    let route = WorkspaceRoute()
+    let route = WorkspaceRoute(opensWorkspaceAtLaunch: true)
     let opening = RecordingWindowOpening()
     opening.onOpen = { opening.destinationAtOpen = route.destination }
 
     route.handle(.present(destination: .settings), using: opening)
-    route.handle(.launch(legacyImportOffer: true), using: opening)
+    route.handle(.launch, using: opening)
 
     XCTAssertEqual(route.destination, .settings)
     XCTAssertEqual(opening.openCount, 2)
@@ -72,7 +83,7 @@ final class WorkspaceRouteTests: XCTestCase {
   }
 
   func testExplicitSettingsPresentationSelectsBeforeOpeningWorkspace() {
-    let route = WorkspaceRoute()
+    let route = WorkspaceRoute(opensWorkspaceAtLaunch: true)
     let opening = RecordingWindowOpening()
     opening.onOpen = { opening.destinationAtOpen = route.destination }
 
@@ -84,7 +95,7 @@ final class WorkspaceRouteTests: XCTestCase {
   }
 
   func testInWorkspaceNavigationChangesDestinationWithoutOpeningWindow() {
-    let route = WorkspaceRoute()
+    let route = WorkspaceRoute(opensWorkspaceAtLaunch: true)
     let opening = RecordingWindowOpening()
 
     route.handle(.navigate(destination: .servers), using: opening)
@@ -94,7 +105,7 @@ final class WorkspaceRouteTests: XCTestCase {
   }
 
   func testExplicitHomePresentationSelectsHomeBeforeOpeningWorkspace() {
-    let route = WorkspaceRoute()
+    let route = WorkspaceRoute(opensWorkspaceAtLaunch: true)
     let opening = RecordingWindowOpening()
     opening.onOpen = { opening.destinationAtOpen = route.destination }
     route.navigate(to: .diagnostics)
@@ -107,7 +118,7 @@ final class WorkspaceRouteTests: XCTestCase {
   }
 
   func testPassiveReopenRetainsCurrentDestination() {
-    let route = WorkspaceRoute()
+    let route = WorkspaceRoute(opensWorkspaceAtLaunch: true)
     let opening = RecordingWindowOpening()
     opening.onOpen = { opening.destinationAtOpen = route.destination }
     route.handle(.navigate(destination: .diagnostics), using: opening)

@@ -15,6 +15,14 @@ protocol LaunchAtLoginControlling {
   func unregister() throws
 }
 
+extension LoginItemStatus {
+  /// 已注册或已请求注册待批准都算开启——系统 API 状态的唯一口径，
+  /// LaunchAtLoginController.isEnabled 与启动来源判定共用。
+  var countsAsEnabled: Bool {
+    self == .registered || self == .requiresApproval
+  }
+}
+
 struct SMAppLaunchAtLoginService: LaunchAtLoginControlling {
   private let service = SMAppService.mainApp
 
@@ -58,9 +66,9 @@ final class LaunchAtLoginController: ObservableObject {
     status = service.status
   }
 
-  /// 已注册或已请求注册待批准都算开启——两者都只来自系统 API 的状态。
+  /// 已注册或已请求注册待批准都算开启。
   var isEnabled: Bool {
-    status == .registered || status == .requiresApproval
+    status.countsAsEnabled
   }
 
   var requiresApproval: Bool { status == .requiresApproval }

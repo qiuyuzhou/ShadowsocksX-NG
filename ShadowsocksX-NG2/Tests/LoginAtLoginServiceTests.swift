@@ -60,6 +60,34 @@ final class LaunchAtLoginServiceTests: XCTestCase {
     XCTAssertEqual(controller.errorMessage, AppPresentation.unknownError)
   }
 
+  // MARK: 登录项启动判定(LaunchContext,启动策略输入)
+
+  func testLoginLaunchRequiresEnabledLoginItem() {
+    XCTAssertFalse(
+      LaunchContext.isLoginItemLaunch(loginItemEnabled: false, systemUptime: 5),
+      "登录项未启用时,开机后立即手动启动也不该被当成登录启动")
+    XCTAssertTrue(LaunchContext.isLoginItemLaunch(loginItemEnabled: true, systemUptime: 5))
+  }
+
+  func testApprovalPendingAndRegisteredCountAsEnabledLoginItem() {
+    XCTAssertTrue(LoginItemStatus.registered.countsAsEnabled)
+    XCTAssertTrue(LoginItemStatus.requiresApproval.countsAsEnabled)
+    XCTAssertFalse(LoginItemStatus.notRegistered.countsAsEnabled)
+    XCTAssertFalse(LoginItemStatus.notFound.countsAsEnabled)
+  }
+
+  func testUptimeBeyondBootWindowIsManualLaunch() {
+    XCTAssertFalse(
+      LaunchContext.isLoginItemLaunch(
+        loginItemEnabled: true,
+        systemUptime: LaunchContext.loginLaunchWindow),
+      "窗口期右边界(开区间)之外视为手动启动")
+    XCTAssertFalse(
+      LaunchContext.isLoginItemLaunch(
+        loginItemEnabled: true,
+        systemUptime: LaunchContext.loginLaunchWindow + 1))
+  }
+
   private enum FakeError: Error, CustomStringConvertible {
     case system
 

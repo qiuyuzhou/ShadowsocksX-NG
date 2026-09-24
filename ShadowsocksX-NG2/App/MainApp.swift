@@ -70,7 +70,13 @@ struct ShadowsocksXNG2App: App {
       wrappedValue: DiagnosticsWorkflow(
         runtimeFacts: controller,
         catalogFacts: { catalogWorkflow.diagnosticCatalogFacts }))
-    _workspaceRoute = StateObject(wrappedValue: WorkspaceRoute())
+    // 启动策略（CONTEXT.md「Background form」不变量）：登录项拉起静默，
+    // 其余启动开主窗口（前台形态）；Legacy 导入提示由已开窗口的 home 分区呈现。
+    let opensWorkspaceAtLaunch = !LaunchContext.isLoginItemLaunch(
+      loginItemEnabled: dependencies.loginService.status.countsAsEnabled,
+      systemUptime: ProcessInfo.processInfo.systemUptime)
+    _workspaceRoute = StateObject(
+      wrappedValue: WorkspaceRoute(opensWorkspaceAtLaunch: opensWorkspaceAtLaunch))
     // GUI 事件接入内存环形缓冲（spec #21 D5，issue #34）：主窗口日志查看器与
     // 诊断导出的来源；wrapper 侧不注册，仍走 stderr → agent.log 收敛。
     RuntimeLog.setSink(RuntimeEventStore.shared)
