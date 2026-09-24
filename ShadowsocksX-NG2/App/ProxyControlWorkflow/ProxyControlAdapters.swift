@@ -20,7 +20,7 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
 
   var activeTargetID: NodeID? { controller.activeTargetID }
 
-  var httpExportCapability: HTTPExportCapability? {
+  var httpExportCapability: HTTPExportCapability {
     HTTPExportCapability(listen: controller.listenSettings)
   }
 
@@ -49,8 +49,7 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
 /// HTTP 导出能力的唯一派生点：监听设置 → 可复制导出行。地址取监听范围的
 /// 对外地址（回环态 127.0.0.1，主机态为对外公布地址），与 PAC 语义一致。
 extension HTTPExportCapability {
-  init?(listen: SslocalListenSettings) {
-    guard listen.httpProxyEnabled else { return nil }
+  init(listen: SslocalListenSettings) {
     let endpoint = "http://\(listen.scope.advertisedAddress):\(listen.httpPort)"
     self.init(copyableLine: "export http_proxy=\(endpoint);export https_proxy=\(endpoint);")
   }

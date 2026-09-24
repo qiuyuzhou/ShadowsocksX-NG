@@ -77,7 +77,9 @@ final class StatusMenuModelTests: XCTestCase {
       availableModes: ProxyMode.availableModes,
       activeTarget: activeTarget,
       skippedInvalidServerCount: 0,
-      httpExport: nil)
+      httpExport: HTTPExportCapability(
+        copyableLine:
+          "export http_proxy=http://127.0.0.1:11087;export https_proxy=http://127.0.0.1:11087;"))
   }
 
   // MARK: - 头部状态摘要

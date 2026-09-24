@@ -25,21 +25,18 @@ extension RuntimeListenFacts {
       return RuntimeListenFacts(
         scope: scope,
         socksPort: port,
-        httpProxyEnabled: httpProxyEnabled,
         httpPort: httpPort,
         pacPort: pacPort)
     case .http:
       return RuntimeListenFacts(
         scope: scope,
         socksPort: socksPort,
-        httpProxyEnabled: httpProxyEnabled,
         httpPort: port,
         pacPort: pacPort)
     case .pac:
       return RuntimeListenFacts(
         scope: scope,
         socksPort: socksPort,
-        httpProxyEnabled: httpProxyEnabled,
         httpPort: httpPort,
         pacPort: port)
     }

@@ -13,7 +13,9 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
   var proxyMode: ProxyMode
   var skippedInvalidServerCount = 0
   var activeTargetID: NodeID?
-  var httpExportCapability: HTTPExportCapability?
+  var httpExportCapability = HTTPExportCapability(
+    copyableLine:
+      "export http_proxy=http://127.0.0.1:11087;export https_proxy=http://127.0.0.1:11087;")
 
   private let changeSubject = PassthroughSubject<Void, Never>()
   var changes: AnyPublisher<Void, Never> { changeSubject.eraseToAnyPublisher() }
@@ -74,7 +76,7 @@ final class ProxyControlWorkflowTests: XCTestCase {
     mode: ProxyMode,
     activeTarget: ProxyActiveTargetFacts?,
     skipped: Int,
-    export: HTTPExportCapability?
+    export: HTTPExportCapability
   ) -> ProxyControlSnapshot {
     ProxyControlSnapshot(
       runtime: facts,

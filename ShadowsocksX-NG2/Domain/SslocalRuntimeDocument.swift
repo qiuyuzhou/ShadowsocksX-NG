@@ -218,8 +218,8 @@ extension SslocalLocalDocument {
   }
 }
 
-/// 三个本地端点与单一监听范围的派生设置。HTTP 入站可独立关闭，但启用时与
-/// SOCKS、PAC 共用同一范围；默认端口与 Legacy 隔离（11086/11087/11089）。
+/// 三个本地端点与单一监听范围的派生设置。HTTP 入站恒开启，与 SOCKS、PAC
+/// 共用同一范围；默认端口与 Legacy 隔离（11086/11087/11089）。
 struct SslocalListenSettings: Equatable, Sendable {
   static let defaultSocksPort = 11086
   static let defaultHTTPPort = 11087
@@ -227,7 +227,6 @@ struct SslocalListenSettings: Equatable, Sendable {
 
   var scope: ListenScope = .loopback
   var socksPort: Int = Self.defaultSocksPort
-  var httpProxyEnabled: Bool = true
   var httpPort: Int = Self.defaultHTTPPort
   var pacPort: Int = Self.defaultPACPort
 
@@ -236,22 +235,18 @@ struct SslocalListenSettings: Equatable, Sendable {
   var mode: String { "tcp_and_udp" }
 
   var locals: [SslocalLocalDocument] {
-    var result = [
+    [
       SslocalLocalDocument(
         inboundProtocol: "socks",
         localAddress: bindAddress,
         localPort: socksPort,
-        mode: mode)
+        mode: mode),
+      SslocalLocalDocument(
+        inboundProtocol: "http",
+        localAddress: bindAddress,
+        localPort: httpPort,
+        mode: "tcp_only"),
     ]
-    if httpProxyEnabled {
-      result.append(
-        SslocalLocalDocument(
-          inboundProtocol: "http",
-          localAddress: bindAddress,
-          localPort: httpPort,
-          mode: "tcp_only"))
-    }
-    return result
   }
 
   var pac: PACRuntimeDocument {
@@ -273,12 +268,11 @@ struct SslocalListenSettings: Equatable, Sendable {
 
 /// Typed effective listener facts exposed by the runtime boundary. This is the
 /// complete identity of the listeners that are actually intended to be bound:
-/// scope carries both bind and advertised addresses, while the endpoint flags
-/// and ports prevent a same-port comparison from masquerading as a match.
+/// scope carries both bind and advertised addresses, while the ports prevent a
+/// same-port comparison from masquerading as a match.
 struct RuntimeListenFacts: Equatable, Sendable {
   let scope: ListenScope
   let socksPort: Int
-  let httpProxyEnabled: Bool
   let httpPort: Int
   let pacPort: Int
 
@@ -286,7 +280,6 @@ struct RuntimeListenFacts: Equatable, Sendable {
     self.init(
       scope: listen.scope,
       socksPort: listen.socksPort,
-      httpProxyEnabled: listen.httpProxyEnabled,
       httpPort: listen.httpPort,
       pacPort: listen.pacPort)
   }
@@ -294,13 +287,11 @@ struct RuntimeListenFacts: Equatable, Sendable {
   init(
     scope: ListenScope,
     socksPort: Int,
-    httpProxyEnabled: Bool,
     httpPort: Int,
     pacPort: Int
   ) {
     self.scope = scope
     self.socksPort = socksPort
-    self.httpProxyEnabled = httpProxyEnabled
     self.httpPort = httpPort
     self.pacPort = pacPort
   }
@@ -318,7 +309,6 @@ struct RuntimeListenFacts: Equatable, Sendable {
     self.init(
       scope: scope,
       socksPort: socks?.localPort ?? document.pac.socksPort,
-      httpProxyEnabled: http != nil,
       httpPort: http?.localPort ?? SslocalListenSettings.defaultHTTPPort,
       pacPort: document.pac.port)
   }

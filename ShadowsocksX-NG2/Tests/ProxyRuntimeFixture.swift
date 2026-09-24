@@ -86,7 +86,6 @@ enum ProxyRuntimeFixture {
       listen: SslocalListenSettings(
         scope: scope,
         socksPort: localPort,
-        httpProxyEnabled: false,
         httpPort: 11087,
         pacPort: pacPort))
   }

@@ -115,7 +115,6 @@ private struct ListenSettingsRecord: Codable, Equatable, Sendable {
   /// 主机态的对外公布地址；回环态为 nil。
   var advertisedAddress: String?
   var socksPort: Int = SslocalListenSettings.defaultSocksPort
-  var httpProxyEnabled: Bool = true
   var httpPort: Int = SslocalListenSettings.defaultHTTPPort
   var pacPort: Int = SslocalListenSettings.defaultPACPort
 
@@ -128,7 +127,6 @@ private struct ListenSettingsRecord: Codable, Equatable, Sendable {
     socksPort =
       try container.decodeIfPresent(Int.self, forKey: .socksPort)
       ?? SslocalListenSettings.defaultSocksPort
-    httpProxyEnabled = try container.decode(Bool.self, forKey: .httpProxyEnabled)
     httpPort =
       try container.decodeIfPresent(Int.self, forKey: .httpPort)
       ?? SslocalListenSettings.defaultHTTPPort
@@ -138,7 +136,7 @@ private struct ListenSettingsRecord: Codable, Equatable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case scopeKind, advertisedAddress, socksPort, httpProxyEnabled, httpPort, pacPort
+    case scopeKind, advertisedAddress, socksPort, httpPort, pacPort
   }
 }
 
@@ -150,7 +148,6 @@ extension ListenSettingsFileStore {
       record.advertisedAddress = address
     }
     record.socksPort = settings.socksPort
-    record.httpProxyEnabled = settings.httpProxyEnabled
     record.httpPort = settings.httpPort
     record.pacPort = settings.pacPort
     return record
@@ -162,7 +159,6 @@ extension ListenSettingsFileStore {
       settings.scope = .host(advertisedAddress: address)
     }
     settings.socksPort = record.socksPort
-    settings.httpProxyEnabled = record.httpProxyEnabled
     settings.httpPort = record.httpPort
     settings.pacPort = record.pacPort
     return settings

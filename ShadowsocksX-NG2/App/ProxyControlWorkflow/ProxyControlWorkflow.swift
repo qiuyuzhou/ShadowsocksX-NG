@@ -4,8 +4,8 @@ import Foundation
 // MARK: - Snapshot 投影
 
 /// 可安全复制的 HTTP 导出能力（issue #47）：shell 可直接 source 的 http/https
-/// 双导出行。原始监听设置与内部端口语义不进 snapshot；HTTP 入站未启用时无
-/// 此能力。复制是 UI 的副作用，workflow 不触剪贴板。
+/// 双导出行。原始监听设置与内部端口语义不进 snapshot。复制是 UI 的副作用，
+/// workflow 不触剪贴板。
 struct HTTPExportCapability: Equatable, Sendable {
   /// 已就绪的导出行（UI 原样复制，不自行拼装）。
   let copyableLine: String
@@ -36,8 +36,8 @@ struct ProxyControlSnapshot: Equatable, Sendable {
   let activeTarget: ProxyActiveTargetFacts?
   /// 最近一次激活预检或目录收敛跳过的无效服务器数量。
   let skippedInvalidServerCount: Int
-  /// HTTP 导出能力；HTTP 入站未启用为 nil。
-  let httpExport: HTTPExportCapability?
+  /// HTTP 导出能力。
+  let httpExport: HTTPExportCapability
 }
 
 // MARK: - 适配缝
@@ -55,8 +55,8 @@ protocol ProxyRuntimeAdapting: AnyObject {
   var skippedInvalidServerCount: Int { get }
   /// 当前活动目标身份；无目标为 nil（目录侧目标事实的唯一输入）。
   var activeTargetID: NodeID? { get }
-  /// 可安全复制的 HTTP 导出能力；HTTP 入站未启用为 nil。
-  var httpExportCapability: HTTPExportCapability? { get }
+  /// 可安全复制的 HTTP 导出能力。
+  var httpExportCapability: HTTPExportCapability { get }
   /// 运行时事实变化通知：目录驱动、设置变更或运行时收敛导致事实变化后
   /// 发值。生产实现带主队列 hop（willChange 语义 → didChange 读取）；
   /// fake 同步发值。workflow 以此触发整体重观察。

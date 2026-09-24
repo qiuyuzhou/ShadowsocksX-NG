@@ -272,7 +272,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
       listen.scope = .host(advertisedAddress: address)
     }
     listen.socksPort = record.socksPort
-    listen.httpProxyEnabled = record.httpProxyEnabled
     listen.httpPort = record.httpPort
     listen.pacPort = record.pacPort
 
@@ -301,7 +300,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
       return nil
     }()
     record.socksPort = settings.listen.socksPort
-    record.httpProxyEnabled = settings.listen.httpProxyEnabled
     record.httpPort = settings.listen.httpPort
     record.pacPort = settings.listen.pacPort
     record.timeoutSeconds = settings.timeoutSeconds
@@ -380,7 +378,6 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
   var scopeKind: ListenScopeKind = .loopback
   var advertisedAddress: String?
   var socksPort: Int = SslocalListenSettings.defaultSocksPort
-  var httpProxyEnabled: Bool = true
   var httpPort: Int = SslocalListenSettings.defaultHTTPPort
   var pacPort: Int = SslocalListenSettings.defaultPACPort
   var timeoutSeconds: Int = 60
@@ -400,7 +397,6 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
     socksPort =
       try container.decodeIfPresent(Int.self, forKey: .socksPort)
       ?? SslocalListenSettings.defaultSocksPort
-    httpProxyEnabled = try container.decodeIfPresent(Bool.self, forKey: .httpProxyEnabled) ?? true
     httpPort =
       try container.decodeIfPresent(Int.self, forKey: .httpPort)
       ?? SslocalListenSettings.defaultHTTPPort
@@ -424,7 +420,7 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
 
 extension ProxySettingsRecord {
   fileprivate enum CodingKeys: String, CodingKey {
-    case scopeKind, advertisedAddress, socksPort, httpProxyEnabled, httpPort, pacPort
+    case scopeKind, advertisedAddress, socksPort, httpPort, pacPort
     case timeoutSeconds, verboseLogging, proxyExceptions
     case gfwListCredentialReference, gfwListURLConfigured
     case pacUserRules, preferredMode

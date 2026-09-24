@@ -35,14 +35,13 @@ final class ProxyPortSemanticsTests: XCTestCase {
   func testDuplicateConfiguredPortsAreRejectedNamingBothEndpoints() {
     let settings = SslocalListenSettings(
       socksPort: 1086,
-      httpProxyEnabled: false,
       httpPort: 1086,
       pacPort: 1089)
 
     XCTAssertEqual(
       settings.portValidationErrors(),
       [.duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 1086)],
-      "HTTP 停用时其配置端口仍参与互异校验，避免日后重新启用时才暴露冲突")
+      "三个端点的配置值都必须互异")
   }
 
   func testPresentationNamesEndpointAndPort() {
@@ -78,7 +77,7 @@ final class ProxyPortSemanticsTests: XCTestCase {
 
   func testSuggestedPortForEndpointExcludesOtherTwoConfiguredValues() {
     let settings = SslocalListenSettings(
-      socksPort: 40000, httpProxyEnabled: false, httpPort: 40001, pacPort: 1089)
+      socksPort: 40000, httpPort: 40001, pacPort: 1089)
     var probed: [Int] = []
     let suggested = settings.suggestedPort(for: .pac) { port in
       probed.append(port)

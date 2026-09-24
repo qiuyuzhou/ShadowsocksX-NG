@@ -108,7 +108,6 @@ final class RuntimeDocumentTests: XCTestCase {
     let listen = SslocalListenSettings(
       scope: .loopback,
       socksPort: 1086,
-      httpProxyEnabled: true,
       httpPort: 1087,
       pacPort: 1089)
 
@@ -132,7 +131,6 @@ final class RuntimeDocumentTests: XCTestCase {
     let listen = SslocalListenSettings(
       scope: .host(advertisedAddress: "192.168.2.89"),
       socksPort: 1086,
-      httpProxyEnabled: true,
       httpPort: 1087,
       pacPort: 1089)
 
@@ -146,12 +144,12 @@ final class RuntimeDocumentTests: XCTestCase {
     )
   }
 
-  func testHTTPInboundCanBeDisabledWithoutChangingPACSOCKSTarget() {
+  func testHTTPInboundIsAlwaysPresentAlongsidePACSOCKSTarget() {
     let listen = SslocalListenSettings(
-      scope: .loopback, socksPort: 2086, httpProxyEnabled: false, httpPort: 2087,
+      scope: .loopback, socksPort: 2086, httpPort: 2087,
       pacPort: 2089)
 
-    XCTAssertEqual(listen.locals.map(\.inboundProtocol), ["socks"])
+    XCTAssertEqual(listen.locals.map(\.inboundProtocol), ["socks", "http"])
     XCTAssertTrue(listen.pac.javaScript.contains("127.0.0.1:2086"))
   }
 }

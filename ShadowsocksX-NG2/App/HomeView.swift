@@ -314,7 +314,6 @@ private struct QuickActionCard: View {
             help: copyHelp,
             action: copyHTTPExport
           )
-          .disabled(control.snapshot.httpExport == nil)
           if isRefreshingAll {
             ProgressView()
               .controlSize(.small)
@@ -326,8 +325,7 @@ private struct QuickActionCard: View {
   }
 
   private var copyHelp: String? {
-    control.snapshot.httpExport.map { _ in "复制可在 shell 中 source 的 http/https 代理导出行" }
-      ?? "HTTP 代理未启用，无法导出"
+    "复制可在 shell 中 source 的 http/https 代理导出行"
   }
 
   private func refreshAll() {
@@ -339,7 +337,7 @@ private struct QuickActionCard: View {
   }
 
   private func copyHTTPExport() {
-    guard let line = control.snapshot.httpExport?.copyableLine else { return }
+    let line = control.snapshot.httpExport.copyableLine
     do {
       try clipboard.write(line)
     } catch {

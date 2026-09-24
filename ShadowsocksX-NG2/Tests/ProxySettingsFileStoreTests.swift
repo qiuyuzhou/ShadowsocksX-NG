@@ -47,7 +47,6 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     var settings = ProxySettings()
     settings.listen.scope = .host(advertisedAddress: "192.168.2.89")
     settings.listen.socksPort = 2086
-    settings.listen.httpProxyEnabled = false
     settings.listen.httpPort = 2087
     settings.listen.pacPort = 2089
     settings.timeoutSeconds = 120

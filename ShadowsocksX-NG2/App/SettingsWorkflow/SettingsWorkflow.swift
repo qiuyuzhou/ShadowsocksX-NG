@@ -81,10 +81,9 @@ final class SettingsWorkflow: ObservableObject {
       canSuggestFreePort: canSuggest)
   }
 
-  /// 明确阻塞保存的端口。HTTP 入站关闭时 HTTP 端点不参与门禁。
+  /// 明确阻塞保存的端口。
   var blockingPortIDs: [SettingsPortID] {
     SettingsPortID.allCases.filter { id in
-      guard id != .http || draft.httpProxyEnabled else { return false }
       guard !isRuntimePortException(id) else { return false }
       if case .occupied = occupancyByPort[id] { return true }
       return false
@@ -257,8 +256,7 @@ final class SettingsWorkflow: ObservableObject {
   /// 例外只影响保存门禁与提示，不改持久化。
   private func isRuntimePortException(_ id: SettingsPortID) -> Bool {
     guard let runtime = committing.runtimeListenFacts else { return false }
-    guard runtime == listenFacts(of: draft) else { return false }
-    return id != .http || runtime.httpProxyEnabled
+    return runtime == listenFacts(of: draft)
   }
 
   private func listenFacts(of draft: SettingsDraft) -> RuntimeListenFacts {

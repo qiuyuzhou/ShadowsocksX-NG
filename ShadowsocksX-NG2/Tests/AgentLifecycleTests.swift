@@ -205,7 +205,7 @@ final class AgentLifecycleTests: XCTestCase {
   func testStructurallyInvalidContractIsAlsoCleaned() throws {
     // 可解码但 servers 为空：wrapper 校验拒绝，不给 sslocal 反复失败的机会。
     try SslocalRuntimeDocument(
-      servers: [], listen: SslocalListenSettings(httpProxyEnabled: false)
+      servers: [], listen: SslocalListenSettings()
     ).jsonData().write(to: contractURL)
     let wrapper = try launchWrapper(behavior: "run")
 

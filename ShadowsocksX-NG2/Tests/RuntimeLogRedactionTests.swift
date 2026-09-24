@@ -34,7 +34,7 @@ final class RuntimeLogRedactionTests: XCTestCase {
   func testDocumentSummaryExposesOnlyCountsProtocolsAndMode() {
     let summary = Redactor.documentSummary(poisoned)
 
-    XCTAssertEqual(summary, "servers=1 protocols=socks mode=tcp_and_udp")
+    XCTAssertEqual(summary, "servers=1 protocols=socks,http mode=tcp_and_udp")
     assertNoSecrets(summary)
   }
 

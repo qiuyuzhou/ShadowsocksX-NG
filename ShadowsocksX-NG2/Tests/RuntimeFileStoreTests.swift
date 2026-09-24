@@ -87,7 +87,7 @@ final class RuntimeFileStoreTests: XCTestCase {
   func testLoadDocumentReturnsNilForStructurallyInvalidDocument() throws {
     try store.write(
       SslocalRuntimeDocument(
-        servers: [], listen: SslocalListenSettings(httpProxyEnabled: false)))
+        servers: [], listen: SslocalListenSettings()))
 
     XCTAssertNil(try store.loadDocument(), "空 servers 属结构性无效（读取侧防御）")
   }
@@ -123,7 +123,7 @@ final class RuntimeFileStoreTests: XCTestCase {
       SslocalRuntimeDocument(
         servers: servers,
         listen: SslocalListenSettings(
-          socksPort: localPort, httpProxyEnabled: false, pacPort: 1089))
+          socksPort: localPort, pacPort: 1089))
     }
     func server(
       id: String = "s", address: String = "203.0.113.7", port: Int = 8388,

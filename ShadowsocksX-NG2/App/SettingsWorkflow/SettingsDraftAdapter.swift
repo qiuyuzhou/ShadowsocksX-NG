@@ -38,7 +38,6 @@ enum SettingsDraftAdapter {
       isHostScope: isHostScope,
       advertisedAddress: advertisedAddress,
       socksPort: settings.listen.socksPort,
-      httpProxyEnabled: settings.listen.httpProxyEnabled,
       httpPort: settings.listen.httpPort,
       pacPort: settings.listen.pacPort,
       timeoutSeconds: settings.timeoutSeconds,
@@ -56,7 +55,6 @@ enum SettingsDraftAdapter {
     listen.scope =
       draft.isHostScope ? .host(advertisedAddress: draft.advertisedAddress) : .loopback
     listen.socksPort = draft.socksPort
-    listen.httpProxyEnabled = draft.httpProxyEnabled
     listen.httpPort = draft.httpPort
     listen.pacPort = draft.pacPort
     return ProxySettings(
@@ -76,7 +74,6 @@ enum SettingsDraftAdapter {
     listen.scope =
       draft.isHostScope ? .host(advertisedAddress: draft.advertisedAddress) : .loopback
     listen.socksPort = draft.socksPort
-    listen.httpProxyEnabled = draft.httpProxyEnabled
     listen.httpPort = draft.httpPort
     listen.pacPort = draft.pacPort
     return RuntimeListenFacts(listen: listen)

@@ -153,7 +153,7 @@ final class RealSslocalSmokeTests: XCTestCase {
           pluginOpts: nil)
       ],
       listen: SslocalListenSettings(
-        socksPort: socksPort, httpProxyEnabled: true, httpPort: httpPort, pacPort: pacPort))
+        socksPort: socksPort, httpPort: httpPort, pacPort: pacPort))
     let wrapper = try launchWrapper(document)
 
     // 两个端口同时就绪：验证 locals[] 被官方 sslocal 接受并实际绑定。
@@ -223,7 +223,7 @@ final class RealSslocalSmokeTests: XCTestCase {
           pluginOpts: "mode=websocket")
       ],
       listen: SslocalListenSettings(
-        socksPort: socksPort, httpProxyEnabled: true, httpPort: httpPort, pacPort: pacPort))
+        socksPort: socksPort, httpPort: httpPort, pacPort: pacPort))
     let wrapper = try launchWrapper(document)
 
     // 插件进程建立：sslocal 按 SIP003 拉起 bundle 内 v2ray-plugin 并保持运行

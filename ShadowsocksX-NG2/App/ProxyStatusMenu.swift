@@ -38,7 +38,7 @@ struct ProxyStatusMenu: View {
     let snapshot = control.snapshot
     let summary = StatusMenuModel.summary(from: snapshot)
     let targetTree = catalogWorkflow.tree.roots
-    let exportLine = snapshot.httpExport?.copyableLine
+    let exportLine = snapshot.httpExport.copyableLine
 
     // ① 头部状态摘要
     Text(summary.status)
@@ -90,11 +90,8 @@ struct ProxyStatusMenu: View {
 
     // ⑥ 复制 HTTP 导出行：workflow 只提供安全能力，复制是 UI 副作用。
     Button("复制 HTTP 导出行") {
-      if let exportLine {
-        copyHTTPExportLine(exportLine)
-      }
+      copyHTTPExportLine(exportLine)
     }
-    .disabled(exportLine == nil)
 
     Divider()
 

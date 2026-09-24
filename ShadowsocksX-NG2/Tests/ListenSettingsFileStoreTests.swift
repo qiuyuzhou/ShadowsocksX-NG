@@ -43,7 +43,6 @@ final class ListenSettingsFileStoreTests: XCTestCase {
     var settings = SslocalListenSettings()
     settings.scope = .host(advertisedAddress: "192.168.2.89")
     settings.socksPort = 2086
-    settings.httpProxyEnabled = false
     settings.httpPort = 2087
     settings.pacPort = 2089
 

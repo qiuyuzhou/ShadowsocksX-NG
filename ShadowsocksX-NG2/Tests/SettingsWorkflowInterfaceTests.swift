@@ -104,7 +104,6 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     let expected = RuntimeListenFacts(
       scope: .host(advertisedAddress: "192.168.2.89"),
       socksPort: 11086,
-      httpProxyEnabled: true,
       httpPort: 11087,
       pacPort: 11089)
 
@@ -122,17 +121,6 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
 
     XCTAssertEqual(workflow.portFieldState(for: .socks).occupancy, .occupied(occupier: "other-app"))
     XCTAssertTrue(workflow.portFieldState(for: .socks).canSuggestFreePort)
-  }
-
-  func testDisabledHTTPEndpointDoesNotParticipateInSaveGating() async throws {
-    probe = FakeOccupancyProbe(occupiedPorts: [11087])
-    let workflow = makeWorkflow()
-    workflow.draft.httpProxyEnabled = false
-    await waitUntil(workflow.portFieldState(for: .http).occupancy != nil)
-
-    XCTAssertEqual(workflow.portFieldState(for: .http).occupancy, .occupied(occupier: "other-app"))
-    XCTAssertFalse(workflow.hasBlockingPortOccupancy)
-    XCTAssertTrue(workflow.canSave)
   }
 
   // MARK: - 运行中端口例外
@@ -172,20 +160,6 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     XCTAssertFalse(workflow.canSave)
   }
 
-  func testRuntimeExceptionRequiresCommittedHTTPInboundForHTTPPort() async throws {
-    probe = FakeOccupancyProbe(occupiedPorts: [11087])
-    committing.isProxyRunning = true
-    var committed = committing.committedSettings
-    committed.listen.httpProxyEnabled = false
-    committing.committedSettings = committed
-
-    let workflow = makeWorkflow()
-    _ = await workflow.reloadFromCommitted()
-    await waitUntil(workflow.portFieldState(for: .http).occupancy != nil)
-
-    XCTAssertFalse(workflow.portFieldState(for: .http).isRuntimePortException)
-  }
-
   func testRuntimePortExceptionRequiresTheCompleteListenIdentity() async throws {
     probe = FakeOccupancyProbe(occupiedPorts: [11086])
     committing.isProxyRunning = true
@@ -197,7 +171,6 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     committing.runtimeListenFacts = RuntimeListenFacts(
       scope: .host(advertisedAddress: "192.168.2.89"),
       socksPort: 11086,
-      httpProxyEnabled: true,
       httpPort: 11087,
       pacPort: 11089)
     _ = await workflow.reloadFromCommitted()

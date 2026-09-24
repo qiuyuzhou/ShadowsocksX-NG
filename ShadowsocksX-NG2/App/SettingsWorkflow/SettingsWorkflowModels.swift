@@ -17,7 +17,6 @@ struct SettingsDraft: Equatable, Sendable {
   var isHostScope: Bool
   var advertisedAddress: String
   var socksPort: Int
-  var httpProxyEnabled: Bool
   var httpPort: Int
   var pacPort: Int
   var timeoutSeconds: Int

@@ -236,7 +236,6 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let listen = SslocalListenSettings(
       scope: .host(advertisedAddress: "192.168.2.89"),
       socksPort: 1086,
-      httpProxyEnabled: true,
       httpPort: 1087,
       pacPort: 1089)
     let controller = makeController(

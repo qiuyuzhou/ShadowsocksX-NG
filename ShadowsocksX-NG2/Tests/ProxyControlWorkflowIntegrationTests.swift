@@ -116,7 +116,9 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertEqual(snapshot.availableModes, [.pac, .global])
     XCTAssertEqual(snapshot.activeTarget?.pathSummary, "香港 01", "活动目标摘要来自真实目录树")
     XCTAssertEqual(snapshot.skippedInvalidServerCount, 0)
-    XCTAssertNotNil(snapshot.httpExport, "HTTP 入站启用时导出能力在 snapshot 中就绪")
+    XCTAssertTrue(
+      snapshot.httpExport.copyableLine.contains("127.0.0.1:11087"),
+      "HTTP 导出能力在 snapshot 中就绪")
   }
 
   func testUnhealthyEndpointSurfacesTypedLaunchFailureInSnapshot() async throws {
@@ -267,7 +269,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
 
   func testHTTPExportCapabilityDerivesSafeCopyableLineForLoopback() {
     XCTAssertEqual(
-      HTTPExportCapability(listen: SslocalListenSettings())?.copyableLine,
+      HTTPExportCapability(listen: SslocalListenSettings()).copyableLine,
       "export http_proxy=http://127.0.0.1:11087;export https_proxy=http://127.0.0.1:11087;")
   }
 
@@ -276,13 +278,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     listen.scope = .host(advertisedAddress: "192.168.1.10")
     listen.httpPort = 8080
     XCTAssertEqual(
-      HTTPExportCapability(listen: listen)?.copyableLine,
+      HTTPExportCapability(listen: listen).copyableLine,
       "export http_proxy=http://192.168.1.10:8080;export https_proxy=http://192.168.1.10:8080;")
-  }
-
-  func testHTTPExportCapabilityAbsentWhenHTTPInboundDisabled() {
-    var listen = SslocalListenSettings()
-    listen.httpProxyEnabled = false
-    XCTAssertNil(HTTPExportCapability(listen: listen))
   }
 }

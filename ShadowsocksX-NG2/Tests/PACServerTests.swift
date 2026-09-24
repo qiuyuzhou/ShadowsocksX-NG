@@ -9,7 +9,7 @@ final class PACServerTests: XCTestCase {
   func testVersionedEndpointServesPACOverHTTP11() throws {
     let port = try ProxyRuntimeFixture.unusedLoopbackPort()
     let configuration = SslocalListenSettings(
-      scope: .loopback, socksPort: 2086, httpProxyEnabled: false, httpPort: 2087,
+      scope: .loopback, socksPort: 2086, httpPort: 2087,
       pacPort: port
     ).pac
     let server = PACServer(configuration: configuration)
@@ -32,7 +32,7 @@ final class PACServerTests: XCTestCase {
   func testOnlyGETOnTheVersionedEndpointIsAccepted() throws {
     let port = try ProxyRuntimeFixture.unusedLoopbackPort()
     let configuration = SslocalListenSettings(
-      httpProxyEnabled: false, pacPort: port
+      pacPort: port
     ).pac
     let server = PACServer(configuration: configuration)
     try server.start()
@@ -63,7 +63,6 @@ final class PACServerTests: XCTestCase {
     let configuration = SslocalListenSettings(
       scope: .host(advertisedAddress: "192.168.2.89"),
       socksPort: 2086,
-      httpProxyEnabled: false,
       httpPort: 2087,
       pacPort: port
     ).pac
@@ -82,7 +81,7 @@ final class PACServerTests: XCTestCase {
   func testStopMakesPACEndpointUnreachable() throws {
     let port = try ProxyRuntimeFixture.unusedLoopbackPort()
     let server = PACServer(
-      configuration: SslocalListenSettings(httpProxyEnabled: false, pacPort: port).pac)
+      configuration: SslocalListenSettings(pacPort: port).pac)
     try server.start()
     XCTAssertTrue(canConnect(port: port))
 
@@ -94,7 +93,7 @@ final class PACServerTests: XCTestCase {
   func testSlowIncompleteHeaderIsClosedAndDoesNotPoisonTheEndpoint() throws {
     let port = try ProxyRuntimeFixture.unusedLoopbackPort()
     let server = PACServer(
-      configuration: SslocalListenSettings(httpProxyEnabled: false, pacPort: port).pac,
+      configuration: SslocalListenSettings(pacPort: port).pac,
       requestHeaderTimeout: 0.05)
     try server.start()
     defer { server.stop() }

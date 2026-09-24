@@ -113,7 +113,7 @@ struct SettingsView: View {
           .font(.footnote)
           .foregroundStyle(.red)
       }
-      settingRow("监听范围", note: listenScopeNote) {
+      settingRow("监听范围") {
         Picker("监听范围", selection: $workflow.draft.isHostScope) {
           Text("仅本机").tag(false)
           Text("局域网").tag(true)
@@ -129,7 +129,7 @@ struct SettingsView: View {
               .textFieldStyle(.roundedBorder)
               .frame(width: 170)
           } label: {
-            settingCopy("对外公布的地址", note: "本机可路由的局域网 IPv4 地址")
+            settingCopy("对外公布的地址")
           }
           issuesRow(.advertisedAddress)
           if workflow.draft.advertisedAddress.isEmpty {
@@ -151,21 +151,12 @@ struct SettingsView: View {
         }
         .padding(.vertical, 2)
       }
-      portRow(.socks, title: "SOCKS5 端口", note: "系统全局模式使用")
-      Toggle(isOn: $workflow.draft.httpProxyEnabled) {
-        settingCopy("启用 HTTP 代理", note: "可单独关闭 HTTP 监听")
-      }
-      .toggleStyle(.switch)
-      portRow(.http, title: "HTTP 代理端口", note: "可单独关闭 HTTP 监听")
-        .disabled(!workflow.draft.httpProxyEnabled)
-      portRow(.pac, title: "PAC 端口", note: "分享出去的 PAC URL 会包含此端口")
+      portRow(.socks, title: "SOCKS5 端口")
+      portRow(.http, title: "HTTP 代理端口")
+      portRow(.pac, title: "PAC 端口")
     } header: {
       sectionHeader("代理端点", subtitle: "监听范围和本地服务端口", trailing: "不会自动换端口")
     }
-  }
-
-  private var listenScopeNote: String {
-    workflow.draft.isHostScope ? "局域网 · 对外公布地址" : "仅本机 · 127.0.0.1"
   }
 
   // MARK: - 高级
@@ -233,20 +224,22 @@ struct SettingsView: View {
     .padding(.vertical, 2)
   }
 
-  /// 主文案 + 次说明（票 #57 原型行式）。
-  private func settingCopy(_ title: String, note: String) -> some View {
+  /// 主文案 + 可选次说明（票 #57 原型行式；代理端点区不配次说明）。
+  private func settingCopy(_ title: String, note: String? = nil) -> some View {
     VStack(alignment: .leading, spacing: 2) {
       Text(title)
         .font(.body)
-      Text(note)
-        .font(.caption)
-        .foregroundStyle(.secondary)
+      if let note {
+        Text(note)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
     }
   }
 
   /// 行式布局：左侧文案，右侧控件（票 #57）。
   private func settingRow<Control: View>(
-    _ title: String, note: String, @ViewBuilder control: () -> Control
+    _ title: String, note: String? = nil, @ViewBuilder control: () -> Control
   ) -> some View {
     HStack(spacing: 16) {
       settingCopy(title, note: note)
@@ -304,9 +297,9 @@ extension SettingsView {
 // MARK: - 端口行（同文件扩展，保持 private 访问）
 
 extension SettingsView {
-  private func portRow(_ id: SettingsPortID, title: String, note: String) -> some View {
+  private func portRow(_ id: SettingsPortID, title: String) -> some View {
     let state = workflow.portFieldState(for: id)
-    return settingRow(title, note: note) {
+    return settingRow(title) {
       VStack(alignment: .trailing, spacing: 4) {
         TextField(
           title,

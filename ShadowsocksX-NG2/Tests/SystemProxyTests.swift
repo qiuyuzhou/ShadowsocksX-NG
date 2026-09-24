@@ -56,7 +56,7 @@ final class SystemProxyTests: XCTestCase {
 
   func testLocalPACPassesTargetHealthProbe() async throws {
     let port = try ProxyRuntimeFixture.unusedLoopbackPort()
-    let settings = SslocalListenSettings(httpProxyEnabled: false, pacPort: port)
+    let settings = SslocalListenSettings(pacPort: port)
     let server = PACServer(configuration: settings.pac)
     try server.start()
     defer { server.stop() }
