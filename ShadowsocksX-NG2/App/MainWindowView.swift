@@ -71,7 +71,11 @@ struct MainWindowView: View {
   private var destinationView: some View {
     switch route.destination {
     case .home:
-      WorkspaceHomeView(workflow: workflow)
+      WorkspaceHomeView(
+        workflow: workflow,
+        control: control,
+        clipboard: clipboard,
+        onManageServers: { route.navigate(to: .servers) })
     case .servers:
       ServersView(
         workflow: workflow,
@@ -104,14 +108,21 @@ struct MainWindowView: View {
 
 private struct WorkspaceHomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
+  @ObservedObject var control: ProxyControlWorkflow
+  let clipboard: any TextClipboard
+  let onManageServers: () -> Void
+  @StateObject private var errors = ErrorAlertPresenter()
 
   @State private var showLegacyImportSheet = false
   @State private var didOfferLegacyImport = false
 
   var body: some View {
-    ContentUnavailableView(
-      "首页", systemImage: "house",
-      description: Text("从侧栏选择服务器、订阅、设置或诊断。")
+    HomeView(
+      workflow: workflow,
+      control: control,
+      clipboard: clipboard,
+      onManageServers: onManageServers,
+      errors: errors
     )
     .sheet(isPresented: $showLegacyImportSheet) {
       LegacyImportSheet(workflow: workflow)
@@ -120,6 +131,16 @@ private struct WorkspaceHomeView: View {
       guard !didOfferLegacyImport, workflow.legacyImportState.shouldOffer else { return }
       didOfferLegacyImport = true
       showLegacyImportSheet = true
+    }
+    .alert(
+      "操作失败",
+      isPresented: Binding(
+        get: { errors.isPresented },
+        set: { if !$0 { errors.dismiss() } })
+    ) {
+      Button("好", role: .cancel) {}
+    } message: {
+      Text(errors.message ?? "")
     }
   }
 }
