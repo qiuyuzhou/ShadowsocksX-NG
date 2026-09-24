@@ -10,23 +10,17 @@ import SwiftUI
 /// 目录树、激活与订阅动作仍走目录工作流，剪贴板写入等 AppKit 副作用留在呈现
 /// 边界。
 struct ProxyStatusMenu: View {
-  @Environment(\.openWindow) private var openWindow
   /// 代理控制唯一 seam（issue #47）：状态摘要与代理命令的唯一来源。
   @ObservedObject var control: ProxyControlWorkflow
   @ObservedObject var catalogWorkflow: CatalogWorkflow
   @ObservedObject var route: WorkspaceRoute
   let clipboard: any TextClipboard
+  /// 开窗 seam 由组合根注入（菜单 extra 上下文的 SwiftUI openWindow 实测不可用）。
+  let windowOpening: any WorkspaceWindowOpening
   @StateObject private var errors = ErrorAlertPresenter()
 
   var body: some View {
     menuContent
-      .task {
-        guard !isUnitTesting else { return }
-        await control.resyncOnLaunch()
-        route.handle(
-          .launch,
-          using: WorkspaceWindowOpeningAdapter(openWindow: openWindow))
-      }
       .alert(
         "操作失败",
         isPresented: Binding(
@@ -106,9 +100,7 @@ struct ProxyStatusMenu: View {
 
     // ⑦ 打开主窗口
     Button("打开主窗口…") {
-      route.handle(
-        .reopen,
-        using: WorkspaceWindowOpeningAdapter(openWindow: openWindow))
+      route.handle(.reopen, using: windowOpening)
     }
 
     Divider()
@@ -117,12 +109,6 @@ struct ProxyStatusMenu: View {
     Button("退出 ShadowsocksX-NG 2.0（代理仍在后台运行）") {
       NSApp.terminate(nil)
     }
-  }
-
-  private var isUnitTesting: Bool {
-    let environment = ProcessInfo.processInfo.environment
-    return environment["XCTestConfigurationFilePath"] != nil
-      || environment["XCTestSessionIdentifier"] != nil
   }
 
   private func copyHTTPExportLine(_ line: String) {

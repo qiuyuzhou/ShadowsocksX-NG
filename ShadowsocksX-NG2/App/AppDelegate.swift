@@ -1,8 +1,8 @@
 import AppKit
 
 /// 混合应用形态的 AppKit 生命周期家：LSUIElement 让进程默认纯后台
-/// （accessory），主 workspace 可见期间由开窗 adapter 切成普通应用
-/// （regular）；这里负责最后一个窗口关闭后切回纯后台。
+/// （accessory），这里负责前台形态的进入与退出——任意路径使主窗口可见
+/// 时切成普通应用（regular），最后一个窗口关闭后切回纯后台。
 final class AppDelegate: NSObject, NSApplicationDelegate {
   /// 混合形态的硬性要求：关窗不退进程，代理 GUI 仍驻留菜单栏。
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -10,9 +10,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    NotificationCenter.default.addObserver(
+    // 启动即进入前台形态（CONTEXT.md「每次启动呈现主窗口」不变量）：LSUIElement
+    // 应用里 SwiftUI 不做启动呈现（defaultLaunchBehavior 只有 suppressed 一档
+    // 增量），而菜单 extra 内容视图首次点开才挂载、launch intent 挂不上；切到
+    // regular 后交给普通应用的默认行为——启动呈现 Window scene。
+    NSApp.setActivationPolicy(.regular)
+    NSApp.activate(ignoringOtherApps: true)
+
+    let center = NotificationCenter.default
+    center.addObserver(
       self, selector: #selector(windowWillClose(_:)),
       name: NSWindow.willCloseNotification, object: nil)
+    center.addObserver(
+      self, selector: #selector(appOcclusionDidChange(_:)),
+      name: NSApplication.didChangeOcclusionStateNotification, object: nil)
+  }
+
+  /// 关窗回纯后台后再经菜单 ⑦ / Dock reopen 开窗的入场：任意路径让主窗口
+  /// 可见都进前台形态。只进不出：窗口被完全遮挡或 Cmd+H 也会短暂失去
+  /// .visible，但那只意味着「不该退」，退场由 willClose 普查负责；多切一次
+  /// .regular 是幂等的。
+  @objc private func appOcclusionDidChange(_ notification: Notification) {
+    let hasVisibleWindow = NSApp.windows.contains { $0.isVisible && $0.canBecomeMain }
+    guard hasVisibleWindow, NSApp.activationPolicy() != .regular else { return }
+    NSApp.setActivationPolicy(.regular)
+    NSApp.activate(ignoringOtherApps: true)
   }
 
   /// 前台形态下窗口被最小化时，Dock 点击只激活应用不会自动还原（SwiftUI
