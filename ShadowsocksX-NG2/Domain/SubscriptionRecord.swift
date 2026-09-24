@@ -16,7 +16,9 @@ struct SubscriptionRecord: Codable, Equatable, Sendable, Identifiable {
 /// 或任意错误 description（D5 脱敏）。
 enum SubscriptionRefreshStatus: Codable, Equatable, Sendable {
   case never
+  // swiftlint:disable:next identifier_name
   case succeeded(at: Date)
+  // swiftlint:disable:next identifier_name
   case failed(at: Date, failure: SubscriptionRefreshFailure)
 
   private enum CodingKeys: String, CodingKey {
@@ -26,10 +28,12 @@ enum SubscriptionRefreshStatus: Codable, Equatable, Sendable {
   }
 
   private struct SucceededPayload: Codable {
+    // swiftlint:disable:next identifier_name
     let at: Date
   }
 
   private struct FailedPayload: Codable {
+    // swiftlint:disable:next identifier_name
     let at: Date
     let failure: SubscriptionRefreshFailure?
     let reason: String?
@@ -60,9 +64,9 @@ enum SubscriptionRefreshStatus: Codable, Equatable, Sendable {
     switch self {
     case .never:
       try container.encode([String: String](), forKey: .never)
-    case .succeeded(let at):
+    case .succeeded(let at):  // swiftlint:disable:this identifier_name
       try container.encode(SucceededPayload(at: at), forKey: .succeeded)
-    case .failed(let at, let failure):
+    case .failed(let at, let failure):  // swiftlint:disable:this identifier_name
       try container.encode(FailedPayload(at: at, failure: failure, reason: nil), forKey: .failed)
     }
   }
