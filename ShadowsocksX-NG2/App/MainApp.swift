@@ -9,6 +9,7 @@ struct ShadowsocksXNG2App: App {
   @StateObject private var loginController: LaunchAtLoginController
   @StateObject private var settingsWorkflow: SettingsWorkflow
   @StateObject private var diagnosticsWorkflow: DiagnosticsWorkflow
+  @StateObject private var workspaceRoute: WorkspaceRoute
 
   init() {
     let dependencies = ApplicationDependencies.make()
@@ -65,6 +66,7 @@ struct ShadowsocksXNG2App: App {
       wrappedValue: DiagnosticsWorkflow(
         runtimeFacts: controller,
         catalogFacts: { catalogWorkflow.diagnosticCatalogFacts }))
+    _workspaceRoute = StateObject(wrappedValue: WorkspaceRoute())
     // GUI 事件接入内存环形缓冲（spec #21 D5，issue #34）：主窗口日志查看器与
     // 诊断导出的来源；wrapper 侧不注册，仍走 stderr → agent.log 收敛。
     RuntimeLog.setSink(RuntimeEventStore.shared)
@@ -72,32 +74,22 @@ struct ShadowsocksXNG2App: App {
 
   var body: some Scene {
     MenuBarExtra("ShadowsocksX-NG 2.0", systemImage: "network") {
-      ProxyStatusMenu(control: proxyControl, catalogWorkflow: catalogWorkflow)
-        .task {
-          guard !ApplicationDependencies.isUnitTesting else { return }
-          await proxyControl.resyncOnLaunch()
-        }
+      ProxyStatusMenu(
+        control: proxyControl,
+        catalogWorkflow: catalogWorkflow,
+        route: workspaceRoute)
     }
     .menuBarExtraStyle(.menu)
 
-    Window("ShadowsocksX-NG 2.0", id: "main") {
+    Window("ShadowsocksX-NG 2.0", id: WorkspaceWindowOpeningAdapter.workspaceWindowID) {
       MainWindowView(
-        workflow: catalogWorkflow, proxyController: proxyController,
-        diagnostics: diagnosticsWorkflow)
+        route: workspaceRoute,
+        workflow: catalogWorkflow,
+        proxyController: proxyController,
+        diagnostics: diagnosticsWorkflow,
+        settingsWorkflow: settingsWorkflow,
+        loginController: loginController)
     }
-    .defaultLaunchBehavior(
-      catalogWorkflow.legacyImportState.shouldOffer ? .automatic : .suppressed)
-
-    // 菜单栏 app 没有可依赖的常规应用菜单；设置窗口必须有显式 scene ID，
-    // 由状态菜单通过 openWindow(id:) 打开。
-    Window("设置", id: "settings") {
-      SettingsView(
-        workflow: settingsWorkflow,
-        loginController: loginController
-      )
-      .frame(width: 640, height: 760)
-    }
-    .defaultLaunchBehavior(.suppressed)
   }
 }
 

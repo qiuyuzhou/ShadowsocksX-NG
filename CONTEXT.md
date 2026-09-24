@@ -31,6 +31,8 @@
 - **System-level shortcut**: A user-configurable keyboard action registered by the app that can trigger an app action even when the app has no focus.
   _Avoid_: global hotkey, global shortcut.
 - **Window-local default action shortcut**: A keyboard action bound to the focused app window or form context, such as confirming a dialog; it is distinct from a system-level shortcut.
+- **Workspace destination**: A top-level location in the single 2.0 GUI workspace, such as home, servers, subscriptions, settings, or diagnostics. It is navigation state only; it does not contain a node selection, sheet, alert, or feature draft.
+- **Workspace route**: The in-process navigation choice and intent used to move between workspace destinations from the workspace or another app entry point. It does not persist user configuration or own feature-local state.
 
 ## Relationships and invariants
 

@@ -5,7 +5,7 @@ import SwiftUI
 /// （运行状态、当前模式、活动目标）②代理开关 ③模式选择（勾选态）④活动目标
 /// 级联选择器（组树子菜单、只读）⑤立即更新全部订阅 ⑥复制 HTTP 导出行 ⑦打开
 /// 主窗口 ⑧打开设置 ⑨退出（明示代理仍在后台运行）。白名单外操作一律不进菜单
-/// 栏；编辑类操作只在主窗口或设置窗口。运行时事实、开关、模式与导出能力全部
+/// 栏；编辑类操作只在主 workspace。运行时事实、开关、模式与导出能力全部
 /// 来自代理控制工作流的整体 snapshot（issue #47），菜单不直接读控制器字段；
 /// 目录树、激活与订阅动作仍走目录工作流，剪贴板写入等 AppKit 副作用留在呈现
 /// 边界。
@@ -14,8 +14,21 @@ struct ProxyStatusMenu: View {
   /// 代理控制唯一 seam（issue #47）：状态摘要与代理命令的唯一来源。
   @ObservedObject var control: ProxyControlWorkflow
   @ObservedObject var catalogWorkflow: CatalogWorkflow
+  @ObservedObject var route: WorkspaceRoute
 
   var body: some View {
+    menuContent
+      .task {
+        guard !isUnitTesting else { return }
+        await control.resyncOnLaunch()
+        route.handle(
+          .launch(legacyImportOffer: catalogWorkflow.legacyImportState.shouldOffer),
+          using: WorkspaceWindowOpeningAdapter(openWindow: openWindow))
+      }
+  }
+
+  @ViewBuilder
+  private var menuContent: some View {
     let snapshot = control.snapshot
     let summary = StatusMenuModel.summary(from: snapshot)
     let targetTree = catalogWorkflow.tree.roots
@@ -82,14 +95,16 @@ struct ProxyStatusMenu: View {
 
     // ⑦ 打开主窗口
     Button("打开主窗口…") {
-      NSApp.activate()
-      openWindow(id: "main")
+      route.handle(
+        .reopen,
+        using: WorkspaceWindowOpeningAdapter(openWindow: openWindow))
     }
 
-    // 菜单栏 app 没有常规应用菜单；设置 scene 由这里显式打开。
+    // 通过同一 workspace route 选择设置，再由 focused adapter 确保主窗口可见。
     Button("打开设置…") {
-      NSApp.activate()
-      openWindow(id: "settings")
+      route.handle(
+        .present(destination: .settings),
+        using: WorkspaceWindowOpeningAdapter(openWindow: openWindow))
     }
 
     Divider()
@@ -98,6 +113,12 @@ struct ProxyStatusMenu: View {
     Button("退出 ShadowsocksX-NG 2.0（代理仍在后台运行）") {
       NSApp.terminate(nil)
     }
+  }
+
+  private var isUnitTesting: Bool {
+    let environment = ProcessInfo.processInfo.environment
+    return environment["XCTestConfigurationFilePath"] != nil
+      || environment["XCTestSessionIdentifier"] != nil
   }
 
   /// 模式选择走同一控制 seam：切换语义与菜单勾选态由同一 snapshot 事实来源

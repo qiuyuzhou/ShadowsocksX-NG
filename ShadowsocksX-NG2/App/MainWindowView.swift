@@ -1,31 +1,20 @@
 import SwiftUI
 
-/// 主窗口（spec #21 D11，issue #32/#34/#35/#41）：NavigationSplitView 分区。
-/// 侧栏顶部分区切换「服务器 / 订阅 / 诊断」；服务器分区是配置目录分组树（订阅
-/// 子树只读）与详情编辑；订阅分区是订阅卡片与刷新/编辑/删除；诊断
-/// 分区是日志查看与脱敏导出（D11「诊断收进主窗口」）。编辑类操作只在主窗口
-/// （菜单栏仅保留 D11 白名单内的「立即更新全部订阅」快速动作）。
-/// 窗口状态（选择、pane、sheet、alert、确认弹窗）由本视图持有；目录事实与
-/// 命令结果全部经由目录工作流 module（issue #41）。
-struct MainWindowView: View {
-  enum Pane: Hashable {
-    case servers
-    case subscriptions
-    case diagnostics
-  }
+/// 服务器 destination（spec #21 D11，issue #32/#34/#35/#41）：保留服务器目录树、
+/// 详情编辑与导入行为。workspace destination 由外层 MainWindowView 持有；本视图
+/// 只持有服务器功能的 sheet、alert、确认弹窗与编辑草稿边界；selection 由
+/// workspace feature host 绑定，以便订阅删除仍能清除失效的服务器选择。
+struct ServersView: View {
 
   @ObservedObject var workflow: CatalogWorkflow
   /// 运行时事实来源：活动目标标记；激活命令经 `workflow.activate`。
   @ObservedObject var proxyController: ProxyRuntimeController
-  /// 诊断工作流 module（issue #43）：诊断侧栏与详情共用的唯一 seam。
-  @ObservedObject var diagnostics: DiagnosticsWorkflow
+  @Binding var selection: NodeID?
 
   /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
   @StateObject private var errors = ErrorAlertPresenter()
 
-  // 纯窗口状态（issue #41）：selection/pane/sheet/alert 不进目录 module。
-  @State private var pane: Pane = .servers
-  @State private var selection: NodeID?
+  // 纯窗口状态（issue #41）：selection/sheet/alert 不进目录 module。
   @State private var renameTarget: NodeID?
   @State private var renameText = ""
   @State private var newGroupParent: NodeID?
@@ -35,14 +24,13 @@ struct MainWindowView: View {
   @State private var showImportURLSheet = false
   @State private var showQRImportSheet = false
   @State private var showLegacyImportSheet = false
-  @State private var didOfferLegacyImport = false
   @State private var rootDropHovering = false
 
   var body: some View {
     NavigationSplitView {
-      sidebar
+      serverSidebar
     } detail: {
-      detailPane
+      serverDetailPane
     }
     .frame(minWidth: 720, minHeight: 420)
     .alert(
@@ -103,54 +91,6 @@ struct MainWindowView: View {
     ) { context in
       MoveNodeSheet(workflow: workflow, errors: errors, nodeID: context.nodeID)
     }
-    .onAppear {
-      guard !didOfferLegacyImport, workflow.legacyImportState.shouldOffer else { return }
-      didOfferLegacyImport = true
-      showLegacyImportSheet = true
-    }
-  }
-
-  // MARK: - 侧栏（分区切换 + 树 / 诊断摘要）
-
-  private var sidebar: some View {
-    VStack(spacing: 0) {
-      Picker("分区", selection: $pane) {
-        Text("服务器").tag(Pane.servers)
-        Text("订阅").tag(Pane.subscriptions)
-        Text("诊断").tag(Pane.diagnostics)
-      }
-      .pickerStyle(.segmented)
-      .labelsHidden()
-      .padding(.horizontal, 8)
-      .padding(.vertical, 6)
-      switch pane {
-      case .servers:
-        serverSidebar
-      case .subscriptions:
-        subscriptionsSidebar
-      case .diagnostics:
-        diagnosticsSidebar
-      }
-    }
-  }
-
-  /// 诊断分区侧栏：代理状态摘要与脱敏说明（详情与导出入口在右侧日志区）。
-  private var diagnosticsSidebar: some View {
-    DiagnosticsSummarySidebar(workflow: diagnostics)
-  }
-
-  /// 订阅分区侧栏：订阅摘要说明（卡片与操作全在右侧详情区）。
-  private var subscriptionsSidebar: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text("订阅")
-        .font(.headline)
-      Text("每个订阅是一张卡片：远端 SIP-008 文档经解析校验后原子提交；刷新失败保留最后一次成功内容。远端名称、结构与成员权威；不支持的服务器配置会保留并在激活时跳过。")
-        .font(.callout)
-        .foregroundStyle(.secondary)
-      Spacer()
-    }
-    .padding(12)
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var serverSidebar: some View {
@@ -229,30 +169,21 @@ struct MainWindowView: View {
   // MARK: - 详情区
 
   @ViewBuilder
-  private var detailPane: some View {
-    switch pane {
-    case .diagnostics:
-      DiagnosticsView(diagnostics: diagnostics, errors: errors)
-    case .subscriptions:
-      SubscriptionsView(
-        workflow: workflow, errors: errors,
-        onNodesRemoved: { clearSelectionIfInvalidated($0) })
-    case .servers:
-      if let id = selection, let node = workflow.tree.node(withID: id) {
-        if node.isGroup {
-          GroupDetailView(
-            workflow: workflow, groupID: id,
-            errors: errors)
-        } else {
-          ServerDetailView(
-            workflow: workflow, serverID: id,
-            errors: errors)
-        }
+  private var serverDetailPane: some View {
+    if let id = selection, let node = workflow.tree.node(withID: id) {
+      if node.isGroup {
+        GroupDetailView(
+          workflow: workflow, groupID: id,
+          errors: errors)
       } else {
-        ContentUnavailableView(
-          "未选择节点", systemImage: "sidebar.left",
-          description: Text("在左侧选择服务器或分组查看与编辑详情"))
+        ServerDetailView(
+          workflow: workflow, serverID: id,
+          errors: errors)
       }
+    } else {
+      ContentUnavailableView(
+        "未选择节点", systemImage: "sidebar.left",
+        description: Text("在左侧选择服务器或分组查看与编辑详情"))
     }
   }
 
