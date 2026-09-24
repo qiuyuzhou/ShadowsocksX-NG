@@ -90,6 +90,7 @@ struct ShadowsocksXNG2App: App {
       MainWindowView(
         route: workspaceRoute,
         workflow: catalogWorkflow,
+        control: proxyControl,
         proxyController: proxyController,
         diagnostics: diagnosticsWorkflow,
         settingsWorkflow: settingsWorkflow,
