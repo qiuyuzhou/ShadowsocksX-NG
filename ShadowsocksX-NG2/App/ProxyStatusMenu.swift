@@ -15,6 +15,8 @@ struct ProxyStatusMenu: View {
   @ObservedObject var control: ProxyControlWorkflow
   @ObservedObject var catalogWorkflow: CatalogWorkflow
   @ObservedObject var route: WorkspaceRoute
+  let clipboard: any TextClipboard
+  @StateObject private var errors = ErrorAlertPresenter()
 
   var body: some View {
     menuContent
@@ -24,6 +26,16 @@ struct ProxyStatusMenu: View {
         route.handle(
           .launch(legacyImportOffer: catalogWorkflow.legacyImportState.shouldOffer),
           using: WorkspaceWindowOpeningAdapter(openWindow: openWindow))
+      }
+      .alert(
+        "操作失败",
+        isPresented: Binding(
+          get: { errors.isPresented },
+          set: { if !$0 { errors.dismiss() } })
+      ) {
+        Button("好", role: .cancel) {}
+      } message: {
+        Text(errors.message ?? "")
       }
   }
 
@@ -85,8 +97,7 @@ struct ProxyStatusMenu: View {
     // ⑥ 复制 HTTP 导出行：workflow 只提供安全能力，复制是 UI 副作用。
     Button("复制 HTTP 导出行") {
       if let exportLine {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(exportLine, forType: .string)
+        copyHTTPExportLine(exportLine)
       }
     }
     .disabled(exportLine == nil)
@@ -119,6 +130,14 @@ struct ProxyStatusMenu: View {
     let environment = ProcessInfo.processInfo.environment
     return environment["XCTestConfigurationFilePath"] != nil
       || environment["XCTestSessionIdentifier"] != nil
+  }
+
+  private func copyHTTPExportLine(_ line: String) {
+    do {
+      try clipboard.write(line)
+    } catch {
+      errors.present(error)
+    }
   }
 
   /// 模式选择走同一控制 seam：切换语义与菜单勾选态由同一 snapshot 事实来源

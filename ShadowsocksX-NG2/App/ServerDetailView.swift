@@ -9,6 +9,7 @@ struct ServerDetailView: View {
   let workflow: CatalogWorkflow
   let serverID: NodeID
   let errors: ErrorAlertPresenter
+  let clipboard: any TextClipboard
 
   @State private var address = ""
   @State private var port = 8388
@@ -249,10 +250,11 @@ struct ServerDetailView: View {
   }
 
   private func copySsUri() {
-    guard let uri = qrPayload() else { return }
-    let board = NSPasteboard.general
-    board.clearContents()
-    board.setString(uri, forType: .string)
+    do {
+      try clipboard.write(workflow.shareURI(for: serverID))
+    } catch {
+      errors.present(error)
+    }
   }
 
   private func generateQR() {

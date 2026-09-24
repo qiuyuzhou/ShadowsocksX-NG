@@ -10,9 +10,13 @@ struct ShadowsocksXNG2App: App {
   @StateObject private var settingsWorkflow: SettingsWorkflow
   @StateObject private var diagnosticsWorkflow: DiagnosticsWorkflow
   @StateObject private var workspaceRoute: WorkspaceRoute
+  private let textClipboard: any TextClipboard
+  private let diagnosticReportExporter: any DiagnosticReportExporter
 
   init() {
     let dependencies = ApplicationDependencies.make()
+    textClipboard = dependencies.textClipboard
+    diagnosticReportExporter = dependencies.diagnosticReportExporter
     // The catalog document is read exactly once at startup. The coordinator
     // publishes later committed snapshots; the controller receives read-only
     // access to this same in-process source.
@@ -77,7 +81,8 @@ struct ShadowsocksXNG2App: App {
       ProxyStatusMenu(
         control: proxyControl,
         catalogWorkflow: catalogWorkflow,
-        route: workspaceRoute)
+        route: workspaceRoute,
+        clipboard: textClipboard)
     }
     .menuBarExtraStyle(.menu)
 
@@ -88,7 +93,9 @@ struct ShadowsocksXNG2App: App {
         proxyController: proxyController,
         diagnostics: diagnosticsWorkflow,
         settingsWorkflow: settingsWorkflow,
-        loginController: loginController)
+        loginController: loginController,
+        clipboard: textClipboard,
+        diagnosticReportExporter: diagnosticReportExporter)
     }
   }
 }
@@ -97,6 +104,7 @@ struct ShadowsocksXNG2App: App {
 /// SwiftUI application. Its bootstrap must nevertheless be hermetic: starting
 /// XCTest must not read the user's catalog, settings, activation state, Legacy
 /// defaults, login-item registration, runtime files, or production Keychain.
+@MainActor
 private struct ApplicationDependencies {
   let credentials: CredentialStoring
   let catalogFileStore: CatalogFileStore
@@ -108,6 +116,8 @@ private struct ApplicationDependencies {
   let legacyImportService: LegacyImportService
   let launchAgent: LaunchAgentControlling
   let loginService: LaunchAtLoginControlling
+  let textClipboard: any TextClipboard
+  let diagnosticReportExporter: any DiagnosticReportExporter
 
   static var isUnitTesting: Bool {
     let environment = ProcessInfo.processInfo.environment
@@ -138,7 +148,9 @@ private struct ApplicationDependencies {
       legacyImportService: LegacyImportService(
         catalogStore: catalogFileStore, credentials: credentials),
       launchAgent: SMAppLaunchAgentService(),
-      loginService: SMAppLaunchAtLoginService())
+      loginService: SMAppLaunchAtLoginService(),
+      textClipboard: AppKitTextClipboard(),
+      diagnosticReportExporter: AppKitDiagnosticReportExporter())
   }
 
   private static func makeTesting() -> ApplicationDependencies {
@@ -174,7 +186,9 @@ private struct ApplicationDependencies {
         settings: restoredSettings.settings.listen, unreadableError: nil),
       legacyImportService: legacyImportService,
       launchAgent: NoopLaunchAgentService(),
-      loginService: NoopLaunchAtLoginService())
+      loginService: NoopLaunchAtLoginService(),
+      textClipboard: InMemoryTextClipboard(),
+      diagnosticReportExporter: InMemoryDiagnosticReportExporter())
   }
 }
 

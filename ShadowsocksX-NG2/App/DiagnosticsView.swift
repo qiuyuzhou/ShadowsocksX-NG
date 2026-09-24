@@ -1,14 +1,15 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// 主窗口诊断区（spec #21 D11，issue #34/#43）：日志查看器（GUI 事件流实时
 /// 呈现 + wrapper 收敛日志尾部，均可复制）与显式触发的脱敏诊断导出。事实
 /// 采样、轮询代际与报告准备全部经 DiagnosticsWorkflow（issue #43 的唯一
-/// UI-facing seam）；本视图只负责生命周期触发、呈现、剪贴板、保存面板与
-/// 报告文件写入——文件实际写入成功后才登记导出完成事件。
+/// UI-facing seam）；本视图只负责生命周期触发、呈现与用户触发动作；剪贴板
+/// 和报告文件效果经显式 adapter 注入，文件实际写入成功后才登记导出完成事件。
 struct DiagnosticsView: View {
   @ObservedObject var diagnostics: DiagnosticsWorkflow
   let errors: ErrorAlertPresenter
+  let clipboard: any TextClipboard
+  let reportExporter: any DiagnosticReportExporter
 
   enum LogSource: String, CaseIterable, Identifiable {
     case guiEvents
@@ -126,28 +127,29 @@ struct DiagnosticsView: View {
   }
 
   private func copyToClipboard(_ text: String) {
-    NSPasteboard.general.clearContents()
-    NSPasteboard.general.setString(text, forType: .string)
+    do {
+      try clipboard.write(text)
+    } catch {
+      errors.present(error)
+    }
   }
 
   // MARK: - 显式导出（唯一导出入口）
 
   private func exportReport() {
-    let panel = NSSavePanel()
-    panel.allowedContentTypes = [.plainText]
-    panel.nameFieldStringValue = diagnostics.suggestedReportFileName()
-    guard panel.runModal() == .OK, let url = panel.url else { return }
-    switch diagnostics.prepareReport() {
-    case .ready(let draft):
-      do {
-        try draft.data.write(to: url)
-        diagnostics.noteExportCompleted()
-        exportedPath = url.path
-      } catch {
-        errors.present(text: "导出失败：\(error.presentableMessage)")
-      }
-    case .failed:
-      errors.present(text: "导出失败：诊断报告无法安全构造")
+    switch DiagnosticReportExportAction(
+      diagnostics: diagnostics, exporter: reportExporter
+    ).perform()
+    {
+    case .preparationFailed(let failure):
+      errors.present(failure)
+    case .cancelled:
+      break
+    case .saved(let url):
+      diagnostics.noteExportCompleted()
+      exportedPath = url.path
+    case .exportFailed(let failure):
+      errors.present(failure)
     }
   }
 }

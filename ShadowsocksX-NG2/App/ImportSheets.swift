@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct ImportURLSheet: View {
   let workflow: CatalogWorkflow
   let errors: ErrorAlertPresenter
+  let clipboard: any TextClipboard
   @Binding var selection: NodeID?
   @Environment(\.dismiss) private var dismiss
 
@@ -25,8 +26,8 @@ struct ImportURLSheet: View {
         )
       HStack {
         Button("粘贴自剪贴板") {
-          if let clipboard = NSPasteboard.general.string(forType: .string) {
-            text = clipboard
+          if let clipboardText = clipboard.read() {
+            text = clipboardText
           }
         }
         Spacer()

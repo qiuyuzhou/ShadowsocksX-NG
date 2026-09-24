@@ -10,6 +10,7 @@ struct ServersView: View {
   /// 运行时事实来源：活动目标标记；激活命令经 `workflow.activate`。
   @ObservedObject var proxyController: ProxyRuntimeController
   @Binding var selection: NodeID?
+  let clipboard: any TextClipboard
 
   /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
   @StateObject private var errors = ErrorAlertPresenter()
@@ -76,7 +77,8 @@ struct ServersView: View {
       Text(deleteMessage)
     }
     .sheet(isPresented: $showImportURLSheet) {
-      ImportURLSheet(workflow: workflow, errors: errors, selection: $selection)
+      ImportURLSheet(
+        workflow: workflow, errors: errors, clipboard: clipboard, selection: $selection)
     }
     .sheet(isPresented: $showQRImportSheet) {
       QRImportSheet(workflow: workflow, errors: errors, selection: $selection)
@@ -178,7 +180,7 @@ struct ServersView: View {
       } else {
         ServerDetailView(
           workflow: workflow, serverID: id,
-          errors: errors)
+          errors: errors, clipboard: clipboard)
       }
     } else {
       ContentUnavailableView(
@@ -217,7 +219,7 @@ struct ServersView: View {
 
   /// 剪贴板入口：整段剪贴板文本按行解析导入当前落点。
   private func importFromClipboard() {
-    let text = NSPasteboard.general.string(forType: .string) ?? ""
+    let text = clipboard.read() ?? ""
     performImport(text)
   }
 

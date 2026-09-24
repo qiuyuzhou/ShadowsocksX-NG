@@ -107,4 +107,19 @@ final class AppPresentationTests: XCTestCase {
 
     XCTAssertEqual(AppPresentation.message(for: SecretError()), AppPresentation.unknownError)
   }
+
+  func testPlatformEffectFailuresHaveStableSafePresentation() {
+    let failures: [Error] = [
+      TextClipboardFailure.writeFailed,
+      DiagnosticReportFailure.encodingFailed,
+      DiagnosticReportExportFailure.writeFailed,
+    ]
+
+    for failure in failures {
+      let message = AppPresentation.message(for: failure)
+      XCTAssertFalse(message.isEmpty, "平台 effect failure 必须有安全呈现：\(failure)")
+      XCTAssertFalse(message.contains("secret"))
+      XCTAssertFalse(message.contains("/Users/"))
+    }
+  }
 }

@@ -65,6 +65,12 @@ extension AppPresentation {
       return systemProxy(error)
     case let error as SystemProxyOwnershipStoreError:
       return ownershipStore(error)
+    case let error as TextClipboardFailure:
+      return textClipboard(error)
+    case let error as DiagnosticReportFailure:
+      return diagnosticReport(error)
+    case let error as DiagnosticReportExportFailure:
+      return diagnosticReportExport(error)
     default:
       return unknownError
     }
@@ -375,6 +381,24 @@ extension AppPresentation {
     case .readFailed: return "系统代理所有权记录读取失败"
     case .writeFailed: return "系统代理所有权记录写入失败"
     case .invalidRecord: return "系统代理所有权记录无效"
+    }
+  }
+
+  private static func textClipboard(_ error: TextClipboardFailure) -> String {
+    switch error {
+    case .writeFailed: return "剪贴板写入失败，请重试"
+    }
+  }
+
+  private static func diagnosticReport(_ error: DiagnosticReportFailure) -> String {
+    switch error {
+    case .encodingFailed: return "诊断报告无法安全构造，请重试"
+    }
+  }
+
+  private static func diagnosticReportExport(_ error: DiagnosticReportExportFailure) -> String {
+    switch error {
+    case .writeFailed: return "诊断报告写入失败，请选择其他位置或重试"
     }
   }
 

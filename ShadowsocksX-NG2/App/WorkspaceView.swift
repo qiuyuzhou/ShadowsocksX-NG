@@ -9,6 +9,8 @@ struct MainWindowView: View {
   @ObservedObject var diagnostics: DiagnosticsWorkflow
   @ObservedObject var settingsWorkflow: SettingsWorkflow
   @ObservedObject var loginController: LaunchAtLoginController
+  let clipboard: any TextClipboard
+  let diagnosticReportExporter: any DiagnosticReportExporter
 
   @State private var selection: NodeID?
 
@@ -29,7 +31,8 @@ struct MainWindowView: View {
       ServersView(
         workflow: workflow,
         proxyController: proxyController,
-        selection: $selection)
+        selection: $selection,
+        clipboard: clipboard)
     case .subscriptions:
       WorkspaceSubscriptionsView(
         workflow: workflow,
@@ -38,7 +41,10 @@ struct MainWindowView: View {
       SettingsView(workflow: settingsWorkflow, loginController: loginController)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     case .diagnostics:
-      WorkspaceDiagnosticsView(diagnostics: diagnostics)
+      WorkspaceDiagnosticsView(
+        diagnostics: diagnostics,
+        clipboard: clipboard,
+        reportExporter: diagnosticReportExporter)
     }
   }
 
@@ -119,23 +125,30 @@ private struct WorkspaceSubscriptionsView: View {
 
 private struct WorkspaceDiagnosticsView: View {
   @ObservedObject var diagnostics: DiagnosticsWorkflow
+  let clipboard: any TextClipboard
+  let reportExporter: any DiagnosticReportExporter
   @StateObject private var errors = ErrorAlertPresenter()
 
   var body: some View {
     NavigationSplitView {
       DiagnosticsSummarySidebar(workflow: diagnostics)
     } detail: {
-      DiagnosticsView(diagnostics: diagnostics, errors: errors)
-        .alert(
-          "操作失败",
-          isPresented: Binding(
-            get: { errors.isPresented },
-            set: { if !$0 { errors.dismiss() } })
-        ) {
-          Button("好", role: .cancel) {}
-        } message: {
-          Text(errors.message ?? "")
-        }
+      DiagnosticsView(
+        diagnostics: diagnostics,
+        errors: errors,
+        clipboard: clipboard,
+        reportExporter: reportExporter
+      )
+      .alert(
+        "操作失败",
+        isPresented: Binding(
+          get: { errors.isPresented },
+          set: { if !$0 { errors.dismiss() } })
+      ) {
+        Button("好", role: .cancel) {}
+      } message: {
+        Text(errors.message ?? "")
+      }
     }
   }
 }
