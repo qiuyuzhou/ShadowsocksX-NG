@@ -35,7 +35,7 @@
 - **Workspace destination**: A top-level location in the single 2.0 GUI workspace, such as home, servers, subscriptions, settings, or diagnostics. It is navigation state only; it does not contain a node selection, sheet, alert, or feature draft.
 - **Workspace route**: The in-process navigation choice and intent used to move between workspace destinations from the workspace or another app entry point. It does not persist user configuration or own feature-local state.
 - **Foreground form**: The app presentation while the workspace window is open: the app presents as a regular macOS app with a Dock icon and app-switcher presence. It lasts exactly as long as the workspace window is open; hiding the window does not end it.
-- **Background form**: The default menu-bar-only app presentation: the status menu is available and there is no Dock icon or app-switcher presence. A login-item launch always starts in the background form; every other launch starts in the foreground form by presenting the workspace window.
+- **Background form**: The menu-bar-only app presentation: the status menu is available and there is no Dock icon or app-switcher presence. The app enters it by closing the workspace window and leaves it by opening the workspace window; every launch starts in the foreground form by presenting the workspace window.
 
 ## Relationships and invariants
 
@@ -77,4 +77,4 @@
 - The proxy mode selector's choice persists with the settings snapshot and survives GUI restarts; a persistence failure keeps the previous mode in force and names the reason. Local PAC and global are always available, and user-provided remote PAC URLs are not accepted as proxy settings. Resetting preferences returns the mode to local PAC.
 - The GUI is the user-facing manager; the Shadowsocks tunnel service is an external runtime boundary rather than part of the GUI's domain model.
 - The presentation form is governed solely by the workspace window: opening it enters the foreground form, and closing it returns the app to the background form while the GUI process keeps running with the status menu available; hiding the window without closing it does not leave the foreground form.
-- A login-item launch never presents the workspace window; every other launch presents it at startup.
+- Every launch of the GUI presents the workspace window at startup.

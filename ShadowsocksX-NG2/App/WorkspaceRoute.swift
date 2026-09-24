@@ -34,15 +34,7 @@ protocol WorkspaceWindowOpening {
 final class WorkspaceRoute: ObservableObject {
   @Published private(set) var destination: WorkspaceDestination = .home
 
-  /// 启动是否呈现主 workspace：登录项拉起为 false（静默驻留纯后台形态），
-  /// 其余启动为 true（前台形态开窗）。判定来源见 LaunchContext。
-  private let opensWorkspaceAtLaunch: Bool
-
   private var didApplyLaunchPolicy = false
-
-  init(opensWorkspaceAtLaunch: Bool) {
-    self.opensWorkspaceAtLaunch = opensWorkspaceAtLaunch
-  }
 
   /// workspace 内部导航只改变 route destination，不请求新的窗口呈现。
   func navigate(to destination: WorkspaceDestination) {
@@ -57,11 +49,11 @@ final class WorkspaceRoute: ObservableObject {
   ) {
     switch intent {
     case .launch:
+      // 启动策略（CONTEXT.md「Background form」不变量）：每次启动都呈现
+      // 主 workspace（前台形态开窗）；Legacy 导入提示由已开窗口的 home 分区呈现。
       guard !didApplyLaunchPolicy else { return }
       didApplyLaunchPolicy = true
-      if opensWorkspaceAtLaunch {
-        windowOpening.ensureWorkspaceVisible()
-      }
+      windowOpening.ensureWorkspaceVisible()
     case .navigate(let destination):
       navigate(to: destination)
     case .present(let destination):
