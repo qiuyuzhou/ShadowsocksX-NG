@@ -184,7 +184,7 @@ struct ServersView: View {
           errors: errors)
       } else {
         ServerDetailView(
-          workflow: workflow, serverID: id,
+          workflow: workflow, serverID: id, isActiveTarget: proxyController.activeTargetID == id,
           errors: errors, clipboard: clipboard)
       }
     } else {

@@ -1,13 +1,17 @@
 import SwiftUI
 
-/// 服务器详情表单（issue #32/#38/#41）：连接字段与插件选择可编辑（仅手动节
-/// 点）。表单状态经工作流的显式编辑命令解析（凭据明文仅在编辑动作中出现）；
-/// 插件区为受管选择器（D10）——「无」+ 受管列表，选中受管项才显示参数输入；
-/// 集外引用以显式「本版本未提供」呈现并原样保留；分享区（二维码 + 复制 ss://，
-/// 显式分享命令）。订阅服务器整表只读。
+/// 服务器详情表单（issue #32/#38/#41，地图 #52 票 #55）：按原型重排为详情头
+/// （图标 + 名称 + 来源说明）+ 两列表单栅格（地址/端口、加密/备注、密码全宽、
+/// 插件区）+ 底部操作区（取消恢复草稿 / 保存）。表单状态经工作流的显式编辑
+/// 命令解析（凭据明文仅在编辑动作中出现）；插件区为受管选择器（D10）——
+/// 「无」+ 受管列表，选中受管项才显示参数输入；集外引用以显式「本版本未
+/// 提供」呈现并原样保留；分享区（二维码 + 复制 ss://，显式分享命令）。
+/// 订阅服务器整表只读（无底部操作区，横幅说明）。
 struct ServerDetailView: View {
   let workflow: CatalogWorkflow
   let serverID: NodeID
+  /// 运行时事实（活动目标标记）：由父视图从既有接缝传入，详情面不持控制器。
+  let isActiveTarget: Bool
   let errors: ErrorAlertPresenter
   let clipboard: any TextClipboard
 
@@ -19,8 +23,9 @@ struct ServerDetailView: View {
   @State private var pluginChoice: PluginSelection = .none
   @State private var pluginOptionsText = ""
   @State private var showPassword = false
-  @State private var showQR = false
-  @State private var qrImage: NSImage?
+  // 分享/二维码状态由同 module 的 ServerDetailView+Share.swift 扩展驱动。
+  @State var showQR = false
+  @State var qrImage: NSImage?
 
   private var formState: ServerEditForm? {
     workflow.serverEditForm(for: serverID)
@@ -44,81 +49,21 @@ struct ServerDetailView: View {
   }
 
   var body: some View {
-    Form {
-      Section("连接") {
-        TextField("地址", text: $address)
-          .disabled(!isEditable)
-        TextField("端口", value: $port, format: .number.grouping(.never))
-          .disabled(!isEditable)
-        Picker("加密方法", selection: $encryptionMethod) {
-          ForEach(methodChoices, id: \.self) { Text($0).tag($0) }
+    VStack(spacing: 0) {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 0) {
+          detailHeader
+          formContent
         }
-        .disabled(!isEditable)
-        HStack {
-          if showPassword {
-            TextField("密码", text: $password)
-              .disabled(!isEditable)
-          } else {
-            SecureField("密码", text: $password)
-              .disabled(!isEditable)
-          }
-          Button {
-            showPassword.toggle()
-          } label: {
-            Image(systemName: showPassword ? "eye.slash" : "eye")
-          }
-          .buttonStyle(.borderless)
-          .help(showPassword ? "隐藏密码" : "显示密码")
-        }
-        TextField("备注", text: $remark)
-          .disabled(!isEditable)
+        .padding(.leading, 28)
+        .padding(.trailing, 32)
+        .padding(.top, 20)
+        .padding(.bottom, 24)
       }
-
-      if let node, node.isInvalid {
-        Section("激活状态") {
-          ForEach(Array(node.invalidReasons.enumerated()), id: \.offset) { _, reason in
-            Label(
-              AppPresentation.message(
-                for: ActivationFailure.invalidLeaf(node: node.id, reason: reason)),
-              systemImage: "exclamationmark.triangle.fill"
-            )
-            .foregroundStyle(.orange)
-          }
-        }
-      }
-
-      Section("插件") {
-        pluginSection
-      }
-
       if isEditable {
-        Section {
-          Button("保存修改") { save() }
-        }
-      } else {
-        Section {
-          Label("订阅节点由远端管理：连接字段只读。", systemImage: "info.circle")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-        }
-      }
-
-      Section("分享") {
-        Button {
-          copySsUri()
-        } label: {
-          Label("复制 ss:// 链接", systemImage: "doc.on.doc")
-        }
-        Button {
-          generateQR()
-        } label: {
-          Label("二维码…", systemImage: "qrcode")
-        }
-        .disabled(qrPayload() == nil)
+        detailFooter
       }
     }
-    .formStyle(.grouped)
-    .navigationTitle(workflow.displayName(for: serverID))
     .popover(isPresented: $showQR) {
       qrPopover
     }
@@ -126,93 +71,173 @@ struct ServerDetailView: View {
     .onChange(of: serverID) { _, _ in loadForm() }
   }
 
-  /// 受管选择器（D10）：「无」+ 受管列表；集外现有引用追加显式「本版本未提供」
-  /// 项使当前状态可见。选中受管项才显示供应链事实与参数输入。
-  @ViewBuilder
-  private var pluginSection: some View {
-    if let plugin = formState?.plugin {
-      Picker("插件", selection: $pluginChoice) {
-        Text("无").tag(PluginSelection.none)
-        ForEach(plugin.managed, id: \.program) { info in
-          Text(info.program).tag(PluginSelection.managed(program: info.program))
-        }
-        if case .unknown(let program) = plugin.selection {
-          Text("\(program)（本版本未提供）").tag(PluginSelection.unknown(program: program))
-        }
-      }
-      .disabled(!isEditable)
+  // MARK: - 详情头与表单
 
-      switch pluginChoice {
-      case .none:
-        Text("不使用插件：生成的配置不含 plugin 字段。")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-      case .managed(let program):
-        managedPluginDetails(program: program, plugin: plugin)
-      case .unknown(let program):
-        unknownPluginNotice(program: program, plugin: plugin)
+  private var detailHeader: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .center, spacing: 12) {
+        ZStack {
+          RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(Color.accentColor.opacity(0.12))
+          Image(systemName: "server.rack")
+            .font(.system(size: 16, weight: .medium))
+            .foregroundStyle(.tint)
+        }
+        .frame(width: 38, height: 38)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(workflow.displayName(for: serverID))
+            .font(.title2.weight(.semibold))
+            .lineLimit(1)
+          Text(sourceDescription)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+        }
+        Spacer(minLength: 0)
+        if let node, node.isInvalid {
+          Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundStyle(.orange)
+            .help("该服务器存在已知阻塞问题，激活会被点名拒绝")
+        }
       }
+      .padding(.bottom, 16)
+      Divider()
     }
   }
 
-  /// 选中受管项：供应链事实（来源项目、许可证、固定版本、重签）与参数输入。
+  private var sourceDescription: String {
+    guard let node else { return "" }
+    if node.source == .subscription {
+      return "订阅节点 · 远端管理"
+    }
+    return isActiveTarget ? "手动服务器 · 活动目标" : "手动服务器"
+  }
+
   @ViewBuilder
-  private func managedPluginDetails(program: String, plugin: PluginSectionState) -> some View {
-    if let info = plugin.managed.first(where: { $0.program == program }) {
-      LabeledContent("来源项目", value: info.project)
-      LabeledContent("许可证", value: info.license)
-      LabeledContent("固定版本", value: info.release)
-      Text("随 app 打包，构建期经 Developer ID 重签：\(info.signIdentifier)")
+  private var formContent: some View {
+    if let node, node.isInvalid {
+      invalidBanner(node)
+    }
+    if !isEditable {
+      Label("订阅节点由远端管理：连接字段只读。", systemImage: "info.circle")
         .font(.footnote)
         .foregroundStyle(.secondary)
-      if !plugin.provided {
+        .padding(.top, 16)
+    }
+    Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 18) {
+      GridRow {
+        column("服务器地址") {
+          TextField("服务器地址", text: $address)
+            .textFieldStyle(.roundedBorder)
+            .disabled(!isEditable)
+        }
+        column("端口") {
+          TextField("端口", value: $port, format: .number.grouping(.never))
+            .textFieldStyle(.roundedBorder)
+            .disabled(!isEditable)
+        }
+      }
+      GridRow {
+        column("加密方式") {
+          Picker("加密方式", selection: $encryptionMethod) {
+            ForEach(methodChoices, id: \.self) { Text($0).tag($0) }
+          }
+          .disabled(!isEditable)
+        }
+        column("备注") {
+          TextField("备注", text: $remark)
+            .textFieldStyle(.roundedBorder)
+            .disabled(!isEditable)
+        }
+      }
+      GridRow {
+        column("密码") {
+          HStack(spacing: 8) {
+            Group {
+              if showPassword {
+                TextField("密码", text: $password)
+              } else {
+                SecureField("密码", text: $password)
+              }
+            }
+            .textFieldStyle(.roundedBorder)
+            .disabled(!isEditable)
+            Button {
+              showPassword.toggle()
+            } label: {
+              Image(systemName: showPassword ? "eye.slash" : "eye")
+            }
+            .buttonStyle(.borderless)
+            .help(showPassword ? "隐藏密码" : "显示密码")
+          }
+        }
+        .gridCellColumns(2)
+      }
+      GridRow {
+        column("受管理插件与参数") {
+          ServerPluginSection(
+            selection: $pluginChoice,
+            optionsText: $pluginOptionsText,
+            plugin: formState?.plugin,
+            isEditable: isEditable)
+        }
+        .gridCellColumns(2)
+      }
+    }
+    .padding(.top, 20)
+
+    shareSection
+      .padding(.top, 24)
+  }
+
+  private func invalidBanner(_ node: CatalogTreeNode) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      ForEach(Array(node.invalidReasons.enumerated()), id: \.offset) { _, reason in
         Label(
-          "受管插件可执行文件缺失：激活会被点名拒绝；请重新安装本 app。",
+          AppPresentation.message(
+            for: ActivationFailure.invalidLeaf(node: node.id, reason: reason)),
           systemImage: "exclamationmark.triangle.fill"
         )
+        .font(.footnote)
         .foregroundStyle(.orange)
       }
-      TextField(
-        "插件参数",
-        text: $pluginOptionsText,
-        prompt: Text("如 mode=websocket;host=example.com（留空即无参数）")
-      )
-      .disabled(!isEditable)
     }
+    .padding(.top, 16)
   }
 
-  /// 集外引用（Legacy 导入/订阅带入）：原样保留并明确指出当前 app 无法提供该插件。
-  @ViewBuilder
-  private func unknownPluginNotice(program: String, plugin: PluginSectionState) -> some View {
-    Label(
-      "本版本未提供「\(program)」：引用原样保留，激活包含该服务器会被点名拒绝；可改选「无」或受管插件。",
-      systemImage: "exclamationmark.triangle.fill"
-    )
-    .foregroundStyle(.orange)
-    if plugin.optionsPresent {
-      LabeledContent("插件参数", value: "已配置（存于钥匙串，原样保留）")
-    }
-  }
-
-  private var qrPopover: some View {
-    VStack(spacing: 12) {
-      if let qrImage {
-        Image(nsImage: qrImage)
-          .interpolation(.none)
-          .resizable()
-          .scaledToFit()
-          .frame(width: 220, height: 220)
-      } else {
-        ProgressView()
-          .frame(width: 220, height: 220)
+  private var shareSection: some View {
+    HStack(spacing: 10) {
+      Button {
+        copySsUri()
+      } label: {
+        Label("复制 ss:// 链接", systemImage: "doc.on.doc")
       }
-      Text("用其他设备的客户端扫描此二维码")
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-      Button("复制 ss:// 链接") { copySsUri() }
+      Button {
+        generateQR()
+      } label: {
+        Label("二维码…", systemImage: "qrcode")
+      }
+      .disabled(qrPayload() == nil)
+      Spacer(minLength: 0)
     }
-    .padding(20)
   }
+
+  /// 底部操作区：取消恢复已保存值，保存提交草稿。
+  private var detailFooter: some View {
+    VStack(spacing: 0) {
+      Divider()
+      HStack {
+        Spacer(minLength: 0)
+        Button("取消") { loadForm() }
+        Button("保存") { save() }
+          .keyboardShortcut(.defaultAction)
+      }
+      .padding(.horizontal, 32)
+      .padding(.vertical, 12)
+    }
+    .background(.bar)
+  }
+
+  // MARK: - 表单装载与提交
 
   private func loadForm() {
     guard let state = formState else { return }
@@ -245,26 +270,15 @@ struct ServerDetailView: View {
     }
   }
 
-  private func qrPayload() -> String? {
-    try? workflow.shareURI(for: serverID)
-  }
-
-  private func copySsUri() {
-    do {
-      try clipboard.write(workflow.shareURI(for: serverID))
-    } catch {
-      errors.present(error)
+  private func column<Content: View>(
+    _ label: String, @ViewBuilder content: () -> Content
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(label)
+        .font(.callout.weight(.medium))
+        .foregroundStyle(.secondary)
+      content()
     }
-  }
-
-  private func generateQR() {
-    guard let payload = qrPayload() else { return }
-    showQR = true
-    Task.detached(priority: .userInitiated) {
-      let image = (try? QrCodeCodec.generatePNG(for: payload)).flatMap { NSImage(data: $0) }
-      await MainActor.run {
-        qrImage = image
-      }
-    }
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }

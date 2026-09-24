@@ -20,8 +20,16 @@ struct SidebarRow: View {
     HStack(spacing: 6) {
       Image(systemName: node.isGroup ? "folder" : "server.rack")
         .foregroundStyle(.secondary)
-      Text(node.name)
-        .foregroundStyle(node.isInvalid ? .secondary : .primary)
+      VStack(alignment: .leading, spacing: 1) {
+        Text(node.name)
+          .foregroundStyle(node.isInvalid ? .secondary : .primary)
+        if node.isGroup {
+          // 分组行尾数量说明（票 #55）：原型「手动分组 · N 项」口径。
+          Text("\(node.isManual ? "手动分组" : "订阅分组") · \(node.childCount) 项")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+        }
+      }
       if node.isInvalid {
         Image(systemName: "exclamationmark.triangle.fill")
           .foregroundStyle(.orange)
