@@ -20,6 +20,8 @@ enum StatusMenuModel {
     let systemProxyIntentEnabled: Bool
     /// 系统代理实际应用状态文本（与 agent 运行状态分开呈现）。
     let systemProxyStatus: String
+    /// 同上但不带「系统代理：」前缀（首页等已有上下文的呈现面用）。
+    let systemProxyStateLabel: String
     /// 系统代理写入/恢复失败的点名原因；非失败态为 nil。
     let systemProxyDetail: String?
     let modeLabel: String
@@ -50,20 +52,20 @@ enum StatusMenuModel {
     let agentDetail =
       snapshot.runtime.failure.map { AppPresentation.message(for: $0) }
       ?? snapshot.activationFailure.map { AppPresentation.message(for: $0) }
-    let systemProxyStatus: String
+    let stateLabel: String
     let systemProxyDetail: String?
     switch snapshot.systemProxyApplication {
     case .idle:
-      systemProxyStatus = "系统代理：未接管"
+      stateLabel = "未接管"
       systemProxyDetail = nil
     case .pending:
-      systemProxyStatus = "系统代理：待应用"
+      stateLabel = "待应用"
       systemProxyDetail = nil
     case .applied:
-      systemProxyStatus = "系统代理：已应用"
+      stateLabel = "已应用"
       systemProxyDetail = nil
     case .failed(let facts):
-      systemProxyStatus = "系统代理：应用失败"
+      stateLabel = "应用失败"
       systemProxyDetail = AppPresentation.message(for: RuntimeFailureFacts.systemProxy(facts))
     }
     return Summary(
@@ -72,7 +74,8 @@ enum StatusMenuModel {
       status: status,
       detail: agentDetail,
       systemProxyIntentEnabled: snapshot.systemProxyIntentEnabled,
-      systemProxyStatus: systemProxyStatus,
+      systemProxyStatus: "系统代理：\(stateLabel)",
+      systemProxyStateLabel: stateLabel,
       systemProxyDetail: systemProxyDetail,
       modeLabel: snapshot.proxyMode.label,
       targetPath: snapshot.activeTarget?.pathSummary)

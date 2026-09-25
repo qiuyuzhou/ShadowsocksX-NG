@@ -76,7 +76,7 @@ private struct RuntimeControlCard: View {
               Toggle("设置系统代理", isOn: systemProxyBinding)
                 .toggleStyle(.switch)
               Spacer(minLength: 0)
-              Text(systemProxyShortStatus(summary))
+              Text(summary.systemProxyStateLabel)
                 .font(.callout.weight(.medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -107,10 +107,6 @@ private struct RuntimeControlCard: View {
     Binding(
       get: { control.snapshot.systemProxyIntentEnabled },
       set: { enabled in Task { await control.setSystemProxyEnabled(enabled) } })
-  }
-
-  private func systemProxyShortStatus(_ summary: StatusMenuModel.Summary) -> String {
-    summary.systemProxyStatus.replacingOccurrences(of: "系统代理：", with: "")
   }
 
   private func systemProxyHint(_ summary: StatusMenuModel.Summary) -> String {

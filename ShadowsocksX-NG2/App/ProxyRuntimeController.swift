@@ -13,9 +13,10 @@ struct SystemEndpointProbe: EndpointProbing {
 }
 
 /// 代理运行时控制器（spec #21 D2/D5/D7/D9，issue #27/#28/#60）：把激活状态机
-/// 的产出接到「GUI → LaunchAgent → wrapper → sslocal」链路。决策全部在纯域
-/// `ProxyRuntimePlan`，本类按序执行动作并负责健康呈现；GUI 退出不影响任何
-/// 一侧（agent 由 launchd 持有，构造上成立）。
+/// 的产出接到「GUI → LaunchAgent → wrapper → sslocal」链路。launchd/契约动作
+/// 序列在纯域 `ProxyRuntimePlan`，本类按序执行、负责健康呈现与系统代理门禁
+/// 收敛（issue #60：意图持久化先行，门禁与待应用策略是应用层决策）；GUI 退出
+/// 不影响任何一侧（agent 由 launchd 持有，构造上成立）。
 ///
 /// 两个用户意图相互独立（issue #60）：agent 意图（`settings.agentEnabled`，
 /// 默认开启）驱动 LaunchAgent 注册与本地监听；系统代理意图
@@ -230,9 +231,20 @@ final class ProxyRuntimeController: ObservableObject {
   }
 
   /// Agent 开关（issue #60）：先持久化意图（显式关闭在 GUI 重启后仍生效），
-  /// 再收敛运行时。持久化失败保留现状并点名，不静默偏离持久化事实。
+  /// 再收敛运行时。持久化失败保留现状并点名，不静默偏离持久化事实。意图已
+  /// 开启时的开启命令仅在未达健康态时重收敛——它是启动失败/重置后的显式
+  /// 重试入口；健康运行中不做无谓的注销重拉。
   func setAgentEnabled(_ enabled: Bool) async {
-    guard enabled != settings.agentEnabled else { return }
+    if enabled == settings.agentEnabled {
+      guard enabled else { return }
+      switch state {
+      case .off, .launchFailed, .serviceFailed:
+        await convergeAgent()
+      case .starting, .running, .firewallBlocked, .requiresApproval:
+        break
+      }
+      return
+    }
     var next = settings
     next.agentEnabled = enabled
     do {

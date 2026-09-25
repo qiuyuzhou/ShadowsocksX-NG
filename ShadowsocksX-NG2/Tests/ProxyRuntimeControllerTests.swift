@@ -692,3 +692,25 @@ extension ProxyRuntimeControllerTests {
     XCTAssertTrue(systemProxy.applied.isEmpty, "系统代理意图关闭，不写系统设置")
   }
 }
+
+extension ProxyRuntimeControllerTests {
+  /// 意图已开启时的开启命令是失败态的显式重试入口（issue #60）：无需先关再开。
+  func testAgentEnableCommandRetriesConvergenceWhileIntentAlreadyOn() async throws {
+    let seeded = try makeSeededCatalog()
+    let probe = ProxyRuntimeFixture.FakeProbe.refusing()
+    let controller = makeController(probe: probe)
+
+    // 激活即按默认意图部署：端点不可达 → 启动失败（走满 15 秒健康窗）。
+    try await controller.activate(seeded.server)
+    if case .launchFailed = controller.state {
+    } else {
+      XCTFail("端点不可达应呈现启动失败，实际 \(controller.state)")
+    }
+
+    probe.setOutcomes([.reachable])
+    await controller.setAgentEnabled(true)
+
+    XCTAssertEqual(controller.state, .running, "意图已开启时开启命令重走收敛")
+    XCTAssertEqual(controller.systemProxyState, .idle)
+  }
+}
