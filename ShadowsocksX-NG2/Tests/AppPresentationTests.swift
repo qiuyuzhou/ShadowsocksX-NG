@@ -55,28 +55,38 @@ final class AppPresentationTests: XCTestCase {
   }
 
   func testRuntimeAndSettingsFactsUseCentralPresentation() {
-    let runtimeStates: [ProxyRuntimeController.ProxyState] = [
+    let runtimeStates: [ProxyRuntimeController.AgentRunState] = [
       .firewallBlocked(FirewallBlockedFacts(executableName: "sslocal")),
       .launchFailed(
         .localEndpoint(endpoint: "SOCKS", host: "127.0.0.1", port: 11086, cause: .refused)),
       .launchFailed(.pacEndpoint(port: 11089, cause: .timedOut)),
       .launchFailed(.missingRuntimeDocument),
       .launchFailed(.unreadableSettings),
-      .activationFailed(.noActiveTarget),
       .serviceFailed(.runtimeFile),
       .serviceFailed(.agent),
       .serviceFailed(.missingDocument),
       .serviceFailed(.persistence),
       .serviceFailed(.unknown),
-      .systemProxyFailed(.operation(.applyFailed)),
-      .systemProxyFailed(.mode(.invalidSOCKSPort(0))),
-      .systemProxyFailed(.ownershipConflict),
-      .systemProxyFailed(.unknown),
     ]
 
     for state in runtimeStates {
       let message = AppPresentation.message(for: state)
       XCTAssertFalse(message.isEmpty, "每个 runtime fact 都应有呈现：\(state)")
+    }
+
+    // 系统代理应用状态（issue #60）：独立状态面同样走中央呈现。
+    let systemProxyApplications: [SystemProxyApplicationFacts] = [
+      .idle,
+      .pending,
+      .applied,
+      .failed(.operation(.applyFailed)),
+      .failed(.mode(.invalidSOCKSPort(0))),
+      .failed(.ownershipConflict),
+      .failed(.unknown),
+    ]
+    for application in systemProxyApplications {
+      let message = AppPresentation.message(for: application)
+      XCTAssertFalse(message.isEmpty, "每个系统代理应用态都应有呈现：\(application)")
     }
 
     let runtimeFailures: [RuntimeFailureFacts] = [

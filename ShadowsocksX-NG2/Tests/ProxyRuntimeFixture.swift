@@ -5,6 +5,24 @@ import XCTest
 
 /// 代理运行时测试共享夹具（票 #27）：临时运行时目录、契约文档构造、LaunchAgent
 /// 与探测替身。
+/// 跨替身共享的有序事件记录：断言「先恢复系统代理、再停止监听」等次序。
+final class ProxyRuntimeEventLog: @unchecked Sendable {
+  private let lock = NSLock()
+  private var items: [String] = []
+
+  func record(_ item: String) {
+    lock.lock()
+    defer { lock.unlock() }
+    items.append(item)
+  }
+
+  var events: [String] {
+    lock.lock()
+    defer { lock.unlock() }
+    return items
+  }
+}
+
 enum ProxyRuntimeFixture {
   /// 在临时目录中建一套隔离的运行时文件组（不触碰真实 ~/Library）。
   struct TemporaryRuntime {
@@ -98,6 +116,8 @@ enum ProxyRuntimeFixture {
     var registerError: Error?
     /// register() 成功后自动迁移到的状态（模拟 launchd 拉起）。
     var statusAfterRegister: LaunchAgentStatus = .registered
+    /// 可选共享事件日志（次序断言用）。
+    weak var eventLog: ProxyRuntimeEventLog?
 
     init(initialStatus: LaunchAgentStatus = .notRegistered) {
       currentStatus = initialStatus
@@ -111,6 +131,7 @@ enum ProxyRuntimeFixture {
 
     func register() throws {
       registerCount += 1
+      eventLog?.record("register")
       if let registerError {
         currentStatus = .registered
         throw registerError
@@ -120,6 +141,7 @@ enum ProxyRuntimeFixture {
 
     func unregister() throws {
       unregisterCount += 1
+      eventLog?.record("unregister")
       currentStatus = .notRegistered
     }
   }
@@ -141,6 +163,13 @@ enum ProxyRuntimeFixture {
 
     static func refusing() -> FakeProbe {
       FakeProbe(outcomes: [.refused(detail: "Connection refused")])
+    }
+
+    /// 运行中改写探测序列（「条件恢复后自动收敛」类测试用）。
+    func setOutcomes(_ newOutcomes: [EndpointHealthProbe.Outcome]) {
+      lock.lock()
+      defer { lock.unlock() }
+      outcomes = newOutcomes
     }
 
     var ports: [Int] {
@@ -199,14 +228,18 @@ enum ProxyRuntimeFixture {
     private(set) var restoreCount = 0
     var applyError: Error?
     var restoreError: Error?
+    /// 可选共享事件日志（次序断言用）。
+    weak var eventLog: ProxyRuntimeEventLog?
 
     func apply(_ configuration: SystemProxyConfiguration) throws {
+      eventLog?.record("apply")
       if let applyError { throw applyError }
       applied.append(configuration)
     }
 
     func restore() throws {
       restoreCount += 1
+      eventLog?.record("restore")
       if let restoreError { throw restoreError }
     }
   }

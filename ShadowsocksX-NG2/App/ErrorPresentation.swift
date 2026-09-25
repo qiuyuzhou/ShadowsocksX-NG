@@ -178,7 +178,7 @@ extension AppPresentation {
     }
   }
 
-  static func message(for state: ProxyRuntimeController.ProxyState) -> String {
+  static func message(for state: ProxyRuntimeController.AgentRunState) -> String {
     switch state {
     case .off: return "代理未运行"
     case .starting: return "代理正在启动"
@@ -186,12 +186,17 @@ extension AppPresentation {
     case .firewallBlocked(let facts):
       return message(for: RuntimeFailureFacts.firewallBlocked(facts))
     case .launchFailed(let facts): return message(for: RuntimeFailureFacts.launch(facts))
-    case .activationFailed(let failure):
-      return message(for: RuntimeFailureFacts.activation(failure))
     case .requiresApproval: return message(for: RuntimeFailureFacts.requiresApproval)
     case .serviceFailed(let facts): return message(for: RuntimeFailureFacts.service(facts))
-    case .systemProxyFailed(let facts):
-      return message(for: RuntimeFailureFacts.systemProxy(facts))
+    }
+  }
+
+  static func message(for application: SystemProxyApplicationFacts) -> String {
+    switch application {
+    case .idle: return "系统代理未接管"
+    case .pending: return "系统代理待应用：等待代理就绪或可用出口"
+    case .applied: return "系统代理已应用"
+    case .failed(let facts): return systemProxyFailure(facts)
     }
   }
 
@@ -216,7 +221,7 @@ extension AppPresentation {
   private static func activation(_ error: ActivationFailure) -> String {
     switch error {
     case .noActiveTarget: return "尚未激活任何服务器或分组，请先选择一个目标"
-    case .targetNotFound: return "活动目标不存在，代理已停止"
+    case .targetNotFound: return "活动目标不存在，已清除目标；本地监听不受影响"
     case .targetExpandsToNothing: return "目标没有可激活的服务器"
     case .invalidLeaf(let node, let reason):
       return "服务器不可用：\(leaf(reason))（\(shortNodeID(node))）"

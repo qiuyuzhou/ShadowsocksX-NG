@@ -17,6 +17,12 @@ struct ProxySettings: Equatable, Sendable {
   /// The persisted current mode: the mode selector's choice survives GUI
   /// restarts.
   var preferredMode: ProxyModeKind
+  /// 代理 agent 意图（issue #60）：首次运行默认开启；用户显式关闭的选择
+  /// 持久化，GUI 重启后仍生效。
+  var agentEnabled: Bool
+  /// 系统代理意图（issue #60）：默认关闭；与 agent 意图相互独立，开关关闭
+  /// 只恢复 NG2 持有的系统设置，不影响本地监听。
+  var systemProxyEnabled: Bool
 
   init(
     listen: SslocalListenSettings = SslocalListenSettings(),
@@ -25,7 +31,9 @@ struct ProxySettings: Equatable, Sendable {
     proxyExceptions: String = ProxySettings.defaultProxyExceptions,
     gfwListURL: String = ProxySettings.defaultGFWListURL,
     pacUserRules: String = "",
-    preferredMode: ProxyModeKind = .pac
+    preferredMode: ProxyModeKind = .pac,
+    agentEnabled: Bool = true,
+    systemProxyEnabled: Bool = false
   ) {
     self.listen = listen
     self.timeoutSeconds = timeoutSeconds
@@ -34,6 +42,8 @@ struct ProxySettings: Equatable, Sendable {
     self.gfwListURL = gfwListURL
     self.pacUserRules = pacUserRules
     self.preferredMode = preferredMode
+    self.agentEnabled = agentEnabled
+    self.systemProxyEnabled = systemProxyEnabled
   }
 
   /// 系统代理的 ExceptionsList；输入顺序保留，重复项只保留第一次出现的值。
@@ -289,7 +299,9 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
         proxyExceptions: record.proxyExceptions,
         gfwListURL: gfwListURL,
         pacUserRules: record.pacUserRules,
-        preferredMode: record.preferredMode))
+        preferredMode: record.preferredMode,
+        agentEnabled: record.agentEnabled,
+        systemProxyEnabled: record.systemProxyEnabled))
   }
 
   private func record(from settings: ProxySettings) -> ProxySettingsRecord {
@@ -310,6 +322,8 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     record.gfwListURLConfigured = true
     record.pacUserRules = settings.pacUserRules
     record.preferredMode = settings.preferredMode
+    record.agentEnabled = settings.agentEnabled
+    record.systemProxyEnabled = settings.systemProxyEnabled
     return record
   }
 
@@ -387,6 +401,8 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
   var gfwListURLConfigured: Bool = false
   var pacUserRules: String = ""
   var preferredMode: ProxyModeKind = .pac
+  var agentEnabled: Bool = true
+  var systemProxyEnabled: Bool = false
 
   init() {}
 
@@ -415,6 +431,10 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
     pacUserRules = try container.decodeIfPresent(String.self, forKey: .pacUserRules) ?? ""
     preferredMode =
       try container.decodeIfPresent(ProxyModeKind.self, forKey: .preferredMode) ?? .pac
+    // 首次运行缺省：agent 默认开启，系统代理默认关闭（issue #60）。
+    agentEnabled = try container.decodeIfPresent(Bool.self, forKey: .agentEnabled) ?? true
+    systemProxyEnabled =
+      try container.decodeIfPresent(Bool.self, forKey: .systemProxyEnabled) ?? false
   }
 }
 
@@ -424,5 +444,6 @@ extension ProxySettingsRecord {
     case timeoutSeconds, verboseLogging, proxyExceptions
     case gfwListCredentialReference, gfwListURLConfigured
     case pacUserRules, preferredMode
+    case agentEnabled, systemProxyEnabled
   }
 }

@@ -203,9 +203,10 @@ final class AgentLifecycleTests: XCTestCase {
   }
 
   func testStructurallyInvalidContractIsAlsoCleaned() throws {
-    // 可解码但 servers 为空：wrapper 校验拒绝，不给 sslocal 反复失败的机会。
+    // 可解码但 PAC 端口无效：wrapper 校验拒绝，不给 sslocal 反复失败的机会。
+    // （issue #60 起空 `servers` 是合法契约——无活动目标的监听部署。）
     try SslocalRuntimeDocument(
-      servers: [], listen: SslocalListenSettings()
+      servers: [], listen: SslocalListenSettings(pacPort: 0)
     ).jsonData().write(to: contractURL)
     let wrapper = try launchWrapper(behavior: "run")
 
@@ -213,6 +214,23 @@ final class AgentLifecycleTests: XCTestCase {
 
     XCTAssertEqual(exitStatus, 0)
     XCTAssertFalse(FileManager.default.fileExists(atPath: contractURL.path))
+  }
+
+  /// 空服务器契约是合法部署（issue #60）：wrapper 接受并照常拉起 sslocal，
+  /// 由 PAC 与本地入站提供无目标的本地监听。
+  func testEmptyServerContractIsValidAndRunsSslocal() throws {
+    try SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings()
+    ).jsonData().write(to: contractURL)
+    let wrapper = try launchWrapper(behavior: "run")
+
+    XCTAssertTrue(
+      try waitUntil { self.stateLog().contains("invoked:") },
+      "空服务器契约应照常拉起 sslocal")
+    XCTAssertTrue(pidAlive(wrapper.processIdentifier), "空监听会话 wrapper 应保持常驻")
+
+    kill(wrapper.processIdentifier, SIGTERM)
+    XCTAssertEqual(try waitForExit(wrapper), 0, "显式停止干净退出")
   }
 
   // MARK: 变更协议（D5）

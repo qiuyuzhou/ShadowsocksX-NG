@@ -14,6 +14,21 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
 
   var runtimeFacts: ProxyRuntimeFacts { controller.runtimeFacts }
 
+  var agentIntentEnabled: Bool { controller.agentIntentEnabled }
+
+  var activationFailure: ActivationFailure? { controller.lastActivationFailure }
+
+  var systemProxyIntentEnabled: Bool { controller.systemProxyIntentEnabled }
+
+  var systemProxyApplication: SystemProxyApplicationFacts {
+    switch controller.systemProxyState {
+    case .idle: return .idle
+    case .pending: return .pending
+    case .applied: return .applied
+    case .failed(let facts): return .failed(facts)
+    }
+  }
+
   var proxyMode: ProxyMode { controller.proxyMode }
 
   var skippedInvalidServerCount: Int { controller.skippedServers.count }
@@ -37,8 +52,12 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
     await controller.resyncOnLaunch()
   }
 
-  func setProxyEnabled(_ enabled: Bool) async {
-    await controller.setProxyEnabled(enabled)
+  func setAgentEnabled(_ enabled: Bool) async {
+    await controller.setAgentEnabled(enabled)
+  }
+
+  func setSystemProxyEnabled(_ enabled: Bool) async {
+    await controller.setSystemProxyEnabled(enabled)
   }
 
   func setProxyMode(_ mode: ProxyMode) async {

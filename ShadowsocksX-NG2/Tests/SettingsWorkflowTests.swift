@@ -143,7 +143,7 @@ final class SettingsWorkflowTests: XCTestCase {
     try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
     let pair = makePair()
     try await pair.controller.activate(server)
-    await pair.controller.setProxyEnabled(true)
+    await pair.controller.setAgentEnabled(true)
     await waitUntil(pair.controller.state == .running)
     return pair
   }

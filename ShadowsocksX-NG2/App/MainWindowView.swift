@@ -259,14 +259,22 @@ extension MainWindowView {
 
   // MARK: - 底部代理状态卡
 
+  /// 底部状态卡（issue #60）：agent 与系统代理两个开关并排呈现，各自绑定
+  /// 持久化意图；运行状态、系统代理实际应用与点名原因来自同一 snapshot。
   private var statusCard: some View {
     let summary = StatusMenuModel.summary(from: control.snapshot)
     return VStack(alignment: .leading, spacing: 7) {
       HStack(spacing: 8) {
-        Toggle("代理开关", isOn: proxyToggleBinding)
+        Toggle("后台代理", isOn: agentToggleBinding)
           .toggleStyle(.switch)
           .controlSize(.mini)
           .labelsHidden()
+          .help("控制后台代理 agent：提供本地 SOCKS/HTTP 监听，关闭选择会保留")
+        Toggle("系统代理", isOn: systemProxyToggleBinding)
+          .toggleStyle(.switch)
+          .controlSize(.mini)
+          .labelsHidden()
+          .help("让 macOS 系统代理指向本地入口；关闭只恢复 NG2 持有的系统设置")
         Text(summary.status)
           .font(.footnote.weight(.semibold))
           .foregroundStyle(statusColor(summary))
@@ -279,7 +287,7 @@ extension MainWindowView {
         .help(
           summary.targetPath.map { "活动目标：\($0)" }
             ?? "未设置活动目标；在首页或服务器目录中激活")
-      Text("模式：\(summary.modeLabel)")
+      Text("模式：\(summary.modeLabel) · \(summary.systemProxyStatus)")
         .font(.caption)
         .foregroundStyle(.secondary)
       if let detail = summary.detail {
@@ -288,6 +296,13 @@ extension MainWindowView {
           .foregroundStyle(.orange)
           .lineLimit(2)
           .help(detail)
+      }
+      if let systemProxyDetail = summary.systemProxyDetail {
+        Text(systemProxyDetail)
+          .font(.caption)
+          .foregroundStyle(.orange)
+          .lineLimit(2)
+          .help(systemProxyDetail)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -302,11 +317,19 @@ extension MainWindowView {
     .padding(.bottom, 12)
   }
 
-  private var proxyToggleBinding: Binding<Bool> {
+  private var agentToggleBinding: Binding<Bool> {
     Binding(
-      get: { control.snapshot.runtime.isOn },
+      get: { control.snapshot.agentIntentEnabled },
       set: { enabled in
-        Task { await control.setProxyEnabled(enabled) }
+        Task { await control.setAgentEnabled(enabled) }
+      })
+  }
+
+  private var systemProxyToggleBinding: Binding<Bool> {
+    Binding(
+      get: { control.snapshot.systemProxyIntentEnabled },
+      set: { enabled in
+        Task { await control.setSystemProxyEnabled(enabled) }
       })
   }
 
@@ -320,7 +343,7 @@ extension MainWindowView {
       .secondary
     case .firewallBlocked, .requiresApproval:
       .orange
-    case .launchFailed, .activationFailed, .serviceFailed, .systemProxyFailed:
+    case .launchFailed, .serviceFailed:
       .red
     }
   }

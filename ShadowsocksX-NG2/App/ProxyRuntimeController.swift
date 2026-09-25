@@ -12,13 +12,21 @@ struct SystemEndpointProbe: EndpointProbing {
   }
 }
 
-/// 代理运行时控制器（spec #21 D2/D5/D7/D9，issue #27/#28）：把激活状态机的产出接到
-/// 「GUI → LaunchAgent → wrapper → sslocal」链路。决策全部在纯域
+/// 代理运行时控制器（spec #21 D2/D5/D7/D9，issue #27/#28/#60）：把激活状态机
+/// 的产出接到「GUI → LaunchAgent → wrapper → sslocal」链路。决策全部在纯域
 /// `ProxyRuntimePlan`，本类按序执行动作并负责健康呈现；GUI 退出不影响任何
 /// 一侧（agent 由 launchd 持有，构造上成立）。
+///
+/// 两个用户意图相互独立（issue #60）：agent 意图（`settings.agentEnabled`，
+/// 默认开启）驱动 LaunchAgent 注册与本地监听；系统代理意图
+/// （`settings.systemProxyEnabled`，默认关闭）只在「agent 健康 + 模式具备
+/// 可用出口」时写入系统设置，关闭只恢复 NG2 持有的系统设置。两个状态面
+/// （`state` 与 `systemProxyState`）分开呈现，互不代替。
 @MainActor
 final class ProxyRuntimeController: ObservableObject {
-  enum ProxyState: Equatable {
+  /// Agent（后台代理运行时）运行状态。系统代理结果不在此面呈现——它有
+  /// 独立的 `SystemProxyControlState`。
+  enum AgentRunState: Equatable {
     case off
     case starting
     case running
@@ -26,17 +34,28 @@ final class ProxyRuntimeController: ObservableObject {
     case firewallBlocked(FirewallBlockedFacts)
     /// 启动失败：携带点名端点与端口的事实（D8；端口语义细节 #30 接线）。
     case launchFailed(LaunchFailureFacts)
-    /// 激活失败或活动目标清除（无静默回退族的呈现面）。
-    case activationFailed(ActivationFailure)
     /// 需要用户在系统设置-登录项中允许后台项。
     case requiresApproval
     /// 服务管理或运行时文件本身失败。
     case serviceFailed(ServiceFailureFacts)
-    /// 运行时健康，但系统代理未能应用或恢复。
-    case systemProxyFailed(SystemProxyFailureFacts)
   }
 
-  @Published private(set) var state: ProxyState = .off
+  /// 系统代理实际作用状态（issue #60）：意图持久化在
+  /// `ProxySettings.systemProxyEnabled`，这里是 NG2 对系统设置的真实作用。
+  enum SystemProxyControlState: Equatable {
+    /// 意图关闭：NG2 不持有系统设置。
+    case idle
+    /// 意图开启，但 agent 未健康或模式缺少可用出口；条件恢复后随下次
+    /// 收敛自动应用。
+    case pending
+    /// 已写入系统设置且持续持有。
+    case applied
+    /// 写入或恢复失败（typed；ownership 冲突报告而不强制覆盖）。
+    case failed(SystemProxyFailureFacts)
+  }
+
+  @Published private(set) var state: AgentRunState = .off
+  @Published private(set) var systemProxyState: SystemProxyControlState = .idle
   @Published private(set) var settings: ProxySettings
   @Published private(set) var pacURL: URL?
   /// 当前活动目标（菜单栏状态摘要与级联只读呈现用，issue #31）。machine 是
@@ -45,6 +64,9 @@ final class ProxyRuntimeController: ObservableObject {
   @Published private(set) var activeTargetID: NodeID?
   /// 最近一次激活预检在分组中跳过的服务器；仅记录 app 已知的本地阻塞原因。
   @Published private(set) var skippedServers: [SkippedServer] = []
+  /// 最近一次激活拒绝或目标清除的点名原因。独立于运行状态呈现：agent 可
+  /// 能仍在监听，激活失败不代表运行时停止（issue #60）。
+  @Published private(set) var lastActivationFailure: ActivationFailure?
   private(set) var machine: ActivationStateMachine
 
   private let catalogSnapshotReader: RuntimeCatalogSnapshotReading
@@ -127,6 +149,12 @@ final class ProxyRuntimeController: ObservableObject {
 
   var isActiveTargetPresent: Bool { machine.activeTargetID != nil }
 
+  /// Agent 开关意图（持久化事实；开关 UI 的绑定来源，issue #60）。
+  var agentIntentEnabled: Bool { settings.agentEnabled }
+
+  /// 系统代理开关意图（持久化事实；开关 UI 的绑定来源，issue #60）。
+  var systemProxyIntentEnabled: Bool { settings.systemProxyEnabled }
+
   /// Stable app-facing projection for status-menu presentation. The menu does
   /// not depend on this controller's nested state representation.
   var runtimeFacts: ProxyRuntimeFacts {
@@ -150,9 +178,9 @@ final class ProxyRuntimeController: ObservableObject {
   var effectiveRuntimeListenFacts: RuntimeListenFacts? {
     let isListening: Bool
     switch state {
-    case .running, .firewallBlocked, .systemProxyFailed:
+    case .running, .firewallBlocked:
       isListening = true
-    case .off, .starting, .launchFailed, .activationFailed, .requiresApproval, .serviceFailed:
+    case .off, .starting, .launchFailed, .requiresApproval, .serviceFailed:
       isListening = false
     }
     guard isListening, let lastDocument else { return nil }
@@ -167,9 +195,10 @@ final class ProxyRuntimeController: ObservableObject {
 
   // MARK: - 用户意图
 
-  /// 激活一个服务器或分组目标（目录 UI 工单复用入口）：持久化目标；代理
-  /// 开启时立即把新档推到运行时。激活原子失败时状态完全不动（D3），返回
-  /// `.rejectedActivation`；意外错误 throws 并进入 `serviceFailed`。
+  /// 激活一个服务器或分组目标（目录 UI 工单复用入口）：持久化目标；agent
+  /// 意图开启时立即把新档推到运行时。激活原子失败时目标与运行时完全不动
+  /// （D3），点名原因进 `lastActivationFailure` 并返回 `.rejectedActivation`；
+  /// 意外错误 throws 并进入 `serviceFailed`。
   @discardableResult
   func activate(_ target: NodeID) async throws -> ActivationCommandOutcome {
     let catalog = catalogSnapshotReader.catalogSnapshot
@@ -180,18 +209,19 @@ final class ProxyRuntimeController: ObservableObject {
         pacUserRules: settings.pacUserRules)
       activeTargetID = target
       skippedServers = configuration.skippedServers
+      lastActivationFailure = nil
       do {
         try activationFileStore.save(activeTargetID: target)
       } catch {
         state = .serviceFailed(.persistence)
         throw error
       }
-      if state != .off {
+      if settings.agentEnabled {
         await deploy(configuration.document)
       }
       return .activated(skippedInvalid: configuration.skippedServers.count)
     } catch let failure as ActivationFailure {
-      state = .activationFailed(failure)
+      lastActivationFailure = failure
       return .rejectedActivation
     } catch {
       state = .serviceFailed(.unknown)
@@ -199,32 +229,51 @@ final class ProxyRuntimeController: ObservableObject {
     }
   }
 
-  /// 代理开关。
-  func setProxyEnabled(_ enabled: Bool) async {
+  /// Agent 开关（issue #60）：先持久化意图（显式关闭在 GUI 重启后仍生效），
+  /// 再收敛运行时。持久化失败保留现状并点名，不静默偏离持久化事实。
+  func setAgentEnabled(_ enabled: Bool) async {
+    guard enabled != settings.agentEnabled else { return }
+    var next = settings
+    next.agentEnabled = enabled
+    do {
+      try settingsStore.save(next)
+    } catch {
+      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+      state = .serviceFailed(.persistence)
+      return
+    }
+    settings = next
     if enabled {
-      await enable()
+      await convergeAgent()
     } else {
-      let restoreError: Error?
-      do {
-        try systemProxy.restore()
-        restoreError = nil
-      } catch {
-        restoreError = error
-      }
-      _ = await execute(.stop, document: nil)
-      if let restoreError {
-        state = .systemProxyFailed(systemProxyFacts(for: restoreError))
-      } else {
-        state = .off
-      }
-      pacURL = nil
-      lastDocument = nil
+      await stopAgent()
     }
   }
 
-  /// Changes the current mode without rebuilding the tunnel runtime. Every
-  /// supported mode reuses the same endpoint health gate before writing system
-  /// settings.
+  /// 系统代理开关（issue #60）：只写写/恢复 NG2 持有的系统设置；不注销
+  /// agent、不停止本地 SOCKS/HTTP 监听。
+  func setSystemProxyEnabled(_ enabled: Bool) async {
+    guard enabled != settings.systemProxyEnabled else { return }
+    var next = settings
+    next.systemProxyEnabled = enabled
+    do {
+      try settingsStore.save(next)
+    } catch {
+      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+      state = .serviceFailed(.persistence)
+      return
+    }
+    settings = next
+    if enabled {
+      await convergeSystemProxy()
+    } else {
+      systemProxyState = restoreSystemProxyOutcome()
+    }
+  }
+
+  /// Changes the current mode without rebuilding the tunnel runtime. The mode
+  /// only decides what the system proxy points at, so with the system proxy
+  /// intent off nothing beyond persistence happens.
   /// The choice persists with the settings snapshot first, so a GUI restart
   /// restores it; a persistence failure keeps the previous mode in force and
   /// names the reason instead of switching silently.
@@ -242,54 +291,22 @@ final class ProxyRuntimeController: ObservableObject {
     }
     settings = next
     proxyMode = mode
+    guard settings.systemProxyEnabled else { return }
     guard state != .off, let document = lastDocument ?? runtimeFileStore.loadDocument() else {
+      systemProxyState = .pending
       return
     }
-
     state = .starting
     await presentLaunchHealth(document)
   }
 
-  /// GUI 启动重同步（D5「GUI 下次启动重新校验同步」）：注册态是代理意图的
-  /// 事实来源——注册过即视为开启并重校验；随后与磁盘契约对齐（相同内容跳
-  /// 过写入）。GUI 崩溃期间 agent 与 wrapper 均不受影响。
+  /// GUI 启动重同步（D5「GUI 下次启动重新校验同步」；issue #60）：agent 意图
+  /// 来自持久化设置——开启则自动注册/收敛 LaunchAgent 并部署（无活动目标时
+  /// 以空服务器列表提供监听）；关闭则恢复系统代理后按停止协议收敛。GUI 崩溃
+  /// 期间 agent 与 wrapper 均不受影响。
   func resyncOnLaunch() async {
-    let catalog = catalogSnapshotReader.catalogSnapshot
-    switch reexpand(in: catalog) {
-    case .deployed(let configuration):
-      let status = agent.status
-      if status == .registered || status == .requiresApproval {
-        await deploy(configuration.document)
-      } else {
-        // 未注册但可能残留运行时文件（上次异常退出）：清理残留，保持停止态。
-        runtimeFileStore.deleteRuntimeFiles()
-        RuntimeLog.emit(.runtimeFilesDeleted)
-        let restoreError = restoreSystemProxyError()
-        state =
-          restoreError.map {
-            .systemProxyFailed(systemProxyFacts(for: $0))
-          } ?? .off
-        pacURL = nil
-      }
-    case .clearedAndStopped(let failure):
-      await handleCleared(failure)
-    case nil:
-      // 无活动目标：只剩清理残留（计划层只在已注册时注销）。
-      let restoreError = restoreSystemProxyError()
-      _ = await execute(.stop, document: nil)
-      state =
-        restoreError.map {
-          .systemProxyFailed(systemProxyFacts(for: $0))
-        } ?? .off
-      pacURL = nil
-    }
-  }
-
-  // MARK: - 动作执行
-
-  private func enable() async {
-    guard machine.activeTargetID != nil else {
-      presentNoActiveTarget()
+    guard settings.agentEnabled else {
+      await stopAgent()
       return
     }
     let catalog = catalogSnapshotReader.catalogSnapshot
@@ -299,13 +316,49 @@ final class ProxyRuntimeController: ObservableObject {
     case .clearedAndStopped(let failure):
       await handleCleared(failure)
     case nil:
-      presentNoActiveTarget()
+      await deployListeningWithoutTarget()
     }
   }
 
-  private func presentNoActiveTarget() {
-    RuntimeLog.emit(.activationFailed(reason: "no active target"))
-    state = .activationFailed(.noActiveTarget)
+  // MARK: - 动作执行
+
+  /// Agent 意图开启的收敛：注册态不是事实来源，意图才是——未注册也会注册
+  /// （首次运行默认开启），已注册则重校验目标并部署。
+  private func convergeAgent() async {
+    let catalog = catalogSnapshotReader.catalogSnapshot
+    switch reexpand(in: catalog) {
+    case .deployed(let configuration):
+      await deploy(configuration.document)
+    case .clearedAndStopped(let failure):
+      await handleCleared(failure)
+    case nil:
+      await deployListeningWithoutTarget()
+    }
+  }
+
+  /// Agent 意图关闭的收敛（issue #60 验收次序）：先按 ownership 规则恢复
+  /// NG2 持有的系统设置，再注销 agent 停止本地监听并清理运行时文件。
+  private func stopAgent() async {
+    let restoreError = restoreSystemProxyError()
+    _ = await execute(.stop, document: nil)
+    state = .off
+    pacURL = nil
+    lastDocument = nil
+    skippedServers = []
+    lastActivationFailure = nil
+    systemProxyState = restoreError.map { .failed(systemProxyFacts(for: $0)) } ?? .idle
+  }
+
+  /// 无活动目标时 agent 仍提供本地监听（issue #60）：空服务器列表文档，
+  /// SOCKS/HTTP/PAC 端点照常绑定；系统代理门禁会因缺少可用出口保持待应用。
+  private func deployListeningWithoutTarget() async {
+    let document = SslocalRuntimeDocument(
+      servers: [],
+      listen: settings.listen,
+      timeout: settings.timeoutSeconds,
+      verbose: settings.verboseLogging,
+      pacUserRules: settings.pacUserRules)
+    await deploy(document)
   }
 
   /// 把「运行定义档」意图推到运行时：计划动作 → 顺序执行 → 端点健康呈现。
@@ -326,38 +379,44 @@ final class ProxyRuntimeController: ObservableObject {
   /// 系统擅自改端口——停止运行时并点名呈现，等用户在设置区修复（#33 接线）。
   private func refuseDeployForUnreadableListenSettings() async {
     RuntimeLog.emit(.activationFailed(reason: "listen settings unreadable"))
-    let restoreError = restoreSystemProxyError()
     _ = await execute(.stop, document: nil)
     pacURL = nil
     lastDocument = nil
     skippedServers = []
-    if let restoreError {
-      state = .systemProxyFailed(systemProxyFacts(for: restoreError))
-    } else {
-      state = .launchFailed(.unreadableSettings)
-    }
+    state = .launchFailed(.unreadableSettings)
+    await withdrawSystemProxyAfterEntryLoss()
   }
 
+  /// 活动目标失效（issue #60）：清除并持久化 nil，点名原因独立呈现；agent
+  /// 继续以空服务器列表监听；系统代理安全撤回（意图保留，条件恢复后自动
+  /// 收敛），不悄悄选择其他服务器。
   private func handleCleared(_ failure: ActivationFailure) async {
     RuntimeLog.emit(.activationFailed(reason: String(describing: failure)))
     do {
       try activationFileStore.save(activeTargetID: nil)
     } catch {
-      // 清目标失败不阻断停止：下次重同步会再次收敛（目标已不在状态机中）。
+      // 清目标失败不阻断收敛：下次重同步会再次收敛（目标已不在状态机中）。
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
     }
-    let restoreError = restoreSystemProxyError()
-    _ = await execute(.stop, document: nil)
-    pacURL = nil
-    lastDocument = nil
+    lastActivationFailure = failure
     skippedServers = []
-    if let restoreError {
-      state = .systemProxyFailed(systemProxyFacts(for: restoreError))
+    await withdrawSystemProxyAfterEntryLoss()
+    if settings.agentEnabled {
+      await deployListeningWithoutTarget()
     } else {
-      state = .activationFailed(failure)
+      // 会话内意图已被关闭的残余：按关闭语义收敛。
+      _ = await execute(.stop, document: nil)
+      state = .off
+      pacURL = nil
+      lastDocument = nil
     }
   }
 
+}
+
+// MARK: - 计划动作执行（同文件扩展：private 对本文件可见）
+
+extension ProxyRuntimeController {
   /// 按计划顺序执行动作；返回 false 表示中途失败、状态已呈现（后续动作与
   /// 健康探测都不应继续）。
   private func execute(_ intent: RuntimeIntent, document: SslocalRuntimeDocument?) async -> Bool {
@@ -432,14 +491,14 @@ final class ProxyRuntimeController: ObservableObject {
   }
 }
 
-extension ProxyRuntimeController.ProxyState {
-  /// 代理开关的当前意图（菜单开关与设置工作流共用的同一判定）：启动失败等
-  /// 未运行态视为未开——两个入口的下一步动作都是「启动」。
+extension ProxyRuntimeController.AgentRunState {
+  /// Agent 运行状态的「在跑」投影（状态摘要与诊断口径）：启动失败等未运行
+  /// 态视为未跑。
   var isOn: Bool {
     switch self {
-    case .off, .launchFailed, .activationFailed, .serviceFailed:
+    case .off, .launchFailed, .serviceFailed:
       false
-    case .starting, .running, .firewallBlocked, .requiresApproval, .systemProxyFailed:
+    case .starting, .running, .firewallBlocked, .requiresApproval:
       true
     }
   }
@@ -449,49 +508,65 @@ extension ProxyRuntimeController: Activating {}
 
 extension ProxyRuntimeController {
   /// 目录提交协调器的生产适配入口（issue #40）：以刚提交的内存快照重展开，
-  /// 不回读磁盘（磁盘仍是重启与跨进程恢复的权威来源）。有效非空且代理开启
-  /// → 原子更新运行时；目标失效 → 清除目标并停止代理。返回结构化收敛结果，
-  /// 健康检查耗时属于本调用的异步收敛阶段，不改变「目录已提交」的事实。
+  /// 不回读磁盘（磁盘仍是重启与跨进程恢复的权威来源）。agent 意图开启时
+  /// 原子更新运行时；目标失效 → 清除目标但 agent 继续监听。返回结构化收敛
+  /// 结果，健康检查耗时属于本调用的异步收敛阶段，不改变「目录已提交」的事实。
   func catalogDidCommit(snapshot catalog: ConfigurationCatalog) async -> RuntimeSyncOutcome {
     switch reexpand(in: catalog) {
     case .deployed(let configuration):
-      guard state != .off else {
+      guard settings.agentEnabled else {
         return .revalidated
       }
       await deploy(configuration.document)
-      return Self.syncOutcome(for: state, skippedServers: configuration.skippedServers)
+      return Self.syncOutcome(
+        agentState: state, systemProxyState: systemProxyState,
+        skippedServers: configuration.skippedServers)
     case .clearedAndStopped(let failure):
       await handleCleared(failure)
       return .clearedAndStopped(failure)
     case nil:
-      return .revalidated
+      guard settings.agentEnabled else {
+        return .revalidated
+      }
+      // 无活动目标：已在以空列表监听则不重走健康门（目录提交不该让状态闪回
+      // starting）；否则补齐空监听。
+      if state != .off, lastDocument?.servers.isEmpty == true {
+        return Self.syncOutcome(
+          agentState: state, systemProxyState: systemProxyState, skippedServers: [])
+      }
+      await deployListeningWithoutTarget()
+      return Self.syncOutcome(
+        agentState: state, systemProxyState: systemProxyState, skippedServers: [])
     }
   }
 
   /// 部署后的控制器状态 → 结构化收敛结果：健康通过（含防火墙受阻的运行态）
-  /// 视为已收敛；启动、服务、系统代理与激活拒绝都视为未收敛并携带点名细节。
+  /// 视为已收敛；系统代理写入失败携带点名细节，待应用不算目录收敛失败。
   private static func syncOutcome(
-    for state: ProxyState, skippedServers: [SkippedServer]
+    agentState: AgentRunState, systemProxyState: SystemProxyControlState,
+    skippedServers: [SkippedServer]
   ) -> RuntimeSyncOutcome {
-    switch state {
+    if case .failed(let facts) = systemProxyState {
+      return .failed(failure: .systemProxy(facts))
+    }
+    switch agentState {
     case .running, .firewallBlocked:
-      .converged(skippedServers: skippedServers)
+      return .converged(skippedServers: skippedServers)
     case .launchFailed(let facts):
-      .failed(failure: .launch(facts))
+      return .failed(failure: .launch(facts))
     case .serviceFailed(let facts):
-      .failed(failure: .service(facts))
-    case .systemProxyFailed(let facts):
-      .failed(failure: .systemProxy(facts))
-    case .activationFailed(let failure):
-      .failed(failure: .activation(failure))
+      return .failed(failure: .service(facts))
     case .requiresApproval, .off, .starting:
-      .failed(failure: nil)
+      return .failed(failure: nil)
     }
   }
 
   /// SettingsWorkflow 只需要知道 runtime 是否独立收敛，以及失败的安全 typed
   /// fact；它不消费控制器内部的 state machine。
   private func settingsRuntimeOutcome() -> SettingsRuntimeOutcome {
+    if case .failed(let facts) = systemProxyState {
+      return .failed(.systemProxy(facts))
+    }
     switch state {
     case .off:
       return .notRunning
@@ -501,21 +576,17 @@ extension ProxyRuntimeController {
       return .failed(.firewallBlocked(facts))
     case .launchFailed(let facts):
       return .failed(.launch(facts))
-    case .activationFailed(let failure):
-      return .failed(.activation(failure))
     case .requiresApproval:
       return .failed(.requiresApproval)
     case .serviceFailed(let facts):
       return .failed(.service(facts))
-    case .systemProxyFailed(let facts):
-      return .failed(.systemProxy(facts))
     case .starting:
       return .failed(nil)
     }
   }
 
-  /// Persists a fully validated settings snapshot and, when the proxy is
-  /// active, re-derives the same runtime path with the new snapshot.
+  /// Persists a fully validated settings snapshot and, when the agent is
+  /// running, re-derives the same runtime path with the new snapshot.
   func updateSettings(_ proposed: ProxySettings) async throws -> SettingsRuntimeOutcome {
     let catalog = catalogSnapshotReader.catalogSnapshot
     try settingsStore.save(proposed)
@@ -529,24 +600,27 @@ extension ProxyRuntimeController {
     case .clearedAndStopped(let failure):
       await handleCleared(failure)
     case nil:
-      break
+      await deployListeningWithoutTarget()
     }
     return settingsRuntimeOutcome()
   }
 
   /// Restores factory defaults, removes the persisted snapshot and stops any
-  /// active runtime before the next user action can use the defaults.
+  /// active runtime before the next user action can use the defaults. Factory
+  /// intents are agent on / system proxy off, so held system settings are
+  /// restored and the agent stops until the next convergence.
   func resetPreferences() async throws -> SettingsRuntimeOutcome {
     try settingsStore.reset()
     settings = ProxySettings()
     listenSettingsUnreadable = false
     settingsUnreadable = false
     proxyMode = .pac
-    if state != .off {
-      await setProxyEnabled(false)
-      return state == .off ? .stopped : settingsRuntimeOutcome()
+    lastActivationFailure = nil
+    await stopAgent()
+    if case .failed(let facts) = systemProxyState {
+      return .failed(.systemProxy(facts))
     }
-    return .notRunning
+    return .stopped
   }
 
   /// Applies the post-import 2.0 runtime boundary without touching
@@ -561,6 +635,9 @@ extension ProxyRuntimeController {
     pacURL = nil
     lastDocument = nil
     skippedServers = []
+    lastActivationFailure = nil
+    // 导入边界不触碰 SystemConfiguration（既有不变量），系统代理状态面同
+    // 样不动：它呈现的是系统设置的真实作用，不由导入改写。
 
     if let restored = try? settingsStore.load() {
       settings = restored
@@ -582,7 +659,8 @@ extension ProxyRuntimeController {
   }
 
   /// 启动健康呈现（D2/D7/D8）：先确认 sslocal 的 SOCKS/HTTP TCP 绑定，再
-  /// GET PAC endpoint；主机态额外查询应用防火墙拒绝记录。任一端点超时都点名呈现。
+  /// GET PAC endpoint；主机态额外查询应用防火墙拒绝记录。任一端点超时都点名
+  /// 呈现。健康通过后系统代理按意图与门禁收敛（不在此无条件写入）。
   private func presentLaunchHealth(_ document: SslocalRuntimeDocument) async {
     let generation = flowGeneration
     let deadline = Date().addingTimeInterval(15)
@@ -595,14 +673,15 @@ extension ProxyRuntimeController {
         guard let healthURL = document.pac.healthURL else {
           state = .launchFailed(
             .pacEndpoint(port: document.pac.port, cause: .invalidResponse))
+          await withdrawSystemProxyAfterEntryLoss()
           return
         }
         pacOutcome = await pacProbe.probe(url: healthURL, timeout: 1.5)
         if pacOutcome == .reachable {
           guard generation == flowGeneration else { return }
           pacURL = document.pac.publicURL
-          guard applySystemProxy(for: document) else { return }
           await presentFirewallStatus(for: document)
+          await convergeSystemProxy()
           return
         }
       }
@@ -611,16 +690,17 @@ extension ProxyRuntimeController {
     if generation != flowGeneration { return }
     if let endpointFailure {
       presentEndpointFailure(endpointFailure)
-      return
+    } else {
+      let pacFailure: RuntimeEndpointFailure
+      switch pacOutcome {
+      case .reachable:
+        pacFailure = .unknown
+      case .failed:
+        pacFailure = runtimeEndpointFailure(from: pacOutcome)
+      }
+      state = .launchFailed(.pacEndpoint(port: document.pac.port, cause: pacFailure))
     }
-    let pacFailure: RuntimeEndpointFailure
-    switch pacOutcome {
-    case .reachable:
-      pacFailure = .unknown
-    case .failed:
-      pacFailure = runtimeEndpointFailure(from: pacOutcome)
-    }
-    state = .launchFailed(.pacEndpoint(port: document.pac.port, cause: pacFailure))
+    await withdrawSystemProxyAfterEntryLoss()
   }
 
   private func unhealthyLocalEndpoint(
@@ -768,16 +848,55 @@ extension ProxyRuntimeController {
     String(describing: error)
   }
 
-  private func applySystemProxy(for document: SslocalRuntimeDocument) -> Bool {
+  // MARK: - 系统代理门禁（issue #60）
+
+  /// 系统代理收敛：意图开启 + agent 健康 + 所选模式具备可用出口（活动目标
+  /// 通过本地预检）才写入；否则保持待应用，条件恢复后随下次收敛自动应用。
+  /// 意图关闭时不做任何事（呈现面保持 idle/既有失败态）。
+  private func convergeSystemProxy() async {
+    guard settings.systemProxyEnabled else { return }
+    guard systemProxyExitAvailable, let document = lastDocument else {
+      systemProxyState = .pending
+      return
+    }
     do {
       let configuration = try proxyMode.systemProxyConfiguration(
         for: document, exceptions: settings.proxyExceptionList)
       try systemProxy.apply(configuration)
-      return true
+      systemProxyState = .applied
     } catch {
-      state = .systemProxyFailed(systemProxyFacts(for: error))
+      systemProxyState = .failed(systemProxyFacts(for: error))
+    }
+  }
+
+  /// 出口可用 = agent 入站健康（回环入口可用，含防火墙仅阻主机态的情形）
+  /// 且存在活动目标（模式所需出口）。远端网络可达性不在承诺范围内。
+  private var systemProxyExitAvailable: Bool {
+    switch state {
+    case .running, .firewallBlocked:
+      return activeTargetID != nil
+    case .off, .starting, .launchFailed, .requiresApproval, .serviceFailed:
       return false
     }
+  }
+
+  /// agent 入站不可用（启动失败、目标清除、监听设置不可读）时的安全撤回：
+  /// 尽力恢复 NG2 持有的系统设置；意图保留为待应用，条件恢复后自动收敛。
+  /// 恢复失败以 typed 呈现——系统设置仍被 NG2 持有时用户必须知道。
+  private func withdrawSystemProxyAfterEntryLoss() async {
+    if let error = restoreSystemProxyError() {
+      systemProxyState = .failed(systemProxyFacts(for: error))
+      return
+    }
+    systemProxyState = settings.systemProxyEnabled ? .pending : .idle
+  }
+
+  /// 恢复 NG2 持有的系统设置；成功 → `.idle`，失败 → typed 失败。
+  private func restoreSystemProxyOutcome() -> SystemProxyControlState {
+    if let error = restoreSystemProxyError() {
+      return .failed(systemProxyFacts(for: error))
+    }
+    return .idle
   }
 
   private func restoreSystemProxyError() -> Error? {

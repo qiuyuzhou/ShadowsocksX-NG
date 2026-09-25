@@ -2,9 +2,10 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 状态菜单八项白名单的纯呈现逻辑（spec #21 D11，issue #31/#47）：头部状态
-/// 摘要从代理控制工作流的整体 snapshot 派生。不持有 AppKit 类型；HTTP 导出
-/// 行与目标路径摘要分别在代理控制与目录 module 测试覆盖。
+/// 状态菜单呈现逻辑（spec #21 D11，issue #31/#47/#60）：头部状态摘要从代理
+/// 控制工作流的整体 snapshot 派生，agent 与系统代理两个状态面分开呈现。不
+/// 持有 AppKit 类型；HTTP 导出行与目标路径摘要分别在代理控制与目录 module
+/// 测试覆盖。
 final class StatusMenuModelTests: XCTestCase {
   private struct RuntimeSummaryCase {
     let facts: ProxyRuntimeFacts
@@ -39,13 +40,6 @@ final class StatusMenuModelTests: XCTestCase {
       expectedIsOn: false),
     RuntimeSummaryCase(
       facts: ProxyRuntimeFacts(
-        status: .activationFailed,
-        isOn: false,
-        failure: .activation(.noActiveTarget)),
-      expectedStatus: "无法启动",
-      expectedIsOn: false),
-    RuntimeSummaryCase(
-      facts: ProxyRuntimeFacts(
         status: .requiresApproval, isOn: true, failure: .requiresApproval),
       expectedStatus: "等待允许后台代理",
       expectedIsOn: true),
@@ -56,23 +50,24 @@ final class StatusMenuModelTests: XCTestCase {
         failure: .service(.persistence)),
       expectedStatus: "服务管理失败",
       expectedIsOn: false),
-    RuntimeSummaryCase(
-      facts: ProxyRuntimeFacts(
-        status: .systemProxyFailed,
-        isOn: true,
-        failure: .systemProxy(.operation(.applyFailed))),
-      expectedStatus: "系统代理未应用",
-      expectedIsOn: true),
   ]
 
   /// 从运行时事实构造最小 snapshot（其余字段与本组用例无关）。
   private func makeSnapshot(
     facts: ProxyRuntimeFacts,
+    agentIntent: Bool = true,
+    activationFailure: ActivationFailure? = nil,
+    systemProxyIntent: Bool = false,
+    systemProxyApplication: SystemProxyApplicationFacts = .idle,
     mode: ProxyMode = .pac,
     activeTarget: ProxyActiveTargetFacts? = nil
   ) -> ProxyControlSnapshot {
     ProxyControlSnapshot(
       runtime: facts,
+      agentIntentEnabled: agentIntent,
+      activationFailure: activationFailure,
+      systemProxyIntentEnabled: systemProxyIntent,
+      systemProxyApplication: systemProxyApplication,
       proxyMode: mode,
       availableModes: ProxyMode.availableModes,
       activeTarget: activeTarget,
@@ -87,6 +82,7 @@ final class StatusMenuModelTests: XCTestCase {
   func testSummaryRunningStateIsOnWithNoDetail() {
     let summary = StatusMenuModel.summary(
       from: makeSnapshot(facts: ProxyRuntimeFacts(status: .running, isOn: true)))
+    XCTAssertTrue(summary.agentIntentEnabled)
     XCTAssertTrue(summary.isOn)
     XCTAssertEqual(summary.status, "代理运行中")
     XCTAssertNil(summary.detail)
@@ -94,7 +90,11 @@ final class StatusMenuModelTests: XCTestCase {
 
   func testSummaryOffStateIsOff() {
     let summary = StatusMenuModel.summary(
-      from: makeSnapshot(facts: ProxyRuntimeFacts(status: .off, isOn: false), mode: .global))
+      from: makeSnapshot(
+        facts: ProxyRuntimeFacts(status: .off, isOn: false),
+        agentIntent: false,
+        mode: .global))
+    XCTAssertFalse(summary.agentIntentEnabled, "开关意图独立于运行状态")
     XCTAssertFalse(summary.isOn)
     XCTAssertEqual(summary.status, "代理未运行")
     XCTAssertNil(summary.detail)
@@ -109,6 +109,59 @@ final class StatusMenuModelTests: XCTestCase {
         summary.detail,
         testCase.facts.failure.map { AppPresentation.message(for: $0) })
     }
+  }
+
+  /// 激活拒绝/目标清除的点名原因独立于运行状态呈现（issue #60）：agent 仍
+  /// 在监听时也必须可读。
+  func testSummaryCarriesActivationFailureAlongsideRunningState() {
+    let summary = StatusMenuModel.summary(
+      from: makeSnapshot(
+        facts: ProxyRuntimeFacts(status: .running, isOn: true),
+        activationFailure: .targetNotFound(NodeID(rawValue: "manual:gone"))))
+    XCTAssertEqual(summary.status, "代理运行中")
+    XCTAssertEqual(
+      summary.detail,
+      AppPresentation.message(
+        for: ActivationFailure.targetNotFound(
+          NodeID(rawValue: "manual:gone"))))
+  }
+
+  /// 系统代理状态面（issue #60）：意图与实际应用分开，失败携带点名原因。
+  func testSummaryProjectsSystemProxyApplicationIndependently() {
+    let idle = StatusMenuModel.summary(
+      from: makeSnapshot(
+        facts: ProxyRuntimeFacts(status: .off, isOn: false),
+        systemProxyIntent: false,
+        systemProxyApplication: .idle))
+    XCTAssertFalse(idle.systemProxyIntentEnabled)
+    XCTAssertEqual(idle.systemProxyStatus, "系统代理：未接管")
+    XCTAssertNil(idle.systemProxyDetail)
+
+    let pending = StatusMenuModel.summary(
+      from: makeSnapshot(
+        facts: ProxyRuntimeFacts(status: .running, isOn: true),
+        systemProxyIntent: true,
+        systemProxyApplication: .pending))
+    XCTAssertTrue(pending.systemProxyIntentEnabled)
+    XCTAssertEqual(pending.systemProxyStatus, "系统代理：待应用")
+    XCTAssertNil(pending.systemProxyDetail)
+
+    let applied = StatusMenuModel.summary(
+      from: makeSnapshot(
+        facts: ProxyRuntimeFacts(status: .running, isOn: true),
+        systemProxyIntent: true,
+        systemProxyApplication: .applied))
+    XCTAssertEqual(applied.systemProxyStatus, "系统代理：已应用")
+
+    let failed = StatusMenuModel.summary(
+      from: makeSnapshot(
+        facts: ProxyRuntimeFacts(status: .running, isOn: true),
+        systemProxyIntent: true,
+        systemProxyApplication: .failed(.ownershipConflict)))
+    XCTAssertEqual(failed.systemProxyStatus, "系统代理：应用失败")
+    XCTAssertEqual(
+      failed.systemProxyDetail,
+      AppPresentation.message(for: RuntimeFailureFacts.systemProxy(.ownershipConflict)))
   }
 
   func testSummaryCarriesModeLabelAndTargetPathFromSnapshot() {

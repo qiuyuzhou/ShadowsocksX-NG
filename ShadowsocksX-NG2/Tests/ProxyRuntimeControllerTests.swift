@@ -3,8 +3,9 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 代理运行时控制器（issue #27）：以替身注入 LaunchAgent 与端点探测，验证
-/// 代理开关、目录重展开消费与 GUI 重同步重合（不触真实 SMAppService/launchd）。
+/// 代理运行时控制器（issue #27/#60）：以替身注入 LaunchAgent 与端点探测，验证
+/// agent 开关与系统代理开关的独立语义、目录重展开消费与 GUI 重同步重合（不
+/// 触真实 SMAppService/launchd/SystemConfiguration）。
 @MainActor
 final class ProxyRuntimeControllerTests: XCTestCase {
   private var runtime: ProxyRuntimeFixture.TemporaryRuntime!
@@ -68,6 +69,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     agentStatus: LaunchAgentStatus = .notRegistered,
     listen: SslocalListenSettings = ActivationFixture.listen,
     settingsStore: ProxySettingsStoring? = nil,
+    settings: ProxySettings? = nil,
     settingsRestore: RestoredProxySettings? = nil,
     pacProbe: PACHealthProbing = ProxyRuntimeFixture.FakePACProbe(),
     proxyMode: ProxyMode? = .pac,
@@ -77,6 +79,10 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     firewallPollIntervalNanoseconds: UInt64 = 1_000_000
   ) -> ProxyRuntimeController {
     agent.setStatus(agentStatus)
+    let restored =
+      settingsRestore
+      ?? RestoredProxySettings(
+        settings: settings ?? ProxySettings(listen: listen), unreadableError: nil)
     return ProxyRuntimeController(
       catalogSnapshotReader: ProxyRuntimeFixture.catalogSnapshotReader(at: catalogFileURL),
       activationFileStore: ActivationStateFileStore(fileURL: activationFileURL),
@@ -85,7 +91,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       plugins: ActivationFixture.plugins,
       listenRestore: RestoredListenSettings(settings: listen, unreadableError: nil),
       settingsStore: settingsStore ?? InMemoryProxySettingsStore(),
-      settingsRestore: settingsRestore,
+      settingsRestore: restored,
       agent: agent,
       probe: probe,
       pacProbe: pacProbe,
@@ -97,26 +103,13 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       sendSignal: { [signals] pid, number in signals!.send(pid, number) })
   }
 
-  // MARK: 代理开关
+  // MARK: Agent 开关与首次默认
 
-  func testEnableWithoutActiveTargetPresentsNamedFailureAndStartsNothing() async throws {
-    _ = try makeSeededCatalog()
-    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
-
-    await controller.setProxyEnabled(true)
-
-    XCTAssertEqual(
-      controller.state,
-      .activationFailed(.noActiveTarget))
-    XCTAssertEqual(agent.registerCount, 0, "无目标不触碰 launchd（无静默回退）")
-    XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
-  }
-
-  /// 菜单栏「目标」行的实时性（issue #31）：代理关闭时激活只改活动目标、
-  /// 不触碰 state，目标变更必须仍经 @Published 发布到菜单。
-  func testActivateWhileProxyOffPublishesActiveTargetID() async throws {
+  func testActivateWhileAgentOffPublishesActiveTargetIDWithoutDeploying() async throws {
     let seeded = try makeSeededCatalog()
-    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
     var observed: NodeID?
     let cancellable = controller.$activeTargetID.dropFirst().sink { observed = $0 }
     defer { cancellable.cancel() }
@@ -124,8 +117,9 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     try await controller.activate(seeded.server)
 
     XCTAssertEqual(controller.activeTargetID, seeded.server)
-    XCTAssertEqual(observed, seeded.server, "代理关闭路径的激活也要发布目标变更")
-    XCTAssertEqual(controller.state, .off, "仅激活不启动代理")
+    XCTAssertEqual(observed, seeded.server, "agent 关闭路径的激活也要发布目标变更")
+    XCTAssertEqual(controller.state, .off, "agent 意图关闭时仅选择目标，不部署")
+    XCTAssertEqual(agent.registerCount, 0)
   }
 
   func testActivateThenEnableWritesContractRegistersAndReachesRunning() async throws {
@@ -134,7 +128,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let controller = makeController(probe: probe)
 
     try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
+    await controller.setAgentEnabled(true)
 
     XCTAssertEqual(controller.state, .running)
     XCTAssertEqual(agent.registerCount, 1)
@@ -145,24 +139,23 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(onDisk.servers.count, 1)
     XCTAssertEqual(onDisk.socksPort, ActivationFixture.listen.socksPort)
     XCTAssertEqual(onDisk.servers.first?.password, "pw-香港 01", "凭据已解析进文档")
-    XCTAssertEqual(
-      systemProxy.applied,
-      [
-        SystemProxyConfiguration(
-          target: .pac(URL(string: "http://127.0.0.1:11089/v1/proxy.pac")!),
-          exceptions: ProxySettings().proxyExceptionList)
-      ],
-      "PAC 只有在本地 SOCKS 与 PAC 健康后才写入系统代理")
-    XCTAssertEqual(probe.ports, [11086, 11087], "系统代理写入前必须探测 SOCKS 和 HTTP 入站")
+    XCTAssertTrue(
+      systemProxy.applied.isEmpty, "系统代理意图默认关闭：agent 运行也不写系统设置")
+    XCTAssertEqual(probe.ports, [11086, 11087], "健康门先探测 SOCKS 和 HTTP 入站")
   }
 
-  func testSwitchingGlobalAndPACModesIsImmediateAndRestoresOnStop() async throws {
+  func testSwitchingGlobalAndPACModesIsImmediateAndRestoresOnAgentOff() async throws {
     let seeded = try makeSeededCatalog()
     let controller = makeController(
-      probe: ProxyRuntimeFixture.FakeProbe.reachable(), proxyMode: .global)
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settings: ProxySettings(
+        listen: ActivationFixture.listen,
+        preferredMode: .global,
+        systemProxyEnabled: true),
+      proxyMode: .global)
 
     try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
+    await controller.setAgentEnabled(true)
     XCTAssertEqual(
       systemProxy.applied,
       [
@@ -180,9 +173,9 @@ final class ProxyRuntimeControllerTests: XCTestCase {
         target: .pac(URL(string: "http://127.0.0.1:11089/v1/proxy.pac")!),
         exceptions: ProxySettings().proxyExceptionList))
 
-    await controller.setProxyEnabled(false)
+    await controller.setAgentEnabled(false)
     XCTAssertEqual(controller.state, .off)
-    XCTAssertEqual(systemProxy.restoreCount, 1, "停止代理撤除 2.0 写入的系统代理")
+    XCTAssertEqual(systemProxy.restoreCount, 1, "关闭 agent 撤除 2.0 写入的系统代理")
   }
 
   func testEnableWhenProbeNeverSucceedsPresentsFailureNamingEndpointAndPort() async throws {
@@ -191,7 +184,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       probe: ProxyRuntimeFixture.FakeProbe.refusing(), agentStatus: .notRegistered)
 
     try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
+    await controller.setAgentEnabled(true)
 
     guard case .launchFailed(.localEndpoint(_, _, let port, let cause)) = controller.state else {
       XCTFail("应呈现启动失败，实际 \(controller.state)")
@@ -200,15 +193,16 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(port, 11086)
     XCTAssertEqual(cause, .refused)
     XCTAssertTrue(systemProxy.applied.isEmpty, "端点不健康时不得写系统代理")
+    XCTAssertEqual(controller.systemProxyState, .idle, "系统代理意图默认关闭")
   }
 
-  func testDisableUnregistersAndCleansRuntimeFiles() async throws {
+  func testDisableAgentUnregistersAndCleansRuntimeFiles() async throws {
     let seeded = try makeSeededCatalog()
     let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
     try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
+    await controller.setAgentEnabled(true)
 
-    await controller.setProxyEnabled(false)
+    await controller.setAgentEnabled(false)
 
     XCTAssertEqual(controller.state, .off)
     XCTAssertEqual(agent.unregisterCount, 1)
@@ -223,7 +217,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       probe: ProxyRuntimeFixture.FakeProbe.reachable(), firewallChecker: firewall)
 
     try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
+    await controller.setAgentEnabled(true)
 
     XCTAssertEqual(controller.state, .running)
     XCTAssertTrue(firewall.checkedURLs.isEmpty, "回环态与应用防火墙零交互")
@@ -244,7 +238,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       firewallChecker: firewall)
 
     try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
+    await controller.setAgentEnabled(true)
 
     guard case .firewallBlocked(let facts) = controller.state else {
       XCTFail("主机态被拒应呈现防火墙状态，实际 \(controller.state)")
@@ -266,7 +260,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       firewallChecker: firewall)
 
     try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
+    await controller.setAgentEnabled(true)
 
     let deadline = Date().addingTimeInterval(1)
     while controller.state == .running && Date() < deadline {
@@ -287,7 +281,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let seeded = try makeSeededCatalog()
     let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
     try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
+    await controller.setAgentEnabled(true)
     // 模拟 wrapper 在跑：pid 指向本测试进程（kill(pid, 0) 判活通过）。
     try Data("\(ProcessInfo.processInfo.processIdentifier)".utf8).write(to: runtime.pidFile)
 
@@ -318,32 +312,6 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(signalsSent.first?.signal, SIGUSR1)
   }
 
-  func testInvalidTargetOnCommitClearsPersistsNilAndStops() async throws {
-    let seeded = try makeSeededCatalog()
-    try Data("\(ProcessInfo.processInfo.processIdentifier)".utf8).write(to: runtime.pidFile)
-    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
-    try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
-
-    // 删除活动目标 → 重展开失败 → 清除并停止。
-    var catalog = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
-    try catalog.remove(seeded.server)
-    try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
-
-    // 协调器生产适配入口（issue #40）：以刚提交的内存快照重展开。
-    let committed = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
-    await controller.catalogDidCommit(snapshot: committed)
-
-    guard case .activationFailed = controller.state else {
-      XCTFail("应呈现点名原因，实际 \(controller.state)")
-      return
-    }
-    let persisted = try ActivationStateFileStore(fileURL: activationFileURL).loadActiveTargetID()
-    XCTAssertNil(persisted, "活动目标已清除")
-    XCTAssertEqual(agent.unregisterCount, 1)
-    XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
-  }
-
   // MARK: GUI 重启重同步（D5）
 
   func testResyncWithRegisteredAgentAndMatchingContractSkipsRewrite() async throws {
@@ -351,7 +319,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(), agentStatus: .notRegistered)
     try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
+    await controller.setAgentEnabled(true)
     XCTAssertTrue(agent.registerCount >= 1)
     let contractMtime =
       try FileManager.default.attributesOfItem(
@@ -377,22 +345,63 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       "内容一致不需要 reload 信号")
   }
 
-  func testResyncWithUnregisteredAgentCleansResidueAndStaysOff() async throws {
+  func testLegacyImportBoundaryStopsRuntimeWithoutRestoringSystemProxy() async throws {
     let seeded = try makeSeededCatalog()
-    try Data("stale contract".utf8).write(to: runtime.contract)
-    try Data("99999".utf8).write(to: runtime.pidFile)
+    let settingsStore = InMemoryProxySettingsStore()
+    var importedSettings = ProxySettings()
+    importedSettings.preferredMode = .global
+    settingsStore.saved = importedSettings
     let controller = makeController(
-      probe: ProxyRuntimeFixture.FakeProbe.reachable(), agentStatus: .notRegistered)
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsStore: settingsStore,
+      systemProxy: systemProxy)
+
     try await controller.activate(seeded.server)
-    try ActivationStateFileStore(fileURL: activationFileURL).save(activeTargetID: seeded.server)
+    await controller.setAgentEnabled(true)
+    XCTAssertEqual(controller.state, .running)
 
-    await controller.resyncOnLaunch()
+    await controller.legacyImportDidCommit()
 
-    XCTAssertEqual(controller.state, .off, "未注册 = 代理意图关闭")
-    XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path), "残留契约被清理")
-    XCTAssertEqual(agent.registerCount, 0)
+    XCTAssertEqual(controller.state, .off)
+    XCTAssertEqual(controller.settings, importedSettings)
+    XCTAssertEqual(controller.activeTargetID, seeded.server)
+    XCTAssertEqual(systemProxy.restoreCount, 0, "Legacy 导入不能写入或恢复系统代理")
+    XCTAssertTrue(systemProxy.applied.isEmpty, "导入边界不应重新应用系统代理")
   }
 
+  func testUpdatingSettingsPersistsAndReactivatesTheRuntimeContract() async throws {
+    let seeded = try makeSeededCatalog()
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsStore: settingsStore,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, systemProxyEnabled: true))
+
+    try await controller.activate(seeded.server)
+    await controller.setAgentEnabled(true)
+
+    var next = controller.settings
+    next.timeoutSeconds = 120
+    next.verboseLogging = true
+    next.proxyExceptions = "localhost, 127.0.0.1"
+    try await controller.updateSettings(next)
+
+    let document = try XCTUnwrap(RuntimeFileStore(fileURL: runtime.contract).loadDocument())
+    XCTAssertEqual(controller.settings, next)
+    XCTAssertEqual(settingsStore.saved, next)
+    XCTAssertEqual(document.timeout, 120)
+    XCTAssertTrue(document.pac.verbose)
+    XCTAssertEqual(
+      systemProxy.applied.last?.exceptions,
+      ["localhost", "127.0.0.1"], "系统代理意图开启时随设置更新重新应用")
+  }
+
+  private enum FakeSettingsSaveError: Error, CustomStringConvertible {
+    case system
+
+    var description: String { "fake-save-error" }
+  }
 }
 
 extension ProxyRuntimeControllerTests {
@@ -432,32 +441,238 @@ extension ProxyRuntimeControllerTests {
     }
   }
 
-  func testLegacyImportBoundaryStopsRuntimeWithoutRestoringSystemProxy() async throws {
-    let seeded = try makeSeededCatalog()
+  /// Agent 开关持久化失败（issue #60）：保留现状并点名，不静默偏离持久化
+  /// 事实（否则重启后意图被覆盖）。
+  func testAgentTogglePersistenceFailureKeepsStateAndNamesReason() async throws {
     let settingsStore = InMemoryProxySettingsStore()
-    var importedSettings = ProxySettings()
-    importedSettings.preferredMode = .global
-    settingsStore.saved = importedSettings
+    settingsStore.saveError = FakeSettingsSaveError.system
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       settingsStore: settingsStore,
-      systemProxy: systemProxy)
+      settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
+
+    await controller.setAgentEnabled(true)
+
+    XCTAssertEqual(controller.state, .serviceFailed(.persistence))
+    XCTAssertFalse(controller.agentIntentEnabled, "持久化失败不改变内存意图")
+    XCTAssertEqual(agent.registerCount, 0, "意图未落地前不收敛运行时")
+  }
+}
+
+/// Agent 开关与系统代理开关的拆分语义（issue #60）：与既有开关用例同文件
+/// 追加（Xcode 测试扫描限制），扩展持有独立用例组。
+extension ProxyRuntimeControllerTests {
+  func testEnableWithoutActiveTargetDeploysEmptyServerListening() async throws {
+    _ = try makeSeededCatalog()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
+
+    await controller.setAgentEnabled(true)
+
+    XCTAssertEqual(controller.state, .running, "无活动目标 agent 仍提供本地监听")
+    XCTAssertEqual(agent.registerCount, 1, "开启意图驱动注册")
+    let onDisk = try XCTUnwrap(
+      RuntimeFileStore(fileURL: runtime.contract).loadDocument())
+    XCTAssertTrue(onDisk.servers.isEmpty, "无活动目标以空服务器列表监听")
+    XCTAssertEqual(onDisk.socksPort, ActivationFixture.listen.socksPort)
+    XCTAssertTrue(systemProxy.applied.isEmpty, "系统代理意图关闭，不写系统设置")
+    XCTAssertEqual(controller.systemProxyState, .idle)
+  }
+  /// 首次运行默认语义（issue #60）：GUI 重同步即按默认意图注册并监听，系统
+  /// 代理保持未接管。
+  func testFirstRunResyncStartsAgentWithoutSystemProxy() async throws {
+    _ = try makeSeededCatalog()
+    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
+
+    await controller.resyncOnLaunch()
+
+    XCTAssertEqual(controller.state, .running)
+    XCTAssertEqual(agent.registerCount, 1, "首次运行默认启动 agent")
+    let onDisk = try XCTUnwrap(
+      RuntimeFileStore(fileURL: runtime.contract).loadDocument())
+    XCTAssertTrue(onDisk.servers.isEmpty)
+    XCTAssertEqual(controller.systemProxyState, .idle)
+    XCTAssertTrue(systemProxy.applied.isEmpty)
+  }
+  /// 显式关闭 agent 的选择持久化（issue #60）：GUI 重启（全新控制器 + 恢复
+  /// 快照 + 注册态残留）后仍收敛到关闭。
+  func testExplicitAgentOffPersistsAcrossGUIRestart() async throws {
+    let seeded = try makeSeededCatalog()
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(), settingsStore: settingsStore)
+    try await controller.activate(seeded.server)
+    await controller.setAgentEnabled(false)
+    XCTAssertEqual(settingsStore.saved?.agentEnabled, false, "关闭选择已持久化")
+
+    // GUI 重启：agent 注册态残留、运行时文件残留，恢复快照携带关闭意图。
+    agent.setStatus(.registered)
+    try Data("stale contract".utf8).write(to: runtime.contract)
+    try Data("99999".utf8).write(to: runtime.pidFile)
+    let restarted = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      agentStatus: .registered,
+      settingsStore: settingsStore,
+      settingsRestore: RestoredProxySettings(
+        settings: try XCTUnwrap(settingsStore.load()), unreadableError: nil))
+
+    await restarted.resyncOnLaunch()
+
+    XCTAssertEqual(restarted.state, .off, "显式关闭的选择在 GUI 重启后仍生效")
+    XCTAssertEqual(agent.registerCount, 1, "重启后的关闭路径不得重新注册")
+    XCTAssertEqual(agent.unregisterCount, 2, "注册态残留按停止协议再次收敛")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
+  }
+  func testSystemProxyIntentAppliesOnlyAfterHealthGateAndExitAvailable() async throws {
+    let seeded = try makeSeededCatalog()
+    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
 
     try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
-    XCTAssertEqual(controller.state, .running)
-    XCTAssertEqual(systemProxy.applied.count, 1)
+    await controller.setAgentEnabled(true)
+    await controller.setSystemProxyEnabled(true)
 
-    await controller.legacyImportDidCommit()
-
-    XCTAssertEqual(controller.state, .off)
-    XCTAssertEqual(controller.settings, importedSettings)
-    XCTAssertEqual(controller.activeTargetID, seeded.server)
-    XCTAssertEqual(systemProxy.restoreCount, 0, "Legacy 导入不能写入或恢复系统代理")
-    XCTAssertEqual(systemProxy.applied.count, 1, "导入边界不应重新应用系统代理")
+    XCTAssertEqual(controller.systemProxyState, .applied)
+    XCTAssertEqual(
+      systemProxy.applied,
+      [
+        SystemProxyConfiguration(
+          target: .pac(URL(string: "http://127.0.0.1:11089/v1/proxy.pac")!),
+          exceptions: ProxySettings().proxyExceptionList)
+      ],
+      "系统代理只在本地端点健康且存在可用出口后写入")
   }
+  /// 端点不健康时系统代理意图保持待应用；条件恢复后随下次收敛自动应用，
+  /// 无需重新开关系统代理（issue #60「条件恢复后自动收敛」）。
+  func testSystemProxyIntentStaysPendingUntilEndpointsRecover() async throws {
+    let seeded = try makeSeededCatalog()
+    let probe = ProxyRuntimeFixture.FakeProbe.refusing()
+    let controller = makeController(probe: probe)
 
-  func testResyncWithInvalidActiveTargetClearsAndCleans() async throws {
+    // 激活即按默认意图部署：端点持续不可达 → 启动失败（走满 15 秒健康窗）。
+    try await controller.activate(seeded.server)
+    if case .launchFailed = controller.state {
+    } else {
+      XCTFail("端点不可达应呈现启动失败，实际 \(controller.state)")
+    }
+    await controller.setSystemProxyEnabled(true)
+    XCTAssertEqual(controller.systemProxyState, .pending, "意图保留为待应用")
+    XCTAssertTrue(systemProxy.applied.isEmpty, "端点不健康不得写系统代理")
+
+    // 条件恢复：探测可达后，下一次收敛自动应用待应用意图。
+    probe.setOutcomes([.reachable])
+    try await controller.activate(seeded.server)
+    XCTAssertEqual(controller.state, .running)
+    XCTAssertEqual(controller.systemProxyState, .applied, "恢复后自动收敛待应用意图")
+    XCTAssertEqual(systemProxy.applied.count, 1)
+  }
+  /// 关闭系统代理（issue #60）：只恢复 NG2 持有的系统设置；本地监听与 agent
+  /// 注册态不受影响。
+  func testSystemProxyOffRestoresHeldSettingsAndKeepsListening() async throws {
+    let seeded = try makeSeededCatalog()
+    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
+    try await controller.activate(seeded.server)
+    await controller.setAgentEnabled(true)
+    await controller.setSystemProxyEnabled(true)
+    XCTAssertEqual(controller.systemProxyState, .applied)
+
+    await controller.setSystemProxyEnabled(false)
+
+    XCTAssertEqual(controller.systemProxyState, .idle)
+    XCTAssertEqual(systemProxy.restoreCount, 1)
+    XCTAssertEqual(controller.state, .running, "本地监听不受系统代理开关影响")
+    XCTAssertEqual(agent.unregisterCount, 0, "不注销 agent")
+    XCTAssertTrue(
+      FileManager.default.fileExists(atPath: runtime.contract.path), "运行时契约保留")
+  }
+  /// 系统代理意图持久化（issue #60）：GUI 重启后从恢复快照读回。
+  func testSystemProxyIntentPersistsAcrossGUIRestart() async throws {
+    let seeded = try makeSeededCatalog()
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(), settingsStore: settingsStore)
+    try await controller.activate(seeded.server)
+    await controller.setAgentEnabled(true)
+    await controller.setSystemProxyEnabled(true)
+    XCTAssertEqual(settingsStore.saved?.systemProxyEnabled, true)
+
+    let restarted = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      agentStatus: .registered,
+      settingsStore: settingsStore,
+      settingsRestore: RestoredProxySettings(
+        settings: try XCTUnwrap(settingsStore.load()), unreadableError: nil))
+    XCTAssertTrue(restarted.systemProxyIntentEnabled)
+  }
+  /// ownership 冲突（issue #60）：报告而不强制覆盖，agent 继续运行。
+  func testOwnershipConflictSurfacesTypedFailureAndKeepsAgentRunning() async throws {
+    let seeded = try makeSeededCatalog()
+    systemProxy.applyError = SystemProxyError.ownershipConflict("external change")
+    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
+    try await controller.activate(seeded.server)
+    await controller.setAgentEnabled(true)
+
+    await controller.setSystemProxyEnabled(true)
+
+    XCTAssertEqual(
+      controller.systemProxyState, .failed(.ownershipConflict), "冲突以 typed 呈现")
+    XCTAssertEqual(controller.state, .running, "agent 不受系统代理失败影响")
+    XCTAssertTrue(systemProxy.applied.isEmpty)
+  }
+  /// 关闭 agent 的次序（issue #60）：先按 ownership 规则恢复系统设置，再
+  /// 注销停止监听。
+  func testAgentOffRestoresSystemProxyBeforeStoppingListening() async throws {
+    let seeded = try makeSeededCatalog()
+    let eventLog = ProxyRuntimeEventLog()
+    agent.eventLog = eventLog
+    systemProxy.eventLog = eventLog
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, systemProxyEnabled: true))
+    try await controller.activate(seeded.server)
+    await controller.setAgentEnabled(true)
+    XCTAssertEqual(controller.systemProxyState, .applied)
+
+    await controller.setAgentEnabled(false)
+
+    XCTAssertEqual(
+      eventLog.events,
+      ["register", "apply", "restore", "unregister"],
+      "先恢复持有的系统设置，再停止 agent 监听")
+    XCTAssertEqual(controller.systemProxyState, .idle)
+  }
+  /// 无效活动目标（issue #60）：清除目标且不悄悄回退；agent 继续以空服务器
+  /// 列表监听；已应用的系统代理安全撤回，意图保留待应用。
+  func testInvalidTargetOnCommitClearsKeepsListeningAndWithdrawsSystemProxy() async throws {
+    let seeded = try makeSeededCatalog()
+    try Data("\(ProcessInfo.processInfo.processIdentifier)".utf8).write(to: runtime.pidFile)
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, systemProxyEnabled: true))
+    try await controller.activate(seeded.server)
+    await controller.setAgentEnabled(true)
+    XCTAssertEqual(controller.systemProxyState, .applied)
+
+    // 删除活动目标 → 重展开失败 → 清除目标，agent 继续监听。
+    var catalog = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
+    try catalog.remove(seeded.server)
+    try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
+
+    let committed = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
+    await controller.catalogDidCommit(snapshot: committed)
+
+    XCTAssertNil(controller.activeTargetID)
+    XCTAssertNotNil(controller.lastActivationFailure, "点名原因独立呈现")
+    XCTAssertEqual(controller.state, .running, "agent 保持监听")
+    XCTAssertEqual(agent.unregisterCount, 0, "不注销 agent")
+    let onDisk = try XCTUnwrap(RuntimeFileStore(fileURL: runtime.contract).loadDocument())
+    XCTAssertTrue(onDisk.servers.isEmpty, "运行时以空服务器列表继续监听")
+    XCTAssertEqual(systemProxy.restoreCount, 1, "系统代理安全撤回")
+    XCTAssertEqual(controller.systemProxyState, .pending, "意图保留待应用")
+  }
+  func testResyncWithInvalidActiveTargetClearsAndKeepsListening() async throws {
     _ = try makeSeededCatalog()
     try Data("garbage".utf8).write(to: runtime.contract)
     let missingTarget = NodeID(rawValue: "removed-target")
@@ -467,45 +682,13 @@ extension ProxyRuntimeControllerTests {
 
     await controller.resyncOnLaunch()
 
-    guard case .activationFailed = controller.state else {
-      XCTFail("应呈现点名原因，实际 \(controller.state)")
-      return
-    }
+    XCTAssertEqual(controller.state, .running, "目标失效后 agent 继续监听")
+    XCTAssertNil(controller.activeTargetID)
     let persisted = try ActivationStateFileStore(fileURL: activationFileURL).loadActiveTargetID()
-    XCTAssertNil(persisted)
-    XCTAssertEqual(agent.unregisterCount, 1, "注册过即按停止协议注销")
-    XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
+    XCTAssertNil(persisted, "失效目标已清除")
+    let onDisk = try XCTUnwrap(RuntimeFileStore(fileURL: runtime.contract).loadDocument())
+    XCTAssertTrue(onDisk.servers.isEmpty, "以空服务器列表继续监听")
+    XCTAssertNotNil(controller.lastActivationFailure)
+    XCTAssertTrue(systemProxy.applied.isEmpty, "系统代理意图关闭，不写系统设置")
   }
-
-  func testUpdatingSettingsPersistsAndReactivatesTheRuntimeContract() async throws {
-    let seeded = try makeSeededCatalog()
-    let settingsStore = InMemoryProxySettingsStore()
-    let controller = makeController(
-      probe: ProxyRuntimeFixture.FakeProbe.reachable(), settingsStore: settingsStore)
-
-    try await controller.activate(seeded.server)
-    await controller.setProxyEnabled(true)
-
-    var next = controller.settings
-    next.timeoutSeconds = 120
-    next.verboseLogging = true
-    next.proxyExceptions = "localhost, 127.0.0.1"
-    try await controller.updateSettings(next)
-
-    let document = try XCTUnwrap(RuntimeFileStore(fileURL: runtime.contract).loadDocument())
-    XCTAssertEqual(controller.settings, next)
-    XCTAssertEqual(settingsStore.saved, next)
-    XCTAssertEqual(document.timeout, 120)
-    XCTAssertTrue(document.pac.verbose)
-    XCTAssertEqual(
-      systemProxy.applied.last?.exceptions,
-      ["localhost", "127.0.0.1"])
-  }
-
-  private enum FakeSettingsSaveError: Error, CustomStringConvertible {
-    case system
-
-    var description: String { "fake-save-error" }
-  }
-
 }

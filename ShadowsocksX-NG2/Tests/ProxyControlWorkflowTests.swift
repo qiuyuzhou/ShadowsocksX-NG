@@ -5,11 +5,15 @@ import XCTest
 
 // MARK: - 确定性替身（snapshot 与命令 contract；不触真实运行时）
 
-/// 可编程 runtime 替身（issue #47，story 31）：事实可编程、命令全记录；
+/// 可编程 runtime 替身（issue #47/#60，story 31）：事实可编程、命令全记录；
 /// changes 为手动 subject，同步发值保证观察测试确定性。
 @MainActor
 private final class FakeProxyRuntime: ProxyRuntimeAdapting {
   var runtimeFacts: ProxyRuntimeFacts
+  var agentIntentEnabled: Bool
+  var activationFailure: ActivationFailure?
+  var systemProxyIntentEnabled: Bool
+  var systemProxyApplication: SystemProxyApplicationFacts
   var proxyMode: ProxyMode
   var skippedInvalidServerCount = 0
   var activeTargetID: NodeID?
@@ -21,14 +25,21 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
   var changes: AnyPublisher<Void, Never> { changeSubject.eraseToAnyPublisher() }
 
   private(set) var resyncCount = 0
-  private(set) var enabledCommands: [Bool] = []
+  private(set) var agentCommands: [Bool] = []
+  private(set) var systemProxyCommands: [Bool] = []
   private(set) var modeCommands: [ProxyMode] = []
 
   init(
     facts: ProxyRuntimeFacts = ProxyRuntimeFacts(status: .off, isOn: false),
+    agentIntent: Bool = true,
+    systemProxyIntent: Bool = false,
+    systemProxyApplication: SystemProxyApplicationFacts = .idle,
     mode: ProxyMode = .pac
   ) {
     runtimeFacts = facts
+    agentIntentEnabled = agentIntent
+    systemProxyIntentEnabled = systemProxyIntent
+    self.systemProxyApplication = systemProxyApplication
     proxyMode = mode
   }
 
@@ -36,7 +47,9 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
 
   func resyncOnLaunch() async { resyncCount += 1 }
 
-  func setProxyEnabled(_ enabled: Bool) async { enabledCommands.append(enabled) }
+  func setAgentEnabled(_ enabled: Bool) async { agentCommands.append(enabled) }
+
+  func setSystemProxyEnabled(_ enabled: Bool) async { systemProxyCommands.append(enabled) }
 
   func setProxyMode(_ mode: ProxyMode) async { modeCommands.append(mode) }
 }
@@ -54,7 +67,7 @@ private final class FakeTargetFacts: ProxyTargetFactsReading {
   }
 }
 
-/// 代理控制工作流的 snapshot 与命令 contract（issue #47）：整体一致性、
+/// 代理控制工作流的 snapshot 与命令 contract（issue #47/#60）：整体一致性、
 /// typed commands、窄目录事实缝、运行时变化重观察与命令边界。
 @MainActor
 final class ProxyControlWorkflowTests: XCTestCase {
@@ -71,22 +84,6 @@ final class ProxyControlWorkflowTests: XCTestCase {
 
   private static let serverID = NodeID(rawValue: "manual:server-1")
 
-  private func makeSnapshot(
-    facts: ProxyRuntimeFacts,
-    mode: ProxyMode,
-    activeTarget: ProxyActiveTargetFacts?,
-    skipped: Int,
-    export: HTTPExportCapability
-  ) -> ProxyControlSnapshot {
-    ProxyControlSnapshot(
-      runtime: facts,
-      proxyMode: mode,
-      availableModes: ProxyMode.availableModes,
-      activeTarget: activeTarget,
-      skippedInvalidServerCount: skipped,
-      httpExport: export)
-  }
-
   // MARK: - 整体 snapshot
 
   func testSnapshotAssemblesAllFactsFromSingleObservation() {
@@ -94,6 +91,10 @@ final class ProxyControlWorkflowTests: XCTestCase {
       status: .running,
       isOn: true,
       failure: .firewallBlocked(FirewallBlockedFacts(executableName: "sslocal")))
+    runtime.agentIntentEnabled = true
+    runtime.activationFailure = .noActiveTarget
+    runtime.systemProxyIntentEnabled = true
+    runtime.systemProxyApplication = .pending
     runtime.proxyMode = .global
     runtime.skippedInvalidServerCount = 3
     runtime.activeTargetID = Self.serverID
@@ -104,15 +105,21 @@ final class ProxyControlWorkflowTests: XCTestCase {
 
     XCTAssertEqual(
       workflow.snapshot,
-      makeSnapshot(
-        facts: ProxyRuntimeFacts(
+      ProxyControlSnapshot(
+        runtime: ProxyRuntimeFacts(
           status: .running,
           isOn: true,
           failure: .firewallBlocked(FirewallBlockedFacts(executableName: "sslocal"))),
-        mode: .global,
+        agentIntentEnabled: true,
+        activationFailure: .noActiveTarget,
+        systemProxyIntentEnabled: true,
+        systemProxyApplication: .pending,
+        proxyMode: .global,
+        availableModes: ProxyMode.availableModes,
         activeTarget: ProxyActiveTargetFacts(id: Self.serverID, pathSummary: "组A / 香港 01"),
-        skipped: 3,
-        export: HTTPExportCapability(copyableLine: "export http_proxy=http://127.0.0.1:11087;")))
+        skippedInvalidServerCount: 3,
+        httpExport: HTTPExportCapability(
+          copyableLine: "export http_proxy=http://127.0.0.1:11087;")))
     XCTAssertEqual(
       workflow.snapshot.availableModes, ProxyMode.availableModes,
       "可用模式是 issue #46 Domain 单点策略的投影")
@@ -120,38 +127,67 @@ final class ProxyControlWorkflowTests: XCTestCase {
 
   // MARK: - typed commands：转发并整体重发布
 
-  func testEnableCommandForwardsAndRepublishesWholeSnapshot() async {
+  func testAgentEnableCommandForwardsAndRepublishesWholeSnapshot() async {
     let before = workflow.snapshot
     runtime.runtimeFacts = ProxyRuntimeFacts(status: .running, isOn: true)
+    runtime.agentIntentEnabled = true
     runtime.skippedInvalidServerCount = 2
     runtime.activeTargetID = Self.serverID
 
-    let after = await workflow.setProxyEnabled(true)
+    let after = await workflow.setAgentEnabled(true)
 
-    XCTAssertEqual(runtime.enabledCommands, [true])
+    XCTAssertEqual(runtime.agentCommands, [true])
     XCTAssertEqual(after, workflow.snapshot, "命令返回值就是已发布的最新 snapshot")
     XCTAssertNotEqual(after, before, "命令完成后整体重发布")
     XCTAssertEqual(after.runtime, ProxyRuntimeFacts(status: .running, isOn: true))
     XCTAssertEqual(after.skippedInvalidServerCount, 2)
   }
 
-  func testDisableCommandForwardsAndRepublishesWholeSnapshot() async {
+  func testAgentDisableCommandForwardsAndRepublishesWholeSnapshot() async {
     runtime.runtimeFacts = ProxyRuntimeFacts(status: .running, isOn: true)
-    _ = await workflow.setProxyEnabled(true)
+    runtime.agentIntentEnabled = true
+    _ = await workflow.setAgentEnabled(true)
     runtime.runtimeFacts = ProxyRuntimeFacts(status: .off, isOn: false)
+    runtime.agentIntentEnabled = false
     runtime.skippedInvalidServerCount = 0
     runtime.activeTargetID = nil
 
-    let after = await workflow.setProxyEnabled(false)
+    let after = await workflow.setAgentEnabled(false)
 
-    XCTAssertEqual(runtime.enabledCommands, [true, false])
+    XCTAssertEqual(runtime.agentCommands, [true, false])
     XCTAssertEqual(after.runtime, ProxyRuntimeFacts(status: .off, isOn: false))
+    XCTAssertFalse(after.agentIntentEnabled)
     XCTAssertNil(after.activeTarget)
+  }
+
+  /// 系统代理命令与 agent 命令互不触碰对方事实（issue #60）。
+  func testSystemProxyCommandsForwardIndependentlyFromAgentCommands() async {
+    runtime.agentIntentEnabled = true
+    runtime.runtimeFacts = ProxyRuntimeFacts(status: .running, isOn: true)
+    _ = await workflow.setAgentEnabled(true)
+    runtime.systemProxyIntentEnabled = true
+    runtime.systemProxyApplication = .applied
+
+    let applied = await workflow.setSystemProxyEnabled(true)
+
+    XCTAssertEqual(runtime.systemProxyCommands, [true])
+    XCTAssertTrue(applied.systemProxyIntentEnabled)
+    XCTAssertEqual(applied.systemProxyApplication, .applied)
+    XCTAssertEqual(applied.agentIntentEnabled, true, "agent 意图不被系统代理命令触碰")
+
+    runtime.systemProxyIntentEnabled = false
+    runtime.systemProxyApplication = .idle
+    let off = await workflow.setSystemProxyEnabled(false)
+
+    XCTAssertEqual(runtime.systemProxyCommands, [true, false])
+    XCTAssertFalse(off.systemProxyIntentEnabled)
+    XCTAssertEqual(off.systemProxyApplication, .idle)
+    XCTAssertEqual(runtime.agentCommands, [true], "系统代理命令不触发 agent 命令")
   }
 
   func testModeCommandForwardsAndRepublishesWholeSnapshot() async {
     runtime.runtimeFacts = ProxyRuntimeFacts(status: .running, isOn: true)
-    _ = await workflow.setProxyEnabled(true)
+    _ = await workflow.setAgentEnabled(true)
     runtime.proxyMode = .global
 
     let after = await workflow.setProxyMode(.global)
@@ -217,11 +253,13 @@ final class ProxyControlWorkflowTests: XCTestCase {
   // MARK: - 命令边界（story 37）
 
   func testCommandsTouchOnlyRuntimeAndTargetFactsAdapters() async {
-    await workflow.setProxyEnabled(true)
+    await workflow.setAgentEnabled(true)
+    await workflow.setSystemProxyEnabled(true)
     await workflow.setProxyMode(.global)
     await workflow.resyncOnLaunch()
 
-    XCTAssertEqual(runtime.enabledCommands, [true])
+    XCTAssertEqual(runtime.agentCommands, [true])
+    XCTAssertEqual(runtime.systemProxyCommands, [true])
     XCTAssertEqual(runtime.modeCommands, [.global])
     XCTAssertEqual(runtime.resyncCount, 1)
     // 目标缝只被 snapshot 组装读取；目录激活、订阅刷新、设置保存与诊断导出

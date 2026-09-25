@@ -68,7 +68,7 @@ final class UnreadableListenSettingsTests: XCTestCase {
       ]))
 
     try await controller.activate(server)
-    await controller.setProxyEnabled(true)
+    await controller.setAgentEnabled(true)
 
     guard case .launchFailed(.unreadableSettings) = controller.state else {
       return XCTFail("应呈现启动失败，实际 \(controller.state)")

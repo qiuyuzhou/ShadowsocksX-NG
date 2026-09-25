@@ -13,14 +13,12 @@ extension ProxyRuntimeControllerTests {
       controller.runtimeFacts,
       ProxyRuntimeFacts(status: .off, isOn: false))
 
-    await controller.setProxyEnabled(true)
+    await controller.resyncOnLaunch()
 
     XCTAssertEqual(
       controller.runtimeFacts,
-      ProxyRuntimeFacts(
-        status: .activationFailed,
-        isOn: false,
-        failure: .activation(.noActiveTarget)))
+      ProxyRuntimeFacts(status: .running, isOn: true),
+      "默认 agent 意图开启：重同步后无目标也进入空列表监听")
   }
 
 }
@@ -53,7 +51,9 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
   func testCommitWithoutActiveTargetFeedsLaterActivationThroughSharedSnapshot() async throws {
     let fileStore = CatalogFileStore(fileURL: catalogFileURL)
     let bootstrap = CatalogCommitCoordinator.bootstrap(fileStore: fileStore)
-    let controller = makeController(catalogSnapshotReader: bootstrap.catalogSnapshotReader)
+    let controller = makeController(
+      catalogSnapshotReader: bootstrap.catalogSnapshotReader,
+      settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
     let coordinator = CatalogCommitCoordinator(
       fileStore: fileStore,
       runtime: ProxyRuntimeSyncAdapter(controller: controller),
@@ -69,7 +69,7 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
     try await controller.activate(server)
 
     XCTAssertEqual(controller.activeTargetID, server, "激活读取协调器刚发布的唯一快照")
-    XCTAssertEqual(controller.state, .off, "该命令仅选择目标，不启动代理")
+    XCTAssertEqual(controller.state, .off, "agent 意图关闭时该命令仅选择目标，不部署")
   }
 
   func testCoordinatorUsesProductionAdapterToClearRemovedActiveTarget() async throws {
@@ -77,7 +77,10 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
     try ActivationStateFileStore(fileURL: activationFileURL).save(activeTargetID: server)
     let fileStore = CatalogFileStore(fileURL: catalogFileURL)
     let bootstrap = CatalogCommitCoordinator.bootstrap(fileStore: fileStore)
-    let controller = makeController(catalogSnapshotReader: bootstrap.catalogSnapshotReader)
+    let controller = makeController(
+      catalogSnapshotReader: bootstrap.catalogSnapshotReader,
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      pacProbe: ProxyRuntimeFixture.FakePACProbe())
     let coordinator = CatalogCommitCoordinator(
       fileStore: fileStore,
       runtime: ProxyRuntimeSyncAdapter(controller: controller),
@@ -101,7 +104,10 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
   }
 
   private func makeController(
-    catalogSnapshotReader: RuntimeCatalogSnapshotReading
+    catalogSnapshotReader: RuntimeCatalogSnapshotReading,
+    settings: ProxySettings? = nil,
+    probe: EndpointProbing = SystemEndpointProbe(),
+    pacProbe: PACHealthProbing = SystemPACHealthProbe()
   ) -> ProxyRuntimeController {
     ProxyRuntimeController(
       catalogSnapshotReader: catalogSnapshotReader,
@@ -112,9 +118,12 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
       listenRestore: RestoredListenSettings(
         settings: ActivationFixture.listen, unreadableError: nil),
       settingsStore: InMemoryProxySettingsStore(),
+      settingsRestore: RestoredProxySettings(
+        settings: settings ?? ProxySettings(listen: ActivationFixture.listen),
+        unreadableError: nil),
       agent: agent,
-      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
-      pacProbe: ProxyRuntimeFixture.FakePACProbe(),
+      probe: probe,
+      pacProbe: pacProbe,
       systemProxy: systemProxy,
       firewallExecutableURLs: [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
       firewallPollIntervalNanoseconds: 1_000_000,

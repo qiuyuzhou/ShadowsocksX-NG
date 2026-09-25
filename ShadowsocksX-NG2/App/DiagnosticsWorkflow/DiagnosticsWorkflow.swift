@@ -304,8 +304,16 @@ final class DiagnosticsWorkflow: ObservableObject {
 
 extension ProxyRuntimeController: ProxyRuntimeDiagnosticFacts {
   /// 控制器状态 → 诊断安全呈现（D5：不透传任意错误 detail；监听地址只以
-  /// 回环/非回环两态进入导出，原始错误文本一律丢弃）。
+  /// 回环/非回环两态进入导出，原始错误文本一律丢弃）。系统代理写入失败与
+  /// 激活拒绝优先于运行状态呈现（issue #60：两个状态面分开后仍归入同一组
+  /// 固定诊断类别）。
   var proxyState: DiagnosticProxyState {
+    if case .failed = systemProxyState {
+      return .systemProxyFailed
+    }
+    if let failure = lastActivationFailure {
+      return .activationFailed(reason: AppPresentation.message(for: failure))
+    }
     switch state {
     case .off:
       return .off
@@ -317,14 +325,10 @@ extension ProxyRuntimeController: ProxyRuntimeDiagnosticFacts {
       return .firewallBlocked
     case .launchFailed:
       return .launchFailed
-    case .activationFailed(let reason):
-      return .activationFailed(reason: AppPresentation.message(for: reason))
     case .requiresApproval:
       return .requiresApproval
     case .serviceFailed:
       return .serviceFailed
-    case .systemProxyFailed:
-      return .systemProxyFailed
     }
   }
 

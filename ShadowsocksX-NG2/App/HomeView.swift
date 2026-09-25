@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// 首页分区（地图 #52，票 #54）：代理模式切换、当前服务器目标树与快速操作。
-/// 模式与开关走代理控制工作流的整体 snapshot（issue #47）；目标树与激活走
-/// 目录工作流 projection 与 `activate`；复制 HTTP 导出是 UI 副作用。原型中
-/// 的「手动/外部 PAC」模式不实现：Domain 只有 PAC/全局两种模式。
+/// 首页分区（地图 #52，票 #54）：代理模式切换、运行控制、当前服务器目标树
+/// 与快速操作。模式与两个开关（agent/系统代理，issue #60）走代理控制工作流
+/// 的整体 snapshot；目标树与激活走目录工作流 projection 与 `activate`；复制
+/// HTTP 导出是 UI 副作用。原型中的「手动/外部 PAC」模式不实现：Domain 只有
+/// PAC/全局两种模式。
 struct HomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
@@ -23,13 +24,105 @@ struct HomeView: View {
             errors: errors)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        QuickActionCard(workflow: workflow, control: control, clipboard: clipboard, errors: errors)
-          .frame(width: 300)
+        VStack(spacing: 20) {
+          RuntimeControlCard(control: control)
+          QuickActionCard(
+            workflow: workflow, control: control, clipboard: clipboard, errors: errors)
+        }
+        .frame(width: 300)
       }
       .padding(.leading, 28)
       .padding(.trailing, 32)
       .padding(.top, 24)
       .padding(.bottom, 36)
+    }
+  }
+}
+
+/// 「运行控制」卡（issue #60）：agent 与系统代理两个开关并排，绑定同一
+/// snapshot 的持久化意图；各自呈现运行状态/实际应用与点名原因。两个开关
+/// 互不代替：关闭系统代理不影响本地监听，关闭 agent 先恢复系统设置。
+private struct RuntimeControlCard: View {
+  @ObservedObject var control: ProxyControlWorkflow
+
+  var body: some View {
+    let summary = StatusMenuModel.summary(from: control.snapshot)
+    HomeCard(
+      title: "运行控制",
+      subtitle: "后台代理与系统代理相互独立",
+      trailing: { EmptyView() },
+      content: {
+        VStack(alignment: .leading, spacing: 14) {
+          VStack(alignment: .leading, spacing: 6) {
+            HStack {
+              Toggle("后台代理", isOn: agentBinding)
+                .toggleStyle(.switch)
+              Spacer(minLength: 0)
+              Text(summary.status)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            if let detail = summary.detail {
+              Text(detail)
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+          Divider()
+          VStack(alignment: .leading, spacing: 6) {
+            HStack {
+              Toggle("设置系统代理", isOn: systemProxyBinding)
+                .toggleStyle(.switch)
+              Spacer(minLength: 0)
+              Text(systemProxyShortStatus(summary))
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+            Text(systemProxyHint(summary))
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+            if let systemProxyDetail = summary.systemProxyDetail {
+              Text(systemProxyDetail)
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+          }
+        }
+        .padding(.top, 6)
+      })
+  }
+
+  private var agentBinding: Binding<Bool> {
+    Binding(
+      get: { control.snapshot.agentIntentEnabled },
+      set: { enabled in Task { await control.setAgentEnabled(enabled) } })
+  }
+
+  private var systemProxyBinding: Binding<Bool> {
+    Binding(
+      get: { control.snapshot.systemProxyIntentEnabled },
+      set: { enabled in Task { await control.setSystemProxyEnabled(enabled) } })
+  }
+
+  private func systemProxyShortStatus(_ summary: StatusMenuModel.Summary) -> String {
+    summary.systemProxyStatus.replacingOccurrences(of: "系统代理：", with: "")
+  }
+
+  private func systemProxyHint(_ summary: StatusMenuModel.Summary) -> String {
+    switch control.snapshot.systemProxyApplication {
+    case .idle:
+      "开启后让 macOS 系统代理指向本地入口；需代理已就绪且有可用出口"
+    case .pending:
+      "已请求接管，等待代理就绪或可用出口后自动应用"
+    case .applied:
+      "系统代理已指向本地入口；关闭只恢复 NG2 持有的系统设置"
+    case .failed:
+      "应用失败，原因见下方"
     }
   }
 }

@@ -21,13 +21,23 @@ struct ProxyActiveTargetFacts: Equatable, Sendable {
   let pathSummary: String?
 }
 
-/// 代理控制的统一 UI-facing snapshot（issue #47）：一次 workflow observation
-/// 产出的整体安全投影，所有字段来自同一时间点。不含控制器内部状态枚举、
-/// `ProxySettings`、完整目录树、凭据、原始 URL、原始日志或本地化文案；
-/// 失败保持 typed facts，成句呈现由 App presentation edge 负责。
+/// 代理控制的统一 UI-facing snapshot（issue #47/#60）：一次 workflow
+/// observation 产出的整体安全投影，所有字段来自同一时间点。agent 意图/运行
+/// 状态与系统代理意图/实际应用是四个独立事实，两个开关互不代替；不含控制
+/// 器内部状态枚举、`ProxySettings`、完整目录树、凭据、原始 URL、原始日志或
+/// 本地化文案；失败保持 typed facts，成句呈现由 App presentation edge 负责。
 struct ProxyControlSnapshot: Equatable, Sendable {
-  /// 固定运行时事实：状态类别、开关意图与 typed 失败。
+  /// Agent 运行事实：状态类别、「在跑」投影与 typed 失败。
   let runtime: ProxyRuntimeFacts
+  /// Agent 开关意图（持久化；默认开启）。
+  let agentIntentEnabled: Bool
+  /// 最近一次激活拒绝或目标清除的点名原因（独立于运行状态；agent 可能仍在
+  /// 监听）。
+  let activationFailure: ActivationFailure?
+  /// 系统代理开关意图（持久化；默认关闭）。
+  let systemProxyIntentEnabled: Bool
+  /// 系统代理实际应用状态（与 agent 运行状态分开呈现）。
+  let systemProxyApplication: SystemProxyApplicationFacts
   /// 当前已应用的代理模式（持久化成功的模式）。
   let proxyMode: ProxyMode
   /// 可用模式（issue #46 Domain 单点策略的投影；UI 不再自行判断可用性）。
@@ -42,13 +52,22 @@ struct ProxyControlSnapshot: Equatable, Sendable {
 
 // MARK: - 适配缝
 
-/// 生产运行时适配缝（issue #47）：包装现有 `ProxyRuntimeController` 的能力
-/// 与观察。不复制状态机、generation 与健康门禁；持久化先行、失败恢复与系统
-/// 代理 ownership 语义全部留在控制器。测试注入确定性 fake（story 31）。
+/// 生产运行时适配缝（issue #47/#60）：包装现有 `ProxyRuntimeController` 的
+/// 能力与观察。不复制状态机、generation 与健康门禁；意图持久化先行、失败
+/// 恢复与系统代理 ownership 语义全部留在控制器。测试注入确定性 fake
+/// （story 31）。
 @MainActor
 protocol ProxyRuntimeAdapting: AnyObject {
-  /// 固定运行时事实（状态类别 + 开关意图 + typed 失败）。
+  /// Agent 运行事实（状态类别 + 「在跑」投影 + typed 失败）。
   var runtimeFacts: ProxyRuntimeFacts { get }
+  /// Agent 开关意图。
+  var agentIntentEnabled: Bool { get }
+  /// 最近一次激活拒绝/目标清除的点名原因。
+  var activationFailure: ActivationFailure? { get }
+  /// 系统代理开关意图。
+  var systemProxyIntentEnabled: Bool { get }
+  /// 系统代理实际应用状态。
+  var systemProxyApplication: SystemProxyApplicationFacts { get }
   /// 当前已应用的代理模式。
   var proxyMode: ProxyMode { get }
   /// 最近一次激活预检或目录收敛跳过的无效服务器数量。
@@ -64,7 +83,10 @@ protocol ProxyRuntimeAdapting: AnyObject {
 
   /// 启动重同步（GUI 重启后的注册态重校验）。
   func resyncOnLaunch() async
-  func setProxyEnabled(_ enabled: Bool) async
+  /// Agent 开关命令。
+  func setAgentEnabled(_ enabled: Bool) async
+  /// 系统代理开关命令。
+  func setSystemProxyEnabled(_ enabled: Bool) async
   func setProxyMode(_ mode: ProxyMode) async
 }
 
@@ -78,7 +100,7 @@ protocol ProxyTargetFactsReading: AnyObject {
 
 // MARK: - Workflow
 
-/// 代理控制工作流 module（issue #47）：状态菜单与未来主窗口共用的唯一
+/// 代理控制工作流 module（issue #47/#60）：状态菜单与主窗口共用的唯一
 /// UI-facing 代理控制 seam。围绕现有 `ProxyRuntimeController` 建立稳定
 /// typed interface：整体发布的 `ProxyControlSnapshot` 与 typed async
 /// commands；命令完成后重新发布完整 snapshot，预期运行时失败以
@@ -111,10 +133,17 @@ final class ProxyControlWorkflow: ObservableObject {
     republish()
   }
 
-  /// 启用/停用代理：命令完成后返回并发布完整新 snapshot。
+  /// Agent 开关：命令完成后返回并发布完整新 snapshot。
   @discardableResult
-  func setProxyEnabled(_ enabled: Bool) async -> ProxyControlSnapshot {
-    await runtime.setProxyEnabled(enabled)
+  func setAgentEnabled(_ enabled: Bool) async -> ProxyControlSnapshot {
+    await runtime.setAgentEnabled(enabled)
+    return republish()
+  }
+
+  /// 系统代理开关：命令完成后返回并发布完整新 snapshot。
+  @discardableResult
+  func setSystemProxyEnabled(_ enabled: Bool) async -> ProxyControlSnapshot {
+    await runtime.setSystemProxyEnabled(enabled)
     return republish()
   }
 
@@ -142,6 +171,10 @@ final class ProxyControlWorkflow: ObservableObject {
   ) -> ProxyControlSnapshot {
     ProxyControlSnapshot(
       runtime: runtime.runtimeFacts,
+      agentIntentEnabled: runtime.agentIntentEnabled,
+      activationFailure: runtime.activationFailure,
+      systemProxyIntentEnabled: runtime.systemProxyIntentEnabled,
+      systemProxyApplication: runtime.systemProxyApplication,
       proxyMode: runtime.proxyMode,
       availableModes: ProxyMode.availableModes,
       activeTarget: targetFacts.activeTargetFacts(for: runtime.activeTargetID),

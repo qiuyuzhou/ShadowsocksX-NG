@@ -190,6 +190,53 @@ final class RealSslocalSmokeTests: XCTestCase {
     XCTAssertEqual(wrapper.terminationStatus, 0, "显式停止干净退出")
   }
 
+  /// 无活动服务器监听（issue #60）：空 `servers` 契约是合法部署——上游
+  /// sslocal v1.25.0 接受空服务器列表并照常绑定 SOCKS/HTTP 入站；wrapper
+  /// 的 PAC endpoint 同样照常服务。真实运行时证据（系统代理写入属真实宿主
+  /// 验收，不在替身/回环测试范围内）。
+  func testRealSslocalBindsLocalsWithEmptyServerList() throws {
+    var ports = Set<Int>()
+    while ports.count < 3 {
+      ports.insert(try grabEphemeralLoopbackPort())
+    }
+    let selectedPorts = Array(ports)
+    let document = SslocalRuntimeDocument(
+      servers: [],
+      listen: SslocalListenSettings(
+        socksPort: selectedPorts[0], httpPort: selectedPorts[1], pacPort: selectedPorts[2]))
+    XCTAssertTrue(document.isWellFormed, "空服务器列表契约有效")
+    let wrapper = try launchWrapper(document)
+
+    XCTAssertTrue(
+      try waitForCondition(timeout: 15) {
+        EndpointHealthProbe.probe(host: "127.0.0.1", port: selectedPorts[0], timeout: 1)
+          == .reachable
+      },
+      "空服务器列表下本地 SOCKS 端口应完成监听绑定")
+    XCTAssertTrue(
+      try waitForCondition(timeout: 15) {
+        EndpointHealthProbe.probe(host: "127.0.0.1", port: selectedPorts[1], timeout: 1)
+          == .reachable
+      },
+      "空服务器列表下本地 HTTP 端口应完成监听绑定")
+    XCTAssertTrue(
+      try waitForCondition(timeout: 15) {
+        EndpointHealthProbe.probe(host: "127.0.0.1", port: selectedPorts[2], timeout: 1)
+          == .reachable
+      },
+      "空服务器列表下 PAC endpoint 应照常服务")
+
+    kill(wrapper.processIdentifier, SIGTERM)
+    let exited = XCTestExpectation(description: "wrapper exits")
+    DispatchQueue.global().async {
+      wrapper.waitUntilExit()
+      exited.fulfill()
+    }
+    XCTAssertEqual(
+      XCTWaiter.wait(for: [exited], timeout: 10), .completed, "wrapper 应在 SIGTERM 后退出")
+    XCTAssertEqual(wrapper.terminationStatus, 0, "空监听会话的显式停止同样干净退出")
+  }
+
   // MARK: - 受管插件端到端（issue #38）
 
   /// v2ray-plugin v1.3.2 端到端边界：契约携带 bundle 内插件绝对路径 → sslocal
