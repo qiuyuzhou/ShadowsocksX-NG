@@ -79,8 +79,7 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
     let bootstrap = CatalogCommitCoordinator.bootstrap(fileStore: fileStore)
     let controller = makeController(
       catalogSnapshotReader: bootstrap.catalogSnapshotReader,
-      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
-      pacProbe: ProxyRuntimeFixture.FakePACProbe())
+      probe: ProxyRuntimeFixture.FakeProbe.reachable())
     let coordinator = CatalogCommitCoordinator(
       fileStore: fileStore,
       runtime: ProxyRuntimeSyncAdapter(controller: controller),
@@ -106,13 +105,17 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
   private func makeController(
     catalogSnapshotReader: RuntimeCatalogSnapshotReading,
     settings: ProxySettings? = nil,
-    probe: EndpointProbing = SystemEndpointProbe(),
-    pacProbe: PACHealthProbing = SystemPACHealthProbe()
+    probe: EndpointProbing = SystemEndpointProbe()
   ) -> ProxyRuntimeController {
-    ProxyRuntimeController(
+    let runtimeFileStore = RuntimeFileStore(fileURL: runtime.contract)
+    agent.onRegister = { [runtimeFileStore] in
+      guard let document = runtimeFileStore.loadDocument() else { return }
+      try? runtimeFileStore.writeRuntimeReceipt(for: document, processID: 42)
+    }
+    return ProxyRuntimeController(
       catalogSnapshotReader: catalogSnapshotReader,
       activationFileStore: ActivationStateFileStore(fileURL: activationFileURL),
-      runtimeFileStore: RuntimeFileStore(fileURL: runtime.contract),
+      runtimeFileStore: runtimeFileStore,
       credentials: credentials,
       plugins: ActivationFixture.plugins,
       listenRestore: RestoredListenSettings(
@@ -123,11 +126,11 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
         unreadableError: nil),
       agent: agent,
       probe: probe,
-      pacProbe: pacProbe,
       systemProxy: systemProxy,
       firewallExecutableURLs: [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
       firewallPollIntervalNanoseconds: 1_000_000,
-      sendSignal: { _, _ in 0 })
+      sendSignal: { _, _ in 0 },
+      processIsAlive: { $0 == 42 })
   }
 
   private func makeSeededCatalog() throws -> NodeID {

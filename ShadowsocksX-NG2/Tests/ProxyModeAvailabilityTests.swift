@@ -9,7 +9,7 @@ final class ProxyModeAvailabilityTests: XCTestCase {
   func testBuiltInModesAreAlwaysAvailableInProductOrder() {
     XCTAssertEqual(
       ProxyMode.availableModes.map(\.kind),
-      [.rule, .pac, .global, .direct])
+      [.rule, .global, .direct])
   }
 
   func testDirectModeUsesLocalSOCKSAndIncludesFixedBypasses() throws {

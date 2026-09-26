@@ -81,8 +81,7 @@ enum ProxyRuntimeFixture {
     pluginOpts: String? = nil,
     localAddress: String = "127.0.0.1",
     localPort: Int = 11086,
-    inboundProtocol: String = "socks",
-    pacPort: Int = 11089
+    inboundProtocol: String = "socks"
   ) -> SslocalRuntimeDocument {
     precondition(inboundProtocol == "socks")
     let scope: ListenScope =
@@ -104,8 +103,7 @@ enum ProxyRuntimeFixture {
       listen: SslocalListenSettings(
         scope: scope,
         socksPort: localPort,
-        httpPort: 11087,
-        pacPort: pacPort))
+        httpPort: 11087))
   }
 
   /// LaunchAgent 注册态可编程替身，记录全部调用。
@@ -190,38 +188,6 @@ enum ProxyRuntimeFixture {
       if outcomes.count > 1 {
         outcomes.removeFirst()
       }
-      return outcome
-    }
-  }
-
-  final class FakePACProbe: PACHealthProbing, @unchecked Sendable {
-    private let lock = NSLock()
-    private var outcomes: [PACHealthOutcome]
-    private(set) var callCount = 0
-    private var requestedURLs: [URL] = []
-
-    init(_ outcome: PACHealthOutcome = .reachable) {
-      outcomes = [outcome]
-    }
-
-    init(outcomes: [PACHealthOutcome]) {
-      precondition(!outcomes.isEmpty)
-      self.outcomes = outcomes
-    }
-
-    var urls: [URL] {
-      lock.lock()
-      defer { lock.unlock() }
-      return requestedURLs
-    }
-
-    func probe(url: URL, timeout: TimeInterval) async -> PACHealthOutcome {
-      lock.lock()
-      callCount += 1
-      requestedURLs.append(url)
-      let outcome = outcomes[0]
-      if outcomes.count > 1 { outcomes.removeFirst() }
-      lock.unlock()
       return outcome
     }
   }

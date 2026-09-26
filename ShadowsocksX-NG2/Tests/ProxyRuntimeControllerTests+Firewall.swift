@@ -4,7 +4,7 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 extension ProxyRuntimeControllerTests {
-  func testLoopbackScopeNeverQueriesApplicationFirewallAndPublishesPACURL() async throws {
+  func testLoopbackScopeNeverQueriesApplicationFirewall() async throws {
     let seeded = try makeSeededCatalog()
     let firewall = ProxyRuntimeFixture.FakeFirewallChecker(.blocked)
     let controller = makeController(
@@ -15,17 +15,16 @@ extension ProxyRuntimeControllerTests {
 
     XCTAssertEqual(controller.state, .running)
     XCTAssertTrue(firewall.checkedURLs.isEmpty, "回环态与应用防火墙零交互")
-    XCTAssertEqual(controller.pacURL?.absoluteString, "http://127.0.0.1:11089/v1/proxy.pac")
+    XCTAssertEqual(controller.effectiveRuntimeListenFacts?.scope, .loopback)
   }
 
-  func testHostScopeBlockedByFirewallPresentsTargetedRepairAndKeepsPACURL() async throws {
+  func testHostScopeBlockedByFirewallPresentsTargetedRepair() async throws {
     let seeded = try makeSeededCatalog()
     let firewall = ProxyRuntimeFixture.FakeFirewallChecker(.blocked)
     let listen = SslocalListenSettings(
       scope: .host(advertisedAddress: "192.168.2.89"),
       socksPort: 1086,
-      httpPort: 1087,
-      pacPort: 1089)
+      httpPort: 1087)
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       listen: listen,
@@ -41,7 +40,9 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(facts.executableName, "sslocal")
     XCTAssertTrue(AppPresentation.message(for: controller.state).contains("允许传入连接"))
     XCTAssertEqual(firewall.checkedURLs.map(\.lastPathComponent), ["sslocal"])
-    XCTAssertEqual(controller.pacURL?.absoluteString, "http://192.168.2.89:1089/v1/proxy.pac")
+    XCTAssertEqual(
+      controller.effectiveRuntimeListenFacts?.scope,
+      .host(advertisedAddress: "192.168.2.89"))
   }
 
   func testHostScopeDetectsFirewallRefusalAfterInitialHealthyPresentation() async throws {

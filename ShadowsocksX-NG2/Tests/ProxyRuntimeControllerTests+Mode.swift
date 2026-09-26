@@ -32,8 +32,8 @@ extension ProxyRuntimeControllerTests {
 
     await controller.setProxyMode(.global)
 
-    XCTAssertEqual(controller.proxyMode, .pac, "持久化失败保留旧模式")
-    XCTAssertEqual(controller.settings.preferredMode, .pac)
+    XCTAssertEqual(controller.proxyMode, .rule, "持久化失败保留旧模式")
+    XCTAssertEqual(controller.settings.preferredMode, .rule)
     guard case .serviceFailed(.persistence) = controller.state else {
       XCTFail("应点名持久化失败，实际 \(controller.state)")
       return
@@ -50,7 +50,7 @@ extension ProxyRuntimeControllerTests {
 
     await controller.resyncOnLaunch()
     XCTAssertEqual(controller.state, .running)
-    XCTAssertTrue(systemProxy.applied.isEmpty, "PAC 模式没有活动目标时不得接管")
+    XCTAssertTrue(systemProxy.applied.isEmpty, "规则模式没有活动目标时不得接管")
     let unregisterCount = agent.unregisterCount
 
     await controller.setProxyMode(.direct)
@@ -116,11 +116,10 @@ extension ProxyRuntimeControllerTests {
     await controller.setProxyMode(.direct)
 
     XCTAssertTrue(observedStates.contains(.starting), "重启期间呈现短暂不可用状态")
-    XCTAssertEqual(controller.proxyMode, .pac, "新实例未验证时恢复旧模式")
-    XCTAssertEqual(controller.settings.preferredMode, .pac)
-    XCTAssertEqual(settingsStore.saved?.preferredMode, .pac)
+    XCTAssertEqual(controller.proxyMode, .rule, "新实例未验证时恢复旧模式")
+    XCTAssertEqual(controller.settings.preferredMode, .rule)
+    XCTAssertEqual(settingsStore.saved?.preferredMode, .rule)
     XCTAssertEqual(try runtimeStore.loadDocument(), previousDocument)
-    XCTAssertNil(runtimeStore.loadDocument()?.aclRuntime)
     XCTAssertEqual(controller.state, .running, "旧运行时恢复后重新呈现健康")
     XCTAssertEqual(controller.systemProxyState, .applied)
     XCTAssertEqual(systemProxy.applied.count, previousApplicationCount)
@@ -162,13 +161,14 @@ extension ProxyRuntimeControllerTests {
     let appliedCount = systemProxy.applied.count
     agent.onRegister = { [runtimeStore] in
       guard let requested = runtimeStore.loadDocument() else { return }
-      let processID: Int32 = requested.aclRuntime == nil ? 42 : 43
+      // 新直连实例用一次性存活的 pid 43；其余（含回滚后的旧实例）恒活 pid 42。
+      let processID: Int32 = requested.aclRuntime?.summary == "direct" ? 43 : 42
       try? runtimeStore.writeRuntimeReceipt(for: requested, processID: processID)
     }
 
     await controller.setProxyMode(.direct)
 
-    XCTAssertEqual(controller.proxyMode, .pac, "探测期间新子进程退出时回滚旧模式")
+    XCTAssertEqual(controller.proxyMode, .rule, "探测期间新子进程退出时回滚旧模式")
     XCTAssertEqual(controller.state, .running, "旧实例应保持健康")
     XCTAssertEqual(runtimeStore.loadDocument(), previousDocument)
     XCTAssertEqual(controller.systemProxyState, .applied)

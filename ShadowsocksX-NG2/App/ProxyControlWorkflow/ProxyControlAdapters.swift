@@ -72,7 +72,7 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
 }
 
 /// HTTP 导出能力的唯一派生点：监听设置 → 可复制导出行。地址取监听范围的
-/// 对外地址（回环态 127.0.0.1，主机态为对外公布地址），与 PAC 语义一致。
+/// 对外地址（回环态 127.0.0.1，主机态为对外公布地址），供局域网客户端手动配置。
 extension HTTPExportCapability {
   init(listen: SslocalListenSettings) {
     let endpoint = "http://\(listen.scope.advertisedAddress):\(listen.httpPort)"

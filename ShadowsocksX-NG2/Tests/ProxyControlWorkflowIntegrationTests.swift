@@ -50,14 +50,18 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     probe: EndpointProbing,
     agentStatus: LaunchAgentStatus = .notRegistered,
     settingsStore: ProxySettingsStoring? = nil,
-    settings: ProxySettings? = nil,
-    pacProbe: PACHealthProbing = ProxyRuntimeFixture.FakePACProbe()
+    settings: ProxySettings? = nil
   ) -> Composition {
     agent.setStatus(agentStatus)
+    let runtimeFileStore = RuntimeFileStore(fileURL: runtime.contract)
+    agent.onRegister = { [runtimeFileStore] in
+      guard let document = runtimeFileStore.loadDocument() else { return }
+      try? runtimeFileStore.writeRuntimeReceipt(for: document, processID: 42)
+    }
     let controller = ProxyRuntimeController(
       catalogSnapshotReader: ProxyRuntimeFixture.catalogSnapshotReader(at: catalogFileURL),
       activationFileStore: ActivationStateFileStore(fileURL: activationFileURL),
-      runtimeFileStore: RuntimeFileStore(fileURL: runtime.contract),
+      runtimeFileStore: runtimeFileStore,
       credentials: credentials,
       plugins: ActivationFixture.plugins,
       listenRestore: RestoredListenSettings(
@@ -68,13 +72,13 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
         unreadableError: nil),
       agent: agent,
       probe: probe,
-      pacProbe: pacProbe,
       systemProxy: systemProxy,
-      proxyMode: .pac,
+      proxyMode: .rule,
       firewallChecker: ProxyRuntimeFixture.FakeFirewallChecker(),
       firewallExecutableURLs: [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
       firewallPollIntervalNanoseconds: 1_000_000,
-      sendSignal: { _, _ in 0 })
+      sendSignal: { _, _ in 0 },
+      processIsAlive: { $0 == 42 })
     let fileStore = CatalogFileStore(fileURL: catalogFileURL)
     let bootstrap = CatalogCommitCoordinator.bootstrap(fileStore: fileStore)
     let catalogWorkflow = makeCatalogWorkflow(
@@ -130,8 +134,8 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertEqual(snapshot.runtime, ProxyRuntimeFacts(status: .running, isOn: true))
     XCTAssertNil(snapshot.runtime.failure)
     XCTAssertTrue(snapshot.agentIntentEnabled)
-    XCTAssertEqual(snapshot.proxyMode, .pac)
-    XCTAssertEqual(snapshot.availableModes, [.rule, .pac, .global, .direct])
+    XCTAssertEqual(snapshot.proxyMode, .rule)
+    XCTAssertEqual(snapshot.availableModes, [.rule, .global, .direct])
     XCTAssertEqual(snapshot.activeTarget?.pathSummary, "香港 01", "活动目标摘要来自真实目录树")
     XCTAssertEqual(snapshot.skippedInvalidServerCount, 0)
     XCTAssertTrue(
@@ -186,7 +190,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertEqual(snapshot.runtime, ProxyRuntimeFacts(status: .off, isOn: false))
     XCTAssertFalse(snapshot.agentIntentEnabled)
     XCTAssertNil(snapshot.runtime.failure)
-    XCTAssertEqual(snapshot.availableModes, [.rule, .pac, .global, .direct], "停用后可用操作不消失")
+    XCTAssertEqual(snapshot.availableModes, [.rule, .global, .direct], "停用后可用操作不消失")
   }
 
   /// 关闭 agent 且系统代理恢复失败：agent 停止，恢复失败以系统代理 typed fact
@@ -240,7 +244,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
 
     let snapshot = await composition.control.setProxyMode(.global)
 
-    XCTAssertEqual(snapshot.proxyMode, .pac, "持久化失败保留旧模式")
+    XCTAssertEqual(snapshot.proxyMode, .rule, "持久化失败保留旧模式")
     XCTAssertEqual(
       snapshot.runtime.failure, .service(.persistence), "失败以既有 typed fact 呈现")
     XCTAssertNil(settingsStore.saved, "失败不落半程设置")
@@ -255,7 +259,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
       settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
     let before = composition.control.snapshot
 
-    let after = await composition.control.setProxyMode(.pac)
+    let after = await composition.control.setProxyMode(.rule)
 
     XCTAssertEqual(after, before, "同模式命令无副作用，snapshot 不动")
     XCTAssertNil(settingsStore.saved)
@@ -279,7 +283,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertTrue(summary.agentIntentEnabled)
     XCTAssertTrue(summary.isOn)
     XCTAssertEqual(summary.status, "代理运行中")
-    XCTAssertEqual(summary.modeLabel, "PAC")
+    XCTAssertEqual(summary.modeLabel, "规则 · 未匹配时代理")
     XCTAssertEqual(summary.targetPath, "香港 01")
     XCTAssertNil(summary.detail)
     XCTAssertTrue(summary.systemProxyIntentEnabled)

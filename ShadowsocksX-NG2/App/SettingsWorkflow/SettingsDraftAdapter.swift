@@ -39,12 +39,9 @@ enum SettingsDraftAdapter {
       advertisedAddress: advertisedAddress,
       socksPort: settings.listen.socksPort,
       httpPort: settings.listen.httpPort,
-      pacPort: settings.listen.pacPort,
       timeoutSeconds: settings.timeoutSeconds,
       verboseLogging: settings.verboseLogging,
-      proxyExceptions: settings.proxyExceptions,
-      gfwListURL: settings.gfwListURL,
-      pacUserRules: settings.pacUserRules)
+      proxyExceptions: settings.proxyExceptions)
   }
 
   /// 平坦草稿 → Domain 快照。持久化的当前模式不在草稿中，从 `base` 保留。
@@ -56,14 +53,11 @@ enum SettingsDraftAdapter {
       draft.isHostScope ? .host(advertisedAddress: draft.advertisedAddress) : .loopback
     listen.socksPort = draft.socksPort
     listen.httpPort = draft.httpPort
-    listen.pacPort = draft.pacPort
     return ProxySettings(
       listen: listen,
       timeoutSeconds: draft.timeoutSeconds,
       verboseLogging: draft.verboseLogging,
       proxyExceptions: draft.proxyExceptions,
-      gfwListURL: draft.gfwListURL,
-      pacUserRules: draft.pacUserRules,
       preferredMode: base.preferredMode)
   }
 
@@ -75,7 +69,6 @@ enum SettingsDraftAdapter {
       draft.isHostScope ? .host(advertisedAddress: draft.advertisedAddress) : .loopback
     listen.socksPort = draft.socksPort
     listen.httpPort = draft.httpPort
-    listen.pacPort = draft.pacPort
     return RuntimeListenFacts(listen: listen)
   }
 
@@ -84,7 +77,6 @@ enum SettingsDraftAdapter {
     switch id {
     case .socks: .socks
     case .http: .http
-    case .pac: .pac
     }
   }
 
@@ -104,8 +96,6 @@ enum SettingsDraftAdapter {
         return [.timeoutSeconds(error: error)]
       case .invalidHostAddress:
         return [.advertisedAddress(error: error)]
-      case .invalidGFWListURL:
-        return [.gfwListURL(error: error)]
       }
     }
   }
@@ -114,7 +104,6 @@ enum SettingsDraftAdapter {
     switch endpoint {
     case .socks: .socks
     case .http: .http
-    case .pac: .pac
     }
   }
 }

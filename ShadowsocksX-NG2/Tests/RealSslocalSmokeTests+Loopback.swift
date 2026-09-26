@@ -164,7 +164,7 @@ extension RealSslocalSmokeTests {
     }
   }
 
-  /// 抓取三个互不冲突且避开给定端口的临时回环端口（SOCKS/HTTP/PAC）。
+  /// 抓取三个互不冲突且避开给定端口的临时回环端口。
   func grabThreeListenPorts(excluding occupied: [Int] = []) throws -> [Int] {
     var ports = Set<Int>()
     while ports.count < 3 {

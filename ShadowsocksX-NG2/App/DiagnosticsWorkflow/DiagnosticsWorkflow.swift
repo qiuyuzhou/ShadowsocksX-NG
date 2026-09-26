@@ -52,12 +52,6 @@ extension RuntimeLogEvent {
       return "sslocal stop requested"
     case .listenNotEstablished:
       return "listen not established within deadline"
-    case .pacStarted(let port):
-      return "PAC endpoint started (port=\(port))"
-    case .pacStartFailed(let port, _):
-      return "PAC endpoint failed (port=\(port))"
-    case .pacStopped:
-      return "PAC endpoint stopped"
     case .contractMissing:
       return "contract missing"
     case .contractInvalidRemoved:

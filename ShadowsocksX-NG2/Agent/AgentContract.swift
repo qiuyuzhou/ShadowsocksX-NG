@@ -49,7 +49,7 @@ func spawnSslocal(_ document: SslocalRuntimeDocument) -> Process? {
   // 上游默认日志级别会把服务器地址写进普通日志（D5）：常规模式压到 warn，
   // 用户明确打开 verbose 后才放宽到 debug。显式外部 RUST_LOG 仍可用于诊断。
   if childEnvironment["RUST_LOG"] == nil {
-    childEnvironment["RUST_LOG"] = document.pac.verbose ? "debug" : "warn"
+    childEnvironment["RUST_LOG"] = document.listen.verbose ? "debug" : "warn"
   }
   child.environment = childEnvironment
   do {

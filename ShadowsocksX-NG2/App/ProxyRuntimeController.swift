@@ -50,7 +50,6 @@ final class ProxyRuntimeController: ObservableObject {
   @Published var state: AgentRunState = .off
   @Published var systemProxyState: SystemProxyControlState = .idle
   @Published var settings: ProxySettings
-  @Published var pacURL: URL?
   /// 当前活动目标（菜单栏状态摘要与级联只读呈现用，issue #31）。machine 是
   /// 非发布值的普通结构体，代理关闭路径的激活动作不会触碰 state，菜单的
   /// 「目标」行依赖这里的独立发布保持实时。
@@ -77,7 +76,6 @@ final class ProxyRuntimeController: ObservableObject {
   var settingsUnreadable: Bool
   let agent: LaunchAgentControlling
   let probe: EndpointProbing
-  let pacProbe: PACHealthProbing
   let systemProxy: SystemProxyControlling
   let firewallChecker: FirewallStatusChecking
   let firewallExecutableURLs: [URL]
@@ -110,7 +108,6 @@ final class ProxyRuntimeController: ObservableObject {
     settingsRestore: RestoredProxySettings? = nil,
     agent: LaunchAgentControlling = SMAppLaunchAgentService(),
     probe: EndpointProbing = SystemEndpointProbe(),
-    pacProbe: PACHealthProbing = SystemPACHealthProbe(),
     systemProxy: SystemProxyControlling = SystemConfigurationProxyController(),
     proxyMode: ProxyMode? = nil,
     firewallChecker: FirewallStatusChecking = SocketFilterFirewallChecker(),
@@ -140,7 +137,6 @@ final class ProxyRuntimeController: ObservableObject {
     settingsUnreadable = restoredSettings.unreadableError != nil
     self.agent = agent
     self.probe = probe
-    self.pacProbe = pacProbe
     self.systemProxy = systemProxy
     self.firewallChecker = firewallChecker
     self.firewallExecutableURLs = firewallExecutableURLs ?? Self.defaultFirewallExecutableURLs

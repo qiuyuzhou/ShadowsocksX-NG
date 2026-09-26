@@ -109,7 +109,6 @@ final class DiagnosticReportTests: XCTestCase {
     XCTAssertTrue(report.contains("监听范围：回环"))
     XCTAssertTrue(report.contains("SOCKS5 端口 11086"))
     XCTAssertTrue(report.contains("HTTP 端口 11087"))
-    XCTAssertTrue(report.contains("PAC 端口 11089"))
     XCTAssertTrue(report.contains("servers=1 protocols=socks,http mode=tcp_and_udp"), "缺少契约脱敏摘要")
     XCTAssertFalse(report.contains("UDP 中继"), "诊断不应呈现已移除的 UDP 偏好开关")
     XCTAssertTrue(report.contains("服务器：2（配置插件 1；手动 1 / 订阅 1）"))

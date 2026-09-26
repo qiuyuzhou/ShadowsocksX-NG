@@ -36,7 +36,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     XCTAssertEqual(
       workflow.issues(for: .port(.socks)),
       [.port(.socks, error: .portOutOfRange(endpoint: .socks, port: 0))])
-    XCTAssertTrue(workflow.issues(for: .port(.pac)).isEmpty)
+    XCTAssertTrue(workflow.issues(for: .port(.http)).isEmpty)
   }
 
   func testDuplicatePortIssueLandsOnBothPortsInvolved() {
@@ -50,7 +50,6 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
       [.port(.socks, error: error), .port(.http, error: error)])
     XCTAssertEqual(workflow.issues(for: .port(.socks)), [.port(.socks, error: error)])
     XCTAssertEqual(workflow.issues(for: .port(.http)), [.port(.http, error: error)])
-    XCTAssertTrue(workflow.issues(for: .port(.pac)).isEmpty)
   }
 
   func testTimeoutIssueLandsOnTimeoutField() {
@@ -73,28 +72,24 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
       AppPresentation.message(for: workflow.issues(for: .advertisedAddress)[0]).contains("主机地址"))
   }
 
-  func testGFWListURLIssueLandsOnItsField() {
-    let workflow = makeWorkflow()
-    workflow.draft.gfwListURL = "not a url"
-
-    XCTAssertEqual(workflow.fieldIssues.map(\.field), [.gfwListURL])
-    XCTAssertTrue(
-      AppPresentation.message(for: workflow.issues(for: .gfwListURL)[0])
-        .contains("GFW List URL"))
-  }
-
   // MARK: - 端口 field state
 
   func testPortFieldStateReportsFreeOccupiedAndUnknownFacts() async throws {
-    probe = FakeOccupancyProbe(occupiedPorts: [11087], unknownPorts: [11089])
+    probe = FakeOccupancyProbe(occupiedPorts: [11087])
     let workflow = makeWorkflow()
     _ = await workflow.reloadFromCommitted()
-    await waitUntil(workflow.portFieldState(for: .pac).occupancy != nil)
+    await waitUntil(workflow.portFieldState(for: .socks).occupancy != nil)
 
     XCTAssertEqual(workflow.portFieldState(for: .socks).occupancy, .free)
     XCTAssertEqual(workflow.portFieldState(for: .http).occupancy, .occupied(occupier: "other-app"))
-    XCTAssertEqual(workflow.portFieldState(for: .pac).occupancy, .unknown(detail: "无法判定"))
     XCTAssertEqual(workflow.portFieldState(for: .socks).draftValue, 11086)
+
+    probe = FakeOccupancyProbe(unknownPorts: [11086])
+    let unknownWorkflow = makeWorkflow()
+    _ = await unknownWorkflow.reloadFromCommitted()
+    await waitUntil(unknownWorkflow.portFieldState(for: .socks).occupancy != nil)
+    XCTAssertEqual(
+      unknownWorkflow.portFieldState(for: .socks).occupancy, .unknown(detail: "无法判定"))
   }
 
   func testOccupancyProbeReceivesTheCompleteEffectiveListenIdentity() async throws {
@@ -104,8 +99,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     let expected = RuntimeListenFacts(
       scope: .host(advertisedAddress: "192.168.2.89"),
       socksPort: 11086,
-      httpPort: 11087,
-      pacPort: 11089)
+      httpPort: 11087)
 
     await waitUntil(probe.requests.contains { $0.listen == expected })
 
@@ -171,8 +165,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     committing.runtimeListenFacts = RuntimeListenFacts(
       scope: .host(advertisedAddress: "192.168.2.89"),
       socksPort: 11086,
-      httpPort: 11087,
-      pacPort: 11089)
+      httpPort: 11087)
     _ = await workflow.reloadFromCommitted()
     await waitUntil(workflow.portFieldState(for: .socks).occupancy != nil)
 
@@ -196,7 +189,6 @@ extension SettingsWorkflowInterfaceTests {
     XCTAssertEqual(workflow.draft.socksPort, 32768)
     XCTAssertEqual(workflow.portFieldState(for: .socks).draftValue, 32768)
     XCTAssertEqual(workflow.draft.httpPort, 11087)
-    XCTAssertEqual(workflow.draft.pacPort, 11089)
     XCTAssertTrue(committing.updateCalls.isEmpty, "建议只改草稿，必须经用户保存")
   }
 

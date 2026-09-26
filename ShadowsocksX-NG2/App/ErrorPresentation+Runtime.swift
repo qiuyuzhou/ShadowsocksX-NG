@@ -43,8 +43,6 @@ extension AppPresentation {
     case .missingRuntimeDocument: return "缺少运行时文档"
     case .localEndpoint(let endpoint, let host, let port, let cause):
       return "本地代理 \(endpoint.uppercased()) 端点 \(host):\(port) 未就绪（\(endpointFailure(cause))）"
-    case .pacEndpoint(let port, let cause):
-      return "PAC 端点端口 \(port) 未就绪（\(endpointFailure(cause))）"
     case .unreadableSettings: return "本地代理配置无法读取，已停止代理以避免静默改用出厂端口"
     }
   }

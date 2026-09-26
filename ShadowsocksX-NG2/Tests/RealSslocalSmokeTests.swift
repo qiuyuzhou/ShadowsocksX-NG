@@ -134,13 +134,12 @@ final class RealSslocalSmokeTests: XCTestCase {
 
   func testRealSslocalBindsSOCKSAndHTTPPortsAndCompletesHandshake() throws {
     var ports = Set<Int>()
-    while ports.count < 3 {
+    while ports.count < 2 {
       ports.insert(try grabEphemeralLoopbackPort())
     }
     let selectedPorts = Array(ports)
     let socksPort = selectedPorts[0]
     let httpPort = selectedPorts[1]
-    let pacPort = selectedPorts[2]
     let document = SslocalRuntimeDocument(
       servers: [
         SslocalServerDocument(
@@ -154,7 +153,7 @@ final class RealSslocalSmokeTests: XCTestCase {
           pluginOpts: nil)
       ],
       listen: SslocalListenSettings(
-        socksPort: socksPort, httpPort: httpPort, pacPort: pacPort))
+        socksPort: socksPort, httpPort: httpPort))
     let wrapper = try launchWrapper(document)
 
     // 两个端口同时就绪：验证 locals[] 被官方 sslocal 接受并实际绑定。
@@ -192,19 +191,18 @@ final class RealSslocalSmokeTests: XCTestCase {
   }
 
   /// 无活动服务器监听（issue #60）：空 `servers` 契约是合法部署——上游
-  /// sslocal v1.25.0 接受空服务器列表并照常绑定 SOCKS/HTTP 入站；wrapper
-  /// 的 PAC endpoint 同样照常服务。真实运行时证据（系统代理写入属真实宿主
-  /// 验收，不在替身/回环测试范围内）。
+  /// sslocal v1.25.0 接受空服务器列表并照常绑定 SOCKS/HTTP 入站。真实运行时
+  /// 证据（系统代理写入属真实宿主验收，不在替身/回环测试范围内）。
   func testRealSslocalBindsLocalsWithEmptyServerList() throws {
     var ports = Set<Int>()
-    while ports.count < 3 {
+    while ports.count < 2 {
       ports.insert(try grabEphemeralLoopbackPort())
     }
     let selectedPorts = Array(ports)
     let document = SslocalRuntimeDocument(
       servers: [],
       listen: SslocalListenSettings(
-        socksPort: selectedPorts[0], httpPort: selectedPorts[1], pacPort: selectedPorts[2]))
+        socksPort: selectedPorts[0], httpPort: selectedPorts[1]))
     XCTAssertTrue(document.isWellFormed, "空服务器列表契约有效")
     let wrapper = try launchWrapper(document)
 
@@ -220,12 +218,6 @@ final class RealSslocalSmokeTests: XCTestCase {
           == .reachable
       },
       "空服务器列表下本地 HTTP 端口应完成监听绑定")
-    XCTAssertTrue(
-      try waitForCondition(timeout: 15) {
-        EndpointHealthProbe.probe(host: "127.0.0.1", port: selectedPorts[2], timeout: 1)
-          == .reachable
-      },
-      "空服务器列表下 PAC endpoint 应照常服务")
 
     kill(wrapper.processIdentifier, SIGTERM)
     let exited = XCTestExpectation(description: "wrapper exits")

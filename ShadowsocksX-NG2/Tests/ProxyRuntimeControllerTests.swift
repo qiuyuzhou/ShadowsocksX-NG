@@ -20,6 +20,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
   final class SignalRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private(set) var records: [(pid: Int32, signal: Int32)] = []
+    /// SIGUSR1 送达后模拟 wrapper 热重载刷新回执。
+    var reloadReceipt: (() -> Void)?
 
     var signalsSent: [(pid: Int32, signal: Int32)] {
       lock.lock()
@@ -35,6 +37,9 @@ final class ProxyRuntimeControllerTests: XCTestCase {
 
     func send(_ pid: Int32, _ signal: Int32) -> Int32 {
       record(pid, signal)
+      if signal == SIGUSR1 {
+        reloadReceipt?()
+      }
       return 0
     }
   }
@@ -71,8 +76,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     settingsStore: ProxySettingsStoring? = nil,
     settings: ProxySettings? = nil,
     settingsRestore: RestoredProxySettings? = nil,
-    pacProbe: PACHealthProbing = ProxyRuntimeFixture.FakePACProbe(),
-    proxyMode: ProxyMode? = .pac,
+    proxyMode: ProxyMode? = .rule,
     systemProxy: SystemProxyControlling? = nil,
     firewallChecker: FirewallStatusChecking = ProxyRuntimeFixture.FakeFirewallChecker(),
     firewallExecutableURLs: [URL] = [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
@@ -84,6 +88,11 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     agent.setStatus(agentStatus)
     let runtimeFileStore = RuntimeFileStore(fileURL: runtime.contract)
     agent.onRegister = { [runtimeFileStore] in
+      guard let document = runtimeFileStore.loadDocument() else { return }
+      try? runtimeFileStore.writeRuntimeReceipt(for: document, processID: 42)
+    }
+    // SIGUSR1 模拟 wrapper 热重载后刷新回执（真实 wrapper 会如此）。
+    signals.reloadReceipt = { [runtimeFileStore] in
       guard let document = runtimeFileStore.loadDocument() else { return }
       try? runtimeFileStore.writeRuntimeReceipt(for: document, processID: 42)
     }
@@ -104,7 +113,6 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       settingsRestore: restored,
       agent: agent,
       probe: probe,
-      pacProbe: pacProbe,
       systemProxy: systemProxy ?? self.systemProxy,
       proxyMode: proxyMode,
       firewallChecker: firewallChecker,
@@ -156,7 +164,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(probe.ports, [11086, 11087], "健康门先探测 SOCKS 和 HTTP 入站")
   }
 
-  func testSwitchingGlobalAndPACModesIsImmediateAndRestoresOnAgentOff() async throws {
+  func testSwitchingGlobalAndRuleModesIsImmediateAndRestoresOnAgentOff() async throws {
     let seeded = try makeSeededCatalog()
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
@@ -177,14 +185,15 @@ final class ProxyRuntimeControllerTests: XCTestCase {
             including: ProxySettings().proxyExceptionList))
       ])
 
-    await controller.setProxyMode(.pac)
+    await controller.setProxyMode(.rule)
     XCTAssertEqual(controller.state, .running)
     XCTAssertEqual(systemProxy.applied.count, 2)
     XCTAssertEqual(
       systemProxy.applied.last,
       SystemProxyConfiguration(
-        target: .pac(URL(string: "http://127.0.0.1:11089/v1/proxy.pac")!),
-        exceptions: ProxySettings().proxyExceptionList))
+        target: .socks(host: "127.0.0.1", port: 11086),
+        exceptions: FixedLocalProxyRanges.systemProxyExceptions(
+          including: ProxySettings().proxyExceptionList)))
 
     await controller.setAgentEnabled(false)
     XCTAssertEqual(controller.state, .off)

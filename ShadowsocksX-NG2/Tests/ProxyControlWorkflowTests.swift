@@ -36,7 +36,7 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
     agentIntent: Bool = true,
     systemProxyIntent: Bool = false,
     systemProxyApplication: SystemProxyApplicationFacts = .idle,
-    mode: ProxyMode = .pac
+    mode: ProxyMode = .rule
   ) {
     runtimeFacts = facts
     agentIntentEnabled = agentIntent

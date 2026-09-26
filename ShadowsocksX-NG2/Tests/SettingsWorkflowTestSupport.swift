@@ -152,7 +152,7 @@ final class GatedOccupancyProbe: PortOccupancyProbing, @unchecked Sendable {
     gate.enter()
   }
 
-  /// 已进入探测的调用数（按端口标识序，socks 先于 http/pac）。
+  /// 已进入探测的调用数（按端口标识序，socks 先于 http）。
   var entered: Int {
     lock.lock()
     defer { lock.unlock() }

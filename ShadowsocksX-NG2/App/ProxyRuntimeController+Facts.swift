@@ -67,6 +67,6 @@ extension ProxyRuntimeController: Activating {}
 
 extension ProxyRuntimeController {
   static func makeProxyMode(from settings: ProxySettings) -> ProxyMode {
-    ProxyMode.availableModes.first { $0.kind == settings.preferredMode } ?? .pac
+    ProxyMode.availableModes.first { $0.kind == settings.preferredMode } ?? .rule
   }
 }

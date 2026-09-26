@@ -137,9 +137,9 @@ final class RuntimeFileStoreTests: XCTestCase {
   func testLoadDocumentReturnsNilForStructurallyInvalidDocument() throws {
     try store.write(
       SslocalRuntimeDocument(
-        servers: [], listen: SslocalListenSettings(pacPort: 0)))
+        servers: [], listen: SslocalListenSettings(socksPort: 0)))
 
-    XCTAssertNil(try store.loadDocument(), "PAC 端口无效属结构性无效（读取侧防御）")
+    XCTAssertNil(try store.loadDocument(), "本地端口无效属结构性无效（读取侧防御）")
   }
 
   // MARK: 显式停止清理
@@ -173,13 +173,12 @@ final class RuntimeFileStoreTests: XCTestCase {
   func testWellFormedValidationRejectsStructuralGarbage() {
     func document(
       localPort: Int = 1086,
-      pacPort: Int = 1089,
       servers: [SslocalServerDocument]
     ) -> SslocalRuntimeDocument {
       SslocalRuntimeDocument(
         servers: servers,
         listen: SslocalListenSettings(
-          socksPort: localPort, pacPort: pacPort))
+          socksPort: localPort))
     }
     func server(
       id: String = "s", address: String = "203.0.113.7", port: Int = 8388,
@@ -194,7 +193,6 @@ final class RuntimeFileStoreTests: XCTestCase {
     XCTAssertTrue(
       document(servers: []).isWellFormed,
       "空 servers 合法：无活动目标的本地监听（issue #60）")
-    XCTAssertFalse(document(pacPort: 0, servers: [server()]).isWellFormed)
     XCTAssertFalse(document(localPort: 0, servers: [server()]).isWellFormed)
     XCTAssertFalse(document(localPort: 65_536, servers: [server()]).isWellFormed)
     XCTAssertFalse(document(servers: [server(port: 0)]).isWellFormed)

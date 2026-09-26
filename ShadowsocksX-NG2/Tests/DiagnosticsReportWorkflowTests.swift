@@ -47,7 +47,6 @@ final class DiagnosticsReportWorkflowTests: DiagnosticsWorkflowTestCase {
     XCTAssertTrue(report.contains("- 活动目标：已设置"))
     XCTAssertTrue(report.contains("- 监听范围：回环"))
     XCTAssertTrue(report.contains("SOCKS5 端口 11086"))
-    XCTAssertTrue(report.contains("PAC 端口 11089"))
     XCTAssertTrue(report.contains("servers=1 protocols=socks mode=tcp_and_udp"))
     XCTAssertTrue(report.contains("服务器：2（配置插件 1；手动 1 / 订阅 1）"))
     XCTAssertTrue(report.contains("分组：2"))
@@ -70,7 +69,6 @@ final class DiagnosticsReportWorkflowTests: DiagnosticsWorkflowTestCase {
     // 白名单允许的类别与安全字段（数量、端口、领域点名原因）保留。
     XCTAssertTrue(report.contains("contract written (servers=3)"))
     XCTAssertTrue(report.contains("local endpoint not ready (port=11086)"))
-    XCTAssertTrue(report.contains("PAC endpoint failed (port=11089)"))
     XCTAssertTrue(report.contains("launch agent register failed"))
     XCTAssertTrue(report.contains("listen not established within deadline"))
     XCTAssertTrue(report.contains("runtime metadata persist failed"))

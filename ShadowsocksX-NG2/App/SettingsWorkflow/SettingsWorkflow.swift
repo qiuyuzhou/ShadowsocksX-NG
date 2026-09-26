@@ -8,8 +8,8 @@ import Foundation
 /// 不经本 module。
 ///
 /// 内部沿用既有深 module：`ProxySettings` 的点名校验、`ProxyPortSemantics` 的
-/// 端口互异/建议算法、`PortChangeNotice` 的 PAC 失效判定与 typed occupancy
-/// request。写入侧只依赖窄 seam `SettingsCommitting`；module 不依赖 SwiftUI。
+/// 端口互异/建议算法与 typed occupancy request。写入侧只依赖窄 seam
+/// `SettingsCommitting`；module 不依赖 SwiftUI。
 @MainActor
 final class SettingsWorkflow: ObservableObject {
   /// 编辑中的 UI 形状草稿：视图按字段绑定；监听设置变化时自动重探占用。
@@ -29,7 +29,7 @@ final class SettingsWorkflow: ObservableObject {
   @Published private(set) var lastFailure: SettingsWorkflowFailure?
   /// 最近一次离散 command 的结构化结果，供 UI 观察而无需解析字符串。
   @Published private(set) var lastOutcome: SettingsCommandOutcome?
-  /// 等待用户裁定的确认事实（PAC 失效、重置偏好）；视图只持有 alert 呈现状态。
+  /// 等待用户裁定的确认事实（重置偏好）；视图只持有 alert 呈现状态。
   @Published private(set) var pendingConfirmation: SettingsConfirmation?
 
   private let committing: SettingsCommitting
@@ -111,8 +111,8 @@ final class SettingsWorkflow: ObservableObject {
 
   // MARK: - 具名 typed async commands
 
-  /// 保存：先返回 typed gate rejection；PAC 端口变化则返回确认事实，否则等待
-  /// persistence seam 完成，并把 runtime convergence 独立放进结果。
+  /// 保存：先返回 typed gate rejection，否则等待 persistence seam 完成，
+  /// 并把 runtime convergence 独立放进结果。
   @discardableResult
   func save() async -> SettingsCommandOutcome {
     guard !isCommitting else { return record(.rejected(.inProgress)) }
@@ -125,45 +125,7 @@ final class SettingsWorkflow: ObservableObject {
     guard blockingPortIDs.isEmpty else {
       return record(.rejected(.occupied(blockingPortIDs)))
     }
-
-    let proposed = makeSettings(from: draft)
-    if PortChangeNotice.pacPortChanged(
-      from: committing.committedSettings.listen, to: proposed.listen)
-    {
-      let confirmation = SettingsConfirmation.pacInvalidation(
-        previousPort: committing.committedSettings.listen.pacPort,
-        nextPort: proposed.listen.pacPort)
-      pendingConfirmation = confirmation
-      return record(.confirmationRequired(confirmation))
-    }
-    return await commit(proposed)
-  }
-
-  /// 用户裁定继续保存（确认 PAC 失效提示）后提交。
-  @discardableResult
-  func confirmPACNotice() async -> SettingsCommandOutcome {
-    guard case .pacInvalidation = pendingConfirmation else {
-      return record(.rejected(.noPendingConfirmation))
-    }
-    pendingConfirmation = nil
-    guard !isCommitting else { return record(.rejected(.inProgress)) }
-    guard fieldIssues.isEmpty else {
-      return record(.rejected(.validation(fieldIssues)))
-    }
-    guard blockingPortIDs.isEmpty else {
-      return record(.rejected(.occupied(blockingPortIDs)))
-    }
     return await commit(makeSettings(from: draft))
-  }
-
-  /// 取消挂起的 PAC 失效提示：草稿保留且不提交。
-  @discardableResult
-  func cancelPACNotice() async -> SettingsCommandOutcome {
-    guard case .pacInvalidation = pendingConfirmation else {
-      return record(.rejected(.noPendingConfirmation))
-    }
-    pendingConfirmation = nil
-    return record(.confirmationCancelled)
   }
 
   /// 重置偏好：seam 裁定恒需确认，挂起重置确认事实（摘要范围与重置事务

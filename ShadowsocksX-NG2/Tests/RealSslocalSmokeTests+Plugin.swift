@@ -17,13 +17,12 @@ extension RealSslocalSmokeTests {
       FileManager.default.isExecutableFile(atPath: pluginURL.path) ? pluginURL : nil,
       "v2ray-plugin 未嵌入 app bundle（先跑 fetch-external-binaries.sh）")
     var ports = Set<Int>()
-    while ports.count < 3 {
+    while ports.count < 2 {
       ports.insert(try grabEphemeralLoopbackPort())
     }
     let selectedPorts = Array(ports)
     let socksPort = selectedPorts[0]
     let httpPort = selectedPorts[1]
-    let pacPort = selectedPorts[2]
     let document = SslocalRuntimeDocument(
       servers: [
         SslocalServerDocument(
@@ -37,7 +36,7 @@ extension RealSslocalSmokeTests {
           pluginOpts: "mode=websocket")
       ],
       listen: SslocalListenSettings(
-        socksPort: socksPort, httpPort: httpPort, pacPort: pacPort))
+        socksPort: socksPort, httpPort: httpPort))
     let wrapper = try launchWrapper(document)
 
     // 插件进程建立：sslocal 按 SIP003 拉起 bundle 内 v2ray-plugin 并保持运行

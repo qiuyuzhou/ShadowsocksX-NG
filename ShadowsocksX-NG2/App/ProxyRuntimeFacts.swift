@@ -60,7 +60,6 @@ enum LaunchFailureFacts: Equatable, Sendable {
   case missingRuntimeDocument
   case localEndpoint(
     endpoint: String, host: String, port: Int, cause: RuntimeEndpointFailure)
-  case pacEndpoint(port: Int, cause: RuntimeEndpointFailure)
   case unreadableSettings
 }
 

@@ -81,8 +81,9 @@ extension ProxyRuntimeControllerTests {
       systemProxy.applied,
       [
         SystemProxyConfiguration(
-          target: .pac(URL(string: "http://127.0.0.1:11089/v1/proxy.pac")!),
-          exceptions: ProxySettings().proxyExceptionList)
+          target: .socks(host: "127.0.0.1", port: ActivationFixture.listen.socksPort),
+          exceptions: FixedLocalProxyRanges.systemProxyExceptions(
+            including: ProxySettings().proxyExceptionList))
       ],
       "系统代理只在本地端点健康且存在可用出口后写入")
   }

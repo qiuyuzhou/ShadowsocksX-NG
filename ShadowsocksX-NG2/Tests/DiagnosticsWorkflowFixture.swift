@@ -14,7 +14,7 @@ class DiagnosticsWorkflowTestCase: XCTestCase {
 
   /// 投毒事件 detail：白名单必须整体清洗，不得进入报告。
   let poisonDetails = [
-    "SECRET-PERSIST-DETAIL", "SECRET-PROBE-DETAIL", "SECRET-PAC-DETAIL",
+    "SECRET-PERSIST-DETAIL", "SECRET-PROBE-DETAIL",
     "SECRET-LISTEN-DETAIL", "SECRET-AGENT-DETAIL", "SECRET-UNREADABLE-DETAIL",
   ]
 
@@ -128,8 +128,6 @@ class DiagnosticsWorkflowTestCase: XCTestCase {
     events.append(
       event: .endpointProbeFailed(host: lanAddress, port: 11086, detail: "SECRET-PROBE-DETAIL"),
       timestamp: stamp)
-    events.append(
-      event: .pacStartFailed(port: 11089, detail: "SECRET-PAC-DETAIL"), timestamp: stamp)
     events.append(event: .listenNotEstablished(detail: "SECRET-LISTEN-DETAIL"), timestamp: stamp)
     events.append(
       event: .agentRegisterFailed(detail: "SECRET-AGENT-DETAIL"), timestamp: stamp)

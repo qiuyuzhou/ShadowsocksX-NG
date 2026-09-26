@@ -59,7 +59,7 @@ final class StatusMenuModelTests: XCTestCase {
     activationFailure: ActivationFailure? = nil,
     systemProxyIntent: Bool = false,
     systemProxyApplication: SystemProxyApplicationFacts = .idle,
-    mode: ProxyMode = .pac,
+    mode: ProxyMode = .rule,
     activeTarget: ProxyActiveTargetFacts? = nil
   ) -> ProxyControlSnapshot {
     ProxyControlSnapshot(

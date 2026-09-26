@@ -25,7 +25,7 @@ struct RestoredListenSettings: Equatable {
   let unreadableError: ListenSettingsStoreError?
 }
 
-/// 用户监听设置（端口、HTTP 启用、监听范围）的磁盘持久化，落盘
+/// 用户监听设置（端口、监听范围）的磁盘持久化，落盘
 /// `~/Library/Application Support/ShadowsocksX-NG2/listen-settings.json`。
 /// 只承载用户显式确认过的配置；与运行时契约文件分离。监听范围只按
 /// 原样保留，有效性由派生文档的读取侧校验兜底。
@@ -116,7 +116,6 @@ private struct ListenSettingsRecord: Codable, Equatable, Sendable {
   var advertisedAddress: String?
   var socksPort: Int = SslocalListenSettings.defaultSocksPort
   var httpPort: Int = SslocalListenSettings.defaultHTTPPort
-  var pacPort: Int = SslocalListenSettings.defaultPACPort
 
   init() {}
 
@@ -130,13 +129,10 @@ private struct ListenSettingsRecord: Codable, Equatable, Sendable {
     httpPort =
       try container.decodeIfPresent(Int.self, forKey: .httpPort)
       ?? SslocalListenSettings.defaultHTTPPort
-    pacPort =
-      try container.decodeIfPresent(Int.self, forKey: .pacPort)
-      ?? SslocalListenSettings.defaultPACPort
   }
 
   private enum CodingKeys: String, CodingKey {
-    case scopeKind, advertisedAddress, socksPort, httpPort, pacPort
+    case scopeKind, advertisedAddress, socksPort, httpPort
   }
 }
 
@@ -149,7 +145,6 @@ extension ListenSettingsFileStore {
     }
     record.socksPort = settings.socksPort
     record.httpPort = settings.httpPort
-    record.pacPort = settings.pacPort
     return record
   }
 
@@ -160,7 +155,6 @@ extension ListenSettingsFileStore {
     }
     settings.socksPort = record.socksPort
     settings.httpPort = record.httpPort
-    settings.pacPort = record.pacPort
     return settings
   }
 }

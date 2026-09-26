@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 
 /// 用户可见监听范围。主机地址态把对外公布地址与通配绑定地址绑定在同一个值
-/// 对象中，避免 PAC 内容与实际监听范围各自漂移（spec #21 D7，issue #28）。
+/// 对象中，避免监听身份与实际绑定范围各自漂移（spec #21 D7，issue #28）。
 enum ListenScope: Equatable, Sendable {
   case loopback
   case host(advertisedAddress: String)
@@ -50,30 +50,19 @@ struct SslocalLocalDocument: Codable, Equatable, Sendable {
   }
 }
 
-/// wrapper 自有的 PAC 契约。字段收在 `x_shadowsocksx_ng_pac` 下，上游
-/// sslocal 会忽略该扩展；wrapper 与 GUI 仍从同一原子文件读取同一份事实。
-struct PACRuntimeDocument: Codable, Equatable, Sendable {
-  /// #28 固定的是 API 版本路由；逐 snapshot generation URL 与 ownership/cache
-  /// 事务属于系统代理工单 #29，不能在此提前改变对外 URL 契约。
-  static let versionedEndpointPath = "/v1/proxy.pac"
-
+/// wrapper 自有的监听身份扩展（issue #67 取代已删除的 PAC 扩展）。字段收在
+/// `x_shadowsocksx_ng_listen` 下，上游 sslocal 会忽略该扩展；wrapper 与 GUI
+/// 仍从同一原子文件读取同一份事实。verbose 决定 sslocal 的 RUST_LOG 级别。
+struct RuntimeListenDocument: Codable, Equatable, Sendable {
   let listenScope: ListenScopeKind
   let bindAddress: String
   let advertisedAddress: String
-  let port: Int
-  let socksPort: Int
-  let endpointPath: String
-  let userRules: String
   let verbose: Bool
 
   enum CodingKeys: String, CodingKey {
-    case port
     case listenScope = "listen_scope"
     case bindAddress = "bind_address"
     case advertisedAddress = "advertised_address"
-    case socksPort = "socks_port"
-    case endpointPath = "endpoint_path"
-    case userRules = "user_rules"
     case verbose
   }
 
@@ -81,68 +70,12 @@ struct PACRuntimeDocument: Codable, Equatable, Sendable {
     listenScope: ListenScopeKind,
     bindAddress: String,
     advertisedAddress: String,
-    port: Int,
-    socksPort: Int,
-    endpointPath: String,
-    userRules: String = "",
     verbose: Bool = false
   ) {
     self.listenScope = listenScope
     self.bindAddress = bindAddress
     self.advertisedAddress = advertisedAddress
-    self.port = port
-    self.socksPort = socksPort
-    self.endpointPath = endpointPath
-    self.userRules = userRules
     self.verbose = verbose
-  }
-
-  init(from decoder: Decoder) throws {
-    let container = try decoder.container(keyedBy: CodingKeys.self)
-    listenScope = try container.decode(ListenScopeKind.self, forKey: .listenScope)
-    bindAddress = try container.decode(String.self, forKey: .bindAddress)
-    advertisedAddress = try container.decode(String.self, forKey: .advertisedAddress)
-    port = try container.decode(Int.self, forKey: .port)
-    socksPort = try container.decode(Int.self, forKey: .socksPort)
-    endpointPath = try container.decode(String.self, forKey: .endpointPath)
-    userRules = try container.decodeIfPresent(String.self, forKey: .userRules) ?? ""
-    verbose = try container.decodeIfPresent(Bool.self, forKey: .verbose) ?? false
-  }
-
-  var javaScript: String {
-    let chain =
-      "SOCKS5 \(advertisedAddress):\(socksPort); SOCKS \(advertisedAddress):\(socksPort); DIRECT"
-    let directSuffixes = PACRuleSet.directHostSuffixes(from: userRules)
-    guard !directSuffixes.isEmpty else {
-      return "function FindProxyForURL(url, host) { return \"\(chain)\"; }\n"
-    }
-    var lines = ["function FindProxyForURL(url, host) {"]
-    lines.append(
-      contentsOf: directSuffixes.map { suffix in
-        "  if (dnsDomainIs(host, \"\(suffix)\")) return \"DIRECT\";"
-      })
-    lines.append("  return \"\(chain)\";")
-    lines.append("}\n")
-    return lines.joined(separator: "\n")
-  }
-
-  /// 给用户复制/系统代理写入的 URL；主机态必须使用可路由的 LAN 地址。
-  var publicURL: URL? {
-    makeURL(host: advertisedAddress)
-  }
-
-  /// GUI 健康检查固定走本机回环，避免把防火墙本机执法盲区误写成远端验证。
-  var healthURL: URL? {
-    makeURL(host: "127.0.0.1")
-  }
-
-  private func makeURL(host: String) -> URL? {
-    var components = URLComponents()
-    components.scheme = "http"
-    components.host = host
-    components.port = port
-    components.path = endpointPath
-    return components.url
   }
 }
 
@@ -151,7 +84,7 @@ struct PACRuntimeDocument: Codable, Equatable, Sendable {
 struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
   let servers: [SslocalServerDocument]
   let locals: [SslocalLocalDocument]
-  let pac: PACRuntimeDocument
+  let listen: RuntimeListenDocument
   let timeout: Int
   /// Upstream sslocal ACL file path. The wrapper-owned extension carries the
   /// matching content and digest so both inbounds use the same validated file.
@@ -162,7 +95,7 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     case servers, locals, timeout
     case aclFilePath = "acl"
     case aclRuntime = "x_shadowsocksx_ng_acl"
-    case pac = "x_shadowsocksx_ng_pac"
+    case listen = "x_shadowsocksx_ng_listen"
   }
 
   init(
@@ -170,12 +103,15 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     listen: SslocalListenSettings,
     timeout: Int = 60,
     verbose: Bool = false,
-    pacUserRules: String = "",
     acl: ProxyACLDocument? = nil
   ) {
     self.servers = servers
     locals = listen.locals
-    pac = listen.pac(userRules: pacUserRules, verbose: verbose)
+    self.listen = RuntimeListenDocument(
+      listenScope: listen.scope.kind,
+      bindAddress: listen.bindAddress,
+      advertisedAddress: listen.advertisedAddress,
+      verbose: verbose)
     self.timeout = timeout
     aclFilePath = acl?.path
     aclRuntime = acl
@@ -184,13 +120,13 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
   private init(
     servers: [SslocalServerDocument],
     locals: [SslocalLocalDocument],
-    pac: PACRuntimeDocument,
+    listen: RuntimeListenDocument,
     timeout: Int,
     acl: ProxyACLDocument?
   ) {
     self.servers = servers
     self.locals = locals
-    self.pac = pac
+    self.listen = listen
     self.timeout = timeout
     aclFilePath = acl?.path
     aclRuntime = acl
@@ -200,7 +136,7 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     servers = try container.decode([SslocalServerDocument].self, forKey: .servers)
     locals = try container.decode([SslocalLocalDocument].self, forKey: .locals)
-    pac = try container.decode(PACRuntimeDocument.self, forKey: .pac)
+    listen = try container.decode(RuntimeListenDocument.self, forKey: .listen)
     timeout = try container.decodeIfPresent(Int.self, forKey: .timeout) ?? 60
     aclFilePath = try container.decodeIfPresent(String.self, forKey: .aclFilePath)
     aclRuntime = try container.decodeIfPresent(ProxyACLDocument.self, forKey: .aclRuntime)
@@ -219,7 +155,7 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     SslocalRuntimeDocument(
       servers: servers,
       locals: locals,
-      pac: pac,
+      listen: listen,
       timeout: timeout,
       acl: acl)
   }
@@ -244,8 +180,9 @@ struct SslocalServerDocument: Codable, Equatable, Sendable {
   let pluginOpts: String?
 
   enum CodingKeys: String, CodingKey {
-    case id, remarks, server, password, method, plugin
+    case id, remarks, server
     case serverPort = "server_port"
+    case password, method, plugin
     case pluginOpts = "plugin_opts"
   }
 }
@@ -268,7 +205,7 @@ extension SslocalRuntimeDocument {
   }
 
   var listenFingerprint: SslocalListenFingerprint {
-    SslocalListenFingerprint(locals: locals, pac: pac, acl: aclRuntime)
+    SslocalListenFingerprint(locals: locals, acl: aclRuntime, verbose: listen.verbose)
   }
 
   var socksLocal: SslocalLocalDocument? {
@@ -285,10 +222,8 @@ extension SslocalRuntimeDocument {
   /// 接受空 servers 并照常绑定本地入站。
   var isWellFormed: Bool {
     guard
-      (1...65535).contains(pac.port),
       (1...86_400).contains(timeout),
-      pac.endpointPath == PACRuntimeDocument.versionedEndpointPath,
-      !pac.advertisedAddress.isEmpty
+      !listen.advertisedAddress.isEmpty
     else { return false }
 
     guard
@@ -296,18 +231,18 @@ extension SslocalRuntimeDocument {
       aclRuntime.map({ $0.isWellFormed && $0.path == aclFilePath }) ?? true
     else { return false }
 
-    let expectedBind = pac.listenScope == .loopback ? "127.0.0.1" : "0.0.0.0"
-    guard pac.bindAddress == expectedBind else {
+    let expectedBind = listen.listenScope == .loopback ? "127.0.0.1" : "0.0.0.0"
+    guard listen.bindAddress == expectedBind else {
       return false
     }
-    switch pac.listenScope {
+    switch listen.listenScope {
     case .loopback:
-      guard pac.advertisedAddress == "127.0.0.1" else { return false }
+      guard listen.advertisedAddress == "127.0.0.1" else { return false }
     case .host:
       guard
-        isIPv4Address(pac.advertisedAddress),
-        pac.advertisedAddress != "0.0.0.0",
-        pac.advertisedAddress != "127.0.0.1"
+        isIPv4Address(listen.advertisedAddress),
+        listen.advertisedAddress != "0.0.0.0",
+        listen.advertisedAddress != "127.0.0.1"
       else {
         return false
       }
@@ -318,12 +253,11 @@ extension SslocalRuntimeDocument {
     guard socks.count == 1, http.count <= 1, locals.count == socks.count + http.count else {
       return false
     }
-    guard socks[0].localPort == pac.socksPort else { return false }
     guard socks[0].mode == "tcp_and_udp" else { return false }
     guard http.allSatisfy({ $0.mode == "tcp_only" }) else { return false }
 
     let localPorts = locals.map(\.localPort)
-    guard Set(localPorts + [pac.port]).count == localPorts.count + 1 else { return false }
+    guard Set(localPorts).count == localPorts.count else { return false }
     guard
       locals.allSatisfy({ local in
         let expectedMode = local.inboundProtocol == "socks" ? "tcp_and_udp" : "tcp_only"

@@ -2,12 +2,11 @@ import Foundation
 
 // MARK: - 平坦草稿（UI 形状，设置编辑态的唯一 source of truth）
 
-/// UI 形状端口标识：设置页三个端口字段的稳定标识。端口行与建议空闲端口命令
+/// UI 形状端口标识：设置页两个端口字段的稳定标识。端口行与建议空闲端口命令
 /// 都用本标识；视图不导入探测层端点类型。
 enum SettingsPortID: CaseIterable, Hashable, Sendable {
   case socks
   case http
-  case pac
 }
 
 /// 平坦的 UI 形状编辑草稿：字段全部是 UI 原语。监听范围拆成布尔开关与公布
@@ -18,18 +17,14 @@ struct SettingsDraft: Equatable, Sendable {
   var advertisedAddress: String
   var socksPort: Int
   var httpPort: Int
-  var pacPort: Int
   var timeoutSeconds: Int
   var verboseLogging: Bool
   var proxyExceptions: String
-  var gfwListURL: String
-  var pacUserRules: String
 
   func portValue(for id: SettingsPortID) -> Int {
     switch id {
     case .socks: socksPort
     case .http: httpPort
-    case .pac: pacPort
     }
   }
 
@@ -37,7 +32,6 @@ struct SettingsDraft: Equatable, Sendable {
     switch id {
     case .socks: socksPort = value
     case .http: httpPort = value
-    case .pac: pacPort = value
     }
   }
 }
@@ -49,7 +43,6 @@ enum SettingsFieldID: Hashable, Sendable {
   case advertisedAddress
   case port(SettingsPortID)
   case timeoutSeconds
-  case gfwListURL
 }
 
 /// 按字段归位的校验问题：每条保留 Domain 的 typed fact；文案由 App
@@ -58,21 +51,18 @@ enum SettingsFieldIssue: Equatable, Sendable {
   case port(SettingsPortID, error: ProxySettingsValidationError)
   case advertisedAddress(error: ProxySettingsValidationError)
   case timeoutSeconds(error: ProxySettingsValidationError)
-  case gfwListURL(error: ProxySettingsValidationError)
 
   var field: SettingsFieldID {
     switch self {
     case .port(let id, _): .port(id)
     case .advertisedAddress: .advertisedAddress
     case .timeoutSeconds: .timeoutSeconds
-    case .gfwListURL: .gfwListURL
     }
   }
 
   var error: ProxySettingsValidationError {
     switch self {
-    case .port(_, let error), .advertisedAddress(let error), .timeoutSeconds(let error),
-      .gfwListURL(let error):
+    case .port(_, let error), .advertisedAddress(let error), .timeoutSeconds(let error):
       error
     }
   }
@@ -88,7 +78,7 @@ enum SettingsPortOccupancy: Equatable, Sendable {
   case unknown(detail: String)
 }
 
-/// 每个端口字段的 field state：三个端口行复用同一套呈现逻辑。
+/// 每个端口字段的 field state：两个端口行复用同一套呈现逻辑。
 struct SettingsPortFieldState: Equatable, Sendable {
   let id: SettingsPortID
   /// 该端口当前草稿值。
@@ -108,8 +98,6 @@ struct SettingsPortFieldState: Equatable, Sendable {
 /// 确认事实（统一种类）：seam 裁定动作是否需要确认及摘要内容；视图只持有
 /// alert 呈现状态并把用户选择作为 typed command 发回。
 enum SettingsConfirmation: Equatable, Sendable {
-  /// PAC 地址将失效；仅携带前后端口事实。
-  case pacInvalidation(previousPort: Int, nextPort: Int)
   /// 重置偏好；范围由这个 typed fact 固定，文案由 presentation edge 派生。
   case resetPreferences
 }

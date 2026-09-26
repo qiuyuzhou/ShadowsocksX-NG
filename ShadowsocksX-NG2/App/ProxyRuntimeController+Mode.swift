@@ -98,8 +98,6 @@ extension ProxyRuntimeController {
           at: runtimeFileStore.aclFileURL,
           defaultAction: settings.ruleDefaultAction,
           rules: candidates))
-    case .pac:
-      return document.replacingACL(nil)
     }
   }
 

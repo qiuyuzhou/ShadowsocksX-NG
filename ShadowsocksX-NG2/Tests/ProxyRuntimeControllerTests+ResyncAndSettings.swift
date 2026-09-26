@@ -83,9 +83,10 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(controller.settings, next)
     XCTAssertEqual(settingsStore.saved, next)
     XCTAssertEqual(document.timeout, 120)
-    XCTAssertTrue(document.pac.verbose)
+    XCTAssertTrue(document.listen.verbose)
     XCTAssertEqual(
       systemProxy.applied.last?.exceptions,
-      ["localhost", "127.0.0.1"], "系统代理意图开启时随设置更新重新应用")
+      FixedLocalProxyRanges.systemProxyExceptions(including: ["localhost", "127.0.0.1"]),
+      "系统代理意图开启时随设置更新重新应用")
   }
 }

@@ -45,9 +45,11 @@ final class RuntimeDocumentTests: XCTestCase {
     XCTAssertEqual(locals[0]["mode"] as? String, "tcp_and_udp")
     XCTAssertEqual(locals[1]["local_port"] as? Int, 11087)
     XCTAssertEqual(locals[1]["protocol"] as? String, "http")
-    let pac = try XCTUnwrap(dictionary["x_shadowsocksx_ng_pac"] as? [String: Any])
-    XCTAssertEqual(pac["listen_scope"] as? String, "loopback")
-    XCTAssertEqual(pac["port"] as? Int, 11089)
+    let listen = try XCTUnwrap(dictionary["x_shadowsocksx_ng_listen"] as? [String: Any])
+    XCTAssertEqual(listen["listen_scope"] as? String, "loopback")
+    XCTAssertEqual(listen["bind_address"] as? String, "127.0.0.1")
+    XCTAssertEqual(listen["advertised_address"] as? String, "127.0.0.1")
+    XCTAssertEqual(listen["verbose"] as? Bool, false)
     let servers = try XCTUnwrap(dictionary["servers"] as? [[String: Any]])
     XCTAssertEqual(servers.count, 1)
     let server = servers[0]
@@ -84,7 +86,7 @@ final class RuntimeDocumentTests: XCTestCase {
     XCTAssertEqual(listen.locals.map(\.mode), ["tcp_and_udp", "tcp_only"])
   }
 
-  func testRuntimeDocumentCarriesTimeoutVerboseAndPACUserRules() throws {
+  func testRuntimeDocumentCarriesTimeoutAndVerbose() throws {
     let document = SslocalRuntimeDocument(
       servers: [
         SslocalServerDocument(
@@ -93,15 +95,12 @@ final class RuntimeDocumentTests: XCTestCase {
       ],
       listen: SslocalListenSettings(),
       timeout: 120,
-      verbose: true,
-      pacUserRules: "@@||example.com^")
+      verbose: true)
 
     let decoded = try XCTUnwrap(SslocalRuntimeDocument.decodeValidated(try document.jsonData()))
 
     XCTAssertEqual(decoded.timeout, 120)
-    XCTAssertTrue(decoded.pac.verbose)
-    XCTAssertTrue(decoded.pac.javaScript.contains("dnsDomainIs(host, \"example.com\")"))
-    XCTAssertTrue(decoded.pac.javaScript.contains("DIRECT"))
+    XCTAssertTrue(decoded.listen.verbose)
   }
 
   func testACLPathAndMetadataRoundTripAsUpstreamAndWrapperFields() throws {
@@ -126,12 +125,11 @@ final class RuntimeDocumentTests: XCTestCase {
     XCTAssertNotEqual(document.listenFingerprint, changedPath.listenFingerprint)
   }
 
-  func testLoopbackScopeDerivesPACAndBothSslocalInbounds() {
+  func testLoopbackScopeDerivesBothSslocalInbounds() {
     let listen = SslocalListenSettings(
       scope: .loopback,
       socksPort: 1086,
-      httpPort: 1087,
-      pacPort: 1089)
+      httpPort: 1087)
 
     XCTAssertEqual(listen.bindAddress, "127.0.0.1")
     XCTAssertEqual(listen.advertisedAddress, "127.0.0.1")
@@ -145,33 +143,23 @@ final class RuntimeDocumentTests: XCTestCase {
           inboundProtocol: "http", localAddress: "127.0.0.1", localPort: 1087,
           mode: "tcp_only"),
       ])
-    XCTAssertEqual(listen.pac.port, 1089)
-    XCTAssertEqual(listen.pac.endpointPath, "/v1/proxy.pac")
   }
 
   func testHostScopeUsesWildcardBindingsAndAdvertisedNetworkAddress() {
     let listen = SslocalListenSettings(
       scope: .host(advertisedAddress: "192.168.2.89"),
       socksPort: 1086,
-      httpPort: 1087,
-      pacPort: 1089)
+      httpPort: 1087)
 
     XCTAssertEqual(listen.bindAddress, "0.0.0.0")
     XCTAssertEqual(listen.advertisedAddress, "192.168.2.89")
     XCTAssertEqual(Set(listen.locals.map(\.localAddress)), ["0.0.0.0"])
-    XCTAssertEqual(listen.pac.advertisedAddress, "192.168.2.89")
-    XCTAssertEqual(
-      listen.pac.javaScript,
-      "function FindProxyForURL(url, host) { return \"SOCKS5 192.168.2.89:1086; SOCKS 192.168.2.89:1086; DIRECT\"; }\n"
-    )
   }
 
-  func testHTTPInboundIsAlwaysPresentAlongsidePACSOCKSTarget() {
+  func testHTTPInboundIsAlwaysPresentAlongsideSOCKS() {
     let listen = SslocalListenSettings(
-      scope: .loopback, socksPort: 2086, httpPort: 2087,
-      pacPort: 2089)
+      scope: .loopback, socksPort: 2086, httpPort: 2087)
 
     XCTAssertEqual(listen.locals.map(\.inboundProtocol), ["socks", "http"])
-    XCTAssertTrue(listen.pac.javaScript.contains("127.0.0.1:2086"))
   }
 }

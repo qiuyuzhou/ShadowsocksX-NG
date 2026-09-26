@@ -45,8 +45,17 @@ enum StatusMenuModel {
       systemProxyStatus: "系统代理：\(systemProxy.label)",
       systemProxyStateLabel: systemProxy.label,
       systemProxyDetail: systemProxy.detail,
-      modeLabel: snapshot.proxyMode.label,
+      modeLabel: modeLabel(for: snapshot),
       targetPath: snapshot.activeTarget?.pathSummary)
+  }
+
+  /// 模式标签与首页徽标同口径（issue #67 AC2）：规则模式带上子选项。
+  private static func modeLabel(for snapshot: ProxyControlSnapshot) -> String {
+    let mode = snapshot.proxyMode
+    if mode == .rule {
+      return "\(mode.label) · \(snapshot.ruleDefaultAction.label)"
+    }
+    return mode.label
   }
 
   private static func statusText(for status: ProxyRuntimeStatus) -> String {

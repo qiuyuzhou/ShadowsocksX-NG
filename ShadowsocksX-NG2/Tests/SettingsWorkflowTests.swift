@@ -66,19 +66,6 @@ final class SettingsWorkflowTests: XCTestCase {
     XCTAssertEqual(settingsStore.saved?.timeoutSeconds, 120)
   }
 
-  func testPACPortChangeRequiresConfirmationBeforeCommitting() async throws {
-    let pair = makePair()
-
-    pair.workflow.draft.pacPort = 13089
-    _ = await pair.workflow.save()
-    XCTAssertNotNil(pair.workflow.pendingConfirmation)
-    XCTAssertNil(settingsStore.saved, "未确认失效提示不得提交")
-
-    _ = await pair.workflow.confirmPACNotice()
-    XCTAssertNil(pair.workflow.pendingConfirmation)
-    XCTAssertEqual(pair.controller.settings.listen.pacPort, 13089)
-  }
-
   func testCommitFailureSurfacesPresentedReasonAndKeepsCommittedValues() async throws {
     settingsStore.saveError = FakeSaveError.io
     let pair = makePair()
@@ -114,10 +101,15 @@ final class SettingsWorkflowTests: XCTestCase {
     let catalogSnapshotReader = CatalogCommitCoordinator.bootstrap(
       fileStore: CatalogFileStore(fileURL: catalogFileURL)
     ).catalogSnapshotReader
+    let runtimeFileStore = RuntimeFileStore(fileURL: runtime.contract)
+    agent.onRegister = { [runtimeFileStore] in
+      guard let document = runtimeFileStore.loadDocument() else { return }
+      try? runtimeFileStore.writeRuntimeReceipt(for: document, processID: 42)
+    }
     let controller = ProxyRuntimeController(
       catalogSnapshotReader: catalogSnapshotReader,
       activationFileStore: ActivationStateFileStore(fileURL: activationFileURL),
-      runtimeFileStore: RuntimeFileStore(fileURL: runtime.contract),
+      runtimeFileStore: runtimeFileStore,
       credentials: credentials,
       plugins: ActivationFixture.plugins,
       listenRestore: RestoredListenSettings(
@@ -125,11 +117,11 @@ final class SettingsWorkflowTests: XCTestCase {
       settingsStore: settingsStore,
       agent: agent,
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
-      pacProbe: ProxyRuntimeFixture.FakePACProbe(),
       systemProxy: systemProxy,
       firewallExecutableURLs: [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
       firewallPollIntervalNanoseconds: 1_000_000,
-      sendSignal: { _, _ in 0 })
+      sendSignal: { _, _ in 0 },
+      processIsAlive: { $0 == 42 })
     let workflow = SettingsWorkflow(committing: controller, occupancyProbe: probe)
     return (controller, workflow)
   }

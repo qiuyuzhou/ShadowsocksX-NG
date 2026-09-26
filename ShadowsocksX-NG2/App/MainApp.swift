@@ -220,7 +220,7 @@ private struct ApplicationDependencies {
   private static func makeProduction() -> ApplicationDependencies {
     let credentials = KeychainCredentialStore()
     let catalogFileStore = CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL())
-    let settingsStore = ProxySettingsFileStore(credentials: credentials)
+    let settingsStore = ProxySettingsFileStore()
     let restoredSettings = ProxySettingsFileStore.restored(store: settingsStore)
     return ApplicationDependencies(
       credentials: credentials,
@@ -250,8 +250,7 @@ private struct ApplicationDependencies {
       fileURL: directory.appendingPathComponent("catalog.json"))
     let settingsStore = ProxySettingsFileStore(
       fileURL: directory.appendingPathComponent("settings.json"),
-      legacyListenFileURL: directory.appendingPathComponent("listen-settings.json"),
-      credentials: credentials)
+      legacyListenFileURL: directory.appendingPathComponent("listen-settings.json"))
     let restoredSettings = ProxySettingsFileStore.restored(store: settingsStore)
     let marker = EphemeralLegacyImportMarkerStore()
     let legacyImportService = LegacyImportService(

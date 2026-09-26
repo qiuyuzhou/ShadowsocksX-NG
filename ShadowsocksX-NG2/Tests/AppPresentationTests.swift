@@ -59,7 +59,6 @@ final class AppPresentationTests: XCTestCase {
       .firewallBlocked(FirewallBlockedFacts(executableName: "sslocal")),
       .launchFailed(
         .localEndpoint(endpoint: "SOCKS", host: "127.0.0.1", port: 11086, cause: .refused)),
-      .launchFailed(.pacEndpoint(port: 11089, cause: .timedOut)),
       .launchFailed(.missingRuntimeDocument),
       .launchFailed(.unreadableSettings),
       .serviceFailed(.runtimeFile),
@@ -103,7 +102,6 @@ final class AppPresentationTests: XCTestCase {
       .port(.socks, error: .portOutOfRange(endpoint: .socks, port: 0)),
       .advertisedAddress(error: .invalidHostAddress("127.0.0.1")),
       .timeoutSeconds(error: .invalidTimeout(0)),
-      .gfwListURL(error: .invalidGFWListURL("not a url")),
     ]
     for issue in issues {
       XCTAssertFalse(AppPresentation.message(for: issue).isEmpty)

@@ -124,32 +124,6 @@ final class AgentLifecycleTests: XCTestCase {
       "停止路径不动契约文件（删除由 GUI 的停止协议末端负责）")
   }
 
-  func testPACEndpointLivesAndDiesWithWrapper() throws {
-    let pacPort = try ProxyRuntimeFixture.unusedLoopbackPort()
-    try writeContract(ProxyRuntimeFixture.makeDocument(localPort: 2086, pacPort: pacPort))
-    let wrapper = try launchWrapper(behavior: "run")
-
-    XCTAssertTrue(
-      try waitUntil {
-        EndpointHealthProbe.probe(host: "127.0.0.1", port: pacPort, timeout: 0.2)
-          == .reachable
-      },
-      "wrapper 运行期间 PAC endpoint 应可达")
-    let response = try loadPAC(port: pacPort)
-    XCTAssertEqual(response.statusCode, 200)
-    XCTAssertEqual(response.mimeType, "application/x-ns-proxy-autoconfig")
-    XCTAssertTrue(
-      response.body.contains("SOCKS5 127.0.0.1:2086"),
-      "PAC 内容必须指向同一运行时文档派生的 SOCKS 入站")
-
-    kill(wrapper.processIdentifier, SIGTERM)
-    XCTAssertEqual(try waitForExit(wrapper), 0)
-    XCTAssertNotEqual(
-      EndpointHealthProbe.probe(host: "127.0.0.1", port: pacPort, timeout: 0.2),
-      .reachable,
-      "wrapper 停止后 PAC endpoint 必须不可达")
-  }
-
   // MARK: 契约缺失 / 无效 → 停止并清理（D5）
 
   func testMissingContractExitsCleanlyWithoutSpawning() throws {
@@ -175,10 +149,10 @@ final class AgentLifecycleTests: XCTestCase {
   }
 
   func testStructurallyInvalidContractIsAlsoCleaned() throws {
-    // 可解码但 PAC 端口无效：wrapper 校验拒绝，不给 sslocal 反复失败的机会。
+    // 可解码但本地端口无效：wrapper 校验拒绝，不给 sslocal 反复失败的机会。
     // （issue #60 起空 `servers` 是合法契约——无活动目标的监听部署。）
     try SslocalRuntimeDocument(
-      servers: [], listen: SslocalListenSettings(pacPort: 0)
+      servers: [], listen: SslocalListenSettings(socksPort: 0)
     ).jsonData().write(to: contractURL)
     let wrapper = try launchWrapper(behavior: "run")
 
@@ -189,7 +163,7 @@ final class AgentLifecycleTests: XCTestCase {
   }
 
   /// 空服务器契约是合法部署（issue #60）：wrapper 接受并照常拉起 sslocal，
-  /// 由 PAC 与本地入站提供无目标的本地监听。
+  /// 由本地入站提供无目标的本地监听。
   func testEmptyServerContractIsValidAndRunsSslocal() throws {
     try SslocalRuntimeDocument(
       servers: [], listen: SslocalListenSettings()
@@ -225,38 +199,5 @@ final class AgentLifecycleTests: XCTestCase {
     _ = try waitForExit(wrapper)
     XCTAssertFalse(
       FileManager.default.fileExists(atPath: pidURL.path), "退出路径清理 pid 文件")
-  }
-
-  private struct LoadedPAC {
-    let statusCode: Int
-    let mimeType: String?
-    let body: String
-  }
-
-  private func loadPAC(port: Int) throws -> LoadedPAC {
-    let finished = expectation(description: "PAC GET")
-    let configuration = URLSessionConfiguration.ephemeral
-    configuration.timeoutIntervalForRequest = 2
-    let session = URLSession(configuration: configuration)
-    var captured: Result<LoadedPAC, Error>?
-    let pacURL = URL(string: "http://127.0.0.1:\(port)/v1/proxy.pac")!
-    session.dataTask(with: pacURL) { data, response, error in
-      defer { finished.fulfill() }
-      if let error {
-        captured = .failure(error)
-        return
-      }
-      guard let http = response as? HTTPURLResponse, let data,
-        let body = String(data: data, encoding: .utf8)
-      else {
-        captured = .failure(URLError(.badServerResponse))
-        return
-      }
-      captured = .success(
-        LoadedPAC(statusCode: http.statusCode, mimeType: http.mimeType, body: body))
-    }.resume()
-    wait(for: [finished], timeout: 3)
-    session.invalidateAndCancel()
-    return try XCTUnwrap(captured).get()
   }
 }

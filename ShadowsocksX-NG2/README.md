@@ -10,7 +10,7 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
 
 - `project.yml` — XcodeGen 工程定义，唯一事实来源。`.xcodeproj` 与 `App/Info.plist`、`*.entitlements`、`Tests/Info.plist` 都是生成物（已 gitignore），改工程结构一律改 `project.yml` 后重新生成。
 - `App/` — app target 源码（SwiftUI 菜单栏 app，LSUIElement）。
-- `Agent/` — 代理运行时 wrapper（独立可执行文件，装入 `Contents/MacOS/`，由 LaunchAgent 常驻）：读 `sslocal-active.json` 契约、承载版本化 PAC HTTP endpoint，并以绝对路径启动和监管 sslocal（SIGTERM 链式停止、SIGUSR1 热重载/结构重启、崩溃时非零退出交 KeepAlive 重放，spec #21 D2/D5/D7）。
+- `Agent/` — 代理运行时 wrapper（独立可执行文件，装入 `Contents/MacOS/`，由 LaunchAgent 常驻）：读 `sslocal-active.json` 契约，以绝对路径启动和监管 sslocal（SIGTERM 链式停止、SIGUSR1 热重载/结构重启、崩溃时非零退出交 KeepAlive 重放，spec #21 D2/D5/D7）。PAC HTTP endpoint 已随 issue #67 移除。
 - `LaunchAgent/` — `SMAppService.agent(plistName:)` 的注册清单，装入 `Contents/Library/LaunchAgents/`；`ProgramArguments` 用 bundle 相对路径，由 launchd 按注册 app 的 bundle 位置解析。
 - `Domain/` — 领域核心（配置目录树、凭据引用与持久化，spec #21 D3/D5），与 UI 无关；其中 `RuntimePaths`、`SslocalRuntimeDocument`、`RuntimeLog` 同时编入 wrapper 目标，保证跨进程契约单一来源。
 - `Tests/` — 单元测试 target，随 `ShadowsocksX-NG2` scheme 运行。

@@ -15,7 +15,6 @@ extension RuntimeListenFacts {
     switch endpoint {
     case .socks: socksPort
     case .http: httpPort
-    case .pac: pacPort
     }
   }
 
@@ -25,20 +24,12 @@ extension RuntimeListenFacts {
       return RuntimeListenFacts(
         scope: scope,
         socksPort: port,
-        httpPort: httpPort,
-        pacPort: pacPort)
+        httpPort: httpPort)
     case .http:
       return RuntimeListenFacts(
         scope: scope,
         socksPort: socksPort,
-        httpPort: port,
-        pacPort: pacPort)
-    case .pac:
-      return RuntimeListenFacts(
-        scope: scope,
-        socksPort: socksPort,
-        httpPort: httpPort,
-        pacPort: port)
+        httpPort: port)
     }
   }
 }

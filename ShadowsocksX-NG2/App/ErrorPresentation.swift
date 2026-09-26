@@ -59,8 +59,6 @@ extension AppPresentation {
       return listenStore(error)
     case let error as LegacyImportError:
       return legacyImport(error)
-    case let error as PACServerError:
-      return pacServer(error)
     case let error as SystemProxyError:
       return systemProxy(error)
     case let error as SystemProxyOwnershipStoreError:
@@ -130,17 +128,14 @@ extension AppPresentation {
 
   static func message(for confirmation: SettingsConfirmation) -> String {
     switch confirmation {
-    case .pacInvalidation(let previousPort, let nextPort):
-      return "PAC 端口将从 \(previousPort) 改为 \(nextPort)，已分享的 PAC URL 将失效，保存后需要重新分享"
     case .resetPreferences:
-      return "端口、监听范围和 PAC 设置等全部偏好都会恢复为出厂值，运行中的代理会停止。"
+      return "端口、监听范围等全部偏好都会恢复为出厂值，运行中的代理会停止。"
     }
   }
 
   static func message(for issue: SettingsFieldIssue) -> String {
     switch issue {
-    case .port(_, let error), .advertisedAddress(let error), .timeoutSeconds(let error),
-      .gfwListURL(let error):
+    case .port(_, let error), .advertisedAddress(let error), .timeoutSeconds(let error):
       return message(for: error)
     }
   }
@@ -266,7 +261,6 @@ extension AppPresentation {
 
   static func proxyMode(_ error: ProxyModeError) -> String {
     switch error {
-    case .invalidLocalPACURL: return "本地 PAC URL 无效"
     case .invalidSOCKSPort: return "SOCKS 端口无效"
     }
   }
@@ -290,7 +284,6 @@ extension AppPresentation {
     case .invalidTimeout(let seconds):
       return "超时 \(seconds) 秒无效，必须是 1–86400 之间的整数"
     case .invalidHostAddress: return "主机地址无效，必须是非回环 IPv4 地址"
-    case .invalidGFWListURL: return "GFW List URL 无效"
     }
   }
 
@@ -320,14 +313,6 @@ extension AppPresentation {
     case .alreadyCompleted: return "Legacy 配置已经导入；如需再次导入，请明确选择再次导入"
     case .malformedSnapshot: return "Legacy 快照无效"
     case .commitFailed: return "Legacy 导入未完成，2.0 写入未完成"
-    }
-  }
-
-  private static func pacServer(_ error: PACServerError) -> String {
-    switch error {
-    case .invalidPort: return "PAC 端口无效"
-    case .startFailed: return "PAC 服务启动失败"
-    case .startTimedOut: return "PAC 服务启动超时"
     }
   }
 

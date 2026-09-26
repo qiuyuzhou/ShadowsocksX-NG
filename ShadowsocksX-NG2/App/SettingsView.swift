@@ -43,8 +43,8 @@ struct SettingsView: View {
   // MARK: - 提交动作行（内容顶部，固定不随表单滚动）
 
   /// 保存/恢复默认（原壳动作槽位，票 #57）：表单级提交动作与表单同置；
-  /// 保存走 Return 默认键位。恢复默认的确认与保存的 PAC 失效确认都经
-  /// pendingConfirmation 由本视图 alert 呈现。
+  /// 保存走 Return 默认键位。恢复默认的确认经 pendingConfirmation 由本视图
+  /// alert 呈现。
   private var commitActionsRow: some View {
     HStack(spacing: 8) {
       Spacer(minLength: 0)
@@ -153,7 +153,6 @@ struct SettingsView: View {
       }
       portRow(.socks, title: "SOCKS5 端口")
       portRow(.http, title: "HTTP 代理端口")
-      portRow(.pac, title: "PAC 端口")
     } header: {
       sectionHeader("代理端点", subtitle: "监听范围和本地服务端口", trailing: "不会自动换端口")
     }
@@ -169,19 +168,6 @@ struct SettingsView: View {
       Text("逗号或空格分隔域名，这些目标不走代理。")
         .font(.caption)
         .foregroundStyle(.secondary)
-      TextField("GFW List URL", text: $workflow.draft.gfwListURL, prompt: Text("https://…"))
-      issuesRow(.gfwListURL)
-      Text("远程内容只保存 URL；本设置页不负责远程内容校验或自动更新。")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      VStack(alignment: .leading, spacing: 6) {
-        settingCopy("PAC 用户规则", note: "仅以 @@ 开头的域名例外规则会生成 DIRECT；其他规则保持默认代理链")
-        TextEditor(text: $workflow.draft.pacUserRules)
-          .font(.system(.body, design: .monospaced))
-          .frame(minHeight: 110)
-          .overlay(RoundedRectangle(cornerRadius: 5).stroke(.quaternary))
-      }
-      .padding(.vertical, 4)
       if workflow.hasBlockingPortOccupancy {
         Label("检测到端口已被占用；请先使用对应的「建议空闲端口」，再保存设置。", systemImage: "exclamationmark.triangle")
           .font(.footnote)
@@ -193,7 +179,7 @@ struct SettingsView: View {
           .foregroundStyle(.secondary)
       }
     } header: {
-      sectionHeader("高级", subtitle: "细化系统代理与 PAC 规则")
+      sectionHeader("高级", subtitle: "细化系统代理行为")
     }
   }
 
@@ -254,13 +240,6 @@ struct SettingsView: View {
     for confirmation: SettingsConfirmation
   ) -> ConfirmationPresentation {
     switch confirmation {
-    case .pacInvalidation:
-      ConfirmationPresentation(
-        title: "PAC 地址将失效",
-        confirmTitle: "继续保存",
-        confirmRole: nil,
-        confirm: { Task { _ = await workflow.confirmPACNotice() } },
-        cancel: { Task { _ = await workflow.cancelPACNotice() } })
     case .resetPreferences:
       ConfirmationPresentation(
         title: "重置所有偏好？",

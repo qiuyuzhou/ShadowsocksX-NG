@@ -13,7 +13,6 @@ final class ProxyPortSemanticsTests: XCTestCase {
 
     XCTAssertEqual(settings.socksPort, 11086)
     XCTAssertEqual(settings.httpPort, 11087)
-    XCTAssertEqual(settings.pacPort, 11089)
     XCTAssertTrue(settings.portValidationErrors().isEmpty)
   }
 
@@ -22,26 +21,25 @@ final class ProxyPortSemanticsTests: XCTestCase {
   func testOutOfRangePortsAreRejectedNamingEndpointAndPort() {
     var settings = SslocalListenSettings()
     settings.socksPort = 0
-    settings.pacPort = 65536
+    settings.httpPort = 65536
 
     XCTAssertEqual(
       settings.portValidationErrors(),
       [
         .portOutOfRange(endpoint: .socks, port: 0),
-        .portOutOfRange(endpoint: .pac, port: 65536),
+        .portOutOfRange(endpoint: .http, port: 65536),
       ])
   }
 
   func testDuplicateConfiguredPortsAreRejectedNamingBothEndpoints() {
     let settings = SslocalListenSettings(
       socksPort: 1086,
-      httpPort: 1086,
-      pacPort: 1089)
+      httpPort: 1086)
 
     XCTAssertEqual(
       settings.portValidationErrors(),
       [.duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 1086)],
-      "三个端点的配置值都必须互异")
+      "两个端点的配置值都必须互异")
   }
 
   func testPresentationNamesEndpointAndPort() {
@@ -52,8 +50,8 @@ final class ProxyPortSemanticsTests: XCTestCase {
     XCTAssertEqual(
       AppPresentation.message(
         for: PortSettingError.duplicatePort(
-          endpoint: .pac, otherEndpoint: .socks, port: 1086)),
-      "PAC 端口与 SOCKS5 端口冲突（都是 1086），请为每个端点配置不同的端口")
+          endpoint: .socks, otherEndpoint: .http, port: 1086)),
+      "SOCKS5 端口与 HTTP 端口冲突（都是 1086），请为每个端点配置不同的端口")
   }
 
   // MARK: 建议端口算法（D8：32768–65535 高位段，空闲且与另两端点配置值互异）
@@ -75,18 +73,17 @@ final class ProxyPortSemanticsTests: XCTestCase {
     XCTAssertNil(PortSuggestion.firstFree(excluding: [], isFree: { _ in false }))
   }
 
-  func testSuggestedPortForEndpointExcludesOtherTwoConfiguredValues() {
+  func testSuggestedPortForEndpointExcludesOtherConfiguredValues() {
     let settings = SslocalListenSettings(
-      socksPort: 40000, httpPort: 40001, pacPort: 1089)
+      socksPort: 40000, httpPort: 40001)
     var probed: [Int] = []
-    let suggested = settings.suggestedPort(for: .pac) { port in
+    let suggested = settings.suggestedPort(for: .http) { port in
       probed.append(port)
       return port == 40002
     }
 
     XCTAssertEqual(suggested, 40002)
-    XCTAssertFalse(probed.contains(40000))
-    XCTAssertFalse(probed.contains(40001), "另两端点的配置值无论启用与否都排除")
+    XCTAssertFalse(probed.contains(40000), "另个端点的配置值无论启用与否都排除")
   }
 
   // MARK: 占用探测（设置区即时校验的 I/O 缝；激活仍以 runtime 实际绑定的
@@ -127,24 +124,6 @@ final class ProxyPortSemanticsTests: XCTestCase {
     XCTAssertNil(
       SystemPortOccupancyProbe.occupierProcessName(fromLsofOutput: "COMMAND PID USER FD"),
       "只有表头（无占用进程）时解析为 nil")
-  }
-
-  // MARK: PAC 端口变更失效提示（D8；UI 面在 #33 接线）
-
-  func testPACPortChangeProducesInvalidationNoticeNamingBothPorts() {
-    let notice = PortChangeNotice.pacPortChanged(
-      from: SslocalListenSettings(), to: SslocalListenSettings(pacPort: 8080))
-
-    XCTAssertTrue(notice)
-  }
-
-  func testChangesNotTouchingPACPortProduceNoNotice() {
-    XCTAssertFalse(
-      PortChangeNotice.pacPortChanged(
-        from: SslocalListenSettings(), to: SslocalListenSettings(socksPort: 2086)))
-    XCTAssertFalse(
-      PortChangeNotice.pacPortChanged(
-        from: SslocalListenSettings(), to: SslocalListenSettings()))
   }
 }
 

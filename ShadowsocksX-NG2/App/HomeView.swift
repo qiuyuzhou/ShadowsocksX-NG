@@ -3,7 +3,7 @@ import SwiftUI
 /// 首页分区（地图 #52，票 #54）：代理模式切换、运行控制、当前服务器目标树
 /// 与快速操作。模式与两个开关（agent/系统代理，issue #60）走代理控制工作流
 /// 的整体 snapshot；目标树与激活走目录工作流 projection 与 `activate`；复制
-/// HTTP 导出是 UI 副作用。当前选择器保留 PAC 和全局模式，并加入 ACL 直连。
+/// HTTP 导出是 UI 副作用。三种模式（规则/全局/直连）与规则子选项共用同一快照。
 struct HomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
@@ -191,9 +191,7 @@ private struct ModeCard: View {
   private func modeDescription(_ mode: ProxyMode) -> String {
     switch mode {
     case .rule:
-      "按内置中国域名规则在代理与直连间选择；未匹配目标走默认动作。"
-    case .pac:
-      "根据规则自动决定直连或通过代理，适合日常使用。"
+      "按内置规则在代理与直连间选择；未匹配目标走默认动作。"
     case .global:
       "所有系统代理流量通过本地 SOCKS5 端点转发，不使用规则分流。"
     case .direct:

@@ -110,7 +110,7 @@ extension ProxyRuntimeController {
     settings = ProxySettings()
     listenSettingsUnreadable = false
     settingsUnreadable = false
-    proxyMode = .pac
+    proxyMode = .rule
     lastActivationFailure = nil
     await stopAgent()
     if case .failed(let facts) = systemProxyState {
@@ -128,7 +128,6 @@ extension ProxyRuntimeController {
     flowGeneration += 1
     _ = await execute(.stop, document: nil)
     state = .off
-    pacURL = nil
     lastDocument = nil
     skippedServers = []
     lastActivationFailure = nil

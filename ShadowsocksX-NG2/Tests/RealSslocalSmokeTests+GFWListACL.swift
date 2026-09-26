@@ -11,7 +11,7 @@ extension RealSslocalSmokeTests {
     let fakeSSServer = try ConnectionCountingServer()
     let selectedPorts = try grabThreeListenPorts(excluding: [echoServer.port, fakeSSServer.port])
     let listen = SslocalListenSettings(
-      socksPort: selectedPorts[0], httpPort: selectedPorts[1], pacPort: selectedPorts[2])
+      socksPort: selectedPorts[0], httpPort: selectedPorts[1])
     let gfwSource = RuleSourceIdentity(
       kind: .gfwlist, upstreamVersion: "test", label: "GFWList")
     let gfwRules = [
@@ -59,7 +59,7 @@ extension RealSslocalSmokeTests {
     let fakeSSServer = try ConnectionCountingServer()
     let selectedPorts = try grabThreeListenPorts(excluding: [echoServer.port, fakeSSServer.port])
     let listen = SslocalListenSettings(
-      socksPort: selectedPorts[0], httpPort: selectedPorts[1], pacPort: selectedPorts[2])
+      socksPort: selectedPorts[0], httpPort: selectedPorts[1])
     let acl = priorityProbeACL()
     let document = SslocalRuntimeDocument(
       servers: [

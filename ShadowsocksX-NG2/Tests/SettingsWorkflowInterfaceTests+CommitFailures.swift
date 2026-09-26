@@ -33,16 +33,15 @@ extension SettingsWorkflowInterfaceTests {
       .store(.ioFailure(detail: "disk full")))
     XCTAssertTrue(workflow.lastFailure?.presentableMessage.contains("偏好文件") == true)
 
-    committing.updateError = ProxySettingsStoreError.missingCredential(
-      ProxySettingsFileStore.gfwListReference)
+    let reference = CredentialReference(rawValue: "test-ref")
+    committing.updateError = ProxySettingsStoreError.missingCredential(reference)
     _ = await workflow.save()
     await waitUntil(
       workflow.lastFailure
-        == .store(
-          .missingCredential(ProxySettingsFileStore.gfwListReference)))
+        == .store(.missingCredential(reference)))
     XCTAssertEqual(
       workflow.lastFailure,
-      .store(.missingCredential(ProxySettingsFileStore.gfwListReference)))
+      .store(.missingCredential(reference)))
   }
 
   func testCommittingStateBlocksRepeatedSave() async throws {

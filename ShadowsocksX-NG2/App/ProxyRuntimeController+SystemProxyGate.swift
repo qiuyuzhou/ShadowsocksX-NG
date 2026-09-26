@@ -4,7 +4,7 @@ import Foundation
 
 extension ProxyRuntimeController {
   func presentFirewallStatus(for document: SslocalRuntimeDocument) async {
-    guard document.pac.listenScope == .host else {
+    guard document.listen.listenScope == .host else {
       state = .running
       return
     }

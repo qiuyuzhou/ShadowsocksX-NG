@@ -11,15 +11,13 @@ struct RuntimeDocumentOptions: Equatable, Sendable {
   var listen: SslocalListenSettings
   var timeout: Int = 60
   var verbose: Bool = false
-  var pacUserRules: String = ""
 }
 
 extension ProxySettings {
   /// 激活派生所用选项即用户设置中的运行时文档旋钮。
   var runtimeDocumentOptions: RuntimeDocumentOptions {
     RuntimeDocumentOptions(
-      listen: listen, timeout: timeoutSeconds, verbose: verboseLogging,
-      pacUserRules: pacUserRules)
+      listen: listen, timeout: timeoutSeconds, verbose: verboseLogging)
   }
 }
 
@@ -127,8 +125,7 @@ struct ActivationStateMachine: Equatable, Sendable {
           servers: servers,
           listen: options.listen,
           timeout: options.timeout,
-          verbose: options.verbose,
-          pacUserRules: options.pacUserRules),
+          verbose: options.verbose),
         skippedServers: skippedServers))
   }
 

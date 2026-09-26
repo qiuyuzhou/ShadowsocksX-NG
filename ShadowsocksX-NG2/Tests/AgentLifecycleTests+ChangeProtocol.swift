@@ -86,8 +86,7 @@ extension AgentLifecycleTests {
     let runtimeStore = RuntimeFileStore(fileURL: contractURL)
     let listen = SslocalListenSettings(
       socksPort: staleSocksListener.port,
-      httpPort: staleHTTPListener.port,
-      pacPort: try ProxyRuntimeFixture.unusedLoopbackPort())
+      httpPort: staleHTTPListener.port)
     let directDocument = SslocalRuntimeDocument(servers: [], listen: listen)
       .replacingACL(.direct(at: runtimeStore.aclFileURL))
     try writeContract(directDocument)

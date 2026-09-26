@@ -4,7 +4,6 @@ import Foundation
 /// #33 的用户偏好快照。监听端点仍是运行时契约的输入，但不会把偏好文件
 /// 当作运行时文件使用；代理启动前由控制器从快照重新派生完整契约。
 struct ProxySettings: Equatable, Sendable {
-  static let defaultGFWListURL = "https://cdn.jsdelivr.net/gh/gfwlist/gfwlist/gfwlist.txt"
   static let defaultProxyExceptions =
     "127.0.0.1, localhost, 192.168.0.0/16, 10.0.0/8, FE80::/64, ::1, FD00::/8"
 
@@ -12,10 +11,8 @@ struct ProxySettings: Equatable, Sendable {
   var timeoutSeconds: Int
   var verboseLogging: Bool
   var proxyExceptions: String
-  var gfwListURL: String
-  var pacUserRules: String
   /// The persisted current mode: the mode selector's choice survives GUI
-  /// restarts.
+  /// restarts. First run defaults to rule mode (issue #67).
   var preferredMode: ProxyModeKind
   /// 规则模式子选项（issue #63）：未匹配默认动作，出厂「未匹配时代理」。
   var ruleDefaultAction: RuleDefaultAction
@@ -31,9 +28,7 @@ struct ProxySettings: Equatable, Sendable {
     timeoutSeconds: Int = 60,
     verboseLogging: Bool = false,
     proxyExceptions: String = ProxySettings.defaultProxyExceptions,
-    gfwListURL: String = ProxySettings.defaultGFWListURL,
-    pacUserRules: String = "",
-    preferredMode: ProxyModeKind = .pac,
+    preferredMode: ProxyModeKind = .rule,
     ruleDefaultAction: RuleDefaultAction = .proxyWhenUnmatched,
     agentEnabled: Bool = true,
     systemProxyEnabled: Bool = false
@@ -42,8 +37,6 @@ struct ProxySettings: Equatable, Sendable {
     self.timeoutSeconds = timeoutSeconds
     self.verboseLogging = verboseLogging
     self.proxyExceptions = proxyExceptions
-    self.gfwListURL = gfwListURL
-    self.pacUserRules = pacUserRules
     self.preferredMode = preferredMode
     self.ruleDefaultAction = ruleDefaultAction
     self.agentEnabled = agentEnabled
@@ -73,18 +66,7 @@ struct ProxySettings: Equatable, Sendable {
     if case .host(let address) = listen.scope, !Self.isUsableHostAddress(address) {
       errors.append(.invalidHostAddress(address))
     }
-    if !gfwListURL.isEmpty, !Self.isUsableRemoteURL(gfwListURL) {
-      errors.append(.invalidGFWListURL(gfwListURL))
-    }
     return errors
-  }
-
-  private static func isUsableRemoteURL(_ value: String) -> Bool {
-    guard let url = URL(string: value), let scheme = url.scheme?.lowercased(),
-      scheme == "http" || scheme == "https", url.host != nil,
-      url.user == nil, url.password == nil
-    else { return false }
-    return value.utf8.count <= 2048
   }
 
   private static func isUsableHostAddress(_ value: String) -> Bool {
@@ -100,7 +82,6 @@ enum ProxySettingsValidationError: Error, Equatable, Sendable {
   case duplicatePort(endpoint: ProxyEndpointKind, otherEndpoint: ProxyEndpointKind, port: Int)
   case invalidTimeout(Int)
   case invalidHostAddress(String)
-  case invalidGFWListURL(String)
 
   init(_ error: PortSettingError) {
     switch error {

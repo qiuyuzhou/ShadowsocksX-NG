@@ -73,7 +73,6 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
     "LaunchAgentService.swift",
     "LoginAtLoginService.swift",
     "FirewallStatusChecker.swift",
-    "PACHealthProbe.swift",
   ]
 
   /// 豁免目录：workflow module 实现（含被测的目录工作流自身）。

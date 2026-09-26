@@ -133,7 +133,6 @@ extension ProxyRuntimeController {
     let restoreError = restoreSystemProxyError()
     _ = await execute(.stop, document: nil)
     state = .off
-    pacURL = nil
     lastDocument = nil
     skippedServers = []
     lastActivationFailure = nil
@@ -141,14 +140,13 @@ extension ProxyRuntimeController {
   }
 
   /// 无活动目标时 agent 仍提供本地监听（issue #60）：空服务器列表文档，
-  /// SOCKS/HTTP/PAC 端点照常绑定；系统代理门禁会因缺少可用出口保持待应用。
+  /// SOCKS/HTTP 端点照常绑定；系统代理门禁会因缺少可用出口保持待应用。
   func deployListeningWithoutTarget() async {
     let document = SslocalRuntimeDocument(
       servers: [],
       listen: settings.listen,
       timeout: settings.timeoutSeconds,
-      verbose: settings.verboseLogging,
-      pacUserRules: settings.pacUserRules)
+      verbose: settings.verboseLogging)
     await deploy(document)
   }
 
@@ -168,7 +166,6 @@ extension ProxyRuntimeController {
       state = .serviceFailed(.runtimeFile)
       return false
     }
-    pacURL = nil
     lastDocument = document
     guard await execute(.run(document), document: document) else { return false }
     state = .starting
@@ -181,7 +178,6 @@ extension ProxyRuntimeController {
   private func refuseDeployForUnreadableListenSettings() async {
     RuntimeLog.emit(.activationFailed(reason: "listen settings unreadable"))
     _ = await execute(.stop, document: nil)
-    pacURL = nil
     lastDocument = nil
     skippedServers = []
     state = .launchFailed(.unreadableSettings)
@@ -208,7 +204,6 @@ extension ProxyRuntimeController {
       // 会话内意图已被关闭的残余：按关闭语义收敛。
       _ = await execute(.stop, document: nil)
       state = .off
-      pacURL = nil
       lastDocument = nil
     }
   }

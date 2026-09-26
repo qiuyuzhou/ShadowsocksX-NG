@@ -8,7 +8,7 @@ The proxy mode selector needs a direct option that does not require an active Sh
 
 ## Decision
 
-- Add persisted `direct` as a third system proxy mode. When applied, macOS points at the existing local SOCKS endpoint. Local PAC and global SOCKS remain available; manual and external PAC modes remain removed as decided in ADR-0007.
+- Add persisted `direct` as a third system proxy mode. When applied, macOS points at the existing local SOCKS endpoint. Rule and global modes remain available; manual and external PAC modes remain removed as decided in ADR-0007. Local PAC is removed entirely by issue #67.
 - Direct mode deploys an `sslocal` ACL with `[bypass_all]` and an explicit bypass list for loopback, private, link-local, unique-local, localhost, `.local`, and no-dot destinations. It needs no active target and produces an empty server list when no target is selected. SOCKS and HTTP use the same ACL.
 - Keep the fixed local exceptions in the SystemConfiguration bypass list as well. Do not add carrier-grade NAT ranges to the fixed list.
 - Treat ACL path, content, digest, and summary as runtime identity. An ACL change restarts `sslocal`; server-only changes use the existing hot-reload path, deferred until a direct-mode child owns its configured listeners if startup is still in progress.
@@ -16,4 +16,4 @@ The proxy mode selector needs a direct option that does not require an active Sh
 
 ## Consequences
 
-Direct mode remains within the existing PAC, SOCKS, and HTTP runtime. ACL state lives in a protected sidecar and is validated against the runtime contract before launch. A stale listener cannot verify a candidate: the wrapper ties the receipt to the process that owns each configured TCP listener, and the controller checks that process throughout its health probes.
+Direct mode remains within the existing SOCKS and HTTP runtime. ACL state lives in a protected sidecar and is validated against the runtime contract before launch. A stale listener cannot verify a candidate: the wrapper ties the receipt to the process that owns each configured TCP listener, and the controller checks that process throughout its health probes.

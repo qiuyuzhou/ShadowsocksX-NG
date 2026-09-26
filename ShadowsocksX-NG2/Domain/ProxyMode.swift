@@ -1,9 +1,9 @@
 import Foundation
 
-/// Persisted identity of a proxy mode.
+/// Persisted identity of a proxy mode. PAC is gone (issue #67): the product
+/// exposes rule / global / direct only.
 enum ProxyModeKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
   case rule
-  case pac
   case global
   case direct
 }
@@ -13,7 +13,6 @@ enum ProxyModeKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable
 /// 规则模式（issue #63）另持久化 `RuleDefaultAction` 子选项。
 enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   case rule
-  case pac
   case global
   case direct
 
@@ -23,7 +22,6 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
 
   private enum Kind: String, Codable {
     case rule
-    case pac
     case global
     case direct
   }
@@ -33,8 +31,6 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
     switch try container.decode(Kind.self, forKey: .kind) {
     case .rule:
       self = .rule
-    case .pac:
-      self = .pac
     case .global:
       self = .global
     case .direct:
@@ -47,8 +43,6 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
     switch self {
     case .rule:
       try container.encode(Kind.rule, forKey: .kind)
-    case .pac:
-      try container.encode(Kind.pac, forKey: .kind)
     case .global:
       try container.encode(Kind.global, forKey: .kind)
     case .direct:
@@ -60,8 +54,6 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
     switch self {
     case .rule:
       "规则"
-    case .pac:
-      "PAC"
     case .global:
       "全局"
     case .direct:
@@ -72,41 +64,32 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   var kind: ProxyModeKind {
     switch self {
     case .rule: .rule
-    case .pac: .pac
     case .global: .global
     case .direct: .direct
     }
   }
 
   /// Returns every mode supported by the product in stable selector order.
-  static var availableModes: [ProxyMode] { [.rule, .pac, .global, .direct] }
+  static var availableModes: [ProxyMode] { [.rule, .global, .direct] }
 
   /// Derives the only system-proxy state that this mode is allowed to own.
+  /// All three modes are projected as a local SOCKS target (issue #59/#67).
   func systemProxyConfiguration(
     for document: SslocalRuntimeDocument,
     exceptions: [String]? = nil
   ) throws -> SystemProxyConfiguration {
-    switch self {
-    case .pac:
-      guard let url = document.pac.publicURL else {
-        throw ProxyModeError.invalidLocalPACURL
-      }
-      return SystemProxyConfiguration(target: .pac(url), exceptions: exceptions)
-    case .rule, .global, .direct:
-      guard (1...65535).contains(document.socksPort) else {
-        throw ProxyModeError.invalidSOCKSPort(document.socksPort)
-      }
-      return SystemProxyConfiguration(
-        target: .socks(host: "127.0.0.1", port: document.socksPort),
-        exceptions: FixedLocalProxyRanges.systemProxyExceptions(including: exceptions))
+    guard (1...65535).contains(document.socksPort) else {
+      throw ProxyModeError.invalidSOCKSPort(document.socksPort)
     }
+    return SystemProxyConfiguration(
+      target: .socks(host: "127.0.0.1", port: document.socksPort),
+      exceptions: FixedLocalProxyRanges.systemProxyExceptions(including: exceptions))
   }
 }
 
 /// The part of the system proxy dictionary that 2.0 intentionally controls.
 struct SystemProxyConfiguration: Equatable, Sendable {
   enum Target: Equatable, Sendable {
-    case pac(URL)
     case socks(host: String, port: Int)
   }
 
@@ -122,6 +105,5 @@ struct SystemProxyConfiguration: Equatable, Sendable {
 }
 
 enum ProxyModeError: Error, Equatable, Sendable {
-  case invalidLocalPACURL
   case invalidSOCKSPort(Int)
 }

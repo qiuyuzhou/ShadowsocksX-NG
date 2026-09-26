@@ -269,11 +269,10 @@ enum DiagnosticReportBuilder {
     }
   }
 
-  /// 三个本地端点只以端口事实呈现（端口语义 #28/#30）。
+  /// 本地端点只以端口事实呈现（端口语义 #28/#30）。
   private static func listenDescription(_ listen: SslocalListenSettings) -> String {
     var parts = ["SOCKS5 端口 \(listen.socksPort)"]
     parts.append("HTTP 端口 \(listen.httpPort)")
-    parts.append("PAC 端口 \(listen.pacPort)")
     return parts.joined(separator: "；")
   }
 

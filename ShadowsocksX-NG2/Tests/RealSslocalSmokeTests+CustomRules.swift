@@ -11,7 +11,7 @@ extension RealSslocalSmokeTests {
     let fakeSSServer = try ConnectionCountingServer()
     let selectedPorts = try grabThreeListenPorts(excluding: [echoServer.port, fakeSSServer.port])
     let listen = SslocalListenSettings(
-      socksPort: selectedPorts[0], httpPort: selectedPorts[1], pacPort: selectedPorts[2])
+      socksPort: selectedPorts[0], httpPort: selectedPorts[1])
     let customSource = RuleSourceIdentity(
       kind: .custom, upstreamVersion: "user", label: "自定义")
     let customRules = [
@@ -115,7 +115,7 @@ extension RealSslocalSmokeTests {
     let fakeSSServer = try ConnectionCountingServer()
     let selectedPorts = try grabThreeListenPorts(excluding: [echoServer.port, fakeSSServer.port])
     let listen = SslocalListenSettings(
-      socksPort: selectedPorts[0], httpPort: selectedPorts[1], pacPort: selectedPorts[2])
+      socksPort: selectedPorts[0], httpPort: selectedPorts[1])
     let customSource = RuleSourceIdentity(
       kind: .custom, upstreamVersion: "user", label: "自定义")
     let customRules = [
