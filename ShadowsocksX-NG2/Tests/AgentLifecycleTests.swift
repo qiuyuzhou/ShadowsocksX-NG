@@ -44,6 +44,7 @@ final class AgentLifecycleTests: XCTestCase {
     let script = """
       #!/bin/sh
       echo "invoked: $*" >> "$SSLOCAL_STUB_STATE"
+      echo "dns-force-builtin: ${SS_SYSTEM_DNS_RESOLVER_FORCE_BUILTIN:-unset}" >> "$SSLOCAL_STUB_STATE"
       trap 'echo "SIGTERM" >> "$SSLOCAL_STUB_STATE"; exit 0' TERM
       trap 'echo "SIGUSR1" >> "$SSLOCAL_STUB_STATE"' USR1
       case "$SSLOCAL_STUB_BEHAVIOR" in
@@ -122,6 +123,23 @@ final class AgentLifecycleTests: XCTestCase {
     XCTAssertTrue(
       FileManager.default.fileExists(atPath: contractURL.path),
       "停止路径不动契约文件（删除由 GUI 的停止协议末端负责）")
+  }
+
+  /// macOS resolv.conf 可能含带 zone id 的链路本地 nameserver，hickory 解析
+  /// 失败只会刷 ERROR 后回退：wrapper 应直接注入强制 builtin 的环境变量。
+  func testSpawnForcesBuiltinDnsResolverEnvironment() throws {
+    try writeContract(ProxyRuntimeFixture.makeDocument())
+    let wrapper = try launchWrapper(behavior: "run")
+
+    XCTAssertTrue(
+      try waitUntil { self.stateLog().contains("invoked:") },
+      "wrapper 应拉起 sslocal，实际：\(stateLog())")
+    XCTAssertTrue(
+      stateLog().contains("dns-force-builtin: 1"),
+      "sslocal 子进程应收到 SS_SYSTEM_DNS_RESOLVER_FORCE_BUILTIN=1，实际：\(stateLog())")
+
+    kill(wrapper.processIdentifier, SIGTERM)
+    XCTAssertEqual(try waitForExit(wrapper), 0)
   }
 
   // MARK: 契约缺失 / 无效 → 停止并清理（D5）

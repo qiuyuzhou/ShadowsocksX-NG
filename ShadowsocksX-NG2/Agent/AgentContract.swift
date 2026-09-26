@@ -51,6 +51,13 @@ func spawnSslocal(_ document: SslocalRuntimeDocument) -> Process? {
   if childEnvironment["RUST_LOG"] == nil {
     childEnvironment["RUST_LOG"] = document.listen.verbose ? "debug" : "warn"
   }
+  // macOS 的 resolv.conf 可能含带 zone id 的链路本地 nameserver（RA 下发的
+  // RDNSS，如 fe80::…%en0），hickory 解析不了该后缀（hickory-dns#3713），
+  // 每次启动都报错再回退 builtin。强制 builtin getaddrinfo 即回退后的实际
+  // 路径，跳过这段噪音；显式外部设置仍可覆盖以便诊断。
+  if childEnvironment["SS_SYSTEM_DNS_RESOLVER_FORCE_BUILTIN"] == nil {
+    childEnvironment["SS_SYSTEM_DNS_RESOLVER_FORCE_BUILTIN"] = "1"
+  }
   child.environment = childEnvironment
   do {
     try child.run()
