@@ -100,6 +100,9 @@ final class ProxyRuntimeController: ObservableObject {
 
   @Published var proxyMode: ProxyMode
 
+  /// 规则模式子选项（issue #63）：从设置快照投影。
+  var ruleDefaultAction: RuleDefaultAction { settings.ruleDefaultAction }
+
   init(
     catalogSnapshotReader: RuntimeCatalogSnapshotReading,
     activationFileStore: ActivationStateFileStore = ActivationStateFileStore(
@@ -358,7 +361,15 @@ final class ProxyRuntimeController: ObservableObject {
       await refuseDeployForUnreadableListenSettings()
       return false
     }
-    let document = runtimeDocument(sourceDocument, for: proxyMode)
+    let document: SslocalRuntimeDocument
+    do {
+      document = try runtimeDocument(sourceDocument, for: proxyMode)
+    } catch {
+      // 规则快照缺失/损坏：不静默退化成全局（issue #63 AC4）。
+      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+      state = .serviceFailed(.runtimeFile)
+      return false
+    }
     pacURL = nil
     lastDocument = document
     guard await execute(.run(document), document: document) else { return false }

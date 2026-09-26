@@ -126,7 +126,7 @@ private struct RuntimeControlCard: View {
   }
 }
 
-/// 「代理模式」卡：可用模式切换（Domain 单点策略投影）+ 模式说明 + 当前徽标。
+/// 「代理模式」卡：可用模式切换（Domain 单点策略投影）+ 规则子选项 + 模式说明 + 当前徽标。
 private struct ModeCard: View {
   @ObservedObject var control: ProxyControlWorkflow
 
@@ -134,7 +134,7 @@ private struct ModeCard: View {
     HomeCard(
       title: "代理模式",
       subtitle: "选择系统代理接管方式",
-      trailing: { ModeBadge(label: control.snapshot.proxyMode.label) },
+      trailing: { ModeBadge(label: modeBadgeLabel) },
       content: {
         VStack(alignment: .leading, spacing: 14) {
           Picker("代理模式", selection: modeBinding) {
@@ -145,6 +145,16 @@ private struct ModeCard: View {
           .pickerStyle(.segmented)
           .labelsHidden()
           .frame(maxWidth: 480, alignment: .leading)
+          if control.snapshot.proxyMode == .rule {
+            Picker("未匹配默认动作", selection: ruleDefaultActionBinding) {
+              ForEach(RuleDefaultAction.allCases, id: \.self) { action in
+                Text(action.label).tag(action)
+              }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 480, alignment: .leading)
+          }
           Text(modeDescription(control.snapshot.proxyMode))
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -152,6 +162,14 @@ private struct ModeCard: View {
         }
         .padding(.top, 6)
       })
+  }
+
+  private var modeBadgeLabel: String {
+    let mode = control.snapshot.proxyMode
+    if mode == .rule {
+      return "\(mode.label) · \(control.snapshot.ruleDefaultAction.label)"
+    }
+    return mode.label
   }
 
   private var modeBinding: Binding<ProxyMode> {
@@ -162,8 +180,18 @@ private struct ModeCard: View {
       })
   }
 
+  private var ruleDefaultActionBinding: Binding<RuleDefaultAction> {
+    Binding(
+      get: { control.snapshot.ruleDefaultAction },
+      set: { action in
+        Task { await control.setRuleDefaultAction(action) }
+      })
+  }
+
   private func modeDescription(_ mode: ProxyMode) -> String {
     switch mode {
+    case .rule:
+      "按内置中国域名规则在代理与直连间选择；未匹配目标走默认动作。"
     case .pac:
       "根据规则自动决定直连或通过代理，适合日常使用。"
     case .global:

@@ -15,6 +15,7 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
   var systemProxyIntentEnabled: Bool
   var systemProxyApplication: SystemProxyApplicationFacts
   var proxyMode: ProxyMode
+  var ruleDefaultAction: RuleDefaultAction = .proxyWhenUnmatched
   var skippedInvalidServerCount = 0
   var activeTargetID: NodeID?
   var httpExportCapability = HTTPExportCapability(
@@ -28,6 +29,7 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
   private(set) var agentCommands: [Bool] = []
   private(set) var systemProxyCommands: [Bool] = []
   private(set) var modeCommands: [ProxyMode] = []
+  private(set) var ruleDefaultActionCommands: [RuleDefaultAction] = []
 
   init(
     facts: ProxyRuntimeFacts = ProxyRuntimeFacts(status: .off, isOn: false),
@@ -52,6 +54,10 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
   func setSystemProxyEnabled(_ enabled: Bool) async { systemProxyCommands.append(enabled) }
 
   func setProxyMode(_ mode: ProxyMode) async { modeCommands.append(mode) }
+
+  func setRuleDefaultAction(_ action: RuleDefaultAction) async {
+    ruleDefaultActionCommands.append(action)
+  }
 }
 
 /// 可编程目标事实替身（story 32）：路径摘要可编程、查询全记录。
@@ -115,6 +121,7 @@ final class ProxyControlWorkflowTests: XCTestCase {
         systemProxyIntentEnabled: true,
         systemProxyApplication: .pending,
         proxyMode: .global,
+        ruleDefaultAction: .proxyWhenUnmatched,
         availableModes: ProxyMode.availableModes,
         activeTarget: ProxyActiveTargetFacts(id: Self.serverID, pathSummary: "组A / 香港 01"),
         skippedInvalidServerCount: 3,
@@ -195,6 +202,18 @@ final class ProxyControlWorkflowTests: XCTestCase {
     XCTAssertEqual(runtime.modeCommands, [.global])
     XCTAssertEqual(after.proxyMode, .global)
     XCTAssertEqual(after.runtime, ProxyRuntimeFacts(status: .running, isOn: true))
+  }
+
+  func testRuleDefaultActionCommandForwardsAndRepublishes() async {
+    runtime.ruleDefaultAction = .proxyWhenUnmatched
+    _ = await workflow.setRuleDefaultAction(.directWhenUnmatched)
+    XCTAssertEqual(runtime.ruleDefaultActionCommands, [.directWhenUnmatched])
+    // 命令完成后 workflow 从 runtime 重读事实。
+    XCTAssertEqual(workflow.snapshot.ruleDefaultAction, .proxyWhenUnmatched)
+    runtime.ruleDefaultAction = .directWhenUnmatched
+    runtime.emitChange()
+    XCTAssertEqual(workflow.snapshot.ruleDefaultAction, .directWhenUnmatched)
+    XCTAssertEqual(workflow.snapshot.proxyMode, runtime.proxyMode)
   }
 
   func testResyncOnLaunchForwardsAndRepublishes() async {

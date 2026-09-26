@@ -31,6 +31,8 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
 
   var proxyMode: ProxyMode { controller.proxyMode }
 
+  var ruleDefaultAction: RuleDefaultAction { controller.ruleDefaultAction }
+
   var skippedInvalidServerCount: Int { controller.skippedServers.count }
 
   var activeTargetID: NodeID? { controller.activeTargetID }
@@ -62,6 +64,10 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
 
   func setProxyMode(_ mode: ProxyMode) async {
     await controller.setProxyMode(mode)
+  }
+
+  func setRuleDefaultAction(_ action: RuleDefaultAction) async {
+    await controller.setRuleDefaultAction(action)
   }
 }
 

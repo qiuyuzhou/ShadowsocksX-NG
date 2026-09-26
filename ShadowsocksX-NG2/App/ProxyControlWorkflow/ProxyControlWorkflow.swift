@@ -40,6 +40,8 @@ struct ProxyControlSnapshot: Equatable, Sendable {
   let systemProxyApplication: SystemProxyApplicationFacts
   /// 当前已应用的代理模式（持久化成功的模式）。
   let proxyMode: ProxyMode
+  /// 规则模式子选项（issue #63）：未匹配默认动作；仅规则模式呈现。
+  let ruleDefaultAction: RuleDefaultAction
   /// 可用模式（issue #46 Domain 单点策略的投影；UI 不再自行判断可用性）。
   let availableModes: [ProxyMode]
   /// 活动目标事实；无活动目标为 nil。
@@ -70,6 +72,8 @@ protocol ProxyRuntimeAdapting: AnyObject {
   var systemProxyApplication: SystemProxyApplicationFacts { get }
   /// 当前已应用的代理模式。
   var proxyMode: ProxyMode { get }
+  /// 规则模式子选项（issue #63）。
+  var ruleDefaultAction: RuleDefaultAction { get }
   /// 最近一次激活预检或目录收敛跳过的无效服务器数量。
   var skippedInvalidServerCount: Int { get }
   /// 当前活动目标身份；无目标为 nil（目录侧目标事实的唯一输入）。
@@ -88,6 +92,8 @@ protocol ProxyRuntimeAdapting: AnyObject {
   /// 系统代理开关命令。
   func setSystemProxyEnabled(_ enabled: Bool) async
   func setProxyMode(_ mode: ProxyMode) async
+  /// 规则模式子选项命令（issue #63）。
+  func setRuleDefaultAction(_ action: RuleDefaultAction) async
 }
 
 /// 窄的目录目标事实缝（issue #47，story 28）：目录侧只向代理控制提供活动
@@ -155,6 +161,13 @@ final class ProxyControlWorkflow: ObservableObject {
     return republish()
   }
 
+  /// 切换规则模式子选项（issue #63）：完成后整体重发布。
+  @discardableResult
+  func setRuleDefaultAction(_ action: RuleDefaultAction) async -> ProxyControlSnapshot {
+    await runtime.setRuleDefaultAction(action)
+    return republish()
+  }
+
   // MARK: - 整体观察（implementation，UI 不可见）
 
   /// 一次 observation 内整体拼装 snapshot；任何单一事实变化后整体替换，
@@ -176,6 +189,7 @@ final class ProxyControlWorkflow: ObservableObject {
       systemProxyIntentEnabled: runtime.systemProxyIntentEnabled,
       systemProxyApplication: runtime.systemProxyApplication,
       proxyMode: runtime.proxyMode,
+      ruleDefaultAction: runtime.ruleDefaultAction,
       availableModes: ProxyMode.availableModes,
       activeTarget: targetFacts.activeTargetFacts(for: runtime.activeTargetID),
       skippedInvalidServerCount: runtime.skippedInvalidServerCount,

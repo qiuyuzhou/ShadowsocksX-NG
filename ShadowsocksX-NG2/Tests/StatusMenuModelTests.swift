@@ -69,6 +69,7 @@ final class StatusMenuModelTests: XCTestCase {
       systemProxyIntentEnabled: systemProxyIntent,
       systemProxyApplication: systemProxyApplication,
       proxyMode: mode,
+      ruleDefaultAction: .proxyWhenUnmatched,
       availableModes: ProxyMode.availableModes,
       activeTarget: activeTarget,
       skippedInvalidServerCount: 0,

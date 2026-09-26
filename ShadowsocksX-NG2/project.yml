@@ -45,12 +45,25 @@ targets:
           copyFiles:
             destination: wrapper
             subpath: Contents/Helpers/Plugins
+      # 内置规则快照（issue #63）：普通构建只读本地已固定快照，离线且不重新
+      # 抓取或转换；缺失、损坏或版本不匹配时 verify-rule-snapshots.sh 使构建失败。
+      - path: Vendor/rules/geolocation-cn/snapshot.json
+        buildPhase: resources
+        type: file
+      - path: Vendor/rules/geolocation-cn/NOTICE
+        buildPhase: resources
+        type: file
     preBuildScripts:
       - name: Fetch & verify external binaries
         basedOnDependencyAnalysis: false
         script: |
           set -e
           "$SRCROOT/Scripts/fetch-external-binaries.sh"
+      - name: Verify rule snapshots
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          "$SRCROOT/Scripts/verify-rule-snapshots.sh"
     postBuildScripts:
       # 必须在 app 自身签名之前逐二进制 DevID 重签；Xcode 在所有脚本阶段之后
       # 完成 app 外层签名，封存重签后的嵌套代码。
@@ -100,6 +113,7 @@ targets:
       - path: Domain/RuntimePaths.swift
       - path: Domain/AtomicFileWriter.swift
       - path: Domain/ProxyACL.swift
+      - path: Domain/ProxyRule.swift
       - path: Domain/PACUserRules.swift
       - path: Domain/SslocalRuntimeDocument.swift
       - path: Domain/PACServer.swift

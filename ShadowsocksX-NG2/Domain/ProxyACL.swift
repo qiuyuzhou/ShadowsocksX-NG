@@ -75,10 +75,45 @@ struct ProxyACLDocument: Codable, Equatable, Sendable {
       at: fileURL, header: "[proxy_all]", summary: "global")
   }
 
-  private static func makeDocument(
-    at fileURL: URL, header: String, summary: String
+  /// 规则模式（issue #63）：`.cn` 与 geolocation-cn 域名候选直连，其余目标
+  /// 默认代理（「未匹配时代理」）。固定本地绕过优先；中国 IPv4 CIDR 由后续
+  /// 票据加入。
+  static func rule(
+    at fileURL: URL,
+    defaultAction: RuleDefaultAction,
+    chinaRules: [ProxyRule]
   ) -> ProxyACLDocument {
-    let lines = [header, "[bypass_list]"] + FixedLocalProxyRanges.aclBypassRules
+    switch defaultAction {
+    case .proxyWhenUnmatched:
+      // proxy_all + 中国域名进 bypass_list（直连候选）。
+      let bypass =
+        FixedLocalProxyRanges.aclBypassRules
+        + chinaRules.filter { $0.action == .direct }.map { $0.aclLine }
+      return makeDocument(
+        at: fileURL, header: "[proxy_all]", summary: "rule-proxy-default",
+        bypassRules: bypass, proxyRules: [])
+    case .directWhenUnmatched:
+      // bypass_all + 可生效的代理规则进 proxy_list（GFWList 由后续票据提供）。
+      let bypass =
+        FixedLocalProxyRanges.aclBypassRules
+        + chinaRules.filter { $0.action == .direct }.map { $0.aclLine }
+      let proxy = chinaRules.filter { $0.action == .proxy }.map { $0.aclLine }
+      return makeDocument(
+        at: fileURL, header: "[bypass_all]", summary: "rule-direct-default",
+        bypassRules: bypass, proxyRules: proxy)
+    }
+  }
+
+  private static func makeDocument(
+    at fileURL: URL, header: String, summary: String,
+    bypassRules: [String] = FixedLocalProxyRanges.aclBypassRules,
+    proxyRules: [String] = []
+  ) -> ProxyACLDocument {
+    var lines = [header, "[bypass_list]"] + bypassRules
+    if !proxyRules.isEmpty {
+      lines.append("[proxy_list]")
+      lines.append(contentsOf: proxyRules)
+    }
     return ProxyACLDocument(
       path: fileURL.standardizedFileURL.path,
       summary: summary,

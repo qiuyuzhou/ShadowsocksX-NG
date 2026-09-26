@@ -17,6 +17,8 @@ struct ProxySettings: Equatable, Sendable {
   /// The persisted current mode: the mode selector's choice survives GUI
   /// restarts.
   var preferredMode: ProxyModeKind
+  /// 规则模式子选项（issue #63）：未匹配默认动作，出厂「未匹配时代理」。
+  var ruleDefaultAction: RuleDefaultAction
   /// 代理 agent 意图（issue #60）：首次运行默认开启；用户显式关闭的选择
   /// 持久化，GUI 重启后仍生效。
   var agentEnabled: Bool
@@ -32,6 +34,7 @@ struct ProxySettings: Equatable, Sendable {
     gfwListURL: String = ProxySettings.defaultGFWListURL,
     pacUserRules: String = "",
     preferredMode: ProxyModeKind = .pac,
+    ruleDefaultAction: RuleDefaultAction = .proxyWhenUnmatched,
     agentEnabled: Bool = true,
     systemProxyEnabled: Bool = false
   ) {
@@ -42,6 +45,7 @@ struct ProxySettings: Equatable, Sendable {
     self.gfwListURL = gfwListURL
     self.pacUserRules = pacUserRules
     self.preferredMode = preferredMode
+    self.ruleDefaultAction = ruleDefaultAction
     self.agentEnabled = agentEnabled
     self.systemProxyEnabled = systemProxyEnabled
   }
@@ -300,6 +304,7 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
         gfwListURL: gfwListURL,
         pacUserRules: record.pacUserRules,
         preferredMode: record.preferredMode,
+        ruleDefaultAction: record.ruleDefaultAction,
         agentEnabled: record.agentEnabled,
         systemProxyEnabled: record.systemProxyEnabled))
   }
@@ -322,6 +327,7 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     record.gfwListURLConfigured = true
     record.pacUserRules = settings.pacUserRules
     record.preferredMode = settings.preferredMode
+    record.ruleDefaultAction = settings.ruleDefaultAction
     record.agentEnabled = settings.agentEnabled
     record.systemProxyEnabled = settings.systemProxyEnabled
     return record
@@ -401,6 +407,7 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
   var gfwListURLConfigured: Bool = false
   var pacUserRules: String = ""
   var preferredMode: ProxyModeKind = .pac
+  var ruleDefaultAction: RuleDefaultAction = .proxyWhenUnmatched
   var agentEnabled: Bool = true
   var systemProxyEnabled: Bool = false
 
@@ -431,6 +438,10 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
     pacUserRules = try container.decodeIfPresent(String.self, forKey: .pacUserRules) ?? ""
     preferredMode =
       try container.decodeIfPresent(ProxyModeKind.self, forKey: .preferredMode) ?? .pac
+    // 规则模式子选项（issue #63）：出厂「未匹配时代理」。
+    ruleDefaultAction =
+      try container.decodeIfPresent(RuleDefaultAction.self, forKey: .ruleDefaultAction)
+      ?? .proxyWhenUnmatched
     // 首次运行缺省：agent 默认开启，系统代理默认关闭（issue #60）。
     agentEnabled = try container.decodeIfPresent(Bool.self, forKey: .agentEnabled) ?? true
     systemProxyEnabled =
@@ -444,6 +455,7 @@ extension ProxySettingsRecord {
     case timeoutSeconds, verboseLogging, proxyExceptions
     case gfwListCredentialReference, gfwListURLConfigured
     case pacUserRules, preferredMode
+    case ruleDefaultAction
     case agentEnabled, systemProxyEnabled
   }
 }

@@ -672,6 +672,87 @@ extension RealSslocalSmokeTests {
       "停止后应清除运行回执")
   }
 
+  /// 规则模式 ACL 路由（issue #63）：「未匹配时代理」→ proxy_all + 中国域名
+  /// 直连候选。`.cn` 目标不触达 SS 出口；非中国公网目标默认走代理；固定本地
+  /// 绕过仍然生效；SOCKS 与 HTTP 入站共用同一 ACL。
+  func testRuleProxyDefaultACLRoutesChinaDirectAndRestThroughProxy() throws {
+    let echoServer = try LoopbackEchoServer()
+    let fakeSSServer = try ConnectionCountingServer()
+    var ports = Set<Int>()
+    while ports.count < 3 {
+      let port = try grabEphemeralLoopbackPort()
+      if port != echoServer.port && port != fakeSSServer.port { ports.insert(port) }
+    }
+    let selectedPorts = Array(ports)
+    let listen = SslocalListenSettings(
+      socksPort: selectedPorts[0], httpPort: selectedPorts[1], pacPort: selectedPorts[2])
+    let chinaRules = [
+      ProxyRule(
+        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"),
+        source: RuleSourceIdentity(
+          kind: .geolocationCN, upstreamVersion: "test", label: "geolocation-cn"))
+    ]
+    let document = SslocalRuntimeDocument(
+      servers: [
+        SslocalServerDocument(
+          id: "rule-smoke-server",
+          remarks: "rule-smoke",
+          server: "127.0.0.1",
+          serverPort: fakeSSServer.port,
+          password: "smoke-password",
+          method: "aes-256-gcm",
+          plugin: nil,
+          pluginOpts: nil)
+      ],
+      listen: listen,
+      acl: .rule(
+        at: workDir.appendingPathComponent("sslocal-active.acl"),
+        defaultAction: .proxyWhenUnmatched,
+        chinaRules: chinaRules))
+    XCTAssertTrue(document.isWellFormed)
+    let wrapper = try launchWrapper(document)
+    defer {
+      if wrapper.isRunning { kill(wrapper.processIdentifier, SIGTERM) }
+    }
+
+    try awaitGlobalInboundsReady(listen: listen, document: document)
+
+    // 固定本地绕过：回环目标直连，不触达 SS。
+    try assertLocalTargetsBypass(listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
+
+    // .cn 域名候选直连：SOCKS CONNECT example.cn 不应触达 SS 出口。
+    let beforeCN = fakeSSServer.connectionCount
+    performSocksConnectReply(socksPort: listen.socksPort, targetHost: "example.cn", targetPort: 443)
+    Thread.sleep(forTimeInterval: 0.5)
+    XCTAssertEqual(
+      fakeSSServer.connectionCount, beforeCN,
+      "规则模式的 .cn 直连候选不得触达 Shadowsocks 出口")
+
+    // 非中国公网目标默认代理。
+    let publicReply = performSocksConnectReply(
+      socksPort: listen.socksPort, targetHost: "8.8.8.8", targetPort: 53)
+    XCTAssertNotNil(publicReply, "未匹配目标应走代理路径")
+    XCTAssertTrue(
+      try waitForCondition(timeout: 5) { fakeSSServer.connectionCount > beforeCN },
+      "未匹配的公网目标应连接 Shadowsocks 出口")
+
+    // HTTP 入站对未匹配目标同样走代理。
+    let afterSocks = fakeSSServer.connectionCount
+    performHTTPConnect(httpPort: listen.httpPort, targetHost: "1.1.1.1", targetPort: 443)
+    XCTAssertTrue(
+      try waitForCondition(timeout: 5) { fakeSSServer.connectionCount > afterSocks },
+      "HTTP 入站应应用同一规则 ACL")
+
+    kill(wrapper.processIdentifier, SIGTERM)
+    let exited = XCTestExpectation(description: "rule wrapper exits")
+    DispatchQueue.global().async {
+      wrapper.waitUntilExit()
+      exited.fulfill()
+    }
+    XCTAssertEqual(XCTWaiter.wait(for: [exited], timeout: 10), .completed)
+    XCTAssertEqual(wrapper.terminationStatus, 0)
+  }
+
   private func awaitGlobalInboundsReady(
     listen: SslocalListenSettings, document: SslocalRuntimeDocument
   ) throws {

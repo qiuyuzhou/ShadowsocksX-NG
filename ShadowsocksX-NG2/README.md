@@ -15,7 +15,8 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
 - `Domain/` — 领域核心（配置目录树、凭据引用与持久化，spec #21 D3/D5），与 UI 无关；其中 `RuntimePaths`、`SslocalRuntimeDocument`、`RuntimeLog` 同时编入 wrapper 目标，保证跨进程契约单一来源。
 - `Tests/` — 单元测试 target，随 `ShadowsocksX-NG2` scheme 运行。
 - `Vendor/<name>/manifest.json` — 外部二进制的固定供应链清单（tag + 资产 URL + 归档 SHA-256 + bundle 内位置 + 签名 identifier）；二进制本体与 `.fetched.sha256` 戳是构建缓存，不入库。
-- `Scripts/` — 供应链脚本（见下节）与打包门槛断言。
+- `Vendor/rules/geolocation-cn/` — 内置中国域名规则快照（issue #63）：`snapshot.json`（规范化规则 + 元数据 + 损失报告）、`manifest.json`（上游版本与快照 SHA-256）、`NOTICE`（许可证与归属）。普通构建只读本地快照，绝不抓取或转换。
+- `Scripts/` — 供应链脚本（见下节）与打包门槛断言；另有 `update-geolocation-cn.sh`（显式维护动作，抓取固定版 geosite.dat 并转换）与 `verify-rule-snapshots.sh`（构建前离线校验快照完整性）。
 
 ## 外部二进制供应链
 
@@ -70,6 +71,10 @@ Scripts/packaging-gate.sh \
 - 配置文件：`.swift-format` 是 Swift 6.4 工具链默认规则的快照（固定成文件，工具链升级不漂移）；`.swiftlint.yml` 默认规则起步，只声明排除项与个别和 format 基线冲突的关闭项（文件内有触发案例注释）。
 - 仓库级 `pre-commit` 钩子的启用方式和检查范围见根目录 [`README.md`](../README.md)。
 - 调整规则只针对实际痛点：修改 `.swift-format` / `.swiftlint.yml` 的 PR 须给出触发案例，并同步更新本节中的基线版本。
+
+## 内置规则快照
+
+规则模式使用的 `geolocation-cn` 快照是显式维护产物：人工复验上游后运行 `Scripts/update-geolocation-cn.sh`，从固定版 [Loyalsoldier/domain-list-custom](https://github.com/Loyalsoldier/domain-list-custom) `geosite.dat` 解析 typed 条目并生成 `Vendor/rules/geolocation-cn/snapshot.json`。更新失败保留上一份有效快照。普通构建由 `Scripts/verify-rule-snapshots.sh` 离线校验快照存在、摘要匹配且 schema/转换器版本一致，缺失或损坏即构建失败。分发物必须携带 `NOTICE`（许可证与归属）。
 
 ## 依赖升级
 

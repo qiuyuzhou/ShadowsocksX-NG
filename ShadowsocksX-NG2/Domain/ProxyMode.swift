@@ -2,6 +2,7 @@ import Foundation
 
 /// Persisted identity of a proxy mode.
 enum ProxyModeKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
+  case rule
   case pac
   case global
   case direct
@@ -9,7 +10,9 @@ enum ProxyModeKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable
 
 /// The mutually exclusive ways in which 2.0 exposes the local proxy to macOS.
 /// Hashable 供菜单栏模式选择的勾选态 Picker 使用（issue #31）。
+/// 规则模式（issue #63）另持久化 `RuleDefaultAction` 子选项。
 enum ProxyMode: Codable, Equatable, Hashable, Sendable {
+  case rule
   case pac
   case global
   case direct
@@ -19,6 +22,7 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   }
 
   private enum Kind: String, Codable {
+    case rule
     case pac
     case global
     case direct
@@ -27,6 +31,8 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     switch try container.decode(Kind.self, forKey: .kind) {
+    case .rule:
+      self = .rule
     case .pac:
       self = .pac
     case .global:
@@ -39,6 +45,8 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
     switch self {
+    case .rule:
+      try container.encode(Kind.rule, forKey: .kind)
     case .pac:
       try container.encode(Kind.pac, forKey: .kind)
     case .global:
@@ -50,6 +58,8 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
 
   var label: String {
     switch self {
+    case .rule:
+      "规则"
     case .pac:
       "PAC"
     case .global:
@@ -61,6 +71,7 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
 
   var kind: ProxyModeKind {
     switch self {
+    case .rule: .rule
     case .pac: .pac
     case .global: .global
     case .direct: .direct
@@ -68,7 +79,7 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   }
 
   /// Returns every mode supported by the product in stable selector order.
-  static var availableModes: [ProxyMode] { [.pac, .global, .direct] }
+  static var availableModes: [ProxyMode] { [.rule, .pac, .global, .direct] }
 
   /// Derives the only system-proxy state that this mode is allowed to own.
   func systemProxyConfiguration(
@@ -81,7 +92,7 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
         throw ProxyModeError.invalidLocalPACURL
       }
       return SystemProxyConfiguration(target: .pac(url), exceptions: exceptions)
-    case .global, .direct:
+    case .rule, .global, .direct:
       guard (1...65535).contains(document.socksPort) else {
         throw ProxyModeError.invalidSOCKSPort(document.socksPort)
       }

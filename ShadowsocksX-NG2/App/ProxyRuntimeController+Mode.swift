@@ -7,12 +7,27 @@ extension ProxyRuntimeController {
   func setProxyMode(_ mode: ProxyMode) async {
     guard ProxyMode.availableModes.contains(mode) else { return }
     guard mode != proxyMode else { return }
+    await transitionMode(mode, ruleDefaultAction: settings.ruleDefaultAction)
+  }
+
+  /// 规则模式子选项（issue #63）：切换「未匹配时代理/直连」并重部署 ACL。
+  /// 失败保留旧模式、旧子选项与旧系统代理应用状态。
+  func setRuleDefaultAction(_ action: RuleDefaultAction) async {
+    guard action != settings.ruleDefaultAction else { return }
+    await transitionMode(proxyMode, ruleDefaultAction: action)
+  }
+
+  private func transitionMode(
+    _ mode: ProxyMode,
+    ruleDefaultAction: RuleDefaultAction
+  ) async {
     let previousSettings = settings
     let previousMode = proxyMode
     let previousDocument = lastDocument
     let previousState = state
     var next = settings
     next.preferredMode = mode.kind
+    next.ruleDefaultAction = ruleDefaultAction
     do {
       try settingsStore.save(next)
     } catch {
@@ -32,7 +47,21 @@ extension ProxyRuntimeController {
       return
     }
 
-    let nextDocument = runtimeDocument(currentDocument, for: mode)
+    let nextDocument: SslocalRuntimeDocument
+    do {
+      nextDocument = try runtimeDocument(currentDocument, for: mode)
+    } catch {
+      // 快照缺失/损坏：不静默退化，恢复旧模式与旧子选项。
+      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+      await restoreModeTransition(
+        previousMode: previousMode,
+        previousRuleDefaultAction: previousSettings.ruleDefaultAction,
+        previousDocument: previousDocument ?? currentDocument,
+        previousState: previousState,
+        previousSystemProxyEnabled: previousSettings.systemProxyEnabled,
+        generation: generation)
+      return
+    }
     guard nextDocument.aclRuntime != currentDocument.aclRuntime else {
       guard settings.systemProxyEnabled else { return }
       state = .starting
@@ -43,6 +72,7 @@ extension ProxyRuntimeController {
     await deployModeTransition(
       nextDocument,
       previousMode: previousMode,
+      previousRuleDefaultAction: previousSettings.ruleDefaultAction,
       previousDocument: previousDocument ?? currentDocument,
       previousState: previousState,
       previousSystemProxyEnabled: previousSettings.systemProxyEnabled,
@@ -52,20 +82,35 @@ extension ProxyRuntimeController {
   func runtimeDocument(
     _ document: SslocalRuntimeDocument,
     for mode: ProxyMode
-  ) -> SslocalRuntimeDocument {
+  ) throws -> SslocalRuntimeDocument {
     switch mode {
     case .direct:
       return document.replacingACL(.direct(at: runtimeFileStore.aclFileURL))
     case .global:
       return document.replacingACL(.global(at: runtimeFileStore.aclFileURL))
+    case .rule:
+      let china = try chinaDirectRules()
+      return document.replacingACL(
+        .rule(
+          at: runtimeFileStore.aclFileURL,
+          defaultAction: settings.ruleDefaultAction,
+          chinaRules: china))
     case .pac:
       return document.replacingACL(nil)
     }
   }
 
+  /// 内置中国域名直连候选。快照缺失/损坏/版本不匹配时抛错，调用方必须失败
+  /// 并保留旧 ACL，不得静默退化成全局（issue #63 AC4）。
+  func chinaDirectRules() throws -> [ProxyRule] {
+    let snapshot = try BuiltinRuleCatalog.loadGeolocationCN()
+    return BuiltinRuleCatalog.chinaDirectRules(from: snapshot)
+  }
+
   private func deployModeTransition(
     _ document: SslocalRuntimeDocument,
     previousMode: ProxyMode,
+    previousRuleDefaultAction: RuleDefaultAction,
     previousDocument: SslocalRuntimeDocument,
     previousState: AgentRunState,
     previousSystemProxyEnabled: Bool,
@@ -78,6 +123,7 @@ extension ProxyRuntimeController {
       guard generation == modeChangeGeneration else { return }
       await restoreModeTransition(
         previousMode: previousMode,
+        previousRuleDefaultAction: previousRuleDefaultAction,
         previousDocument: previousDocument,
         previousState: previousState,
         previousSystemProxyEnabled: previousSystemProxyEnabled,
@@ -95,6 +141,7 @@ extension ProxyRuntimeController {
     guard healthy else {
       await restoreModeTransition(
         previousMode: previousMode,
+        previousRuleDefaultAction: previousRuleDefaultAction,
         previousDocument: previousDocument,
         previousState: previousState,
         previousSystemProxyEnabled: previousSystemProxyEnabled,
@@ -108,6 +155,7 @@ extension ProxyRuntimeController {
 
   private func restoreModeTransition(
     previousMode: ProxyMode,
+    previousRuleDefaultAction: RuleDefaultAction,
     previousDocument: SslocalRuntimeDocument,
     previousState: AgentRunState,
     previousSystemProxyEnabled: Bool,
@@ -116,6 +164,7 @@ extension ProxyRuntimeController {
     var persistenceFailed = false
     var restoredSettings = settings
     restoredSettings.preferredMode = previousMode.kind
+    restoredSettings.ruleDefaultAction = previousRuleDefaultAction
     do {
       try settingsStore.save(restoredSettings)
     } catch {

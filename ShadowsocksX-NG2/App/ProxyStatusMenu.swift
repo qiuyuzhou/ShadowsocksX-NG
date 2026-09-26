@@ -78,6 +78,16 @@ struct ProxyStatusMenu: View {
     }
     .pickerStyle(.inline)
 
+    // 规则模式子选项（issue #63）：仅规则模式呈现。
+    if snapshot.proxyMode == .rule {
+      Picker("未匹配默认动作", selection: ruleDefaultActionBinding) {
+        ForEach(RuleDefaultAction.allCases, id: \.self) { action in
+          Text(action.label).tag(action)
+        }
+      }
+      .pickerStyle(.inline)
+    }
+
     // ④ 活动目标级联（只读）
     Menu("活动目标") {
       if targetTree.isEmpty {
@@ -129,6 +139,13 @@ struct ProxyStatusMenu: View {
     Binding(
       get: { control.snapshot.proxyMode },
       set: { mode in Task { await control.setProxyMode(mode) } })
+  }
+
+  /// 规则模式子选项（issue #63）：与首页共用同一控制 seam。
+  private var ruleDefaultActionBinding: Binding<RuleDefaultAction> {
+    Binding(
+      get: { control.snapshot.ruleDefaultAction },
+      set: { action in Task { await control.setRuleDefaultAction(action) } })
   }
 
   /// 两个开关绑定持久化意图（issue #60）；命令完成由 workflow 整体重发布。
