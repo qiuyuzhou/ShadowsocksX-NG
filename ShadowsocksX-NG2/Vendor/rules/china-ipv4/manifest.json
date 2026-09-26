@@ -1,0 +1,8 @@
+{
+  "converterVersion": "1.0.0",
+  "name": "china-ipv4",
+  "snapshotSHA256": "f97086c877982e860d0fb3ee5564e23e6c9f934b8e053a128150551e309296c6",
+  "upstreamArchiveSHA256": "98493d3ec7f2c77b9f191600dc741df731cfbaef775201594d0bda66b0181479",
+  "upstreamURL": "https://raw.githubusercontent.com/gaoyifan/china-operator-ip/75f2eb035cb53a7a4af3437e2c2110d0f73cf14a/china.txt",
+  "upstreamVersion": "75f2eb035cb53a7a4af3437e2c2110d0f73cf14a"
+}

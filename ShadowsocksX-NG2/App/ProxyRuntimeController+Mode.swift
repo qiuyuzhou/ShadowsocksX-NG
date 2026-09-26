@@ -103,11 +103,13 @@ extension ProxyRuntimeController {
     }
   }
 
-  /// 内置中国域名直连候选。快照缺失/损坏/版本不匹配时抛错，调用方必须失败
+  /// 内置中国直连候选：geolocation-cn 域名 + china-operator-ip IPv4 CIDR
+  /// （issue #63/#64）。快照缺失/损坏/版本不匹配时抛错，调用方必须失败
   /// 并保留旧 ACL，不得静默退化成全局（issue #63 AC4）。
   func chinaDirectRules() throws -> [ProxyRule] {
-    let snapshot = try BuiltinRuleCatalog.loadGeolocationCN()
-    return BuiltinRuleCatalog.chinaDirectRules(from: snapshot)
+    let geolocation = try BuiltinRuleCatalog.loadGeolocationCN()
+    let chinaIPv4 = try BuiltinRuleCatalog.loadChinaIPv4()
+    return BuiltinRuleCatalog.chinaDirectRules(from: [geolocation, chinaIPv4])
   }
 
   private func deployModeTransition(

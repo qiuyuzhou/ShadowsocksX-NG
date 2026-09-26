@@ -127,6 +127,38 @@ final class ProxyACLTests: XCTestCase {
     XCTAssertFalse(acl.content.contains("[proxy_all]"))
   }
 
+  /// 规则＋未匹配时代理（issue #64）：proxy_all 同时含中国域名与 IPv4 CIDR
+  /// 直连候选，固定本地绕过仍优先。
+  func testRuleProxyDefaultACLIncludesChinaIPv4CIDRCandidates() throws {
+    let domainSource = RuleSourceIdentity(
+      kind: .geolocationCN, upstreamVersion: "v1", label: "geolocation-cn")
+    let cidrSource = RuleSourceIdentity(
+      kind: .chinaIPv4, upstreamVersion: "c1", label: "china-operator-ip")
+    let rules = [
+      ProxyRule(
+        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"), source: domainSource),
+      ProxyRule(
+        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24"), source: cidrSource),
+      ProxyRule(
+        action: .direct, match: try RuleMatch(ipv4CIDR: "198.51.100.0/24"), source: cidrSource),
+    ]
+    let acl = ProxyACLDocument.rule(
+      at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"),
+      defaultAction: .proxyWhenUnmatched,
+      chinaRules: rules)
+
+    XCTAssertTrue(acl.isWellFormed)
+    XCTAssertTrue(acl.content.hasPrefix("[proxy_all]\n[bypass_list]\n"))
+    XCTAssertTrue(acl.content.contains("||cn\n"), "中国域名直连候选")
+    XCTAssertTrue(acl.content.contains("203.0.113.0/24\n"), "中国 IPv4 CIDR 直连候选")
+    XCTAssertTrue(acl.content.contains("198.51.100.0/24\n"), "中国 IPv4 CIDR 直连候选")
+    // 固定本地绕过仍排在中国候选之前（优先级）。
+    let lines = acl.content.split(separator: "\n").map(String.init)
+    let localIndex = lines.firstIndex(of: "127.0.0.0/8") ?? -1
+    let cidrIndex = lines.firstIndex(of: "203.0.113.0/24") ?? -1
+    XCTAssertTrue(localIndex >= 0 && cidrIndex > localIndex, "固定本地绕过应优先于中国 CIDR")
+  }
+
   /// 冲突元数据不影响 ACL 行；同匹配只输出一行。
   func testRuleACLLineMapping() throws {
     let source = RuleSourceIdentity(kind: .custom, upstreamVersion: "v1", label: "custom")

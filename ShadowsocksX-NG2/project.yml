@@ -45,14 +45,13 @@ targets:
           copyFiles:
             destination: wrapper
             subpath: Contents/Helpers/Plugins
-      # 内置规则快照（issue #63）：普通构建只读本地已固定快照，离线且不重新
+      # 内置规则快照（issue #63/#64）：普通构建只读本地已固定快照，离线且不重新
       # 抓取或转换；缺失、损坏或版本不匹配时 verify-rule-snapshots.sh 使构建失败。
-      - path: Vendor/rules/geolocation-cn/snapshot.json
+      # folder reference 保留 rules/<source>/snapshot.json 结构，避免多个
+      # snapshot.json 在 bundle 根目录撞名。
+      - path: Vendor/rules
         buildPhase: resources
-        type: file
-      - path: Vendor/rules/geolocation-cn/NOTICE
-        buildPhase: resources
-        type: file
+        type: folder
     preBuildScripts:
       - name: Fetch & verify external binaries
         basedOnDependencyAnalysis: false

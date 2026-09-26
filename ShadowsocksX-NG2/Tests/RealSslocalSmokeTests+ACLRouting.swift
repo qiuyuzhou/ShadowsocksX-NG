@@ -137,6 +137,85 @@ extension RealSslocalSmokeTests {
     stopWrapperAndAssertCleanExit(wrapper, description: "rule wrapper exits")
   }
 
+  /// 规则模式 ACL 路由（issue #64）：中国 IPv4 CIDR 直连候选。命中 CIDR 的
+  /// 目标不触达 SS 出口；未命中 CIDR 的公网目标默认走代理；SOCKS 与 HTTP
+  /// 入站共用同一 ACL。CIDR 判定可能触发本地 DNS 查询（文档已声明）。
+  func testRuleProxyDefaultACLRoutesChinaCIDRHitDirectAndMissThroughProxy() throws {
+    let echoServer = try LoopbackEchoServer()
+    let fakeSSServer = try ConnectionCountingServer()
+    let selectedPorts = try grabThreeListenPorts(excluding: [echoServer.port, fakeSSServer.port])
+    let listen = SslocalListenSettings(
+      socksPort: selectedPorts[0], httpPort: selectedPorts[1], pacPort: selectedPorts[2])
+    let document = SslocalRuntimeDocument(
+      servers: [
+        SslocalServerDocument(
+          id: "cidr-smoke-server",
+          remarks: "cidr-smoke",
+          server: "127.0.0.1",
+          serverPort: fakeSSServer.port,
+          password: "smoke-password",
+          method: "aes-256-gcm",
+          plugin: nil,
+          pluginOpts: nil)
+      ],
+      listen: listen,
+      acl: .rule(
+        at: workDir.appendingPathComponent("sslocal-active.acl"),
+        defaultAction: .proxyWhenUnmatched,
+        chinaRules: try chinaCIDRSmokeRules()))
+    XCTAssertTrue(document.isWellFormed)
+    let wrapper = try launchWrapper(document)
+    defer {
+      if wrapper.isRunning { kill(wrapper.processIdentifier, SIGTERM) }
+    }
+
+    try awaitGlobalInboundsReady(listen: listen, document: document)
+    try assertLocalTargetsBypass(listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
+    try assertCIDRModeRouting(listen: listen, fakeSS: fakeSSServer)
+
+    stopWrapperAndAssertCleanExit(wrapper, description: "cidr rule wrapper exits")
+  }
+
+  /// issue #64 冒烟夹具：`.cn` 域名 + 测试用 `8.8.8.0/24` CIDR 直连候选
+  /// （仅验证命中/未命中路由，不代表真实中国 IP 归属）。
+  private func chinaCIDRSmokeRules() throws -> [ProxyRule] {
+    let domainSource = RuleSourceIdentity(
+      kind: .geolocationCN, upstreamVersion: "test", label: "geolocation-cn")
+    let cidrSource = RuleSourceIdentity(
+      kind: .chinaIPv4, upstreamVersion: "test", label: "china-operator-ip")
+    return [
+      ProxyRule(
+        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"),
+        source: domainSource),
+      ProxyRule(
+        action: .direct, match: try RuleMatch(ipv4CIDR: "8.8.8.0/24"),
+        source: cidrSource),
+    ]
+  }
+
+  /// CIDR 路由断言：命中 `8.8.8.0/24` 直连不触 SS；未命中公网目标走代理。
+  private func assertCIDRModeRouting(
+    listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
+  ) throws {
+    let beforeHit = fakeSS.connectionCount
+    performSocksConnectReply(socksPort: listen.socksPort, targetHost: "8.8.8.8", targetPort: 53)
+    Thread.sleep(forTimeInterval: 0.5)
+    XCTAssertEqual(
+      fakeSS.connectionCount, beforeHit,
+      "命中中国 IPv4 CIDR 的目标应直连，不得触达 Shadowsocks 出口")
+
+    performSocksConnectReply(socksPort: listen.socksPort, targetHost: "1.1.1.1", targetPort: 443)
+    XCTAssertTrue(
+      try waitForCondition(timeout: 5) { fakeSS.connectionCount > beforeHit },
+      "未命中 CIDR 的公网目标应连接 Shadowsocks 出口")
+
+    let afterSocks = fakeSS.connectionCount
+    performHTTPConnect(httpPort: listen.httpPort, targetHost: "9.9.9.9", targetPort: 443)
+    XCTAssertTrue(
+      try waitForCondition(timeout: 5) { fakeSS.connectionCount > afterSocks },
+      "HTTP 入站应应用同一规则 ACL")
+  }
+
   func awaitGlobalInboundsReady(
     listen: SslocalListenSettings, document: SslocalRuntimeDocument
   ) throws {

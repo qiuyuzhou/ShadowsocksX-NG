@@ -16,7 +16,8 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
 - `Tests/` — 单元测试 target，随 `ShadowsocksX-NG2` scheme 运行。
 - `Vendor/<name>/manifest.json` — 外部二进制的固定供应链清单（tag + 资产 URL + 归档 SHA-256 + bundle 内位置 + 签名 identifier）；二进制本体与 `.fetched.sha256` 戳是构建缓存，不入库。
 - `Vendor/rules/geolocation-cn/` — 内置中国域名规则快照（issue #63）：`snapshot.json`（规范化规则 + 元数据 + 损失报告）、`manifest.json`（上游版本与快照 SHA-256）、`NOTICE`（许可证与归属）。普通构建只读本地快照，绝不抓取或转换。
-- `Scripts/` — 供应链脚本（见下节）与打包门槛断言；另有 `update-geolocation-cn.sh`（显式维护动作，抓取固定版 geosite.dat 并转换）与 `verify-rule-snapshots.sh`（构建前离线校验快照完整性）。
+- `Vendor/rules/china-ipv4/` — 内置中国 IPv4 CIDR 直连候选快照（issue #64）：同上三件套，来源为 [gaoyifan/china-operator-ip](https://github.com/gaoyifan/china-operator-ip) `china.txt` 固定 commit。规则模式的 `proxy_all` ACL 同时编入中国域名与 IPv4 CIDR 直连候选。
+- `Scripts/` — 供应链脚本（见下节）与打包门槛断言；另有 `update-geolocation-cn.sh` / `update-china-ipv4.sh`（显式维护动作，抓取固定版上游并转换）与 `verify-rule-snapshots.sh`（构建前离线校验快照完整性）。
 
 ## 外部二进制供应链
 
@@ -74,7 +75,14 @@ Scripts/packaging-gate.sh \
 
 ## 内置规则快照
 
-规则模式使用的 `geolocation-cn` 快照是显式维护产物：人工复验上游后运行 `Scripts/update-geolocation-cn.sh`，从固定版 [Loyalsoldier/domain-list-custom](https://github.com/Loyalsoldier/domain-list-custom) `geosite.dat` 解析 typed 条目并生成 `Vendor/rules/geolocation-cn/snapshot.json`。更新失败保留上一份有效快照。普通构建由 `Scripts/verify-rule-snapshots.sh` 离线校验快照存在、摘要匹配且 schema/转换器版本一致，缺失或损坏即构建失败。分发物必须携带 `NOTICE`（许可证与归属）。
+规则模式使用的内置快照是显式维护产物：
+
+- **geolocation-cn**（issue #63）：人工复验上游后运行 `Scripts/update-geolocation-cn.sh`，从固定版 [Loyalsoldier/domain-list-custom](https://github.com/Loyalsoldier/domain-list-custom) `geosite.dat` 解析 typed 条目并生成 `Vendor/rules/geolocation-cn/snapshot.json`。
+- **china-ipv4**（issue #64）：运行 `Scripts/update-china-ipv4.sh`，从固定版 [gaoyifan/china-operator-ip](https://github.com/gaoyifan/china-operator-ip) `china.txt` 规范化并去重 IPv4 CIDR，生成 `Vendor/rules/china-ipv4/snapshot.json`。
+
+更新失败保留上一份有效快照。geolocation-cn 转换会因未知语法/损坏输入失败；china-ipv4 转换还会因异常格式（拒绝率过高）、全部失效或相对上一份快照的异常规模变化失败。普通构建由 `Scripts/verify-rule-snapshots.sh` 离线校验快照存在、摘要匹配且 schema/转换器版本一致，缺失或损坏即构建失败。分发物必须携带各自的 `NOTICE`（许可证与归属）。
+
+规则模式「未匹配时代理」生成的 `proxy_all` ACL 同时包含中国域名与中国 IPv4 CIDR 直连候选，固定本地绕过优先。**CIDR 判定可能触发本地 DNS 查询**：sslocal 为未命中域名做 IP 匹配时可能发起本地 DNS 查询，产品不承诺 DNS 查询均经远端 Shadowsocks 服务器。
 
 ## 依赖升级
 

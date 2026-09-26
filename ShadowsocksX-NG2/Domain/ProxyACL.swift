@@ -75,9 +75,9 @@ struct ProxyACLDocument: Codable, Equatable, Sendable {
       at: fileURL, header: "[proxy_all]", summary: "global")
   }
 
-  /// 规则模式（issue #63）：`.cn` 与 geolocation-cn 域名候选直连，其余目标
-  /// 默认代理（「未匹配时代理」）。固定本地绕过优先；中国 IPv4 CIDR 由后续
-  /// 票据加入。
+  /// 规则模式（issue #63/#64）：`.cn`、geolocation-cn 域名与中国 IPv4 CIDR
+  /// 候选直连，其余目标默认代理（「未匹配时代理」）。固定本地绕过优先；
+  /// CIDR 判定可能触发本地 DNS 查询，产品不承诺 DNS 均经远端。
   static func rule(
     at fileURL: URL,
     defaultAction: RuleDefaultAction,

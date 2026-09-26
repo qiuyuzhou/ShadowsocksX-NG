@@ -8,9 +8,9 @@ final class BuiltinRuleCatalogTests: XCTestCase {
   func testGeolocationCNSnapshotLoadsFromBundleOrSourceTree() throws {
     // 优先 bundle（随 App 分发）；测试环境回退到源码树固定快照。
     let snapshot: RuleSnapshot
-    if let bundle = try? BuiltinRuleCatalog.loadGeolocationCN() {
-      snapshot = bundle
-    } else {
+    do {
+      snapshot = try BuiltinRuleCatalog.loadGeolocationCN()
+    } catch {
       let sourceURL = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()  // Tests/
         .deletingLastPathComponent()  // ShadowsocksX-NG2/
@@ -43,6 +43,65 @@ final class BuiltinRuleCatalogTests: XCTestCase {
       }
     }
     XCTAssertTrue(independentCN.isEmpty, "同动作 .cn 域名应已被吸收")
+  }
+
+  /// china-ipv4 快照（issue #64）：从 bundle 或源码树加载，直连候选为 IPv4 CIDR。
+  func testChinaIPv4SnapshotLoadsFromBundleOrSourceTree() throws {
+    let snapshot: RuleSnapshot
+    do {
+      snapshot = try BuiltinRuleCatalog.loadChinaIPv4()
+    } catch {
+      let sourceURL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()  // Tests/
+        .deletingLastPathComponent()  // ShadowsocksX-NG2/
+        .appendingPathComponent("Vendor/rules/china-ipv4/snapshot.json")
+      snapshot = try RuleSnapshotStore(fileURL: sourceURL).load()
+    }
+
+    XCTAssertEqual(snapshot.schemaVersion, RuleSnapshot.currentSchemaVersion)
+    XCTAssertEqual(snapshot.metadata.source.kind, .chinaIPv4)
+    XCTAssertEqual(
+      snapshot.metadata.converterVersion, RuleSnapshotMetadata.currentConverterVersion)
+    XCTAssertFalse(snapshot.metadata.license.isEmpty)
+    XCTAssertFalse(snapshot.metadata.attribution.isEmpty)
+    XCTAssertFalse(snapshot.metadata.inputDigest.isEmpty)
+    XCTAssertFalse(snapshot.metadata.upstreamReference.isEmpty)
+
+    let rules = BuiltinRuleCatalog.chinaDirectRules(from: snapshot)
+    XCTAssertFalse(rules.isEmpty)
+    XCTAssertTrue(rules.allSatisfy { $0.action == .direct })
+    XCTAssertTrue(
+      rules.allSatisfy {
+        if case .ipv4CIDR = $0.match { return true }
+        return false
+      }, "china-ipv4 快照应只含 IPv4 CIDR 直连候选")
+  }
+
+  /// 合并投影（issue #64）：域名 + CIDR 直连候选一起进入 ACL 编译输入。
+  func testChinaDirectRulesMergeDomainAndCIDRSnapshots() throws {
+    let geolocation = try loadSourceTreeSnapshot(path: "Vendor/rules/geolocation-cn/snapshot.json")
+    let chinaIPv4 = try loadSourceTreeSnapshot(path: "Vendor/rules/china-ipv4/snapshot.json")
+    let merged = BuiltinRuleCatalog.chinaDirectRules(from: [geolocation, chinaIPv4])
+
+    XCTAssertTrue(
+      merged.contains { rule in
+        if case .domainSuffix("cn") = rule.match { return true }
+        return false
+      }, "合并结果应含 .cn 域名直连候选")
+    XCTAssertTrue(
+      merged.contains { rule in
+        if case .ipv4CIDR = rule.match { return true }
+        return false
+      }, "合并结果应含 IPv4 CIDR 直连候选")
+    XCTAssertTrue(merged.allSatisfy { $0.action == .direct })
+  }
+
+  private func loadSourceTreeSnapshot(path: String) throws -> RuleSnapshot {
+    let sourceURL = URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+      .appendingPathComponent(path)
+    return try RuleSnapshotStore(fileURL: sourceURL).load()
   }
 
   func testRuleDefaultActionLabelsAndFallback() {
