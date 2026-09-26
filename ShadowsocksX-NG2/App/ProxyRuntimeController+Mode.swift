@@ -92,14 +92,26 @@ extension ProxyRuntimeController {
     case .global:
       return document.replacingACL(.global(at: runtimeFileStore.aclFileURL))
     case .rule:
-      let china = try chinaDirectRules()
+      let candidates = try ruleModeCandidateRules()
       return document.replacingACL(
         .rule(
           at: runtimeFileStore.aclFileURL,
           defaultAction: settings.ruleDefaultAction,
-          chinaRules: china))
+          rules: candidates))
     case .pac:
       return document.replacingACL(nil)
+    }
+  }
+
+  /// 规则模式候选按默认动作取对应来源（issue #65）：「未匹配时代理」用中国
+  /// 直连候选；「未匹配时直连」用 GFWList 代理候选。两种默认动作不把全部
+  /// 内置来源无条件并集。
+  func ruleModeCandidateRules() throws -> [ProxyRule] {
+    switch settings.ruleDefaultAction {
+    case .proxyWhenUnmatched:
+      return try chinaDirectRules()
+    case .directWhenUnmatched:
+      return try gfwlistRules()
     }
   }
 
@@ -110,6 +122,12 @@ extension ProxyRuntimeController {
     let geolocation = try BuiltinRuleCatalog.loadGeolocationCN()
     let chinaIPv4 = try BuiltinRuleCatalog.loadChinaIPv4()
     return BuiltinRuleCatalog.chinaDirectRules(from: [geolocation, chinaIPv4])
+  }
+
+  /// GFWList 候选（issue #65）：可准确表达且未被更宽代理规则遮蔽的规则
+  /// （含未遮蔽例外），参与 `bypass_all` ACL 编译。
+  func gfwlistRules() throws -> [ProxyRule] {
+    BuiltinRuleCatalog.gfwlistRules(from: try BuiltinRuleCatalog.loadGFWList())
   }
 
   private func deployModeTransition(

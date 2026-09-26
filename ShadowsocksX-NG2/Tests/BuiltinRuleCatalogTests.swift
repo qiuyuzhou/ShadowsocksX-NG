@@ -77,6 +77,39 @@ final class BuiltinRuleCatalogTests: XCTestCase {
       }, "china-ipv4 快照应只含 IPv4 CIDR 直连候选")
   }
 
+  /// gfwlist 快照（issue #65）：从 bundle 或源码树加载，代理候选为域名后缀。
+  func testGFWListSnapshotLoadsFromBundleOrSourceTree() throws {
+    let snapshot: RuleSnapshot
+    do {
+      snapshot = try BuiltinRuleCatalog.loadGFWList()
+    } catch {
+      snapshot = try loadSourceTreeSnapshot(path: "Vendor/rules/gfwlist/snapshot.json")
+    }
+
+    XCTAssertEqual(snapshot.schemaVersion, RuleSnapshot.currentSchemaVersion)
+    XCTAssertEqual(snapshot.metadata.source.kind, .gfwlist)
+    XCTAssertEqual(
+      snapshot.metadata.converterVersion, RuleSnapshotMetadata.currentConverterVersion)
+    XCTAssertFalse(snapshot.metadata.license.isEmpty)
+    XCTAssertFalse(snapshot.metadata.attribution.isEmpty)
+    XCTAssertFalse(snapshot.metadata.inputDigest.isEmpty)
+    XCTAssertFalse(snapshot.metadata.upstreamReference.isEmpty)
+
+    let rules = BuiltinRuleCatalog.gfwlistRules(from: snapshot)
+    XCTAssertFalse(rules.isEmpty)
+    XCTAssertTrue(
+      rules.allSatisfy {
+        if case .domainSuffix = $0.match { return true }
+        return false
+      }, "gfwlist 快照候选应为域名后缀")
+
+    // 损失报告保留来源、摘要、许可证/归属与转换损失（含遮蔽例外）。
+    XCTAssertGreaterThanOrEqual(snapshot.lossReport.skipped["shadowedException"] ?? 0, 1)
+    XCTAssertFalse(snapshot.lossReport.notes.isEmpty)
+    XCTAssertEqual(snapshot.absorbed.count, snapshot.lossReport.skipped["shadowedException"] ?? 0)
+    XCTAssertEqual(snapshot.lossReport.absorbedCount, snapshot.absorbed.count)
+  }
+
   /// 合并投影（issue #64）：域名 + CIDR 直连候选一起进入 ACL 编译输入。
   func testChinaDirectRulesMergeDomainAndCIDRSnapshots() throws {
     let geolocation = try loadSourceTreeSnapshot(path: "Vendor/rules/geolocation-cn/snapshot.json")

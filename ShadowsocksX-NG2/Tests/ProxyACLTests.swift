@@ -88,7 +88,7 @@ final class ProxyACLTests: XCTestCase {
     let acl = ProxyACLDocument.rule(
       at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"),
       defaultAction: .proxyWhenUnmatched,
-      chinaRules: rules)
+      rules: rules)
 
     XCTAssertTrue(acl.isWellFormed)
     XCTAssertEqual(acl.summary, "rule-proxy-default")
@@ -105,26 +105,64 @@ final class ProxyACLTests: XCTestCase {
     XCTAssertFalse(acl.content.contains("100.64.0.0/10"), "不加入 CGNAT")
   }
 
-  /// 规则＋未匹配时直连：bypass_all + 固定本地 + 中国直连 + 可生效代理规则。
-  func testRuleDirectDefaultACLUsesBypassAll() throws {
-    let source = RuleSourceIdentity(
-      kind: .geolocationCN, upstreamVersion: "v1", label: "geolocation-cn")
+  /// 规则＋未匹配时直连（issue #65）：bypass_all + 固定本地 + GFWList 可生效
+  /// 代理规则。两种默认动作不把全部内置来源无条件并集，因此不混入中国直连项。
+  func testRuleDirectDefaultACLUsesBypassAllAndGFWListProxyCandidates() throws {
+    let gfwSource = RuleSourceIdentity(
+      kind: .gfwlist, upstreamVersion: "v1", label: "GFWList")
     let rules = [
-      ProxyRule(action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"), source: source),
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: source),
+        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: gfwSource),
+      ProxyRule(
+        action: .proxy, match: try RuleMatch(domainSuffix: "also-blocked.example"),
+        source: gfwSource),
+      ProxyRule(
+        action: .direct, match: try RuleMatch(domainSuffix: "unshadowed.example"), source: gfwSource
+      ),
     ]
     let acl = ProxyACLDocument.rule(
       at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"),
       defaultAction: .directWhenUnmatched,
-      chinaRules: rules)
+      rules: rules)
 
     XCTAssertTrue(acl.isWellFormed)
     XCTAssertEqual(acl.summary, "rule-direct-default")
     XCTAssertTrue(acl.content.hasPrefix("[bypass_all]\n[bypass_list]\n"))
     XCTAssertTrue(acl.content.contains("[proxy_list]\n||blocked.example\n"))
-    XCTAssertTrue(acl.content.contains("||cn\n"))
+    XCTAssertTrue(acl.content.contains("||also-blocked.example\n"))
+    XCTAssertTrue(acl.content.contains("||unshadowed.example\n"), "未遮蔽例外参与编译进 bypass_list")
     XCTAssertFalse(acl.content.contains("[proxy_all]"))
+    // 不无条件并集中国来源。
+    XCTAssertFalse(acl.content.contains("||cn\n"))
+    // 固定本地绕过仍在。
+    XCTAssertTrue(acl.content.contains("127.0.0.0/8\n"))
+    XCTAssertTrue(acl.content.contains("||localhost\n"))
+    // 未匹配目标走 bypass_all 默认直连。
+    XCTAssertTrue(acl.content.hasPrefix("[bypass_all]"))
+  }
+
+  /// 规则＋未匹配时直连：IP 字面目标无可用规则命中时直连（无 IP 代理规则时
+  /// proxy_list 只有域名项）。
+  func testRuleDirectDefaultACLLeavesIPLiteralsUnmatchedDirect() throws {
+    let gfwSource = RuleSourceIdentity(
+      kind: .gfwlist, upstreamVersion: "v1", label: "GFWList")
+    let rules = [
+      ProxyRule(
+        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: gfwSource)
+    ]
+    let acl = ProxyACLDocument.rule(
+      at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"),
+      defaultAction: .directWhenUnmatched,
+      rules: rules)
+
+    let proxySection =
+      (acl.content.components(separatedBy: "[proxy_list]\n").last ?? "")
+      .split(whereSeparator: \.isNewline).map(String.init)
+    XCTAssertTrue(
+      proxySection.allSatisfy { line in
+        line.hasPrefix("||") || line.hasPrefix("|") || line.hasPrefix("^")
+      },
+      "GFWList 代理候选只含域名规则；IP 字面目标未命中即直连")
   }
 
   /// 规则＋未匹配时代理（issue #64）：proxy_all 同时含中国域名与 IPv4 CIDR
@@ -145,7 +183,7 @@ final class ProxyACLTests: XCTestCase {
     let acl = ProxyACLDocument.rule(
       at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"),
       defaultAction: .proxyWhenUnmatched,
-      chinaRules: rules)
+      rules: rules)
 
     XCTAssertTrue(acl.isWellFormed)
     XCTAssertTrue(acl.content.hasPrefix("[proxy_all]\n[bypass_list]\n"))

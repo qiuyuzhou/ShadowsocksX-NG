@@ -17,7 +17,8 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
 - `Vendor/<name>/manifest.json` — 外部二进制的固定供应链清单（tag + 资产 URL + 归档 SHA-256 + bundle 内位置 + 签名 identifier）；二进制本体与 `.fetched.sha256` 戳是构建缓存，不入库。
 - `Vendor/rules/geolocation-cn/` — 内置中国域名规则快照（issue #63）：`snapshot.json`（规范化规则 + 元数据 + 损失报告）、`manifest.json`（上游版本与快照 SHA-256）、`NOTICE`（许可证与归属）。普通构建只读本地快照，绝不抓取或转换。
 - `Vendor/rules/china-ipv4/` — 内置中国 IPv4 CIDR 直连候选快照（issue #64）：同上三件套，来源为 [gaoyifan/china-operator-ip](https://github.com/gaoyifan/china-operator-ip) `china.txt` 固定 commit。规则模式的 `proxy_all` ACL 同时编入中国域名与 IPv4 CIDR 直连候选。
-- `Scripts/` — 供应链脚本（见下节）与打包门槛断言；另有 `update-geolocation-cn.sh` / `update-china-ipv4.sh`（显式维护动作，抓取固定版上游并转换）与 `verify-rule-snapshots.sh`（构建前离线校验快照完整性）。
+- `Vendor/rules/gfwlist/` — 内置 GFWList 代理候选快照（issue #65）：同上三件套，来源为 [gfwlist/gfwlist](https://github.com/gfwlist/gfwlist) 官方 Base64 AutoProxy `gfwlist.txt` 固定 commit。只转换可按目标域名无损表达的规则；「未匹配时直连」的 `bypass_all` ACL 编入这些代理候选。
+- `Scripts/` — 供应链脚本（见下节）与打包门槛断言；另有 `update-geolocation-cn.sh` / `update-china-ipv4.sh` / `update-gfwlist.sh`（显式维护动作，抓取固定版上游并转换）与 `verify-rule-snapshots.sh`（构建前离线校验快照完整性）。
 
 ## 外部二进制供应链
 
@@ -79,10 +80,11 @@ Scripts/packaging-gate.sh \
 
 - **geolocation-cn**（issue #63）：人工复验上游后运行 `Scripts/update-geolocation-cn.sh`，从固定版 [Loyalsoldier/domain-list-custom](https://github.com/Loyalsoldier/domain-list-custom) `geosite.dat` 解析 typed 条目并生成 `Vendor/rules/geolocation-cn/snapshot.json`。
 - **china-ipv4**（issue #64）：运行 `Scripts/update-china-ipv4.sh`，从固定版 [gaoyifan/china-operator-ip](https://github.com/gaoyifan/china-operator-ip) `china.txt` 规范化并去重 IPv4 CIDR，生成 `Vendor/rules/china-ipv4/snapshot.json`。
+- **gfwlist**（issue #65）：运行 `Scripts/update-gfwlist.sh`，从固定版 [gfwlist/gfwlist](https://github.com/gfwlist/gfwlist) `gfwlist.txt` 解码官方 Base64 AutoProxy 列表并生成 `Vendor/rules/gfwlist/snapshot.json`。只转换可按目标域名无损表达的 `||host` / `||host^` 规则；URL 路径、协议条件、通配符、正则、单标签前缀与 IP 字面量域名规则逐类计入损失报告，绝不扩大为整域名。被更宽代理规则遮蔽的 `@@` 例外不写入无效 ACL 项（sslocal 域名匹配 proxy_list 优先于 bypass_list），保留代理规则并逐项报告。
 
-更新失败保留上一份有效快照。geolocation-cn 转换会因未知语法/损坏输入失败；china-ipv4 转换还会因异常格式（拒绝率过高）、全部失效或相对上一份快照的异常规模变化失败。普通构建由 `Scripts/verify-rule-snapshots.sh` 离线校验快照存在、摘要匹配且 schema/转换器版本一致，缺失或损坏即构建失败。分发物必须携带各自的 `NOTICE`（许可证与归属）。
+更新失败保留上一份有效快照。geolocation-cn 转换会因未知语法/损坏输入失败；china-ipv4 转换还会因异常格式（拒绝率过高）、全部失效或相对上一份快照的异常规模变化失败；gfwlist 转换因未知语法、损坏 Base64、异常规模或相对上一份快照的异常规模变化失败。普通构建由 `Scripts/verify-rule-snapshots.sh` 离线校验快照存在、摘要匹配且 schema/转换器版本一致，缺失或损坏即构建失败。分发物必须携带各自的 `NOTICE`（许可证与归属）。
 
-规则模式「未匹配时代理」生成的 `proxy_all` ACL 同时包含中国域名与中国 IPv4 CIDR 直连候选，固定本地绕过优先。**CIDR 判定可能触发本地 DNS 查询**：sslocal 为未命中域名做 IP 匹配时可能发起本地 DNS 查询，产品不承诺 DNS 查询均经远端 Shadowsocks 服务器。
+规则模式「未匹配时代理」生成的 `proxy_all` ACL 同时包含中国域名与中国 IPv4 CIDR 直连候选，固定本地绕过优先。规则模式「未匹配时直连」生成的 `bypass_all` ACL 只编入 GFWList 可生效代理候选；两种默认动作不把全部内置来源无条件并集。未匹配目标与无可用规则命中的 IP 字面目标直连。**CIDR 判定可能触发本地 DNS 查询**：sslocal 为未命中域名做 IP 匹配时可能发起本地 DNS 查询，产品不承诺 DNS 查询均经远端 Shadowsocks 服务器。
 
 ## 依赖升级
 

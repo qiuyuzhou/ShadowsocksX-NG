@@ -120,7 +120,7 @@ extension RealSslocalSmokeTests {
       acl: .rule(
         at: workDir.appendingPathComponent("sslocal-active.acl"),
         defaultAction: .proxyWhenUnmatched,
-        chinaRules: chinaRules))
+        rules: chinaRules))
     XCTAssertTrue(document.isWellFormed)
     let wrapper = try launchWrapper(document)
     defer {
@@ -162,7 +162,7 @@ extension RealSslocalSmokeTests {
       acl: .rule(
         at: workDir.appendingPathComponent("sslocal-active.acl"),
         defaultAction: .proxyWhenUnmatched,
-        chinaRules: try chinaCIDRSmokeRules()))
+        rules: try chinaCIDRSmokeRules()))
     XCTAssertTrue(document.isWellFormed)
     let wrapper = try launchWrapper(document)
     defer {

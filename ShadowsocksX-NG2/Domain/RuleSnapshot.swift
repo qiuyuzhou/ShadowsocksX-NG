@@ -46,7 +46,7 @@ struct RuleSnapshotMetadata: Codable, Equatable, Sendable {
 struct RuleConversionLossReport: Codable, Equatable, Sendable {
   /// 成功进入规则模型的条目数。
   var convertedCount: Int
-  /// 被 `.cn` 后缀吸收的条目数。
+  /// 被吸收或遮蔽而不进入运行时规则的条目数（`.cn` 吸收、GFWList `@@` 遮蔽）。
   var absorbedCount: Int
   /// 按类型跳过的计数（keyword / regexp / attribute / include 等）。
   var skipped: [String: Int]

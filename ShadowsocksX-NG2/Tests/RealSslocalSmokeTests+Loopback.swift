@@ -132,6 +132,16 @@ extension RealSslocalSmokeTests {
     return request
   }
 
+  /// SOCKS5 CONNECT 到 IPv4 字面量（ATYP=0x01），用于域名/IP 优先级断言。
+  func socksIPv4ConnectRequest(_ octets: [UInt8], port: Int) -> [UInt8] {
+    precondition(octets.count == 4, "IPv4 request needs 4 octets")
+    var request: [UInt8] = [0x05, 0x01, 0x00, 0x01]
+    request.append(contentsOf: octets)
+    let portBytes = UInt16(port).bigEndian
+    withUnsafeBytes(of: portBytes) { request.append(contentsOf: $0) }
+    return request
+  }
+
   /// 对公网目标发起 HTTP CONNECT（应答头读到即返回，不要求成功）。
   func performHTTPConnect(
     httpPort: Int, targetHost: String, targetPort: Int

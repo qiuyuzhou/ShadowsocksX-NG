@@ -88,5 +88,7 @@ PY
 verify_one "geolocation-cn" 100 200000
 # china-ipv4: China mainland IPv4 CIDR (issue #64).
 verify_one "china-ipv4" 100 50000
+# gfwlist: GFWList AutoProxy proxy candidates (issue #65).
+verify_one "gfwlist" 100 50000
 
 echo "verify-rule-snapshots: ok"
