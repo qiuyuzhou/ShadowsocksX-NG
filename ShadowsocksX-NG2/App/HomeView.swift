@@ -3,8 +3,7 @@ import SwiftUI
 /// 首页分区（地图 #52，票 #54）：代理模式切换、运行控制、当前服务器目标树
 /// 与快速操作。模式与两个开关（agent/系统代理，issue #60）走代理控制工作流
 /// 的整体 snapshot；目标树与激活走目录工作流 projection 与 `activate`；复制
-/// HTTP 导出是 UI 副作用。原型中的「手动/外部 PAC」模式不实现：Domain 只有
-/// PAC/全局两种模式。
+/// HTTP 导出是 UI 副作用。当前选择器保留 PAC 和全局模式，并加入 ACL 直连。
 struct HomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
@@ -81,7 +80,7 @@ private struct RuntimeControlCard: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             }
-            Text(systemProxyHint(summary))
+            Text(systemProxyHint)
               .font(.caption)
               .foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
@@ -109,12 +108,16 @@ private struct RuntimeControlCard: View {
       set: { enabled in Task { await control.setSystemProxyEnabled(enabled) } })
   }
 
-  private func systemProxyHint(_ summary: StatusMenuModel.Summary) -> String {
-    switch control.snapshot.systemProxyApplication {
+  private var systemProxyHint: String {
+    let exitRequirement =
+      control.snapshot.proxyMode == .direct
+      ? "直连模式不依赖活动服务器"
+      : "其他模式需要可用的活动服务器"
+    return switch control.snapshot.systemProxyApplication {
     case .idle:
-      "开启后让 macOS 系统代理指向本地入口；需代理已就绪且有可用出口"
+      "开启后让 macOS 系统代理指向本地入口；\(exitRequirement)"
     case .pending:
-      "已请求接管，等待代理就绪或可用出口后自动应用"
+      "已请求接管，等待本地入口就绪；\(exitRequirement)"
     case .applied:
       "系统代理已指向本地入口；关闭只恢复 NG2 持有的系统设置"
     case .failed:
@@ -165,6 +168,8 @@ private struct ModeCard: View {
       "根据规则自动决定直连或通过代理，适合日常使用。"
     case .global:
       "所有系统代理流量通过本地 SOCKS5 端点转发，不使用规则分流。"
+    case .direct:
+      "通过本地 SOCKS 与 HTTP 入口直连，不使用 Shadowsocks 服务器。"
     }
   }
 }

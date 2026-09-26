@@ -76,9 +76,16 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     systemProxy: SystemProxyControlling? = nil,
     firewallChecker: FirewallStatusChecking = ProxyRuntimeFixture.FakeFirewallChecker(),
     firewallExecutableURLs: [URL] = [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
-    firewallPollIntervalNanoseconds: UInt64 = 1_000_000
+    firewallPollIntervalNanoseconds: UInt64 = 1_000_000,
+    launchHealthTimeoutSeconds: TimeInterval = 15,
+    processIsAlive: @escaping @Sendable (Int32) -> Bool = { $0 == 42 }
   ) -> ProxyRuntimeController {
     agent.setStatus(agentStatus)
+    let runtimeFileStore = RuntimeFileStore(fileURL: runtime.contract)
+    agent.onRegister = { [runtimeFileStore] in
+      guard let document = runtimeFileStore.loadDocument() else { return }
+      try? runtimeFileStore.writeRuntimeReceipt(for: document, processID: 42)
+    }
     let restored =
       settingsRestore
       ?? RestoredProxySettings(
@@ -86,7 +93,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     return ProxyRuntimeController(
       catalogSnapshotReader: ProxyRuntimeFixture.catalogSnapshotReader(at: catalogFileURL),
       activationFileStore: ActivationStateFileStore(fileURL: activationFileURL),
-      runtimeFileStore: RuntimeFileStore(fileURL: runtime.contract),
+      runtimeFileStore: runtimeFileStore,
       credentials: credentials,
       plugins: ActivationFixture.plugins,
       listenRestore: RestoredListenSettings(settings: listen, unreadableError: nil),
@@ -100,7 +107,9 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       firewallChecker: firewallChecker,
       firewallExecutableURLs: firewallExecutableURLs,
       firewallPollIntervalNanoseconds: firewallPollIntervalNanoseconds,
-      sendSignal: { [signals] pid, number in signals!.send(pid, number) })
+      launchHealthTimeoutSeconds: launchHealthTimeoutSeconds,
+      sendSignal: { [signals] pid, number in signals!.send(pid, number) },
+      processIsAlive: processIsAlive)
   }
 
   // MARK: Agent 开关与首次默认
@@ -441,6 +450,93 @@ extension ProxyRuntimeControllerTests {
     }
   }
 
+  func testDirectModeDeploysACLWithoutServerAndProjectsSOCKSProxy() async throws {
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsStore: settingsStore,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, systemProxyEnabled: true))
+
+    await controller.resyncOnLaunch()
+    XCTAssertEqual(controller.state, .running)
+    XCTAssertTrue(systemProxy.applied.isEmpty, "PAC 模式没有活动目标时不得接管")
+    let unregisterCount = agent.unregisterCount
+
+    await controller.setProxyMode(.direct)
+
+    XCTAssertEqual(controller.proxyMode, .direct)
+    XCTAssertEqual(controller.settings.preferredMode, .direct)
+    XCTAssertEqual(settingsStore.saved?.preferredMode, .direct)
+    XCTAssertEqual(controller.state, .running)
+    XCTAssertEqual(agent.unregisterCount, unregisterCount + 1, "ACL 变化触发完整 agent 重启")
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    let document = try XCTUnwrap(runtimeStore.loadDocument())
+    XCTAssertTrue(document.servers.isEmpty, "直连模式允许空服务器列表")
+    XCTAssertEqual(document.aclRuntime?.summary, "direct")
+    XCTAssertEqual(
+      try Data(contentsOf: runtimeStore.aclFileURL),
+      Data(try XCTUnwrap(document.aclRuntime).content.utf8))
+    XCTAssertEqual(
+      systemProxy.applied.last?.target,
+      .socks(host: "127.0.0.1", port: ActivationFixture.listen.socksPort))
+    XCTAssertTrue(
+      Set(FixedLocalProxyRanges.systemProxyExceptions).isSubset(
+        of: Set(systemProxy.applied.last?.exceptions ?? [])))
+    XCTAssertEqual(controller.systemProxyState, .applied)
+
+    let registersBeforeDisable = agent.unregisterCount
+    await controller.setSystemProxyEnabled(false)
+    XCTAssertEqual(controller.state, .running, "关闭系统代理不停止本地入口")
+    XCTAssertEqual(agent.unregisterCount, registersBeforeDisable)
+    XCTAssertEqual(controller.systemProxyState, .idle)
+
+    let restored = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsRestore: RestoredProxySettings(
+        settings: try XCTUnwrap(settingsStore.load()), unreadableError: nil),
+      proxyMode: nil)
+    XCTAssertEqual(restored.proxyMode, .direct, "模式选择从持久快照恢复")
+  }
+
+  func testFailedDirectInstanceRestoresOldModeRuntimeAndSystemProxy() async throws {
+    let seeded = try makeSeededCatalog()
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsStore: settingsStore,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, systemProxyEnabled: true),
+      launchHealthTimeoutSeconds: 0.05)
+    try await controller.activate(seeded.server)
+    XCTAssertEqual(controller.systemProxyState, .applied)
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    let previousDocument = try XCTUnwrap(runtimeStore.loadDocument())
+    let previousApplicationCount = systemProxy.applied.count
+    var observedStates: [ProxyRuntimeController.AgentRunState] = []
+    let cancellable = controller.$state.sink { observedStates.append($0) }
+    defer { cancellable.cancel() }
+
+    agent.onRegister = { [runtimeStore, previousDocument] in
+      guard let requested = runtimeStore.loadDocument() else { return }
+      let accepted = requested.aclRuntime == nil ? requested : previousDocument
+      try? runtimeStore.writeRuntimeReceipt(for: accepted, processID: 42)
+    }
+
+    await controller.setProxyMode(.direct)
+
+    XCTAssertTrue(observedStates.contains(.starting), "重启期间呈现短暂不可用状态")
+    XCTAssertEqual(controller.proxyMode, .pac, "新实例未验证时恢复旧模式")
+    XCTAssertEqual(controller.settings.preferredMode, .pac)
+    XCTAssertEqual(settingsStore.saved?.preferredMode, .pac)
+    XCTAssertEqual(try runtimeStore.loadDocument(), previousDocument)
+    XCTAssertNil(runtimeStore.loadDocument()?.aclRuntime)
+    XCTAssertEqual(controller.state, .running, "旧运行时恢复后重新呈现健康")
+    XCTAssertEqual(controller.systemProxyState, .applied)
+    XCTAssertEqual(systemProxy.applied.count, previousApplicationCount)
+    XCTAssertEqual(systemProxy.restoreCount, 0, "切换失败期间保持原系统代理应用")
+  }
+
   /// Agent 开关持久化失败（issue #60）：保留现状并点名，不静默偏离持久化
   /// 事实（否则重启后意图被覆盖）。
   func testAgentTogglePersistenceFailureKeepsStateAndNamesReason() async throws {
@@ -712,5 +808,53 @@ extension ProxyRuntimeControllerTests {
 
     XCTAssertEqual(controller.state, .running, "意图已开启时开启命令重走收敛")
     XCTAssertEqual(controller.systemProxyState, .idle)
+  }
+}
+
+private final class ProcessLivenessRecorder: @unchecked Sendable {
+  private let lock = NSLock()
+  private var candidateChecks = 0
+
+  func isAlive(_ pid: Int32) -> Bool {
+    if pid == 42 { return true }
+    guard pid == 43 else { return false }
+    lock.lock()
+    defer { lock.unlock() }
+    candidateChecks += 1
+    return candidateChecks == 1
+  }
+}
+
+extension ProxyRuntimeControllerTests {
+  func testDirectReceiptIsRecheckedAfterReachableStaleListenerProbes() async throws {
+    let seeded = try makeSeededCatalog()
+    let settingsStore = InMemoryProxySettingsStore()
+    let processLiveness = ProcessLivenessRecorder()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsStore: settingsStore,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, systemProxyEnabled: true),
+      processIsAlive: { processLiveness.isAlive($0) })
+    try await controller.activate(seeded.server)
+    XCTAssertEqual(controller.systemProxyState, .applied)
+
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    let previousDocument = try XCTUnwrap(runtimeStore.loadDocument())
+    let appliedCount = systemProxy.applied.count
+    agent.onRegister = { [runtimeStore] in
+      guard let requested = runtimeStore.loadDocument() else { return }
+      let processID: Int32 = requested.aclRuntime == nil ? 42 : 43
+      try? runtimeStore.writeRuntimeReceipt(for: requested, processID: processID)
+    }
+
+    await controller.setProxyMode(.direct)
+
+    XCTAssertEqual(controller.proxyMode, .pac, "探测期间新子进程退出时回滚旧模式")
+    XCTAssertEqual(controller.state, .running, "旧实例应保持健康")
+    XCTAssertEqual(runtimeStore.loadDocument(), previousDocument)
+    XCTAssertEqual(controller.systemProxyState, .applied)
+    XCTAssertEqual(systemProxy.applied.count, appliedCount, "旧系统代理保持应用")
+    XCTAssertEqual(systemProxy.restoreCount, 0)
   }
 }

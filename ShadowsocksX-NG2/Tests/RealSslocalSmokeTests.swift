@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 
 @testable import ShadowsocksX_NG2
@@ -63,7 +64,7 @@ final class RealSslocalSmokeTests: XCTestCase {
 
   /// 写入给定契约并拉起 wrapper（契约内容由调用方构造：无插件与插件场景各异）。
   private func launchWrapper(_ document: SslocalRuntimeDocument) throws -> Process {
-    try document.jsonData().write(to: contractURL)
+    try RuntimeFileStore(fileURL: contractURL).write(document)
 
     let wrapperURL = Bundle.main.bundleURL.appendingPathComponent(
       "Contents/MacOS/ShadowsocksX-NG2Agent")
@@ -246,7 +247,7 @@ final class RealSslocalSmokeTests: XCTestCase {
   func testRealSslocalLaunchesManagedV2rayPluginProcess() throws {
     let pluginURL = Bundle.main.bundleURL.appendingPathComponent(
       "Contents/Helpers/Plugins/v2ray-plugin")
-    try XCTUnwrap(
+    _ = try XCTUnwrap(
       FileManager.default.isExecutableFile(atPath: pluginURL.path) ? pluginURL : nil,
       "v2ray-plugin 未嵌入 app bundle（先跑 fetch-external-binaries.sh）")
     var ports = Set<Int>()
@@ -326,5 +327,210 @@ final class RealSslocalSmokeTests: XCTestCase {
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
     pgrep.waitUntilExit()
     return pgrep.terminationStatus == 0 && !data.isEmpty
+  }
+}
+
+private final class LoopbackEchoServer {
+  private let descriptor: Int32
+  let port: Int
+
+  init() throws {
+    let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { throw POSIXError(.ENOTSOCK) }
+
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_addr.s_addr = INADDR_LOOPBACK.bigEndian
+    address.sin_port = 0
+    let bindResult = withUnsafePointer(to: &address) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+        Darwin.bind(descriptor, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+      }
+    }
+    guard bindResult == 0, Darwin.listen(descriptor, 4) == 0 else {
+      Darwin.close(descriptor)
+      throw POSIXError(.EADDRINUSE)
+    }
+
+    var boundAddress = sockaddr_in()
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let nameResult = withUnsafeMutablePointer(to: &boundAddress) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+        getsockname(descriptor, sockaddrPointer, &length)
+      }
+    }
+    guard nameResult == 0 else {
+      Darwin.close(descriptor)
+      throw POSIXError(.EINVAL)
+    }
+
+    self.descriptor = descriptor
+    port = Int(CFSwapInt16BigToHost(boundAddress.sin_port))
+    DispatchQueue.global().async { [descriptor] in
+      while true {
+        let connection = accept(descriptor, nil, nil)
+        guard connection >= 0 else { return }
+        var bytes: [UInt8] = []
+        while !bytes.contains(10) {
+          var chunk = [UInt8](repeating: 0, count: 512)
+          let received = chunk.withUnsafeMutableBytes { buffer in
+            read(connection, buffer.baseAddress!, buffer.count)
+          }
+          guard received > 0 else { break }
+          bytes.append(contentsOf: chunk.prefix(received))
+        }
+        if !bytes.isEmpty {
+          bytes.withUnsafeBytes { buffer in
+            _ = write(connection, buffer.baseAddress!, buffer.count)
+          }
+        }
+        shutdown(connection, SHUT_RDWR)
+        Darwin.close(connection)
+      }
+    }
+  }
+
+  deinit {
+    shutdown(descriptor, SHUT_RDWR)
+    Darwin.close(descriptor)
+  }
+}
+
+extension RealSslocalSmokeTests {
+  private func connectLoopback(port: Int) throws -> Int32 {
+    let socketFD = socket(AF_INET, SOCK_STREAM, 0)
+    guard socketFD >= 0 else { throw POSIXError(.ENOTSOCK) }
+    var timeout = timeval(tv_sec: 5, tv_usec: 0)
+    _ = setsockopt(
+      socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_addr.s_addr = INADDR_LOOPBACK.bigEndian
+    address.sin_port = in_port_t(port).bigEndian
+    let connectResult = withUnsafePointer(to: &address) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+        connect(socketFD, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+      }
+    }
+    guard connectResult == 0 else {
+      Darwin.close(socketFD)
+      throw POSIXError(.ECONNREFUSED)
+    }
+    return socketFD
+  }
+
+  private func performDirectSocksEcho(
+    socksPort: Int, targetPort: Int, payload: [UInt8]
+  ) throws -> [UInt8] {
+    let socketFD = try connectLoopback(port: socksPort)
+    defer { Darwin.close(socketFD) }
+    let greeting: [UInt8] = [0x05, 0x01, 0x00]
+    _ = try greeting.withUnsafeBytes { try writeAll(socketFD, $0) }
+    XCTAssertEqual(try readExactly(socketFD, count: 2), [0x05, 0x00])
+
+    let portBytes = UInt16(targetPort).bigEndian
+    var request: [UInt8] = [0x05, 0x01, 0x00, 0x01, 127, 0, 0, 1]
+    withUnsafeBytes(of: portBytes) { request.append(contentsOf: $0) }
+    _ = try request.withUnsafeBytes { try writeAll(socketFD, $0) }
+    let reply = try readExactly(socketFD, count: 10)
+    XCTAssertEqual(reply[1], 0, "空服务器直连模式应连接本地回环目标")
+
+    _ = try payload.withUnsafeBytes { try writeAll(socketFD, $0) }
+    return try readExactly(socketFD, count: payload.count)
+  }
+
+  private func performDirectHTTPEcho(
+    httpPort: Int, targetPort: Int, payload: [UInt8]
+  ) throws -> [UInt8] {
+    let socketFD = try connectLoopback(port: httpPort)
+    defer { Darwin.close(socketFD) }
+    let request =
+      "CONNECT 127.0.0.1:\(targetPort) HTTP/1.1\r\n"
+      + "Host: 127.0.0.1:\(targetPort)\r\n\r\n"
+    let requestBytes = Array(request.utf8)
+    _ = try requestBytes.withUnsafeBytes { try writeAll(socketFD, $0) }
+
+    var response: [UInt8] = []
+    while response.count < 4 || Array(response.suffix(4)) != [13, 10, 13, 10] {
+      response.append(contentsOf: try readExactly(socketFD, count: 1))
+      guard response.count < 4096 else { throw NSError(domain: "smoke", code: 3) }
+    }
+    let header = String(decoding: response, as: UTF8.self)
+    XCTAssertTrue(header.contains(" 200 "), "HTTP CONNECT 应答成功：\(header)")
+    _ = try payload.withUnsafeBytes { try writeAll(socketFD, $0) }
+    return try readExactly(socketFD, count: payload.count)
+  }
+
+  func testDirectACLRoutesSOCKSAndHTTPLocallyWithoutServers() throws {
+    let echoServer = try LoopbackEchoServer()
+    var ports = Set<Int>()
+    while ports.count < 3 {
+      let port = try grabEphemeralLoopbackPort()
+      if port != echoServer.port { ports.insert(port) }
+    }
+    let selectedPorts = Array(ports)
+    let listen = SslocalListenSettings(
+      socksPort: selectedPorts[0], httpPort: selectedPorts[1], pacPort: selectedPorts[2])
+    let document = SslocalRuntimeDocument(
+      servers: [],
+      listen: listen,
+      acl: .direct(at: workDir.appendingPathComponent("sslocal-active.acl")))
+    XCTAssertTrue(document.isWellFormed)
+    let wrapper = try launchWrapper(document)
+    defer {
+      if wrapper.isRunning { kill(wrapper.processIdentifier, SIGTERM) }
+    }
+
+    XCTAssertTrue(
+      try waitForCondition(timeout: 15) {
+        EndpointHealthProbe.probe(host: "127.0.0.1", port: listen.socksPort, timeout: 1)
+          == .reachable
+          && EndpointHealthProbe.probe(host: "127.0.0.1", port: listen.httpPort, timeout: 1)
+            == .reachable
+      }, "直连模式应绑定 SOCKS 和 HTTP 入站")
+    let runtimeStore = RuntimeFileStore(fileURL: contractURL)
+    let receiptPublished = try waitForCondition(timeout: 30) {
+      guard let receipt = runtimeStore.readRuntimeReceipt() else { return false }
+      return receipt.contractSHA256 == document.deploymentSHA256
+        && kill(receipt.processID, 0) == 0
+    }
+    XCTAssertTrue(receiptPublished, "应发布仍存活的 sslocal 子进程回执")
+    let receipt = try XCTUnwrap(runtimeStore.readRuntimeReceipt())
+    for local in document.locals {
+      XCTAssertTrue(
+        RuntimeSocketOwnershipProbe.process(
+          receipt.processID, ownsTCPListenerOn: local.localPort),
+        "回执对应的 sslocal 应拥有 \(local.inboundProtocol) TCP 监听")
+    }
+    XCTAssertEqual(
+      runtimeStore.readRuntimeReceipt()?.contractSHA256,
+      document.deploymentSHA256)
+
+    let socksPayload = Array("socks direct\n".utf8)
+    XCTAssertEqual(
+      try performDirectSocksEcho(
+        socksPort: listen.socksPort, targetPort: echoServer.port, payload: socksPayload),
+      socksPayload,
+      "空服务器列表下 SOCKS 应通过 bypass_all 直连回环目标")
+
+    let httpPayload = Array("http direct\n".utf8)
+    XCTAssertEqual(
+      try performDirectHTTPEcho(
+        httpPort: listen.httpPort, targetPort: echoServer.port, payload: httpPayload),
+      httpPayload,
+      "HTTP 入站应应用同一 ACL 并直连回环目标")
+
+    kill(wrapper.processIdentifier, SIGTERM)
+    let exited = XCTestExpectation(description: "direct wrapper exits")
+    DispatchQueue.global().async {
+      wrapper.waitUntilExit()
+      exited.fulfill()
+    }
+    XCTAssertEqual(XCTWaiter.wait(for: [exited], timeout: 10), .completed)
+    XCTAssertEqual(wrapper.terminationStatus, 0)
+    XCTAssertNil(runtimeStore.readRuntimeReceipt(), "停止后应清除运行回执")
   }
 }

@@ -4,6 +4,7 @@ import Foundation
 enum ProxyModeKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
   case pac
   case global
+  case direct
 }
 
 /// The mutually exclusive ways in which 2.0 exposes the local proxy to macOS.
@@ -11,6 +12,7 @@ enum ProxyModeKind: String, Codable, CaseIterable, Equatable, Hashable, Sendable
 enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   case pac
   case global
+  case direct
 
   private enum CodingKeys: String, CodingKey {
     case kind
@@ -19,6 +21,7 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   private enum Kind: String, Codable {
     case pac
     case global
+    case direct
   }
 
   init(from decoder: Decoder) throws {
@@ -28,6 +31,8 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
       self = .pac
     case .global:
       self = .global
+    case .direct:
+      self = .direct
     }
   }
 
@@ -38,6 +43,8 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
       try container.encode(Kind.pac, forKey: .kind)
     case .global:
       try container.encode(Kind.global, forKey: .kind)
+    case .direct:
+      try container.encode(Kind.direct, forKey: .kind)
     }
   }
 
@@ -47,6 +54,8 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
       "PAC"
     case .global:
       "全局"
+    case .direct:
+      "直连"
     }
   }
 
@@ -54,11 +63,12 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
     switch self {
     case .pac: .pac
     case .global: .global
+    case .direct: .direct
     }
   }
 
   /// Returns every mode supported by the product in stable selector order.
-  static var availableModes: [ProxyMode] { [.pac, .global] }
+  static var availableModes: [ProxyMode] { [.pac, .global, .direct] }
 
   /// Derives the only system-proxy state that this mode is allowed to own.
   func systemProxyConfiguration(
@@ -77,6 +87,13 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
       }
       return SystemProxyConfiguration(
         target: .socks(host: "127.0.0.1", port: document.socksPort), exceptions: exceptions)
+    case .direct:
+      guard (1...65535).contains(document.socksPort) else {
+        throw ProxyModeError.invalidSOCKSPort(document.socksPort)
+      }
+      return SystemProxyConfiguration(
+        target: .socks(host: "127.0.0.1", port: document.socksPort),
+        exceptions: FixedLocalProxyRanges.systemProxyExceptions(including: exceptions))
     }
   }
 }

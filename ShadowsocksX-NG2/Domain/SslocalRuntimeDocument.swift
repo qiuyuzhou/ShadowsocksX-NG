@@ -153,9 +153,15 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
   let locals: [SslocalLocalDocument]
   let pac: PACRuntimeDocument
   let timeout: Int
+  /// Upstream sslocal ACL file path. The wrapper-owned extension carries the
+  /// matching content and digest so both inbounds use the same validated file.
+  let aclFilePath: String?
+  let aclRuntime: ProxyACLDocument?
 
   enum CodingKeys: String, CodingKey {
     case servers, locals, timeout
+    case aclFilePath = "acl"
+    case aclRuntime = "x_shadowsocksx_ng_acl"
     case pac = "x_shadowsocksx_ng_pac"
   }
 
@@ -164,12 +170,30 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     listen: SslocalListenSettings,
     timeout: Int = 60,
     verbose: Bool = false,
-    pacUserRules: String = ""
+    pacUserRules: String = "",
+    acl: ProxyACLDocument? = nil
   ) {
     self.servers = servers
     locals = listen.locals
     pac = listen.pac(userRules: pacUserRules, verbose: verbose)
     self.timeout = timeout
+    aclFilePath = acl?.path
+    aclRuntime = acl
+  }
+
+  private init(
+    servers: [SslocalServerDocument],
+    locals: [SslocalLocalDocument],
+    pac: PACRuntimeDocument,
+    timeout: Int,
+    acl: ProxyACLDocument?
+  ) {
+    self.servers = servers
+    self.locals = locals
+    self.pac = pac
+    self.timeout = timeout
+    aclFilePath = acl?.path
+    aclRuntime = acl
   }
 
   init(from decoder: Decoder) throws {
@@ -178,10 +202,26 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     locals = try container.decode([SslocalLocalDocument].self, forKey: .locals)
     pac = try container.decode(PACRuntimeDocument.self, forKey: .pac)
     timeout = try container.decodeIfPresent(Int.self, forKey: .timeout) ?? 60
+    aclFilePath = try container.decodeIfPresent(String.self, forKey: .aclFilePath)
+    aclRuntime = try container.decodeIfPresent(ProxyACLDocument.self, forKey: .aclRuntime)
   }
 
   func jsonData() throws -> Data {
     try Self.jsonEncoder.encode(self)
+  }
+
+  var deploymentSHA256: String? {
+    guard let data = try? jsonData() else { return nil }
+    return ProxyACLDocument.digest(data)
+  }
+
+  func replacingACL(_ acl: ProxyACLDocument?) -> SslocalRuntimeDocument {
+    SslocalRuntimeDocument(
+      servers: servers,
+      locals: locals,
+      pac: pac,
+      timeout: timeout,
+      acl: acl)
   }
 
   private static let jsonEncoder: JSONEncoder = {
@@ -317,11 +357,12 @@ struct RuntimeListenFacts: Equatable, Sendable {
   var advertisedAddress: String { scope.advertisedAddress }
 }
 
-/// 监听指纹（spec #21 D5/D7）：服务器列表变化可热重载；任一本地入站或 PAC
-/// endpoint 变化都必须由 wrapper 走优雅重启。
+/// 监听指纹（spec #21 D5/D7）：服务器列表变化可热重载；任一本地入站、PAC
+/// endpoint 或 ACL 内容/路径/摘要变化都必须由 wrapper 完整重启 sslocal。
 struct SslocalListenFingerprint: Equatable, Sendable {
   let locals: [SslocalLocalDocument]
   let pac: PACRuntimeDocument
+  let acl: ProxyACLDocument?
 }
 
 extension SslocalRuntimeDocument {
@@ -334,7 +375,7 @@ extension SslocalRuntimeDocument {
   }
 
   var listenFingerprint: SslocalListenFingerprint {
-    SslocalListenFingerprint(locals: locals, pac: pac)
+    SslocalListenFingerprint(locals: locals, pac: pac, acl: aclRuntime)
   }
 
   var socksLocal: SslocalLocalDocument? {
@@ -355,6 +396,11 @@ extension SslocalRuntimeDocument {
       (1...86_400).contains(timeout),
       pac.endpointPath == PACRuntimeDocument.versionedEndpointPath,
       !pac.advertisedAddress.isEmpty
+    else { return false }
+
+    guard
+      (aclFilePath == nil) == (aclRuntime == nil),
+      aclRuntime.map({ $0.isWellFormed && $0.path == aclFilePath }) ?? true
     else { return false }
 
     let expectedBind = pac.listenScope == .loopback ? "127.0.0.1" : "0.0.0.0"

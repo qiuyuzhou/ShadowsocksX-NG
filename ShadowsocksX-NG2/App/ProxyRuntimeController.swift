@@ -55,10 +55,10 @@ final class ProxyRuntimeController: ObservableObject {
     case failed(SystemProxyFailureFacts)
   }
 
-  @Published private(set) var state: AgentRunState = .off
-  @Published private(set) var systemProxyState: SystemProxyControlState = .idle
-  @Published private(set) var settings: ProxySettings
-  @Published private(set) var pacURL: URL?
+  @Published var state: AgentRunState = .off
+  @Published var systemProxyState: SystemProxyControlState = .idle
+  @Published var settings: ProxySettings
+  @Published var pacURL: URL?
   /// 当前活动目标（菜单栏状态摘要与级联只读呈现用，issue #31）。machine 是
   /// 非发布值的普通结构体，代理关闭路径的激活动作不会触碰 state，菜单的
   /// 「目标」行依赖这里的独立发布保持实时。
@@ -72,30 +72,33 @@ final class ProxyRuntimeController: ObservableObject {
 
   private let catalogSnapshotReader: RuntimeCatalogSnapshotReading
   private let activationFileStore: ActivationStateFileStore
-  private let runtimeFileStore: RuntimeFileStore
+  let runtimeFileStore: RuntimeFileStore
   private let credentials: CredentialStoring
   private let plugins: ManagedPluginProviding
-  private let settingsStore: ProxySettingsStoring
+  let settingsStore: ProxySettingsStoring
   /// 监听设置不可读时的点名原因（D8「任何路径不静默改端口」）；非 nil 时
   /// 设置只是占位出厂默认，禁止部署（见 `deploy`）。
   private var listenSettingsUnreadable: Bool
   /// 新版偏好不可读时同样禁止部署，不以出厂端口静默替代用户配置。
   private var settingsUnreadable: Bool
   private let agent: LaunchAgentControlling
-  private let probe: EndpointProbing
-  private let pacProbe: PACHealthProbing
+  let probe: EndpointProbing
+  let pacProbe: PACHealthProbing
   private let systemProxy: SystemProxyControlling
   private let firewallChecker: FirewallStatusChecking
   private let firewallExecutableURLs: [URL]
   private let firewallPollIntervalNanoseconds: UInt64
+  let launchHealthTimeoutSeconds: TimeInterval
   /// 信号发送缝（默认 kill），单测观测 SIGUSR1 投递。
-  private let sendSignal: @Sendable (Int32, Int32) -> Int32
+  let sendSignal: @Sendable (Int32, Int32) -> Int32
+  let processIsAlive: @Sendable (Int32) -> Bool
   /// 并发流代际：停止请求可使进行中的启动探测立即失效。
-  private var flowGeneration = 0
-  private var lastDocument: SslocalRuntimeDocument?
+  var flowGeneration = 0
+  var modeChangeGeneration = 0
+  var lastDocument: SslocalRuntimeDocument?
   private var firewallObservationTask: Task<Void, Never>?
 
-  @Published private(set) var proxyMode: ProxyMode
+  @Published var proxyMode: ProxyMode
 
   init(
     catalogSnapshotReader: RuntimeCatalogSnapshotReading,
@@ -115,7 +118,9 @@ final class ProxyRuntimeController: ObservableObject {
     firewallChecker: FirewallStatusChecking = SocketFilterFirewallChecker(),
     firewallExecutableURLs: [URL]? = nil,
     firewallPollIntervalNanoseconds: UInt64 = 2_000_000_000,
-    sendSignal: @escaping @Sendable (Int32, Int32) -> Int32 = { kill($0, $1) }
+    launchHealthTimeoutSeconds: TimeInterval = 15,
+    sendSignal: @escaping @Sendable (Int32, Int32) -> Int32 = { kill($0, $1) },
+    processIsAlive: @escaping @Sendable (Int32) -> Bool = { $0 > 0 && kill($0, 0) == 0 }
   ) {
     self.catalogSnapshotReader = catalogSnapshotReader
     self.activationFileStore = activationFileStore
@@ -141,7 +146,9 @@ final class ProxyRuntimeController: ObservableObject {
     self.firewallChecker = firewallChecker
     self.firewallExecutableURLs = firewallExecutableURLs ?? Self.defaultFirewallExecutableURLs
     self.firewallPollIntervalNanoseconds = firewallPollIntervalNanoseconds
+    self.launchHealthTimeoutSeconds = launchHealthTimeoutSeconds
     self.sendSignal = sendSignal
+    self.processIsAlive = processIsAlive
     let persistedTarget = try? activationFileStore.loadActiveTargetID()
     machine = ActivationStateMachine(activeTargetID: persistedTarget)
     activeTargetID = machine.activeTargetID
@@ -283,35 +290,6 @@ final class ProxyRuntimeController: ObservableObject {
     }
   }
 
-  /// Changes the current mode without rebuilding the tunnel runtime. The mode
-  /// only decides what the system proxy points at, so with the system proxy
-  /// intent off nothing beyond persistence happens.
-  /// The choice persists with the settings snapshot first, so a GUI restart
-  /// restores it; a persistence failure keeps the previous mode in force and
-  /// names the reason instead of switching silently.
-  func setProxyMode(_ mode: ProxyMode) async {
-    guard ProxyMode.availableModes.contains(mode) else { return }
-    guard mode != proxyMode else { return }
-    var next = settings
-    next.preferredMode = mode.kind
-    do {
-      try settingsStore.save(next)
-    } catch {
-      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-      state = .serviceFailed(.persistence)
-      return
-    }
-    settings = next
-    proxyMode = mode
-    guard settings.systemProxyEnabled else { return }
-    guard state != .off, let document = lastDocument ?? runtimeFileStore.loadDocument() else {
-      systemProxyState = .pending
-      return
-    }
-    state = .starting
-    await presentLaunchHealth(document)
-  }
-
   /// GUI 启动重同步（D5「GUI 下次启动重新校验同步」；issue #60）：agent 意图
   /// 来自持久化设置——开启则自动注册/收敛 LaunchAgent 并部署（无活动目标时
   /// 以空服务器列表提供监听）；关闭则恢复系统代理后按停止协议收敛。GUI 崩溃
@@ -374,17 +352,19 @@ final class ProxyRuntimeController: ObservableObject {
   }
 
   /// 把「运行定义档」意图推到运行时：计划动作 → 顺序执行 → 端点健康呈现。
-  private func deploy(_ document: SslocalRuntimeDocument) async {
+  @discardableResult
+  private func deploy(_ sourceDocument: SslocalRuntimeDocument) async -> Bool {
     if listenSettingsUnreadable || settingsUnreadable {
       await refuseDeployForUnreadableListenSettings()
-      return
+      return false
     }
+    let document = runtimeDocument(sourceDocument, for: proxyMode)
     pacURL = nil
     lastDocument = document
-    if await execute(.run(document), document: document) {
-      state = .starting
-      await presentLaunchHealth(document)
-    }
+    guard await execute(.run(document), document: document) else { return false }
+    state = .starting
+    return await presentLaunchHealth(
+      document, requiresReceipt: document.aclRuntime != nil)
   }
 
   /// D8「任何路径不静默改端口」：监听设置不可读时以占位出厂端口部署等于
@@ -431,7 +411,7 @@ final class ProxyRuntimeController: ObservableObject {
 extension ProxyRuntimeController {
   /// 按计划顺序执行动作；返回 false 表示中途失败、状态已呈现（后续动作与
   /// 健康探测都不应继续）。
-  private func execute(_ intent: RuntimeIntent, document: SslocalRuntimeDocument?) async -> Bool {
+  func execute(_ intent: RuntimeIntent, document: SslocalRuntimeDocument?) async -> Bool {
     cancelFirewallObservation()
     flowGeneration += 1
     let actions = ProxyRuntimePlan.actions(
@@ -494,7 +474,10 @@ extension ProxyRuntimeController {
       RuntimeLog.emit(.agentUnregistered)
       await waitForWrapperExit()
     case .signalReload(let pid):
-      _ = sendSignal(pid, SIGUSR1)
+      guard sendSignal(pid, SIGUSR1) == 0 else {
+        state = .serviceFailed(.agent)
+        return false
+      }
     case .deleteRuntimeFiles:
       runtimeFileStore.deleteRuntimeFiles()
       RuntimeLog.emit(.runtimeFilesDeleted)
@@ -664,94 +647,7 @@ extension ProxyRuntimeController {
 }
 
 extension ProxyRuntimeController {
-  private struct LocalEndpointFailure {
-    let local: SslocalLocalDocument
-    let host: String
-    let outcome: EndpointHealthProbe.Outcome
-  }
-
-  /// 启动健康呈现（D2/D7/D8）：先确认 sslocal 的 SOCKS/HTTP TCP 绑定，再
-  /// GET PAC endpoint；主机态额外查询应用防火墙拒绝记录。任一端点超时都点名
-  /// 呈现。健康通过后系统代理按意图与门禁收敛（不在此无条件写入）。
-  private func presentLaunchHealth(_ document: SslocalRuntimeDocument) async {
-    let generation = flowGeneration
-    let deadline = Date().addingTimeInterval(15)
-    var endpointFailure: LocalEndpointFailure?
-    var pacOutcome = PACHealthOutcome.failed(detail: "尚未探测")
-    while Date() < deadline {
-      if generation != flowGeneration { return }
-      endpointFailure = await unhealthyLocalEndpoint(in: document)
-      if endpointFailure == nil {
-        guard let healthURL = document.pac.healthURL else {
-          state = .launchFailed(
-            .pacEndpoint(port: document.pac.port, cause: .invalidResponse))
-          await withdrawSystemProxyAfterEntryLoss()
-          return
-        }
-        pacOutcome = await pacProbe.probe(url: healthURL, timeout: 1.5)
-        if pacOutcome == .reachable {
-          guard generation == flowGeneration else { return }
-          pacURL = document.pac.publicURL
-          await presentFirewallStatus(for: document)
-          await convergeSystemProxy()
-          return
-        }
-      }
-      try? await Task.sleep(nanoseconds: 200_000_000)
-    }
-    if generation != flowGeneration { return }
-    if let endpointFailure {
-      presentEndpointFailure(endpointFailure)
-    } else {
-      let pacFailure: RuntimeEndpointFailure
-      switch pacOutcome {
-      case .reachable:
-        pacFailure = .unknown
-      case .failed:
-        pacFailure = runtimeEndpointFailure(from: pacOutcome)
-      }
-      state = .launchFailed(.pacEndpoint(port: document.pac.port, cause: pacFailure))
-    }
-    await withdrawSystemProxyAfterEntryLoss()
-  }
-
-  private func unhealthyLocalEndpoint(
-    in document: SslocalRuntimeDocument
-  ) async -> LocalEndpointFailure? {
-    for local in document.locals {
-      let outcome = await probeAsync(
-        host: local.probeHost, port: local.localPort, timeout: 1.5)
-      if outcome != .reachable {
-        return LocalEndpointFailure(local: local, host: local.probeHost, outcome: outcome)
-      }
-    }
-    return nil
-  }
-
-  private func presentEndpointFailure(_ failure: LocalEndpointFailure) {
-    let detail: String
-    let cause: RuntimeEndpointFailure
-    switch failure.outcome {
-    case .reachable:
-      detail = "已连通"
-      cause = .unknown
-    case .refused(let reason):
-      detail = reason
-      cause = .refused
-    case .timedOut:
-      detail = "连接超时"
-      cause = .timedOut
-    }
-    RuntimeLog.emit(
-      .endpointProbeFailed(
-        host: failure.host, port: failure.local.localPort, detail: detail))
-    let endpointName = failure.local.inboundProtocol.uppercased()
-    state = .launchFailed(
-      .localEndpoint(
-        endpoint: endpointName, host: failure.host, port: failure.local.localPort, cause: cause))
-  }
-
-  private func presentFirewallStatus(for document: SslocalRuntimeDocument) async {
+  func presentFirewallStatus(for document: SslocalRuntimeDocument) async {
     guard document.pac.listenScope == .host else {
       state = .running
       return
@@ -805,7 +701,7 @@ extension ProxyRuntimeController {
     }.value
   }
 
-  private func probeAsync(
+  func probeAsync(
     host: String, port: Int, timeout: TimeInterval
   ) async -> EndpointHealthProbe.Outcome {
     let probe = probe
@@ -824,7 +720,7 @@ extension ProxyRuntimeController {
     }
   }
 
-  private func wrapperState() -> WrapperProcessState {
+  func wrapperState() -> WrapperProcessState {
     guard
       let data = try? Data(contentsOf: runtimeFileStore.pidFileURL),
       let text = String(data: data, encoding: .utf8)?.trimmingCharacters(
@@ -865,10 +761,18 @@ extension ProxyRuntimeController {
   /// 系统代理收敛：意图开启 + agent 健康 + 所选模式具备可用出口（活动目标
   /// 通过本地预检）才写入；否则保持待应用，条件恢复后随下次收敛自动应用。
   /// 意图关闭时不做任何事（呈现面保持 idle/既有失败态）。
-  private func convergeSystemProxy() async {
+  func convergeSystemProxy() async {
     guard settings.systemProxyEnabled else { return }
     guard systemProxyExitAvailable, let document = lastDocument else {
-      systemProxyState = .pending
+      if case .pending = systemProxyState { return }
+      switch restoreSystemProxyOutcome() {
+      case .idle:
+        systemProxyState = .pending
+      case .failed(let failure):
+        systemProxyState = .failed(failure)
+      case .pending, .applied:
+        systemProxyState = .pending
+      }
       return
     }
     do {
@@ -882,11 +786,11 @@ extension ProxyRuntimeController {
   }
 
   /// 出口可用 = agent 入站健康（回环入口可用，含防火墙仅阻主机态的情形）
-  /// 且存在活动目标（模式所需出口）。远端网络可达性不在承诺范围内。
+  /// 且模式有出口；直连不依赖活动服务器目标。
   private var systemProxyExitAvailable: Bool {
     switch state {
     case .running, .firewallBlocked:
-      return activeTargetID != nil
+      return proxyMode == .direct || activeTargetID != nil
     case .off, .starting, .launchFailed, .requiresApproval, .serviceFailed:
       return false
     }
@@ -895,7 +799,7 @@ extension ProxyRuntimeController {
   /// agent 入站不可用（启动失败、目标清除、监听设置不可读）时的安全撤回：
   /// 尽力恢复 NG2 持有的系统设置；意图保留为待应用，条件恢复后自动收敛。
   /// 恢复失败以 typed 呈现——系统设置仍被 NG2 持有时用户必须知道。
-  private func withdrawSystemProxyAfterEntryLoss() async {
+  func withdrawSystemProxyAfterEntryLoss() async {
     if let error = restoreSystemProxyError() {
       systemProxyState = .failed(systemProxyFacts(for: error))
       return
@@ -949,32 +853,6 @@ extension ProxyRuntimeController {
     }
   }
 
-  private func runtimeEndpointFailure(from outcome: EndpointHealthProbe.Outcome)
-    -> RuntimeEndpointFailure
-  {
-    switch outcome {
-    case .reachable: return .unknown
-    case .refused: return .refused
-    case .timedOut: return .timedOut
-    }
-  }
-
-  private func runtimeEndpointFailure(from outcome: PACHealthOutcome)
-    -> RuntimeEndpointFailure
-  {
-    switch outcome {
-    case .reachable: return .unknown
-    case .failed(let detail):
-      let normalized = detail.lowercased()
-      if normalized.contains("timeout") || normalized.contains("timedout") {
-        return .timedOut
-      }
-      if normalized.contains("http") || normalized.contains("mime") || normalized.contains("内容") {
-        return .invalidResponse
-      }
-      return .unknown
-    }
-  }
 }
 
 extension ProxyRuntimeController {

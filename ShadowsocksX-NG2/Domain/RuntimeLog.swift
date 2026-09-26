@@ -32,6 +32,7 @@ enum RuntimeLogEvent: Equatable, CustomStringConvertible, Sendable {
   case contractMissing
   case contractInvalidRemoved
   case reloadForwarded
+  case reloadDeferred
   case reloadRestarted
   /// 本机代理端点启动后未就绪（点名端点与端口，D8）。
   case endpointProbeFailed(host: String, port: Int, detail: String)
@@ -83,6 +84,8 @@ enum RuntimeLogEvent: Equatable, CustomStringConvertible, Sendable {
       return "contract invalid, removed"
     case .reloadForwarded:
       return "reload forwarded to sslocal"
+    case .reloadDeferred:
+      return "reload deferred until listeners are ready"
     case .reloadRestarted:
       return "reload: listen change, restarting sslocal"
     case .endpointProbeFailed(let host, let port, let detail):

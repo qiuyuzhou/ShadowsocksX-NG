@@ -14,10 +14,22 @@ enum RuntimePaths {
     runtimeDirectory().appendingPathComponent("sslocal-active.json")
   }
 
+  /// ACL sidecar referenced by the upstream `acl` runtime configuration key.
+  static func aclFileURL() -> URL {
+    runtimeDirectory().appendingPathComponent("sslocal-active.acl")
+  }
+
   /// wrapper 进程 pid 文件：SMAppService.Status 不暴露运行中 agent 的 pid，
   /// wrapper 自写此文件供 GUI 判活（kill(pid, 0)）并投递 SIGUSR1。
   static func agentPIDFileURL() -> URL {
     runtimeDirectory().appendingPathComponent("agent.pid")
+  }
+
+  /// The wrapper's sslocal deployment receipt. ACL-backed receipts are written
+  /// after the child owns the configured TCP listeners; the GUI checks its
+  /// digest and PID during direct-mode health checks.
+  static func agentRuntimeStatusURL() -> URL {
+    runtimeDirectory().appendingPathComponent("agent-runtime-status.json")
   }
 
   /// wrapper 与 sslocal 的收敛日志（stderr 重定向目标）；滚动与诊断导出由 #33

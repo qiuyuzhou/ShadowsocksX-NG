@@ -116,6 +116,8 @@ enum ProxyRuntimeFixture {
     var registerError: Error?
     /// register() 成功后自动迁移到的状态（模拟 launchd 拉起）。
     var statusAfterRegister: LaunchAgentStatus = .registered
+    /// 测试用的运行回执。生产 wrapper 对 ACL 实例需等 sslocal 绑定监听后才写。
+    var onRegister: (() -> Void)?
     /// 可选共享事件日志（次序断言用）。
     weak var eventLog: ProxyRuntimeEventLog?
 
@@ -137,6 +139,7 @@ enum ProxyRuntimeFixture {
         throw registerError
       }
       currentStatus = statusAfterRegister
+      onRegister?()
     }
 
     func unregister() throws {

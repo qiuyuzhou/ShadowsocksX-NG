@@ -73,6 +73,18 @@ final class ProxyRuntimePlanTests: XCTestCase {
       [.writeContract, .signalReload(pid: 42)])
   }
 
+  func testACLChangeUpdatesContractAndSignalsWrapperForFullRestart() throws {
+    let next = document.replacingACL(
+      .direct(at: URL(fileURLWithPath: "/tmp/ssxng-tests/sslocal-active.acl")))
+
+    XCTAssertEqual(
+      ProxyRuntimePlan.actions(
+        intent: .run(next), agentStatus: .registered,
+        wrapper: .running(pid: 42), contractOnDisk: try contractData()),
+      [.writeContract, .signalReload(pid: 42)],
+      "ACL 路径/摘要变化进入 wrapper 重启判定")
+  }
+
   func testRegisteredButWrapperDeadRelaunchesAgent() throws {
     XCTAssertEqual(
       try actions(

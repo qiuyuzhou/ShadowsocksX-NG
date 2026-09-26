@@ -63,6 +63,56 @@ final class RuntimeFileStoreTests: XCTestCase {
     XCTAssertTrue(residue.isEmpty, "临时文件不应残留，实际 \(residue)")
   }
 
+  func testACLAndContractAreWrittenWithProtectedPermissions() throws {
+    let document = SslocalRuntimeDocument(
+      servers: [],
+      listen: SslocalListenSettings(),
+      acl: .direct(at: store.aclFileURL))
+
+    try store.write(document)
+
+    XCTAssertEqual(try permissions(of: runtime.directory), 0o700)
+    XCTAssertEqual(try permissions(of: runtime.contract), 0o600)
+    XCTAssertEqual(try permissions(of: store.aclFileURL), 0o600)
+    XCTAssertEqual(try store.loadDocument(), document)
+  }
+
+  func testACLSidecarMismatchRejectsTheRuntimeDocument() throws {
+    let document = SslocalRuntimeDocument(
+      servers: [],
+      listen: SslocalListenSettings(),
+      acl: .direct(at: store.aclFileURL))
+    try store.write(document)
+    try Data("[proxy_all]\n".utf8).write(to: store.aclFileURL)
+
+    XCTAssertNil(store.loadDocument(), "wrapper 与 GUI 都拒绝摘要不符的 ACL sidecar")
+  }
+
+  func testContractWriteFailureRestoresPreviousACLSidecar() throws {
+    let contractURL = runtime.contract
+    let failingStore = RuntimeFileStore(fileURL: contractURL) { data, url in
+      guard url != contractURL else { throw NSError(domain: "test", code: 1) }
+      try AtomicFileWriter.write(data, to: url)
+    }
+    let previousACL = ProxyACLDocument(
+      path: failingStore.aclFileURL.standardizedFileURL.path,
+      summary: "previous",
+      content: "[bypass_all]\n# previous\n")
+    try Data(previousACL.content.utf8).write(to: failingStore.aclFileURL)
+    let document = SslocalRuntimeDocument(
+      servers: [],
+      listen: SslocalListenSettings(),
+      acl: ProxyACLDocument(
+        path: failingStore.aclFileURL.standardizedFileURL.path,
+        summary: "next",
+        content: "[bypass_all]\n# next\n"))
+
+    XCTAssertThrowsError(try failingStore.write(document))
+    XCTAssertTrue(
+      try Data(contentsOf: failingStore.aclFileURL) == Data(previousACL.content.utf8),
+      "运行时契约写失败后恢复此前的 ACL sidecar")
+  }
+
   // MARK: 读取侧判定
 
   func testLoadDocumentRoundTripsWrittenDocument() throws {
@@ -95,8 +145,11 @@ final class RuntimeFileStoreTests: XCTestCase {
   // MARK: 显式停止清理
 
   func testDeleteRuntimeFilesRemovesContractPidAndStaleTemporaries() throws {
-    try store.write(ProxyRuntimeFixture.makeDocument())
+    try store.write(
+      SslocalRuntimeDocument(
+        servers: [], listen: SslocalListenSettings(), acl: .direct(at: store.aclFileURL)))
     try Data("1086".utf8).write(to: runtime.pidFile)
+    try Data("status".utf8).write(to: store.runtimeStatusFileURL)
     let staleTemporary = runtime.directory.appendingPathComponent(".sslocal-active.json.tmp-stale")
     try Data("partial".utf8).write(to: staleTemporary)
 
@@ -104,6 +157,8 @@ final class RuntimeFileStoreTests: XCTestCase {
 
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.pidFile.path))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: store.aclFileURL.path))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: store.runtimeStatusFileURL.path))
     XCTAssertFalse(FileManager.default.fileExists(atPath: staleTemporary.path))
   }
 

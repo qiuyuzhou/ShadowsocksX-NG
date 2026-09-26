@@ -98,11 +98,14 @@ targets:
       # wrapper 与 GUI 共享的跨进程契约：路径常量、运行时文档（含读取侧校验）
       # 与日志事件基线（spec #21 D5）；监听建立判定复用端点探测（issue #38）。
       - path: Domain/RuntimePaths.swift
+      - path: Domain/AtomicFileWriter.swift
+      - path: Domain/ProxyACL.swift
       - path: Domain/PACUserRules.swift
       - path: Domain/SslocalRuntimeDocument.swift
       - path: Domain/PACServer.swift
       - path: Domain/RuntimeLog.swift
       - path: Domain/EndpointHealthProbe.swift
+      - path: Domain/RuntimeSocketOwnershipProbe.swift
     settings:
       base:
         PRODUCT_NAME: ShadowsocksX-NG2Agent

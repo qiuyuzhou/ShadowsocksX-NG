@@ -62,6 +62,8 @@ extension RuntimeLogEvent {
       return "contract invalid, removed"
     case .reloadForwarded:
       return "reload forwarded to sslocal"
+    case .reloadDeferred:
+      return "reload deferred until listeners are ready"
     case .reloadRestarted:
       return "reload: listen change, restarting sslocal"
     // 本机监听端点事实只保留端口：主机地址态的对外公布地址不进报告（D7）。

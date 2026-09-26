@@ -54,6 +54,7 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     settings.proxyExceptions = "localhost, 127.0.0.1"
     settings.gfwListURL = "https://lists.example.test/gfw.txt?token=secret"
     settings.pacUserRules = "@@||example.com^"
+    settings.preferredMode = .direct
 
     try store.save(settings)
 

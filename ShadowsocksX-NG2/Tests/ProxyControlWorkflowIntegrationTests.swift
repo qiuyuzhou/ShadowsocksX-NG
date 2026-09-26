@@ -131,7 +131,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertNil(snapshot.runtime.failure)
     XCTAssertTrue(snapshot.agentIntentEnabled)
     XCTAssertEqual(snapshot.proxyMode, .pac)
-    XCTAssertEqual(snapshot.availableModes, [.pac, .global])
+    XCTAssertEqual(snapshot.availableModes, [.pac, .global, .direct])
     XCTAssertEqual(snapshot.activeTarget?.pathSummary, "香港 01", "活动目标摘要来自真实目录树")
     XCTAssertEqual(snapshot.skippedInvalidServerCount, 0)
     XCTAssertTrue(
@@ -285,7 +285,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertEqual(snapshot.runtime, ProxyRuntimeFacts(status: .off, isOn: false))
     XCTAssertFalse(snapshot.agentIntentEnabled)
     XCTAssertNil(snapshot.runtime.failure)
-    XCTAssertEqual(snapshot.availableModes, [.pac, .global], "停用后可用操作不消失")
+    XCTAssertEqual(snapshot.availableModes, [.pac, .global, .direct], "停用后可用操作不消失")
   }
 
   /// 关闭 agent 且系统代理恢复失败：agent 停止，恢复失败以系统代理 typed fact

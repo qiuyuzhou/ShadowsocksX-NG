@@ -104,6 +104,28 @@ final class RuntimeDocumentTests: XCTestCase {
     XCTAssertTrue(decoded.pac.javaScript.contains("DIRECT"))
   }
 
+  func testACLPathAndMetadataRoundTripAsUpstreamAndWrapperFields() throws {
+    let acl = ProxyACLDocument.direct(
+      at: URL(fileURLWithPath: "/tmp/ssxng-tests/sslocal-active.acl"))
+    let document = SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings(), acl: acl)
+    let dictionary = try encodedDictionary(document)
+    let aclMetadata = try XCTUnwrap(
+      dictionary["x_shadowsocksx_ng_acl"] as? [String: Any])
+
+    XCTAssertEqual(dictionary["acl"] as? String, acl.path, "上游配置引用 ACL sidecar")
+    XCTAssertEqual(aclMetadata["path"] as? String, acl.path)
+    XCTAssertEqual(aclMetadata["sha256"] as? String, acl.sha256)
+    XCTAssertEqual(aclMetadata["content"] as? String, acl.content)
+    XCTAssertEqual(aclMetadata["summary"] as? String, "direct")
+    XCTAssertEqual(
+      SslocalRuntimeDocument.decodeValidated(try document.jsonData()), document)
+
+    let changedPath = document.replacingACL(
+      .direct(at: URL(fileURLWithPath: "/tmp/ssxng-tests/other.acl")))
+    XCTAssertNotEqual(document.listenFingerprint, changedPath.listenFingerprint)
+  }
+
   func testLoopbackScopeDerivesPACAndBothSslocalInbounds() {
     let listen = SslocalListenSettings(
       scope: .loopback,
