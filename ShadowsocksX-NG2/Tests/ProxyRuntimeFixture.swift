@@ -75,18 +75,47 @@ enum ProxyRuntimeFixture {
     return Int(CFSwapInt16BigToHost(bound.sin_port))
   }
 
+  /// 夹具默认监听端口：测试进程内一次性分配的空闲端口对。不能固定 11086/
+  /// 11087（与 app 默认监听相同）：宿主 app 在跑时其 sslocal 占住这两个端口，
+  /// wrapper 健康探测会误判「监听已建立」。进程内共享同一对端口而非逐调用
+  /// 分配，保证两次默认构造之间除显式参数外无差异——「仅服务器变化」类
+  /// 变更协议语义依赖这一点。
+  private static let defaultListenPorts: (socks: Int, http: Int) = {
+    func freePort() -> Int {
+      guard let port = try? unusedLoopbackPort() else {
+        preconditionFailure("夹具端口分配失败：socket 不可用（fd 耗尽？）")
+      }
+      return port
+    }
+    let socks = freePort()
+    var http = freePort()
+    while http == socks {
+      http = freePort()
+    }
+    return (socks, http)
+  }()
+
   static func makeDocument(
     serverAddress: String = "203.0.113.7",
     password: String = "resolved-password",
     pluginOpts: String? = nil,
     localAddress: String = "127.0.0.1",
-    localPort: Int = 11086,
+    localPort: Int? = nil,
     inboundProtocol: String = "socks"
   ) -> SslocalRuntimeDocument {
     precondition(inboundProtocol == "socks")
     let scope: ListenScope =
       localAddress == "127.0.0.1"
       ? .loopback : .host(advertisedAddress: localAddress)
+    let socksPort: Int
+    let httpPort: Int
+    if let localPort {
+      socksPort = localPort
+      httpPort = SslocalListenSettings.defaultHTTPPort
+    } else {
+      socksPort = defaultListenPorts.socks
+      httpPort = defaultListenPorts.http
+    }
     return SslocalRuntimeDocument(
       servers: [
         SslocalServerDocument(
@@ -102,8 +131,8 @@ enum ProxyRuntimeFixture {
       ],
       listen: SslocalListenSettings(
         scope: scope,
-        socksPort: localPort,
-        httpPort: 11087))
+        socksPort: socksPort,
+        httpPort: httpPort))
   }
 
   /// LaunchAgent 注册态可编程替身，记录全部调用。
