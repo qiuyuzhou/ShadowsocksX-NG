@@ -11,7 +11,7 @@
 	<string>com.qiuyuzhou.ShadowsocksX-NG2.agent</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>Contents/MacOS/ShadowsocksX-NG2Agent</string>
+		<string>MacOS/ShadowsocksX-NG2Agent</string>
 	</array>
 	<key>ThrottleInterval</key>
 	<integer>2</integer>

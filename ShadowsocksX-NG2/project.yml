@@ -24,8 +24,8 @@ targets:
       # 领域核心：配置目录树、凭据引用与持久化（spec #21 D3/D5）
       - path: Domain
       # LaunchAgent 注册清单：SMAppService.agent(plistName:) 从 bundle 内
-      # Contents/Library/LaunchAgents/ 读取；ProgramArguments 用 bundle 相对路径
-      # （spec #21 D2，issue #27）。
+      # Contents/Library/LaunchAgents/ 读取；ProgramArguments 用 Contents/
+      # 相对路径（launchd 按注册 app 的 Contents/ 解析，spec #21 D2，issue #27）。
       - path: LaunchAgent/com.qiuyuzhou.ShadowsocksX-NG2.agent.plist
         buildPhase:
           copyFiles:
@@ -97,7 +97,7 @@ targets:
         - ShadowsocksX-NG2Tests
     dependencies:
       # 代理运行时 wrapper（BundleProgram，spec #21 D2）：以独立可执行文件装入
-      # Contents/MacOS，由 LaunchAgent plist 以 bundle 相对路径引用。
+      # Contents/MacOS，由 LaunchAgent plist 以 Contents/ 相对路径引用。
       - target: ShadowsocksX-NG2Agent
         copy:
           destination: wrapper

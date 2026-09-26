@@ -10,7 +10,8 @@ protocol LaunchAgentControlling {
 }
 
 /// 生产实现：plist 必须位于 app bundle `Contents/Library/LaunchAgents/`，
-/// ProgramArguments 为 bundle 相对路径（launchd 按注册 app 的 bundle 解析）。
+/// ProgramArguments 为 Contents/ 相对路径（launchd 按注册 app 的 Contents/
+/// 解析）。
 struct SMAppLaunchAgentService: LaunchAgentControlling {
   static let plistName = "com.qiuyuzhou.ShadowsocksX-NG2.agent.plist"
 
