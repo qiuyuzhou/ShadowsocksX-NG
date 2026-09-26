@@ -224,8 +224,15 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
     proxyExceptions =
       try container.decodeIfPresent(String.self, forKey: .proxyExceptions)
       ?? ProxySettings.defaultProxyExceptions
-    preferredMode =
-      try container.decodeIfPresent(ProxyModeKind.self, forKey: .preferredMode) ?? .rule
+    // 旧 NG2 偏好里的 "pac" 等已删除值容错回落到规则模式（issue #67：
+    // 未发布的 PAC 偏好不做迁移，但解码失败会把全部保留字段连坐丢掉）。
+    if let rawMode = try container.decodeIfPresent(String.self, forKey: .preferredMode),
+      let mode = ProxyModeKind(rawValue: rawMode)
+    {
+      preferredMode = mode
+    } else {
+      preferredMode = .rule
+    }
     // 规则模式子选项（issue #63）：出厂「未匹配时代理」。
     ruleDefaultAction =
       try container.decodeIfPresent(RuleDefaultAction.self, forKey: .ruleDefaultAction)

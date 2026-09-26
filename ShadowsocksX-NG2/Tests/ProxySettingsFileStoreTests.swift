@@ -82,6 +82,20 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     XCTAssertFalse(raw.contains("enabledModes"))
   }
 
+  func testLegacyPACPreferredModeFallsBackToRuleWithoutLosingOtherFields() throws {
+    try writeRaw(
+      """
+      {"preferredMode":"pac","socksPort":2086,"httpPort":2087,"timeoutSeconds":120,
+       "pacUserRules":"@@example.com","gfwListURLConfigured":true,"pacPort":2089}
+      """)
+
+    let loaded = try store.load()
+    XCTAssertEqual(loaded.preferredMode, .rule)
+    XCTAssertEqual(loaded.listen.socksPort, 2086)
+    XCTAssertEqual(loaded.listen.httpPort, 2087)
+    XCTAssertEqual(loaded.timeoutSeconds, 120)
+  }
+
   func testInvalidSaveDoesNotTouchExistingSettings() throws {
     try store.save(ProxySettings())
     var invalid = ProxySettings()
