@@ -62,10 +62,26 @@ struct ProxyACLDocument: Codable, Equatable, Sendable {
   /// default, while the explicit fixed-local entries remain a safety policy
   /// shared by SOCKS and HTTP and reusable by later routing modes.
   static func direct(at fileURL: URL) -> ProxyACLDocument {
-    let lines = ["[bypass_all]", "[bypass_list]"] + FixedLocalProxyRanges.aclBypassRules
+    makeDocument(
+      at: fileURL, header: "[bypass_all]", summary: "direct")
+  }
+
+  /// 全局模式（issue #62）：公网目标默认走 Shadowsocks 代理，本地网络目标固定
+  /// 直连。ACL 只含固定本地安全绕过，不混入中国列表、GFWList 或自定义规则；
+  /// SOCKS、HTTP 入站与局域网共享客户端共用此策略。IPv6 系统例外不构成已验证
+  /// 的绕过保证，本 ACL 才是路由兜底。
+  static func global(at fileURL: URL) -> ProxyACLDocument {
+    makeDocument(
+      at: fileURL, header: "[proxy_all]", summary: "global")
+  }
+
+  private static func makeDocument(
+    at fileURL: URL, header: String, summary: String
+  ) -> ProxyACLDocument {
+    let lines = [header, "[bypass_list]"] + FixedLocalProxyRanges.aclBypassRules
     return ProxyACLDocument(
       path: fileURL.standardizedFileURL.path,
-      summary: "direct",
+      summary: summary,
       content: lines.joined(separator: "\n") + "\n")
   }
 

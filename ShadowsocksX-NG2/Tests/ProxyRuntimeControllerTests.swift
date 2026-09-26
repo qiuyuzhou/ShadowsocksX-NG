@@ -170,7 +170,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       [
         SystemProxyConfiguration(
           target: .socks(host: "127.0.0.1", port: 11086),
-          exceptions: ProxySettings().proxyExceptionList)
+          exceptions: FixedLocalProxyRanges.systemProxyExceptions(
+            including: ProxySettings().proxyExceptionList))
       ])
 
     await controller.setProxyMode(.pac)
@@ -856,5 +857,123 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(controller.systemProxyState, .applied)
     XCTAssertEqual(systemProxy.applied.count, appliedCount, "旧系统代理保持应用")
     XCTAssertEqual(systemProxy.restoreCount, 0)
+  }
+}
+
+/// 全局模式以 ACL 实现（issue #62）：proxy_all + 固定本地绕过；无活动服务器
+/// 时 agent 仍监听、系统代理保持待应用；ACL 变化完整重启并失败回滚。
+extension ProxyRuntimeControllerTests {
+  func testGlobalModeDeploysProxyAllACLAndProjectsSOCKSProxyWithFixedExceptions() async throws {
+    let seeded = try makeSeededCatalog()
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsStore: settingsStore,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, systemProxyEnabled: true))
+    try await controller.activate(seeded.server)
+    XCTAssertEqual(controller.systemProxyState, .applied)
+    let unregisterCount = agent.unregisterCount
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+
+    await controller.setProxyMode(.global)
+
+    XCTAssertEqual(controller.proxyMode, .global)
+    XCTAssertEqual(controller.settings.preferredMode, .global)
+    XCTAssertEqual(settingsStore.saved?.preferredMode, .global)
+    XCTAssertEqual(controller.state, .running)
+    XCTAssertEqual(
+      agent.unregisterCount, unregisterCount + 1, "ACL 变化触发完整 agent 重启")
+    let document = try XCTUnwrap(runtimeStore.loadDocument())
+    XCTAssertEqual(document.aclRuntime?.summary, "global")
+    XCTAssertEqual(
+      document.aclRuntime?.content.hasPrefix("[proxy_all]\n[bypass_list]\n"), true)
+    XCTAssertEqual(
+      try Data(contentsOf: runtimeStore.aclFileURL),
+      Data(try XCTUnwrap(document.aclRuntime).content.utf8))
+    XCTAssertEqual(
+      systemProxy.applied.last?.target,
+      .socks(host: "127.0.0.1", port: ActivationFixture.listen.socksPort))
+    XCTAssertTrue(
+      Set(FixedLocalProxyRanges.systemProxyExceptions).isSubset(
+        of: Set(systemProxy.applied.last?.exceptions ?? [])),
+      "系统例外包含固定本地范围")
+    XCTAssertEqual(controller.systemProxyState, .applied)
+  }
+
+  func testGlobalModeWithoutServerKeepsListeningAndPendingUntilTargetRecovers() async throws {
+    // 目录先播种、控制器再创建：bootstrap 快照读取器持有已提交目录，但尚无
+    // 活动目标——正是「全局模式 + 无可用出口」的起点。
+    let seeded = try makeSeededCatalog()
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsStore: settingsStore,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, systemProxyEnabled: true))
+    await controller.resyncOnLaunch()
+    XCTAssertEqual(controller.state, .running, "无活动目标时 agent 仍监听")
+    XCTAssertNil(controller.activeTargetID)
+    let unregisterCount = agent.unregisterCount
+
+    await controller.setProxyMode(.global)
+
+    XCTAssertEqual(controller.proxyMode, .global)
+    XCTAssertEqual(controller.state, .running, "全局模式空服务器列表仍提供本地监听")
+    XCTAssertEqual(
+      agent.unregisterCount, unregisterCount + 1, "ACL 变化触发完整 agent 重启")
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    let document = try XCTUnwrap(runtimeStore.loadDocument())
+    XCTAssertTrue(document.servers.isEmpty, "无活动目标时服务器列表为空")
+    XCTAssertEqual(document.aclRuntime?.summary, "global")
+    XCTAssertEqual(
+      controller.systemProxyState, .pending,
+      "无可用代理出口时系统代理意图保持待应用")
+    XCTAssertTrue(systemProxy.applied.isEmpty, "不得把系统代理指向无出口入口")
+
+    // 服务器有效且端点健康后自动应用已开启的系统代理意图。
+    try await controller.activate(seeded.server)
+
+    XCTAssertEqual(controller.state, .running)
+    XCTAssertEqual(
+      controller.systemProxyState, .applied,
+      "服务器有效且健康后自动收敛待应用意图")
+    XCTAssertEqual(
+      systemProxy.applied.last?.target,
+      .socks(host: "127.0.0.1", port: ActivationFixture.listen.socksPort))
+  }
+
+  func testFailedGlobalInstanceRestoresOldModeRuntimeAndSystemProxy() async throws {
+    let seeded = try makeSeededCatalog()
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsStore: settingsStore,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, systemProxyEnabled: true),
+      launchHealthTimeoutSeconds: 0.05)
+    try await controller.activate(seeded.server)
+    XCTAssertEqual(controller.systemProxyState, .applied)
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    let previousDocument = try XCTUnwrap(runtimeStore.loadDocument())
+    let previousApplicationCount = systemProxy.applied.count
+
+    agent.onRegister = { [runtimeStore, previousDocument] in
+      guard let requested = runtimeStore.loadDocument() else { return }
+      let accepted = requested.aclRuntime == nil ? requested : previousDocument
+      try? runtimeStore.writeRuntimeReceipt(for: accepted, processID: 42)
+    }
+
+    await controller.setProxyMode(.global)
+
+    XCTAssertEqual(controller.proxyMode, .pac, "新实例未验证时恢复旧模式")
+    XCTAssertEqual(controller.settings.preferredMode, .pac)
+    XCTAssertEqual(settingsStore.saved?.preferredMode, .pac)
+    XCTAssertEqual(try runtimeStore.loadDocument(), previousDocument)
+    XCTAssertNil(runtimeStore.loadDocument()?.aclRuntime)
+    XCTAssertEqual(controller.state, .running, "旧运行时恢复后重新呈现健康")
+    XCTAssertEqual(controller.systemProxyState, .applied)
+    XCTAssertEqual(systemProxy.applied.count, previousApplicationCount)
+    XCTAssertEqual(systemProxy.restoreCount, 0, "切换失败期间保持原系统代理应用")
   }
 }

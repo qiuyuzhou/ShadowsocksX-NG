@@ -81,13 +81,7 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
         throw ProxyModeError.invalidLocalPACURL
       }
       return SystemProxyConfiguration(target: .pac(url), exceptions: exceptions)
-    case .global:
-      guard (1...65535).contains(document.socksPort) else {
-        throw ProxyModeError.invalidSOCKSPort(document.socksPort)
-      }
-      return SystemProxyConfiguration(
-        target: .socks(host: "127.0.0.1", port: document.socksPort), exceptions: exceptions)
-    case .direct:
+    case .global, .direct:
       guard (1...65535).contains(document.socksPort) else {
         throw ProxyModeError.invalidSOCKSPort(document.socksPort)
       }

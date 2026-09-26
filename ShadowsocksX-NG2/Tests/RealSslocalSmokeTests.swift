@@ -464,6 +464,90 @@ extension RealSslocalSmokeTests {
     return try readExactly(socketFD, count: payload.count)
   }
 
+  /// 对公网目标发起 SOCKS5 CONNECT，返回应答码；代理出口不可用时应答非 0
+  /// 也算完成路由观测（不直连真实目标）。
+  private func performSocksConnectReply(
+    socksPort: Int, targetHost: String, targetPort: Int
+  ) -> UInt8? {
+    var request: [UInt8] = [0x05, 0x01, 0x00, 0x03, UInt8(targetHost.utf8.count)]
+    request.append(contentsOf: targetHost.utf8)
+    let portBytes = UInt16(targetPort).bigEndian
+    withUnsafeBytes(of: portBytes) { request.append(contentsOf: $0) }
+    return performSocksConnectReply(socksPort: socksPort, request: request)
+  }
+
+  private func performSocksConnectReply(socksPort: Int, request: [UInt8]) -> UInt8? {
+    guard let socketFD = try? connectLoopback(port: socksPort) else { return nil }
+    defer { Darwin.close(socketFD) }
+    do {
+      let greeting: [UInt8] = [0x05, 0x01, 0x00]
+      _ = try greeting.withUnsafeBytes { try writeAll(socketFD, $0) }
+      _ = try readExactly(socketFD, count: 2)
+      _ = try request.withUnsafeBytes { try writeAll(socketFD, $0) }
+      let reply = try readExactly(socketFD, count: 4)
+      return reply[1]
+    } catch {
+      return nil
+    }
+  }
+
+  /// 按给定 CONNECT 请求完成 SOCKS 会话并回显载荷；`successMessage` 用于
+  /// 断言失败时点名场景。
+  private func performSocksEcho(
+    socksPort: Int, request: [UInt8], payload: [UInt8], successMessage: String
+  ) throws -> [UInt8] {
+    let socketFD = try connectLoopback(port: socksPort)
+    defer { Darwin.close(socketFD) }
+    let greeting: [UInt8] = [0x05, 0x01, 0x00]
+    _ = try greeting.withUnsafeBytes { try writeAll(socketFD, $0) }
+    XCTAssertEqual(try readExactly(socketFD, count: 2), [0x05, 0x00])
+    _ = try request.withUnsafeBytes { try writeAll(socketFD, $0) }
+    let reply = try readExactly(socketFD, count: 10)
+    XCTAssertEqual(reply[1], 0, successMessage)
+    _ = try payload.withUnsafeBytes { try writeAll(socketFD, $0) }
+    return try readExactly(socketFD, count: payload.count)
+  }
+
+  private func socksDomainConnectRequest(host: String, port: Int) -> [UInt8] {
+    var request: [UInt8] = [0x05, 0x01, 0x00, 0x03, UInt8(host.utf8.count)]
+    request.append(contentsOf: host.utf8)
+    let portBytes = UInt16(port).bigEndian
+    withUnsafeBytes(of: portBytes) { request.append(contentsOf: $0) }
+    return request
+  }
+
+  /// SOCKS5 CONNECT 到 IPv6 回环（ATYP=0x04）。
+  private func socksIPv6ConnectRequest(port: Int) -> [UInt8] {
+    var request: [UInt8] = [0x05, 0x01, 0x00, 0x04]
+    request.append(contentsOf: Array(repeating: 0, count: 15))
+    request.append(1)  // ::1
+    let portBytes = UInt16(port).bigEndian
+    withUnsafeBytes(of: portBytes) { request.append(contentsOf: $0) }
+    return request
+  }
+
+  /// 对公网目标发起 HTTP CONNECT（应答头读到即返回，不要求成功）。
+  private func performHTTPConnect(
+    httpPort: Int, targetHost: String, targetPort: Int
+  ) {
+    guard let socketFD = try? connectLoopback(port: httpPort) else { return }
+    defer { Darwin.close(socketFD) }
+    do {
+      let request =
+        "CONNECT \(targetHost):\(targetPort) HTTP/1.1\r\n"
+        + "Host: \(targetHost):\(targetPort)\r\n\r\n"
+      let requestBytes = Array(request.utf8)
+      _ = try requestBytes.withUnsafeBytes { try writeAll(socketFD, $0) }
+      var response: [UInt8] = []
+      while response.count < 4 || Array(response.suffix(4)) != [13, 10, 13, 10] {
+        response.append(contentsOf: try readExactly(socketFD, count: 1))
+        guard response.count < 4096 else { return }
+      }
+    } catch {
+      return
+    }
+  }
+
   func testDirectACLRoutesSOCKSAndHTTPLocallyWithoutServers() throws {
     let echoServer = try LoopbackEchoServer()
     var ports = Set<Int>()
@@ -532,5 +616,227 @@ extension RealSslocalSmokeTests {
     XCTAssertEqual(XCTWaiter.wait(for: [exited], timeout: 10), .completed)
     XCTAssertEqual(wrapper.terminationStatus, 0)
     XCTAssertNil(runtimeStore.readRuntimeReceipt(), "停止后应清除运行回执")
+  }
+
+  /// 全局模式 ACL 路由（issue #62）：proxy_all + 固定本地绕过。本地目标经
+  /// SOCKS/HTTP 直连（不触 SS 出口），公网目标默认走代理（SS 出口被连接）。
+  /// 两个入站共用同一 ACL；IPv6 系统例外的局限由 ACL 路由兜底（见 ADR）。
+  func testGlobalACLRoutesLocalDirectAndPublicThroughProxyOnSOCKSAndHTTP() throws {
+    let echoServer = try LoopbackEchoServer()
+    let fakeSSServer = try ConnectionCountingServer()
+    var ports = Set<Int>()
+    while ports.count < 3 {
+      let port = try grabEphemeralLoopbackPort()
+      if port != echoServer.port && port != fakeSSServer.port { ports.insert(port) }
+    }
+    let selectedPorts = Array(ports)
+    let listen = SslocalListenSettings(
+      socksPort: selectedPorts[0], httpPort: selectedPorts[1], pacPort: selectedPorts[2])
+    let document = SslocalRuntimeDocument(
+      servers: [
+        SslocalServerDocument(
+          id: "global-smoke-server",
+          remarks: "global-smoke",
+          server: "127.0.0.1",
+          serverPort: fakeSSServer.port,
+          password: "smoke-password",
+          method: "aes-256-gcm",
+          plugin: nil,
+          pluginOpts: nil)
+      ],
+      listen: listen,
+      acl: .global(at: workDir.appendingPathComponent("sslocal-active.acl")))
+    XCTAssertTrue(document.isWellFormed)
+    let wrapper = try launchWrapper(document)
+    defer {
+      if wrapper.isRunning { kill(wrapper.processIdentifier, SIGTERM) }
+    }
+
+    try awaitGlobalInboundsReady(listen: listen, document: document)
+
+    try assertLocalTargetsBypass(listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
+    try assertPublicTargetsProxy(listen: listen, fakeSS: fakeSSServer)
+    try assertHostnameAndIPv6Bypass(
+      listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
+
+    kill(wrapper.processIdentifier, SIGTERM)
+    let exited = XCTestExpectation(description: "global wrapper exits")
+    DispatchQueue.global().async {
+      wrapper.waitUntilExit()
+      exited.fulfill()
+    }
+    XCTAssertEqual(XCTWaiter.wait(for: [exited], timeout: 10), .completed)
+    XCTAssertEqual(wrapper.terminationStatus, 0)
+    XCTAssertNil(
+      RuntimeFileStore(fileURL: contractURL).readRuntimeReceipt(),
+      "停止后应清除运行回执")
+  }
+
+  private func awaitGlobalInboundsReady(
+    listen: SslocalListenSettings, document: SslocalRuntimeDocument
+  ) throws {
+    XCTAssertTrue(
+      try waitForCondition(timeout: 15) {
+        EndpointHealthProbe.probe(host: "127.0.0.1", port: listen.socksPort, timeout: 1)
+          == .reachable
+          && EndpointHealthProbe.probe(host: "127.0.0.1", port: listen.httpPort, timeout: 1)
+            == .reachable
+      }, "全局模式应绑定 SOCKS 和 HTTP 入站")
+    let runtimeStore = RuntimeFileStore(fileURL: contractURL)
+    XCTAssertTrue(
+      try waitForCondition(timeout: 30) {
+        guard let receipt = runtimeStore.readRuntimeReceipt() else { return false }
+        return receipt.contractSHA256 == document.deploymentSHA256
+          && kill(receipt.processID, 0) == 0
+      }, "应发布仍存活的 sslocal 子进程回执")
+  }
+
+  private func assertLocalTargetsBypass(
+    listen: SslocalListenSettings, echoPort: Int, fakeSS: ConnectionCountingServer
+  ) throws {
+    let socksPayload = Array("socks local\n".utf8)
+    XCTAssertEqual(
+      try performDirectSocksEcho(
+        socksPort: listen.socksPort, targetPort: echoPort, payload: socksPayload),
+      socksPayload,
+      "全局 ACL 的本地绕过应让 SOCKS 直连回环目标")
+    let httpPayload = Array("http local\n".utf8)
+    XCTAssertEqual(
+      try performDirectHTTPEcho(
+        httpPort: listen.httpPort, targetPort: echoPort, payload: httpPayload),
+      httpPayload,
+      "HTTP 入站应应用同一 ACL 并直连回环目标")
+    XCTAssertEqual(fakeSS.connectionCount, 0, "本地绕过不得触达 Shadowsocks 出口")
+  }
+
+  private func assertPublicTargetsProxy(
+    listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
+  ) throws {
+    let publicSocksReply = performSocksConnectReply(
+      socksPort: listen.socksPort, targetHost: "8.8.8.8", targetPort: 53)
+    XCTAssertNotNil(publicSocksReply, "公网目标应走代理路径")
+    XCTAssertTrue(
+      try waitForCondition(timeout: 5) { fakeSS.connectionCount >= 1 },
+      "公网目标应连接 Shadowsocks 出口，而不是直连")
+    let afterSocks = fakeSS.connectionCount
+
+    performHTTPConnect(httpPort: listen.httpPort, targetHost: "1.1.1.1", targetPort: 443)
+    XCTAssertTrue(
+      try waitForCondition(timeout: 5) { fakeSS.connectionCount > afterSocks },
+      "HTTP 入站的公网目标应同样连接 Shadowsocks 出口")
+    XCTAssertTrue(
+      fakeSS.connectionCount >= 2,
+      "SOCKS 与 HTTP 对公网目标遵循同一 ACL 路由")
+  }
+
+  /// 主机名固定绕过与 IPv6 回环（AC2/AC5）。仅 localhost 保证解析到回环 echo；
+  /// 其余主机名与 IPv6 只断言未触达 SS 出口——绕过路由已选定，直连解析失败
+  /// 不改变路由事实，也不依赖不可靠的 IPv6 系统例外。
+  private func assertHostnameAndIPv6Bypass(
+    listen: SslocalListenSettings, echoPort: Int, fakeSS: ConnectionCountingServer
+  ) throws {
+    let afterPublic = fakeSS.connectionCount
+    XCTAssertEqual(
+      try performSocksEcho(
+        socksPort: listen.socksPort,
+        request: socksDomainConnectRequest(host: "localhost", port: echoPort),
+        payload: Array("localhost\n".utf8),
+        successMessage: "localhost 应绕过并直连"),
+      Array("localhost\n".utf8))
+    _ = performSocksConnectReply(
+      socksPort: listen.socksPort,
+      request: socksDomainConnectRequest(host: "printer.local", port: echoPort))
+    _ = performSocksConnectReply(
+      socksPort: listen.socksPort,
+      request: socksDomainConnectRequest(host: "nas", port: echoPort))
+    XCTAssertEqual(
+      fakeSS.connectionCount, afterPublic,
+      "localhost/*.local/无点主机名的固定绕过不得触达 Shadowsocks 出口")
+
+    let afterHostnames = fakeSS.connectionCount
+    _ = performSocksConnectReply(
+      socksPort: listen.socksPort,
+      request: socksIPv6ConnectRequest(port: echoPort))
+    XCTAssertEqual(
+      fakeSS.connectionCount, afterHostnames,
+      "IPv6 本地目标不得触达 Shadowsocks 出口，由 ACL 路由兜底")
+  }
+}
+
+/// 只接受 TCP 连接并计数的假 SS 服务器：证明目标被路由进代理出口，而非
+/// 真实完成 Shadowsocks 握手（数据面属发布门槛人工验收）。
+private final class ConnectionCountingServer {
+  private let descriptor: Int32
+  let port: Int
+  private let counter = CounterBox()
+
+  var connectionCount: Int { counter.value }
+
+  init() throws {
+    let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { throw POSIXError(.ENOTSOCK) }
+
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_addr.s_addr = INADDR_LOOPBACK.bigEndian
+    address.sin_port = 0
+    let bindResult = withUnsafePointer(to: &address) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+        Darwin.bind(descriptor, sockaddrPointer, socklen_t(MemoryLayout<sockaddr_in>.size))
+      }
+    }
+    guard bindResult == 0, Darwin.listen(descriptor, 8) == 0 else {
+      Darwin.close(descriptor)
+      throw POSIXError(.EADDRINUSE)
+    }
+
+    var boundAddress = sockaddr_in()
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let nameResult = withUnsafeMutablePointer(to: &boundAddress) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+        getsockname(descriptor, sockaddrPointer, &length)
+      }
+    }
+    guard nameResult == 0 else {
+      Darwin.close(descriptor)
+      throw POSIXError(.EINVAL)
+    }
+
+    self.descriptor = descriptor
+    port = Int(CFSwapInt16BigToHost(boundAddress.sin_port))
+    let counter = self.counter
+    DispatchQueue.global().async { [descriptor] in
+      while true {
+        let connection = accept(descriptor, nil, nil)
+        guard connection >= 0 else { return }
+        counter.increment()
+        // 立刻断开：sslocal 的 SS 握手会失败，但 TCP 连接已被观察到。
+        shutdown(connection, SHUT_RDWR)
+        Darwin.close(connection)
+      }
+    }
+  }
+
+  deinit {
+    shutdown(descriptor, SHUT_RDWR)
+    Darwin.close(descriptor)
+  }
+
+  private final class CounterBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+      lock.lock()
+      defer { lock.unlock() }
+      return count
+    }
+
+    func increment() {
+      lock.lock()
+      count += 1
+      lock.unlock()
+    }
   }
 }

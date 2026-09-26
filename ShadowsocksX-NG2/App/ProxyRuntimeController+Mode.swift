@@ -1,9 +1,9 @@
 import Foundation
 
 extension ProxyRuntimeController {
-  /// The choice persists with the settings snapshot. Direct-mode transitions
-  /// also deploy and verify the ACL-backed runtime even when system proxy is off,
-  /// because manually connected SOCKS and HTTP clients use the same ACL.
+  /// The choice persists with the settings snapshot. ACL-backed modes (direct
+  /// and global) also deploy and verify the ACL runtime even when system proxy
+  /// is off, because manually connected SOCKS and HTTP clients use the same ACL.
   func setProxyMode(_ mode: ProxyMode) async {
     guard ProxyMode.availableModes.contains(mode) else { return }
     guard mode != proxyMode else { return }
@@ -53,8 +53,14 @@ extension ProxyRuntimeController {
     _ document: SslocalRuntimeDocument,
     for mode: ProxyMode
   ) -> SslocalRuntimeDocument {
-    guard mode == .direct else { return document.replacingACL(nil) }
-    return document.replacingACL(.direct(at: runtimeFileStore.aclFileURL))
+    switch mode {
+    case .direct:
+      return document.replacingACL(.direct(at: runtimeFileStore.aclFileURL))
+    case .global:
+      return document.replacingACL(.global(at: runtimeFileStore.aclFileURL))
+    case .pac:
+      return document.replacingACL(nil)
+    }
   }
 
   private func deployModeTransition(

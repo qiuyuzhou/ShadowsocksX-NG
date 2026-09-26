@@ -15,7 +15,10 @@ final class SystemProxyTests: XCTestCase {
         target: .pac(URL(string: "http://192.168.2.89:2089/v1/proxy.pac")!)))
     XCTAssertEqual(
       try ProxyMode.global.systemProxyConfiguration(for: document),
-      SystemProxyConfiguration(target: .socks(host: "127.0.0.1", port: 2086)))
+      SystemProxyConfiguration(
+        target: .socks(host: "127.0.0.1", port: 2086),
+        exceptions: FixedLocalProxyRanges.systemProxyExceptions),
+      "全局模式的系统例外使用固定本地范围，与 ACL 安全策略一致")
   }
 
   func testSystemConfigurationProjectionEnablesOnlyPACOrSOCKS() {
