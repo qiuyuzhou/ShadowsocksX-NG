@@ -218,4 +218,22 @@ final class DiagnosticReportTests: XCTestCase {
         servers: 1, groups: 1,
         serversWithPlugin: 0, manualServers: 1, subscriptionServers: 0))
   }
+
+  /// 自定义规则诊断摘要（issue #66 AC5）：只含数量与内容版本，无原始域名。
+  func testCustomRuleSummaryExportsCountAndVersionWithoutRawDomains() throws {
+    var snapshot = DiagnosticSnapshot()
+    snapshot.customRuleSummary = CustomRuleSummary(
+      count: 3, contentVersion: "abc123def456")
+
+    let report = DiagnosticReportBuilder.markdown(from: snapshot)
+
+    XCTAssertTrue(report.contains("自定义规则：3 条（版本 abc123def456）"))
+    assertNoSecrets(report)
+  }
+
+  /// 自定义规则摘要缺失时明确标注不可用。
+  func testMissingCustomRuleSummaryIsMarkedUnavailable() {
+    let report = DiagnosticReportBuilder.markdown(from: DiagnosticSnapshot())
+    XCTAssertTrue(report.contains("自定义规则：不可用"))
+  }
 }

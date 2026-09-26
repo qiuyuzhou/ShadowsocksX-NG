@@ -165,4 +165,5 @@ final class FakeRuntimeFacts: ProxyRuntimeDiagnosticFacts {
   var hasActiveTarget = false
   var listen = SslocalListenSettings()
   var contractSummary: String?
+  var customRuleSummary: CustomRuleSummary?
 }

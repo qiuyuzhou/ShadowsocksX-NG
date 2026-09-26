@@ -78,7 +78,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     firewallExecutableURLs: [URL] = [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
     firewallPollIntervalNanoseconds: UInt64 = 1_000_000,
     launchHealthTimeoutSeconds: TimeInterval = 15,
-    processIsAlive: @escaping @Sendable (Int32) -> Bool = { $0 == 42 }
+    processIsAlive: @escaping @Sendable (Int32) -> Bool = { $0 == 42 },
+    customRuleStore: CustomRuleStore? = nil
   ) -> ProxyRuntimeController {
     agent.setStatus(agentStatus)
     let runtimeFileStore = RuntimeFileStore(fileURL: runtime.contract)
@@ -98,6 +99,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       plugins: ActivationFixture.plugins,
       listenRestore: RestoredListenSettings(settings: listen, unreadableError: nil),
       settingsStore: settingsStore ?? InMemoryProxySettingsStore(),
+      customRuleStore: customRuleStore
+        ?? CustomRuleStore(fileURL: runtime.directory.appendingPathComponent("custom-rules.json")),
       settingsRestore: restored,
       agent: agent,
       probe: probe,

@@ -13,6 +13,8 @@ protocol ProxyRuntimeDiagnosticFacts: AnyObject {
   var listen: SslocalListenSettings { get }
   /// 运行时契约的脱敏摘要（数量与模式）；契约缺失或无效为 nil。
   var contractSummary: String? { get }
+  /// 自定义规则安全摘要（issue #66 AC5）：数量 + 内容版本，无原始域名。
+  var customRuleSummary: CustomRuleSummary? { get }
 }
 
 /// 报告事件白名单（issue #43，story 15/45，ADR-0006）：封闭的 RuntimeLogEvent
@@ -229,6 +231,7 @@ final class DiagnosticsWorkflow: ObservableObject {
     snapshot.hasActiveTarget = runtimeFacts.hasActiveTarget
     snapshot.listen = runtimeFacts.listen
     snapshot.runtimeDocumentSummary = runtimeFacts.contractSummary
+    snapshot.customRuleSummary = runtimeFacts.customRuleSummary
     snapshot.catalogFacts = catalogFacts()
     snapshot.fileFacts = fileFacts()
     snapshot.managedPlugins = managedPlugins()
@@ -339,4 +342,6 @@ extension ProxyRuntimeController: ProxyRuntimeDiagnosticFacts {
   var listen: SslocalListenSettings { listenSettings }
 
   var contractSummary: String? { runtimeDocumentSummary() }
+
+  var customRuleSummary: CustomRuleSummary? { readCustomRuleSummary() }
 }

@@ -68,6 +68,8 @@ final class ProxyRuntimeController: ObservableObject {
   let credentials: CredentialStoring
   let plugins: ManagedPluginProviding
   let settingsStore: ProxySettingsStoring
+  /// 自定义规则持久化（issue #66）：规则模式 ACL 合并的用户入口。
+  let customRuleStore: CustomRuleStore
   /// 监听设置不可读时的点名原因（D8「任何路径不静默改端口」）；非 nil 时
   /// 设置只是占位出厂默认，禁止部署（见 `deploy`）。
   var listenSettingsUnreadable: Bool
@@ -104,6 +106,7 @@ final class ProxyRuntimeController: ObservableObject {
     plugins: ManagedPluginProviding = BundleManagedPluginProvider(),
     listenRestore: RestoredListenSettings = ListenSettingsFileStore.restored(),
     settingsStore: ProxySettingsStoring = ProxySettingsFileStore(),
+    customRuleStore: CustomRuleStore = CustomRuleStore(),
     settingsRestore: RestoredProxySettings? = nil,
     agent: LaunchAgentControlling = SMAppLaunchAgentService(),
     probe: EndpointProbing = SystemEndpointProbe(),
@@ -123,6 +126,7 @@ final class ProxyRuntimeController: ObservableObject {
     self.credentials = credentials
     self.plugins = plugins
     self.settingsStore = settingsStore
+    self.customRuleStore = customRuleStore
     let restoredSettings =
       settingsRestore
       ?? RestoredProxySettings(

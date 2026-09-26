@@ -102,6 +102,8 @@ struct DiagnosticSnapshot: Sendable {
   var listen: SslocalListenSettings?
   /// `Redactor.documentSummary` 产出的契约脱敏摘要（数量与模式）。
   var runtimeDocumentSummary: String?
+  /// 自定义规则安全摘要（issue #66 AC5）：数量 + 内容版本，无原始域名。
+  var customRuleSummary: CustomRuleSummary?
   /// 目录聚合事实；nil = 目录事实源不可用（报告中明确标注，不静默丢失）。
   var catalogFacts: DiagnosticCatalogFacts?
   var fileFacts: [DiagnosticFileFacts] = []
@@ -203,6 +205,11 @@ enum DiagnosticReportBuilder {
       lines.append("- 运行时契约摘要：\(summary)")
     } else {
       lines.append("- 运行时契约摘要：不可用")
+    }
+    if let rules = snapshot.customRuleSummary {
+      lines.append("- 自定义规则：\(rules.count) 条（版本 \(rules.contentVersion)）")
+    } else {
+      lines.append("- 自定义规则：不可用")
     }
     lines.append("")
     lines.append("## 配置目录（数量）")
