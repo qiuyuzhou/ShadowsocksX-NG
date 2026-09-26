@@ -18,7 +18,7 @@ extension ProxyRuntimeControllerTests {
     probe: EndpointProbing = ProxyRuntimeFixture.FakeProbe.reachable(),
     settings: ProxySettings? = nil,
     proxyMode: ProxyMode? = nil,
-    launchHealthTimeoutSeconds: TimeInterval = 15
+    launchHealthTimeoutSeconds: TimeInterval = 0.05
   ) -> ProxyRuntimeController {
     makeController(
       probe: probe,

@@ -77,6 +77,8 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
       firewallChecker: ProxyRuntimeFixture.FakeFirewallChecker(),
       firewallExecutableURLs: [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
       firewallPollIntervalNanoseconds: 1_000_000,
+      // 生产默认 15 秒健康窗；FakeProbe 结果确定，短窗口走同一超时呈现路径。
+      launchHealthTimeoutSeconds: 0.05,
       sendSignal: { _, _ in 0 },
       processIsAlive: { $0 == 42 })
     let fileStore = CatalogFileStore(fileURL: catalogFileURL)

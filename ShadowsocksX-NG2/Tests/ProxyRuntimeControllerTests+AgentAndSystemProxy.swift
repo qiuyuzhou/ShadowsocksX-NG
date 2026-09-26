@@ -94,7 +94,7 @@ extension ProxyRuntimeControllerTests {
     let probe = ProxyRuntimeFixture.FakeProbe.refusing()
     let controller = makeController(probe: probe)
 
-    // 激活即按默认意图部署：端点持续不可达 → 启动失败（走满 15 秒健康窗）。
+    // 激活即按默认意图部署：端点持续不可达 → 启动失败（走满注入的短健康窗）。
     try await controller.activate(seeded.server)
     if case .launchFailed = controller.state {
     } else {
@@ -245,7 +245,7 @@ extension ProxyRuntimeControllerTests {
     let probe = ProxyRuntimeFixture.FakeProbe.refusing()
     let controller = makeController(probe: probe)
 
-    // 激活即按默认意图部署：端点不可达 → 启动失败（走满 15 秒健康窗）。
+    // 激活即按默认意图部署：端点不可达 → 启动失败（走满注入的短健康窗）。
     try await controller.activate(seeded.server)
     if case .launchFailed = controller.state {
     } else {

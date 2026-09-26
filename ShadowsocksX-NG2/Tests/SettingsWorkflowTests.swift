@@ -120,6 +120,7 @@ final class SettingsWorkflowTests: XCTestCase {
       systemProxy: systemProxy,
       firewallExecutableURLs: [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
       firewallPollIntervalNanoseconds: 1_000_000,
+      launchHealthTimeoutSeconds: 0.05,
       sendSignal: { _, _ in 0 },
       processIsAlive: { $0 == 42 })
     let workflow = SettingsWorkflow(committing: controller, occupancyProbe: probe)
