@@ -245,7 +245,9 @@ final class SettingsWorkflow: ObservableObject {
     adoptCommittedSettings()
     return record(.reloaded)
   }
+}
 
+extension SettingsWorkflow {
   // MARK: - 提交与占用探测（implementation，UI 不可见）
 
   private func makeSettings(from draft: SettingsDraft) -> ProxySettings {

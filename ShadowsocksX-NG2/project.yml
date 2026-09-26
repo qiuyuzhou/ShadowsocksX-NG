@@ -114,8 +114,10 @@ targets:
       - path: Domain/AtomicFileWriter.swift
       - path: Domain/ProxyACL.swift
       - path: Domain/ProxyRule.swift
+      - path: Domain/RuleSet.swift
       - path: Domain/PACUserRules.swift
       - path: Domain/SslocalRuntimeDocument.swift
+      - path: Domain/SslocalListenSettings.swift
       - path: Domain/PACServer.swift
       - path: Domain/RuntimeLog.swift
       - path: Domain/EndpointHealthProbe.swift

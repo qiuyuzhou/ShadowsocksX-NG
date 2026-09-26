@@ -25,10 +25,11 @@ final class GeolocationCNConverterTests: XCTestCase {
   ) throws -> RuleSnapshot {
     try converter.convert(
       document: document,
-      fetchedAt: fetchedAt,
-      upstreamReference: "test://upstream@v1",
-      license: "MIT",
-      attribution: "test attribution",
+      provenance: .init(
+        fetchedAt: fetchedAt,
+        upstreamReference: "test://upstream@v1",
+        license: "MIT",
+        attribution: "test attribution"),
       provider: provider)
   }
 
@@ -214,10 +215,8 @@ final class GeolocationCNConverterTests: XCTestCase {
     XCTAssertThrowsError(
       try tooSmall.convert(
         document: "example.com\n",
-        fetchedAt: fetchedAt,
-        upstreamReference: "v",
-        license: "MIT",
-        attribution: "a",
+        provenance: .init(
+          fetchedAt: fetchedAt, upstreamReference: "v", license: "MIT", attribution: "a"),
         provider: { _ in "" })
     ) { error in
       XCTAssertEqual(
@@ -229,10 +228,8 @@ final class GeolocationCNConverterTests: XCTestCase {
     XCTAssertThrowsError(
       try tooLarge.convert(
         document: "a.com\nb.com\nc.com\n",
-        fetchedAt: fetchedAt,
-        upstreamReference: "v",
-        license: "MIT",
-        attribution: "a",
+        provenance: .init(
+          fetchedAt: fetchedAt, upstreamReference: "v", license: "MIT", attribution: "a"),
         provider: { _ in "" })
     )
   }

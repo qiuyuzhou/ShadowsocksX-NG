@@ -19,34 +19,6 @@ import Foundation
 // 测试缝（生产走默认值）：`SSXNG_CONTRACT_PATH`、`SSXNG_SSLOCAL_PATH`、
 // `SSXNG_RUNTIME_DIR`（pid 文件与收敛日志的替代目录，测试隔离用）。
 
-private let environment = ProcessInfo.processInfo.environment
-
-private let contractURL: URL =
-  environment["SSXNG_CONTRACT_PATH"].map { URL(fileURLWithPath: $0) }
-  ?? RuntimePaths.runtimeFileURL()
-
-private let sslocalURL: URL =
-  environment["SSXNG_SSLOCAL_PATH"].map { URL(fileURLWithPath: $0) }
-  ?? Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/sslocal")
-
-private let runtimeDirectoryOverride: URL? = environment["SSXNG_RUNTIME_DIR"].map {
-  URL(fileURLWithPath: $0, isDirectory: true)
-}
-
-private let aclFileURL: URL =
-  runtimeDirectoryOverride?.appendingPathComponent("sslocal-active.acl")
-  ?? RuntimePaths.aclFileURL()
-
-private let pidFileURL: URL =
-  runtimeDirectoryOverride?.appendingPathComponent("agent.pid") ?? RuntimePaths.agentPIDFileURL()
-
-private let runtimeStatusFileURL: URL =
-  runtimeDirectoryOverride?.appendingPathComponent("agent-runtime-status.json")
-  ?? RuntimePaths.agentRuntimeStatusURL()
-
-// 顶层脚本是按源码顺序执行的：队列必须先于下方任何函数调用完成初始化。
-private let signalsQueue = DispatchQueue(label: "com.qiuyuzhou.ShadowsocksX-NG2.agent.signals")
-
 // wrapper 与 sslocal 的输出收敛到应用支持目录内的 0600 日志；launchd 统一日
 // 志不承载代理细节。
 redirectStandardStreams(
@@ -77,45 +49,16 @@ private func supervise() -> Int32 {
   }
 
   while true {
-    let document: SslocalRuntimeDocument
-    switch loadContract() {
-    case .missing:
-      RuntimeLog.emit(.contractMissing)
-      return 0
-    case .invalid:
-      try? FileManager.default.removeItem(at: contractURL)
-      RuntimeLog.emit(.contractInvalidRemoved)
-      return 0
-    case .loaded(let loaded):
-      document = loaded
-    }
+    guard let document = loadValidatedContract() else { return 0 }
 
     // Wrapper 上次崩溃时 sslocal 可能仍活着；旧回执不得替新子进程通过健康门。
     clearRuntimeReceipt()
 
-    guard let child = spawnSslocal(document) else {
-      RuntimeLog.emit(.sslocalSpawnFailed)
-      clearRuntimeReceipt()
-      return 0
-    }
-
-    let requiresOwnedListenerReceipt = document.aclRuntime != nil
-    guard child.isRunning,
-      requiresOwnedListenerReceipt
-        || writeRuntimeReceipt(for: document, processID: child.processIdentifier)
-    else {
-      stopUnsupervisedChild(child)
-      clearRuntimeReceipt()
-      return 0
-    }
+    guard let gated = spawnGatedChild(document) else { return 0 }
+    let child = gated.child
 
     let pacServer = PACServer(configuration: document.pac)
-    do {
-      try pacServer.start()
-      RuntimeLog.emit(.pacStarted(port: document.pac.port))
-    } catch {
-      RuntimeLog.emit(
-        .pacStartFailed(port: document.pac.port, detail: String(describing: error)))
+    guard startPACServer(pacServer, document: document) else {
       stopUnsupervisedChild(child)
       clearRuntimeReceipt()
       return 0
@@ -125,16 +68,11 @@ private func supervise() -> Int32 {
     let listenersEstablished = awaitListenEstablishment(
       document: document, child: child, flags: flags)
     guard child.isRunning else {
-      pacServer.stop()
-      RuntimeLog.emit(.pacStopped)
-      child.waitUntilExit()
-      RuntimeLog.emit(.sslocalExitedUnexpectedly(status: child.terminationStatus))
-      clearRuntimeReceipt()
-      return 1
+      return reportStartupChildExit(child, pacServer: pacServer)
     }
 
     let receiptPublished =
-      !requiresOwnedListenerReceipt
+      !gated.requiresOwnedListenerReceipt
       || (listenersEstablished
         && writeRuntimeReceipt(for: document, processID: child.processIdentifier))
     switch superviseChild(
@@ -149,6 +87,65 @@ private func supervise() -> Int32 {
       continue
     }
   }
+}
+
+/// 读取有效契约；缺失或无效分别记日志并清理（干净退出语义由调用方返回）。
+private func loadValidatedContract() -> SslocalRuntimeDocument? {
+  switch loadContract() {
+  case .missing:
+    RuntimeLog.emit(.contractMissing)
+    return nil
+  case .invalid:
+    try? FileManager.default.removeItem(at: contractURL)
+    RuntimeLog.emit(.contractInvalidRemoved)
+    return nil
+  case .loaded(let loaded):
+    return loaded
+  }
+}
+
+/// 拉起 sslocal 并通过回执门（无 ACL 时回执即发布）；失败即清理并返回 nil。
+private func spawnGatedChild(
+  _ document: SslocalRuntimeDocument
+) -> (child: Process, requiresOwnedListenerReceipt: Bool)? {
+  guard let child = spawnSslocal(document) else {
+    RuntimeLog.emit(.sslocalSpawnFailed)
+    clearRuntimeReceipt()
+    return nil
+  }
+  let requiresOwnedListenerReceipt = document.aclRuntime != nil
+  guard child.isRunning,
+    requiresOwnedListenerReceipt
+      || writeRuntimeReceipt(for: document, processID: child.processIdentifier)
+  else {
+    stopUnsupervisedChild(child)
+    clearRuntimeReceipt()
+    return nil
+  }
+  return (child, requiresOwnedListenerReceipt)
+}
+
+/// PAC endpoint 启动；失败记日志返回 false（调用方负责收敛子进程）。
+private func startPACServer(_ pacServer: PACServer, document: SslocalRuntimeDocument) -> Bool {
+  do {
+    try pacServer.start()
+    RuntimeLog.emit(.pacStarted(port: document.pac.port))
+    return true
+  } catch {
+    RuntimeLog.emit(
+      .pacStartFailed(port: document.pac.port, detail: String(describing: error)))
+    return false
+  }
+}
+
+/// 监听建立窗口内子进程已退出：收敛退出状态（非零，交 KeepAlive 重放）。
+private func reportStartupChildExit(_ child: Process, pacServer: PACServer) -> Int32 {
+  pacServer.stop()
+  RuntimeLog.emit(.pacStopped)
+  child.waitUntilExit()
+  RuntimeLog.emit(.sslocalExitedUnexpectedly(status: child.terminationStatus))
+  clearRuntimeReceipt()
+  return 1
 }
 
 /// PAC 尚未启动时的启动失败收敛；此时还没有 DispatchSource 收割子进程。
@@ -172,6 +169,35 @@ private enum SupervisionOutcome {
   case restart
 }
 
+/// 子进程收割句柄：退出状态的单一写入点（handler 线程）与读取点（监管线程），
+/// 由信号量唤醒提供 happens-before。
+private struct ChildReaper {
+  let exitStatus: ExitStatusBox
+  let exitSource: DispatchSourceProcess
+
+  init(child: Process, flags: SignalFlags) {
+    // 单一收割点：waitUntilExit 只在这里调用，其余路径等 box 出值。
+    let box = ExitStatusBox()
+    let source = DispatchSource.makeProcessSource(
+      identifier: child.processIdentifier, eventMask: .exit, queue: signalsQueue)
+    source.setEventHandler {
+      child.waitUntilExit()
+      box.store(child.terminationStatus)
+      flags.wake()
+    }
+    self.exitStatus = box
+    self.exitSource = source
+    source.resume()
+  }
+}
+
+/// 监管事件循环的可变状态：当前契约、回执发布位与挂起的重载转发。
+private struct SupervisionState {
+  var currentDocument: SslocalRuntimeDocument
+  var receiptPublished: Bool
+  var serverReloadPendingUntilReady = false
+}
+
 private func superviseChild(
   _ child: Process,
   pacServer: PACServer,
@@ -179,385 +205,152 @@ private func superviseChild(
   flags: SignalFlags,
   receiptPublished initialReceiptPublished: Bool
 ) -> SupervisionOutcome {
-  var receiptPublished = initialReceiptPublished
-  var serverReloadPendingUntilReady = false
-  var currentDocument = document
-  let exitStatus = ExitStatusBox()
-  // 单一收割点：waitUntilExit 只在这里调用，其余路径等 box 出值。
-  let exitSource = DispatchSource.makeProcessSource(
-    identifier: child.processIdentifier, eventMask: .exit, queue: signalsQueue)
-  exitSource.setEventHandler {
-    child.waitUntilExit()
-    exitStatus.store(child.terminationStatus)
-    flags.wake()
-  }
-  exitSource.resume()
+  var state = SupervisionState(
+    currentDocument: document, receiptPublished: initialReceiptPublished)
+  let reaper = ChildReaper(child: child, flags: flags)
 
   while true {
-    if receiptPublished {
+    if state.receiptPublished {
       flags.wait()
     } else if flags.wait(timeout: .now() + listenProbeInterval) == .timedOut {
-      if child.isRunning,
-        listenersAreEstablished(document: currentDocument, child: child)
-      {
-        if serverReloadPendingUntilReady {
-          guard kill(child.processIdentifier, SIGUSR1) == 0 else { return .childLost }
-          serverReloadPendingUntilReady = false
-        }
-        receiptPublished = writeRuntimeReceipt(
-          for: currentDocument, processID: child.processIdentifier)
-      }
-      if !receiptPublished { clearRuntimeReceipt() }
+      if let outcome = probeListeners(child: child, state: &state) { return outcome }
       continue
     }
     if flags.consumeStop() {
       RuntimeLog.emit(.sslocalStopRequested)
-      return stopCleanly(
-        child: child, pacServer: pacServer, exitStatus: exitStatus, exitSource: exitSource,
-        flags: flags)
+      return stopCleanly(child: child, pacServer: pacServer, reaper: reaper, flags: flags)
     }
-    if let status = exitStatus.load() {
-      return handleUnexpectedExit(status, pacServer: pacServer, exitSource: exitSource)
+    if let status = reaper.exitStatus.load() {
+      return handleUnexpectedExit(status, pacServer: pacServer, reaper: reaper)
     }
     guard flags.consumeReload() else { continue }
 
-    switch loadContract() {
-    case .missing:
-      RuntimeLog.emit(.contractMissing)
-      return stopCleanly(
-        child: child, pacServer: pacServer, exitStatus: exitStatus, exitSource: exitSource,
-        flags: flags)
-    case .invalid:
-      try? FileManager.default.removeItem(at: contractURL)
-      RuntimeLog.emit(.contractInvalidRemoved)
-      return stopCleanly(
-        child: child, pacServer: pacServer, exitStatus: exitStatus, exitSource: exitSource,
-        flags: flags)
-    case .loaded(let reloaded):
-      if reloaded.listenFingerprint != currentDocument.listenFingerprint {
-        RuntimeLog.emit(.reloadRestarted)
-        stopRuntime(
-          child: child, pacServer: pacServer, exitStatus: exitStatus, exitSource: exitSource,
-          flags: flags)
-        if flags.consumeStop() {
-          return .stoppedCleanly
-        }
-        flags.rearmIfPending()
-        return .restart
-      }
-      currentDocument = reloaded
-      let ownsConfiguredListeners =
-        reloaded.aclRuntime == nil
-        || listenersAreEstablished(document: reloaded, child: child)
-      guard ownsConfiguredListeners else {
-        RuntimeLog.emit(.reloadDeferred)
-        serverReloadPendingUntilReady = true
-        receiptPublished = false
-        clearRuntimeReceipt()
-        continue
-      }
-
-      RuntimeLog.emit(.reloadForwarded)
-      guard kill(child.processIdentifier, SIGUSR1) == 0 else { return .childLost }
-      serverReloadPendingUntilReady = false
-      receiptPublished =
-        writeRuntimeReceipt(for: reloaded, processID: child.processIdentifier)
-      if !receiptPublished {
-        clearRuntimeReceipt()
-      }
+    if let outcome = handleReload(
+      child: child, pacServer: pacServer, reaper: reaper, flags: flags, state: &state)
+    {
+      return outcome
     }
+  }
+}
+
+/// 回执未发布时的监听探测路径：监听就绪即转发挂起的重载并补写回执；
+/// 子进程消失交由收割事件处理，这里只清回执。返回 `.childLost` 表示转发失败。
+private func probeListeners(
+  child: Process, state: inout SupervisionState
+) -> SupervisionOutcome? {
+  guard child.isRunning,
+    listenersAreEstablished(document: state.currentDocument, child: child)
+  else {
+    if !state.receiptPublished { clearRuntimeReceipt() }
+    return nil
+  }
+  if state.serverReloadPendingUntilReady {
+    guard kill(child.processIdentifier, SIGUSR1) == 0 else { return .childLost }
+    state.serverReloadPendingUntilReady = false
+  }
+  state.receiptPublished = writeRuntimeReceipt(
+    for: state.currentDocument, processID: child.processIdentifier)
+  if !state.receiptPublished { clearRuntimeReceipt() }
+  return nil
+}
+
+/// 处理 SIGUSR1 重载：契约缺失/无效→干净退出；监听结构变化→优雅重启；
+/// 监听未就绪→推迟转发；否则转发并补写回执。返回 nil 表示继续监管循环。
+private func handleReload(
+  child: Process,
+  pacServer: PACServer,
+  reaper: ChildReaper,
+  flags: SignalFlags,
+  state: inout SupervisionState
+) -> SupervisionOutcome? {
+  switch loadContract() {
+  case .missing:
+    RuntimeLog.emit(.contractMissing)
+    return stopCleanly(child: child, pacServer: pacServer, reaper: reaper, flags: flags)
+  case .invalid:
+    try? FileManager.default.removeItem(at: contractURL)
+    RuntimeLog.emit(.contractInvalidRemoved)
+    return stopCleanly(child: child, pacServer: pacServer, reaper: reaper, flags: flags)
+  case .loaded(let reloaded):
+    if reloaded.listenFingerprint != state.currentDocument.listenFingerprint {
+      RuntimeLog.emit(.reloadRestarted)
+      stopRuntime(child: child, pacServer: pacServer, reaper: reaper, flags: flags)
+      if flags.consumeStop() {
+        return .stoppedCleanly
+      }
+      flags.rearmIfPending()
+      return .restart
+    }
+    state.currentDocument = reloaded
+    let ownsConfiguredListeners =
+      reloaded.aclRuntime == nil
+      || listenersAreEstablished(document: reloaded, child: child)
+    guard ownsConfiguredListeners else {
+      RuntimeLog.emit(.reloadDeferred)
+      state.serverReloadPendingUntilReady = true
+      state.receiptPublished = false
+      clearRuntimeReceipt()
+      return nil
+    }
+
+    RuntimeLog.emit(.reloadForwarded)
+    guard kill(child.processIdentifier, SIGUSR1) == 0 else { return .childLost }
+    state.serverReloadPendingUntilReady = false
+    state.receiptPublished = writeRuntimeReceipt(
+      for: reloaded, processID: child.processIdentifier)
+    if !state.receiptPublished { clearRuntimeReceipt() }
+    return nil
   }
 }
 
 private func stopCleanly(
   child: Process,
   pacServer: PACServer,
-  exitStatus: ExitStatusBox,
-  exitSource: DispatchSourceProcess,
+  reaper: ChildReaper,
   flags: SignalFlags
 ) -> SupervisionOutcome {
-  stopRuntime(
-    child: child, pacServer: pacServer, exitStatus: exitStatus, exitSource: exitSource, flags: flags
-  )
+  stopRuntime(child: child, pacServer: pacServer, reaper: reaper, flags: flags)
   return .stoppedCleanly
 }
 
 private func handleUnexpectedExit(
   _ status: Int32,
   pacServer: PACServer,
-  exitSource: DispatchSourceProcess
+  reaper: ChildReaper
 ) -> SupervisionOutcome {
   pacServer.stop()
   RuntimeLog.emit(.pacStopped)
   RuntimeLog.emit(.sslocalExitedUnexpectedly(status: status))
   clearRuntimeReceipt()
-  exitSource.cancel()
+  reaper.exitSource.cancel()
   return .childLost
 }
 
 private func stopRuntime(
   child: Process,
   pacServer: PACServer,
-  exitStatus: ExitStatusBox,
-  exitSource: DispatchSourceProcess,
+  reaper: ChildReaper,
   flags: SignalFlags
 ) {
   pacServer.stop()
   RuntimeLog.emit(.pacStopped)
-  stopChild(child, exitStatus: exitStatus, exitSource: exitSource, flags: flags)
+  stopChild(child, reaper: reaper, flags: flags)
   clearRuntimeReceipt()
 }
 
 private func stopChild(
   _ child: Process,
-  exitStatus: ExitStatusBox,
-  exitSource: DispatchSourceProcess,
+  reaper: ChildReaper,
   flags: SignalFlags
 ) {
   kill(child.processIdentifier, SIGTERM)
   let gracefulDeadline = DispatchTime.now() + 10
-  while exitStatus.load() == nil {
+  while reaper.exitStatus.load() == nil {
     if flags.wait(timeout: gracefulDeadline) == .timedOut {
       kill(child.processIdentifier, SIGKILL)
       _ = flags.wait(timeout: DispatchTime.now() + 5)
     }
   }
-  exitSource.cancel()
+  reaper.exitSource.cancel()
   flags.rearmIfPending()
-}
-
-// MARK: - 监听建立判定
-
-/// 监听判定时限（D10）：sslocal 拉起后 3 秒内应完成本地监听绑定。
-private let listenEstablishmentDeadline: TimeInterval = 3
-/// 单次探测超时与轮询间隔；正常启动百毫秒级完成，超时路径总耗时不超时限太多。
-private let listenProbeTimeout: TimeInterval = 0.25
-private let listenProbeInterval: TimeInterval = 0.1
-
-/// sslocal 拉起后阻塞监管线程至多 3 秒轮询契约内的本地端点（运行期失败以
-/// sslocal 信号为准，issue #38）：全部端点就绪即返回；信号（停止/重载/子进程
-/// 退出）到达即让位交还监管循环；超时且子进程仍在 → 记 error 日志但继续监管
-/// （GUI 健康门负责呈现，wrapper 不做启停决策）。
-private func awaitListenEstablishment(
-  document: SslocalRuntimeDocument,
-  child: Process,
-  flags: SignalFlags
-) -> Bool {
-  let deadline = DispatchTime.now() + listenEstablishmentDeadline
-  while DispatchTime.now() < deadline {
-    guard child.isRunning else { return false }
-    let listenersReady = listenersAreEstablished(document: document, child: child)
-    guard child.isRunning else { return false }
-    if listenersReady {
-      return true
-    }
-    if flags.wait(timeout: .now() + listenProbeInterval) == .success {
-      flags.rearmIfPending()
-      return false
-    }
-  }
-  guard child.isRunning else { return false }  // 已退出：退出事件自带点名日志
-  let endpoints = document.locals
-    .map { "\($0.inboundProtocol) \($0.localAddress):\($0.localPort)" }
-    .joined(separator: ", ")
-  RuntimeLog.emit(.listenNotEstablished(detail: endpoints))
-  return false
-}
-
-private func listenersAreEstablished(
-  document: SslocalRuntimeDocument,
-  child: Process
-) -> Bool {
-  guard child.isRunning else { return false }
-  for local in document.locals {
-    guard
-      EndpointHealthProbe.probe(
-        host: local.probeHost,
-        port: local.localPort,
-        timeout: listenProbeTimeout) == .reachable
-    else { return false }
-
-    if document.aclRuntime != nil,
-      !RuntimeSocketOwnershipProbe.process(
-        child.processIdentifier, ownsTCPListenerOn: local.localPort)
-    {
-      return false
-    }
-  }
-  return child.isRunning
-}
-
-// MARK: - 信号与共享状态
-
-/// 信号只置位并唤醒监管循环，全部判定在循环线程完成。标志与信号量成对
-/// （辅助等待会消耗信号量，事后 rearmIfPending 补回）。
-private final class SignalFlags {
-  private let lock = NSLock()
-  private var stopRequested = false
-  private var reloadRequested = false
-  private let events = DispatchSemaphore(value: 0)
-
-  func requestStop() {
-    lock.lock()
-    stopRequested = true
-    lock.unlock()
-    events.signal()
-  }
-
-  func requestReload() {
-    lock.lock()
-    reloadRequested = true
-    lock.unlock()
-    events.signal()
-  }
-
-  func wake() {
-    events.signal()
-  }
-
-  func wait() {
-    events.wait()
-  }
-
-  func wait(timeout: DispatchTime) -> DispatchTimeoutResult {
-    events.wait(timeout: timeout)
-  }
-
-  func consumeStop() -> Bool {
-    lock.lock()
-    defer { lock.unlock() }
-    let value = stopRequested
-    stopRequested = false
-    return value
-  }
-
-  func consumeReload() -> Bool {
-    lock.lock()
-    defer { lock.unlock() }
-    let value = reloadRequested
-    reloadRequested = false
-    return value
-  }
-
-  func rearmIfPending() {
-    lock.lock()
-    let pending = stopRequested || reloadRequested
-    lock.unlock()
-    if pending {
-      events.signal()
-    }
-  }
-}
-
-private func observeSignal(_ number: Int32, flags: SignalFlags, handler: @escaping () -> Void)
-  -> DispatchSourceSignal
-{
-  signal(number, SIG_IGN)
-  let source = DispatchSource.makeSignalSource(signal: number, queue: signalsQueue)
-  source.setEventHandler(handler: handler)
-  source.resume()
-  return source
-}
-
-/// 子进程退出状态的单一写入点（handler 线程）与读取点（监管线程），由
-/// 信号量唤醒提供 happens-before。
-private final class ExitStatusBox {
-  private let lock = NSLock()
-  private var value: Int32?
-
-  func store(_ status: Int32) {
-    lock.lock()
-    value = status
-    lock.unlock()
-  }
-
-  func load() -> Int32? {
-    lock.lock()
-    defer { lock.unlock() }
-    return value
-  }
-}
-
-// MARK: - 契约与子进程
-
-private enum ContractLoad {
-  case missing
-  case invalid
-  case loaded(SslocalRuntimeDocument)
-}
-
-private func loadContract() -> ContractLoad {
-  guard let data = try? Data(contentsOf: contractURL) else { return .missing }
-  guard let document = SslocalRuntimeDocument.decodeValidated(data) else { return .invalid }
-  if let acl = document.aclRuntime {
-    guard
-      document.aclFilePath == aclFileURL.standardizedFileURL.path,
-      acl.path == aclFileURL.standardizedFileURL.path,
-      let aclData = try? Data(contentsOf: aclFileURL),
-      aclData == Data(acl.content.utf8)
-    else { return .invalid }
-  }
-  return .loaded(document)
-}
-
-private func writeRuntimeReceipt(for document: SslocalRuntimeDocument, processID: Int32) -> Bool {
-  guard let digest = document.deploymentSHA256 else { return false }
-  let receipt = RuntimeDeploymentReceipt(processID: processID, contractSHA256: digest)
-  let encoder = JSONEncoder()
-  encoder.outputFormatting = [.sortedKeys]
-  guard let data = try? encoder.encode(receipt) else { return false }
-  do {
-    try AtomicFileWriter.write(data, to: runtimeStatusFileURL)
-    return true
-  } catch {
-    return false
-  }
-}
-
-private func clearRuntimeReceipt() {
-  try? FileManager.default.removeItem(at: runtimeStatusFileURL)
-}
-
-private func spawnSslocal(_ document: SslocalRuntimeDocument) -> Process? {
-  guard FileManager.default.isExecutableFile(atPath: sslocalURL.path) else { return nil }
-  let child = Process()
-  child.executableURL = sslocalURL
-  child.arguments = ["-c", contractURL.path]
-  var childEnvironment = environment
-  // 上游默认日志级别会把服务器地址写进普通日志（D5）：常规模式压到 warn，
-  // 用户明确打开 verbose 后才放宽到 debug。显式外部 RUST_LOG 仍可用于诊断。
-  if childEnvironment["RUST_LOG"] == nil {
-    childEnvironment["RUST_LOG"] = document.pac.verbose ? "debug" : "warn"
-  }
-  child.environment = childEnvironment
-  do {
-    try child.run()
-  } catch {
-    return nil
-  }
-  RuntimeLog.emit(.sslocalSpawned(pid: child.processIdentifier))
-  return child
-}
-
-// MARK: - 日志收敛
-
-private func redirectStandardStreams(to logURL: URL) {
-  let fileManager = FileManager.default
-  let directory = logURL.deletingLastPathComponent()
-  try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-  try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
-  if fileManager.fileExists(atPath: logURL.path) {
-    let attributes = try? fileManager.attributesOfItem(atPath: logURL.path)
-    if let size = attributes?[.size] as? UInt64, size > 1_048_576 {
-      // 启动时超限即截断；滚动与诊断导出由 #33 完善。
-      try? fileManager.removeItem(at: logURL)
-    }
-  }
-  if !fileManager.fileExists(atPath: logURL.path) {
-    fileManager.createFile(
-      atPath: logURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
-  }
-  try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: logURL.path)
-  freopen(logURL.path, "a", stdout)
-  freopen(logURL.path, "a", stderr)
 }

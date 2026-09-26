@@ -48,14 +48,16 @@ final class SubscriptionDocumentParserTests: XCTestCase {
       """
       {"version": 1,
        "servers": [
-         {"id": "aaaaaaaa-0000-4000-8000-00000000000a", "server": "203.0.113.1", "server_port": 8388, "password": "p1", "method": "aes-256-gcm"},
-         {"id": "bbbbbbbb-0000-4000-8000-00000000000b", "server": "203.0.113.2", "server_port": 8389, "password": "p2", "method": "aes-256-gcm"}],
+         {"id": "aaaaaaaa-0000-4000-8000-00000000000a", "server": "203.0.113.1", "server_port": 8388,
+          "password": "p1", "method": "aes-256-gcm"},
+         {"id": "bbbbbbbb-0000-4000-8000-00000000000b", "server": "203.0.113.2", "server_port": 8389,
+          "password": "p2", "method": "aes-256-gcm"}],
        "x_shadowsocksx_ng": {"schema_version": \(schemaVersion), "root_group_id": "\(rootGroupID)",
          "groups": [\(groupJSON)]}}
       """.utf8)
   }
 
-  private func parse(_ data: Data) throws -> SubscriptionSnapshot {
+  func parse(_ data: Data) throws -> SubscriptionSnapshot {
     try SubscriptionDocumentParser.parse(data, subscriptionID: subscriptionID)
   }
 
@@ -118,7 +120,8 @@ final class SubscriptionDocumentParserTests: XCTestCase {
   func testPluginFieldsCarriedVerbatim() throws {
     let data = Data(
       """
-      {"version": 1, "servers": [{"id": "aaaaaaaa-0000-4000-8000-00000000000a", "server": "203.0.113.1", "server_port": 443,
+      {"version": 1, "servers": [
+        {"id": "aaaaaaaa-0000-4000-8000-00000000000a", "server": "203.0.113.1", "server_port": 443,
         "password": "p", "method": "aes-256-gcm",
         "plugin": "v2ray-plugin", "plugin_opts": "mode=websocket;host=example.com"}]}
       """.utf8)
@@ -229,8 +232,10 @@ final class SubscriptionDocumentParserTests: XCTestCase {
       """
       {"version": 1,
        "servers": [
-         {"id": "bbbbbbbb-0000-4000-8000-00000000000b", "server": "203.0.113.2", "server_port": 8389, "password": "p2", "method": "m"},
-         {"id": "aaaaaaaa-0000-4000-8000-00000000000a", "server": "203.0.113.1", "server_port": 8388, "password": "p1", "method": "m"}],
+         {"id": "bbbbbbbb-0000-4000-8000-00000000000b", "server": "203.0.113.2", "server_port": 8389,
+          "password": "p2", "method": "m"},
+         {"id": "aaaaaaaa-0000-4000-8000-00000000000a", "server": "203.0.113.1", "server_port": 8388,
+          "password": "p1", "method": "m"}],
        "x_shadowsocksx_ng": {"schema_version": 1, "root_group_id": "root",
          "groups": [\(groups)]}}
       """.utf8)
@@ -240,95 +245,6 @@ final class SubscriptionDocumentParserTests: XCTestCase {
     XCTAssertEqual(serverIDs(snapshot.root).count, 2, "未引用服务器不丢弃")
     XCTAssertEqual(serverRecords(snapshot.root)[0].address, "203.0.113.1", "树引用在前")
     XCTAssertEqual(serverRecords(snapshot.root)[1].address, "203.0.113.2", "未引用按数组序追加")
-  }
-
-  // MARK: schema 与记录校验失败（整份拒绝）
-
-  func testUnsupportedVersionThrows() {
-    let data = Data(#"{"version": 2, "servers": []}"#.utf8)
-
-    XCTAssertThrowsError(try parse(data)) { error in
-      XCTAssertEqual(error as? SubscriptionParseError, .unsupportedSchemaVersion)
-    }
-  }
-
-  func testMissingVersionThrows() {
-    XCTAssertThrowsError(try parse(Data(#"{"servers": []}"#.utf8))) { error in
-      XCTAssertEqual(error as? SubscriptionParseError, .unsupportedSchemaVersion)
-    }
-  }
-
-  func testMissingServersThrows() {
-    XCTAssertThrowsError(try parse(Data(#"{"version": 1}"#.utf8))) { error in
-      XCTAssertEqual(error as? SubscriptionParseError, .missingServers)
-    }
-  }
-
-  func testMalformedJSONThrowsDecodingFailure() {
-    XCTAssertThrowsError(try parse(Data(#"{"version": 1, "servers": ["#.utf8))) { error in
-      XCTAssertEqual(error as? SubscriptionParseError, .decodingFailure)
-    }
-  }
-
-  func testServersNotAnArrayThrowsDecodingFailure() {
-    XCTAssertThrowsError(try parse(Data(#"{"version": 1, "servers": "nope"}"#.utf8))) { error in
-      XCTAssertEqual(error as? SubscriptionParseError, .decodingFailure)
-    }
-  }
-
-  func testRecordValidationFailuresThrowWithIndex() {
-    let cases: [(String, String)] = [
-      (#"{"server": "h", "server_port": 8388, "password": "p"}"#, "method"),
-      (#"{"server": "h", "server_port": 8388, "method": "m"}"#, "password"),
-      (#"{"server_port": 8388, "password": "p", "method": "m"}"#, "server"),
-      (#"{"server": "", "server_port": 8388, "password": "p", "method": "m"}"#, "server"),
-      (#"{"server": "h", "server_port": 0, "password": "p", "method": "m"}"#, "server_port"),
-      (#"{"server": "h", "server_port": 65536, "password": "p", "method": "m"}"#, "server_port"),
-      (#"{"server": "h", "server_port": 8388, "password": "", "method": "m"}"#, "password"),
-      (
-        #"{"id": "not-a-uuid", "server": "h", "server_port": 8388, "password": "p", "method": "m"}"#,
-        "id",
-      ),
-    ]
-    for (record, expectedField) in cases {
-      let data = Data("{\"version\": 1, \"servers\": [\(record)]}".utf8)
-      XCTAssertThrowsError(try parse(data), expectedField) { error in
-        guard case .recordValidation(let index, let reason) = error as? SubscriptionParseError
-        else {
-          return XCTFail("\(expectedField): 应报 recordValidation，实际 \(error)")
-        }
-        XCTAssertEqual(index, 0)
-        XCTAssertTrue(reason.contains(expectedField), "\(expectedField): \(reason)")
-      }
-    }
-  }
-
-  func testDuplicateServerIDThrows() {
-    let data = Data(
-      """
-      {"version": 1, "servers": [
-        {"id": "aaaaaaaa-0000-4000-8000-00000000000a", "server": "203.0.113.1", "server_port": 8388, "password": "p", "method": "m"},
-        {"id": "aaaaaaaa-0000-4000-8000-00000000000a", "server": "203.0.113.9", "server_port": 9999, "password": "q", "method": "n"}]}
-      """.utf8)
-
-    XCTAssertThrowsError(try parse(data)) { error in
-      XCTAssertEqual(
-        error as? SubscriptionParseError,
-        .duplicateServerID(id: "id:aaaaaaaa-0000-4000-8000-00000000000a"))
-    }
-  }
-
-  func testIdenticalIdLessRecordsAreDuplicateIdentity() {
-    let record =
-      #"{"server": "203.0.113.1", "server_port": 8388, "password": "p", "method": "m"}"#
-    let data = Data("{\"version\": 1, \"servers\": [\(record), \(record)]}".utf8)
-
-    XCTAssertThrowsError(try parse(data)) { error in
-      guard case .duplicateServerID(let id) = error as? SubscriptionParseError else {
-        return XCTFail("应报 duplicateServerID，实际 \(error)")
-      }
-      XCTAssertTrue(id.hasPrefix("content:"), "无稳定 ID 用内容指纹判重")
-    }
   }
 
   // MARK: 身份延续规则（issue #9：无稳定 ID 仅精确匹配延续）

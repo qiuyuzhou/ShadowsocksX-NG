@@ -17,14 +17,27 @@ extension ProxyRuntimeController {
     await transitionMode(proxyMode, ruleDefaultAction: action)
   }
 
+  /// 模式切换前的可恢复快照：失败时按它原样还原。
+  private struct ModeTransitionSnapshot {
+    let settings: ProxySettings
+    let mode: ProxyMode
+    /// 切换前的运行时文档；无活动文档时为 `nil`，恢复前由调用方补上当次加载值。
+    let document: SslocalRuntimeDocument?
+    let state: AgentRunState
+
+    /// 用当次加载的文档补齐快照（原 `previousDocument ?? currentDocument` 语义）。
+    func resolvingDocument(_ fallback: SslocalRuntimeDocument) -> ModeTransitionSnapshot {
+      ModeTransitionSnapshot(
+        settings: settings, mode: mode, document: document ?? fallback, state: state)
+    }
+  }
+
   private func transitionMode(
     _ mode: ProxyMode,
     ruleDefaultAction: RuleDefaultAction
   ) async {
-    let previousSettings = settings
-    let previousMode = proxyMode
-    let previousDocument = lastDocument
-    let previousState = state
+    let snapshot = ModeTransitionSnapshot(
+      settings: settings, mode: proxyMode, document: lastDocument, state: state)
     var next = settings
     next.preferredMode = mode.kind
     next.ruleDefaultAction = ruleDefaultAction
@@ -54,12 +67,7 @@ extension ProxyRuntimeController {
       // 快照缺失/损坏：不静默退化，恢复旧模式与旧子选项。
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
       await restoreModeTransition(
-        previousMode: previousMode,
-        previousRuleDefaultAction: previousSettings.ruleDefaultAction,
-        previousDocument: previousDocument ?? currentDocument,
-        previousState: previousState,
-        previousSystemProxyEnabled: previousSettings.systemProxyEnabled,
-        generation: generation)
+        snapshot: snapshot.resolvingDocument(currentDocument), generation: generation)
       return
     }
     guard nextDocument.aclRuntime != currentDocument.aclRuntime else {
@@ -70,12 +78,7 @@ extension ProxyRuntimeController {
     }
 
     await deployModeTransition(
-      nextDocument,
-      previousMode: previousMode,
-      previousRuleDefaultAction: previousSettings.ruleDefaultAction,
-      previousDocument: previousDocument ?? currentDocument,
-      previousState: previousState,
-      previousSystemProxyEnabled: previousSettings.systemProxyEnabled,
+      nextDocument, snapshot: snapshot.resolvingDocument(currentDocument),
       generation: generation)
   }
 
@@ -109,11 +112,7 @@ extension ProxyRuntimeController {
 
   private func deployModeTransition(
     _ document: SslocalRuntimeDocument,
-    previousMode: ProxyMode,
-    previousRuleDefaultAction: RuleDefaultAction,
-    previousDocument: SslocalRuntimeDocument,
-    previousState: AgentRunState,
-    previousSystemProxyEnabled: Bool,
+    snapshot: ModeTransitionSnapshot,
     generation: Int
   ) async {
     guard generation == modeChangeGeneration else { return }
@@ -121,13 +120,7 @@ extension ProxyRuntimeController {
     state = .starting
     guard await execute(.run(document), document: document) else {
       guard generation == modeChangeGeneration else { return }
-      await restoreModeTransition(
-        previousMode: previousMode,
-        previousRuleDefaultAction: previousRuleDefaultAction,
-        previousDocument: previousDocument,
-        previousState: previousState,
-        previousSystemProxyEnabled: previousSystemProxyEnabled,
-        generation: generation)
+      await restoreModeTransition(snapshot: snapshot, generation: generation)
       return
     }
 
@@ -139,13 +132,7 @@ extension ProxyRuntimeController {
       preserveProxyOnFailure: true)
     guard generation == modeChangeGeneration else { return }
     guard healthy else {
-      await restoreModeTransition(
-        previousMode: previousMode,
-        previousRuleDefaultAction: previousRuleDefaultAction,
-        previousDocument: previousDocument,
-        previousState: previousState,
-        previousSystemProxyEnabled: previousSystemProxyEnabled,
-        generation: generation)
+      await restoreModeTransition(snapshot: snapshot, generation: generation)
       return
     }
 
@@ -154,17 +141,13 @@ extension ProxyRuntimeController {
   }
 
   private func restoreModeTransition(
-    previousMode: ProxyMode,
-    previousRuleDefaultAction: RuleDefaultAction,
-    previousDocument: SslocalRuntimeDocument,
-    previousState: AgentRunState,
-    previousSystemProxyEnabled: Bool,
+    snapshot: ModeTransitionSnapshot,
     generation: Int
   ) async {
+    // 两个调用点都经 resolvingDocument 补齐文档；防御性解包失败即无事可做。
+    guard let previousDocument = snapshot.document else { return }
+    let restoredSettings = restoredSettings(for: snapshot)
     var persistenceFailed = false
-    var restoredSettings = settings
-    restoredSettings.preferredMode = previousMode.kind
-    restoredSettings.ruleDefaultAction = previousRuleDefaultAction
     do {
       try settingsStore.save(restoredSettings)
     } catch {
@@ -173,49 +156,11 @@ extension ProxyRuntimeController {
     }
     guard generation == modeChangeGeneration else { return }
     settings = restoredSettings
-    proxyMode = previousMode
+    proxyMode = snapshot.mode
     lastDocument = previousDocument
 
-    let expectedDigest = previousDocument.deploymentSHA256
-    let currentDocument = runtimeFileStore.loadDocument()
-    let receipt = runtimeFileStore.readRuntimeReceipt()
-    let wrapper = wrapperState()
-    let previousInstanceIsRunning: Bool
-    switch wrapper {
-    case .running(let pid):
-      previousInstanceIsRunning =
-        receipt?.processID == pid && receipt?.contractSHA256 == expectedDigest
-    case .notRunning:
-      previousInstanceIsRunning = false
-    }
-    if currentDocument != previousDocument || !previousInstanceIsRunning {
-      do {
-        if currentDocument != previousDocument {
-          try runtimeFileStore.write(previousDocument)
-        }
-      } catch {
-        state = .serviceFailed(.runtimeFile)
-        await withdrawSystemProxyAfterEntryLoss()
-        return
-      }
-
-      if !previousInstanceIsRunning {
-        switch wrapper {
-        case .running(let pid):
-          guard sendSignal(pid, SIGUSR1) == 0 else {
-            state = .serviceFailed(.agent)
-            await withdrawSystemProxyAfterEntryLoss()
-            return
-          }
-        case .notRunning:
-          guard await execute(.run(previousDocument), document: previousDocument) else {
-            guard generation == modeChangeGeneration else { return }
-            await withdrawSystemProxyAfterEntryLoss()
-            return
-          }
-        }
-      }
-    }
+    guard await restoreRuntimeDocument(previousDocument, generation: generation)
+    else { return }
 
     guard generation == modeChangeGeneration else { return }
     state = .starting
@@ -229,11 +174,80 @@ extension ProxyRuntimeController {
       return
     }
 
-    if settings.systemProxyEnabled != previousSystemProxyEnabled {
+    if settings.systemProxyEnabled != snapshot.settings.systemProxyEnabled {
       await convergeSystemProxy()
     } else {
-      state = previousState
+      state = snapshot.state
     }
     if persistenceFailed { state = .serviceFailed(.persistence) }
+  }
+
+  /// 按快照还原偏好（模式与子选项回退，其余字段保留当前值）。
+  private func restoredSettings(for snapshot: ModeTransitionSnapshot) -> ProxySettings {
+    var restored = settings
+    restored.preferredMode = snapshot.mode.kind
+    restored.ruleDefaultAction = snapshot.settings.ruleDefaultAction
+    return restored
+  }
+
+  /// 把运行时文件与包装进程恢复到旧文档；文件写入或进程拉起失败即撤下系统
+  /// 代理并返回 false（健康检查由调用方继续）。
+  private func restoreRuntimeDocument(
+    _ previousDocument: SslocalRuntimeDocument,
+    generation: Int
+  ) async -> Bool {
+    let expectedDigest = previousDocument.deploymentSHA256
+    let currentDocument = runtimeFileStore.loadDocument()
+    let receipt = runtimeFileStore.readRuntimeReceipt()
+    let wrapper = wrapperState()
+    let previousInstanceIsRunning: Bool
+    switch wrapper {
+    case .running(let pid):
+      previousInstanceIsRunning =
+        receipt?.processID == pid && receipt?.contractSHA256 == expectedDigest
+    case .notRunning:
+      previousInstanceIsRunning = false
+    }
+    if currentDocument != previousDocument || !previousInstanceIsRunning {
+      if currentDocument != previousDocument {
+        do {
+          try runtimeFileStore.write(previousDocument)
+        } catch {
+          state = .serviceFailed(.runtimeFile)
+          await withdrawSystemProxyAfterEntryLoss()
+          return false
+        }
+      }
+      if !previousInstanceIsRunning {
+        guard
+          await relaunchPreviousInstance(
+            wrapper: wrapper, previousDocument: previousDocument, generation: generation)
+        else { return false }
+      }
+    }
+    return true
+  }
+
+  /// 旧实例未在运行时按需拉起：在跑的 wrapper 用 SIGUSR1 唤醒重读，否则重新执行。
+  private func relaunchPreviousInstance(
+    wrapper: WrapperProcessState,
+    previousDocument: SslocalRuntimeDocument,
+    generation: Int
+  ) async -> Bool {
+    switch wrapper {
+    case .running(let pid):
+      guard sendSignal(pid, SIGUSR1) == 0 else {
+        state = .serviceFailed(.agent)
+        await withdrawSystemProxyAfterEntryLoss()
+        return false
+      }
+    case .notRunning:
+      guard await execute(.run(previousDocument), document: previousDocument) else {
+        guard generation == modeChangeGeneration else { return false }
+        await withdrawSystemProxyAfterEntryLoss()
+        return false
+      }
+    }
+    return true
   }
 }

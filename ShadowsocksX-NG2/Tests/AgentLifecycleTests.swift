@@ -7,8 +7,8 @@ import XCTest
 /// wrapper 可执行文件，验证启停协议次序、SIGTERM 链、崩溃恢复、文件清理与
 /// SIGUSR1 变更协议（D2/D5）。stub 经环境变量编排行为，全部等待有界。
 final class AgentLifecycleTests: XCTestCase {
-  private var workDir: URL!
-  private var contractURL: URL!
+  var workDir: URL!
+  var contractURL: URL!
   private var stubStateURL: URL!
   private var stubURL: URL!
 
@@ -57,7 +57,7 @@ final class AgentLifecycleTests: XCTestCase {
       [.posixPermissions: 0o755], ofItemAtPath: stubURL.path)
   }
 
-  private func launchWrapper(behavior: String) throws -> Process {
+  func launchWrapper(behavior: String) throws -> Process {
     let wrapper = try wrapperURL
     let process = Process()
     process.executableURL = wrapper
@@ -72,20 +72,20 @@ final class AgentLifecycleTests: XCTestCase {
     return process
   }
 
-  private func writeContract(_ document: SslocalRuntimeDocument) throws {
+  func writeContract(_ document: SslocalRuntimeDocument) throws {
     try RuntimeFileStore(fileURL: contractURL).write(document)
   }
 
-  private func stateLog() -> String {
+  func stateLog() -> String {
     (try? String(contentsOf: stubStateURL, encoding: .utf8)) ?? ""
   }
 
-  private func pidAlive(_ pid: Int32) -> Bool {
+  func pidAlive(_ pid: Int32) -> Bool {
     kill(pid, 0) == 0
   }
 
   @discardableResult
-  private func waitUntil(
+  func waitUntil(
     timeout: TimeInterval = 10, _ condition: () throws -> Bool
   ) throws -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
@@ -97,7 +97,7 @@ final class AgentLifecycleTests: XCTestCase {
   }
 
   /// 断言 wrapper 在超时内退出并返回退出码。
-  private func waitForExit(_ process: Process, timeout: TimeInterval = 10) throws -> Int32 {
+  func waitForExit(_ process: Process, timeout: TimeInterval = 10) throws -> Int32 {
     try waitUntil(timeout: timeout) { !process.isRunning }
     process.waitUntilExit()
     return process.terminationStatus
@@ -148,35 +148,6 @@ final class AgentLifecycleTests: XCTestCase {
       EndpointHealthProbe.probe(host: "127.0.0.1", port: pacPort, timeout: 0.2),
       .reachable,
       "wrapper 停止后 PAC endpoint 必须不可达")
-  }
-
-  // MARK: 崩溃恢复（D2）
-
-  func testSslocalCrashExitsNonZeroForKeepAliveReplay() throws {
-    try writeContract(ProxyRuntimeFixture.makeDocument())
-    let wrapper = try launchWrapper(behavior: "crash")
-
-    let exitStatus = try waitForExit(wrapper)
-
-    XCTAssertNotEqual(exitStatus, 0, "sslocal 崩溃 → wrapper 非零退出 → KeepAlive 重启重放")
-
-    // KeepAlive 重放语义：同一份契约再拉起一次即恢复（stub 换回常驻行为）。
-    let replay = try launchWrapper(behavior: "run")
-    XCTAssertTrue(
-      try waitUntil { self.stateLog().components(separatedBy: "invoked:").count >= 3 },
-      "重放应再次拉起 sslocal")
-    kill(replay.processIdentifier, SIGTERM)
-    XCTAssertEqual(try waitForExit(replay), 0)
-  }
-
-  func testUnexpectedCleanChildExitAlsoCountsAsLoss() throws {
-    try writeContract(ProxyRuntimeFixture.makeDocument())
-    let wrapper = try launchWrapper(behavior: "exit0")
-
-    let exitStatus = try waitForExit(wrapper)
-
-    XCTAssertNotEqual(
-      exitStatus, 0, "sslocal 自行退出（即使干净）也应触发重放而非静默下线")
   }
 
   // MARK: 契约缺失 / 无效 → 停止并清理（D5）
@@ -234,157 +205,6 @@ final class AgentLifecycleTests: XCTestCase {
     XCTAssertEqual(try waitForExit(wrapper), 0, "显式停止干净退出")
   }
 
-  // MARK: 变更协议（D5）
-
-  func testSIGUSR1WithServerOnlyChangeIsForwardedToSslocal() throws {
-    try writeContract(ProxyRuntimeFixture.makeDocument(serverAddress: "203.0.113.7"))
-    let wrapper = try launchWrapper(behavior: "run")
-    XCTAssertTrue(
-      try waitUntil { self.stateLog().contains("invoked:") }, "等待首次拉起")
-
-    try writeContract(ProxyRuntimeFixture.makeDocument(serverAddress: "198.51.100.9"))
-    kill(wrapper.processIdentifier, SIGUSR1)
-
-    XCTAssertTrue(
-      try waitUntil { self.stateLog().contains("SIGUSR1") },
-      "仅服务器列表变化应转发 SIGUSR1 热重载（上游只替换配置来源服务器）")
-    XCTAssertTrue(pidAlive(wrapper.processIdentifier), "热重载不重启 wrapper")
-    XCTAssertFalse(stateLog().contains("SIGTERM"), "热重载不触发子进程重启")
-
-    kill(wrapper.processIdentifier, SIGTERM)
-    XCTAssertEqual(try waitForExit(wrapper), 0)
-  }
-
-  func testSIGUSR1WithListenChangePerformsGracefulRestart() throws {
-    try writeContract(ProxyRuntimeFixture.makeDocument(localPort: 1086))
-    let wrapper = try launchWrapper(behavior: "run")
-    XCTAssertTrue(
-      try waitUntil { self.stateLog().contains("invoked:") }, "等待首次拉起")
-
-    try writeContract(ProxyRuntimeFixture.makeDocument(localPort: 2086))
-    kill(wrapper.processIdentifier, SIGUSR1)
-
-    XCTAssertTrue(
-      try waitUntil {
-        self.stateLog().contains("SIGTERM")
-          && self.stateLog().components(separatedBy: "invoked:").count >= 3
-      },
-      "监听结构变化走优雅重启：先 SIGTERM 旧实例再以新契约拉起，实际：\(stateLog())")
-    XCTAssertTrue(pidAlive(wrapper.processIdentifier), "重启后 wrapper 常驻")
-
-    // 重启后的实例也要能被显式停止。
-    kill(wrapper.processIdentifier, SIGTERM)
-    XCTAssertEqual(try waitForExit(wrapper), 0)
-    XCTAssertEqual(
-      stateLog().components(separatedBy: "SIGTERM").count - 1, 2,
-      "两次停止各转发一次 SIGTERM")
-  }
-
-  func testSIGUSR1WithACLChangeRestartsSslocalWithoutUnreadyReceipt() throws {
-    let runtimeStore = RuntimeFileStore(fileURL: contractURL)
-    let previous = ProxyRuntimeFixture.makeDocument()
-    try writeContract(previous)
-    let wrapper = try launchWrapper(behavior: "run")
-    XCTAssertTrue(
-      try waitUntil {
-        runtimeStore.readRuntimeReceipt()?.contractSHA256 == previous.deploymentSHA256
-      }, "首次实例启动后应发布运行回执")
-    let previousProcessID = try XCTUnwrap(runtimeStore.readRuntimeReceipt()?.processID)
-
-    let next = previous.replacingACL(.direct(at: runtimeStore.aclFileURL))
-    try writeContract(next)
-    XCTAssertEqual(kill(wrapper.processIdentifier, SIGUSR1), 0, "SIGUSR1 应送达 wrapper")
-
-    XCTAssertTrue(
-      try waitUntil {
-        return self.agentLog().contains("reload: listen change, restarting sslocal")
-          && self.stateLog().components(separatedBy: "invoked:").count >= 3
-      },
-      "ACL 摘要变化应完整重启 sslocal；agent: \(agentLog())"
-    )
-    XCTAssertNil(
-      runtimeStore.readRuntimeReceipt(),
-      "stub 未绑定代理端口时，不得为直连实例发布回执（旧 pid=\(previousProcessID)）")
-
-    kill(wrapper.processIdentifier, SIGTERM)
-    XCTAssertEqual(try waitForExit(wrapper), 0)
-  }
-
-  func testACLReceiptIsNotPublishedWhenOnlyStaleListenersAreReachable() throws {
-    let staleSocksListener = try TCPListenerFixture()
-    let staleHTTPListener = try TCPListenerFixture()
-    let runtimeStore = RuntimeFileStore(fileURL: contractURL)
-    let listen = SslocalListenSettings(
-      socksPort: staleSocksListener.port,
-      httpPort: staleHTTPListener.port,
-      pacPort: try ProxyRuntimeFixture.unusedLoopbackPort())
-    let directDocument = SslocalRuntimeDocument(servers: [], listen: listen)
-      .replacingACL(.direct(at: runtimeStore.aclFileURL))
-    try writeContract(directDocument)
-
-    for local in directDocument.locals {
-      XCTAssertEqual(
-        EndpointHealthProbe.probe(host: local.probeHost, port: local.localPort, timeout: 0.2),
-        .reachable,
-        "旧实例应让 \(local.inboundProtocol) 端口可连通")
-    }
-
-    let wrapper = try launchWrapper(behavior: "run")
-    defer {
-      if wrapper.isRunning {
-        kill(wrapper.processIdentifier, SIGTERM)
-        _ = try? waitForExit(wrapper)
-      }
-    }
-
-    XCTAssertTrue(
-      try waitUntil(timeout: 8) {
-        self.agentLog().contains("listen not established within deadline")
-      }, "初次监听等待结束后，wrapper 应继续监管未就绪的 ACL 子进程")
-
-    let server = try XCTUnwrap(ProxyRuntimeFixture.makeDocument().servers.first)
-    let serverReload = SslocalRuntimeDocument(
-      servers: [server], listen: listen, acl: directDocument.aclRuntime)
-    try writeContract(serverReload)
-    XCTAssertEqual(kill(wrapper.processIdentifier, SIGUSR1), 0, "server-only reload 应送达")
-
-    XCTAssertTrue(
-      try waitUntil { self.agentLog().contains("reload deferred until listeners are ready") },
-      "未就绪的直连实例应推迟 server-only reload")
-    XCTAssertTrue(
-      pidAlive(wrapper.processIdentifier),
-      "候选 wrapper 应继续监管；agent log: " + agentLog() + "; child log: " + stateLog())
-    XCTAssertNil(
-      runtimeStore.readRuntimeReceipt(),
-      "候选没有绑定端口时，旧监听和 server-only reload 都不能发布直连回执")
-  }
-
-  // MARK: 监听建立判定（issue #38，D10）
-
-  func testListenNotEstablishedWithinDeadlineIsLoggedAndSupervisionContinues() throws {
-    // stub sslocal 不监听任何端点：超时后应记 error 日志点名端点，且监管继续。
-    try writeContract(ProxyRuntimeFixture.makeDocument())
-    let wrapper = try launchWrapper(behavior: "run")
-
-    let agentLogURL = workDir.appendingPathComponent("agent.log")
-    XCTAssertTrue(
-      try waitUntil {
-        guard let log = try? String(contentsOf: agentLogURL, encoding: .utf8) else {
-          return false
-        }
-        return log.contains("listen not established within deadline")
-      },
-      "3 秒未建立监听应以 error 日志点名（D10），实际 agent.log：\(agentLog())")
-    XCTAssertTrue(pidAlive(wrapper.processIdentifier), "监听未建立只记日志，监管循环继续")
-
-    kill(wrapper.processIdentifier, SIGTERM)
-    XCTAssertEqual(try waitForExit(wrapper), 0, "后续显式停止链不受影响")
-  }
-
-  private func agentLog() -> String {
-    (try? String(contentsOf: workDir.appendingPathComponent("agent.log"), encoding: .utf8)) ?? ""
-  }
-
   // MARK: pid 文件契约
 
   func testWrapperWritesAndRemovesPIDFile() throws {
@@ -438,50 +258,5 @@ final class AgentLifecycleTests: XCTestCase {
     wait(for: [finished], timeout: 3)
     session.invalidateAndCancel()
     return try XCTUnwrap(captured).get()
-  }
-}
-
-private final class TCPListenerFixture {
-  let port: Int
-  private let descriptor: Int32
-
-  init() throws {
-    let socketDescriptor = socket(AF_INET, SOCK_STREAM, 0)
-    guard socketDescriptor >= 0 else { throw POSIXError(.ENOTSOCK) }
-
-    var address = sockaddr_in()
-    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-    address.sin_family = sa_family_t(AF_INET)
-    address.sin_addr.s_addr = inet_addr("127.0.0.1")
-    address.sin_port = 0
-    let bindResult = withUnsafePointer(to: &address) { pointer in
-      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-        Darwin.bind(
-          socketDescriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-      }
-    }
-    guard bindResult == 0, listen(socketDescriptor, 4) == 0 else {
-      close(socketDescriptor)
-      throw POSIXError(.EADDRINUSE)
-    }
-
-    var boundAddress = sockaddr_in()
-    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-    let nameResult = withUnsafeMutablePointer(to: &boundAddress) { pointer in
-      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-        getsockname(socketDescriptor, $0, &length)
-      }
-    }
-    guard nameResult == 0 else {
-      close(socketDescriptor)
-      throw POSIXError(.EINVAL)
-    }
-
-    descriptor = socketDescriptor
-    port = Int(CFSwapInt16BigToHost(boundAddress.sin_port))
-  }
-
-  deinit {
-    close(descriptor)
   }
 }

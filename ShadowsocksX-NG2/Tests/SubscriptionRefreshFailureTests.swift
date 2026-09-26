@@ -50,7 +50,8 @@ final class SubscriptionRefreshFailureTests: XCTestCase {
     let restored = try JSONDecoder().decode(SubscriptionRefreshFailure.self, from: data)
 
     XCTAssertEqual(restored, failure)
-    XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("reason"))
+    let json = String(bytes: data, encoding: .utf8) ?? ""
+    XCTAssertFalse(json.contains("reason"))
   }
 
   func testPartialRollbackIsCoarseAndContainsNoCredentialReferences() throws {
@@ -62,7 +63,7 @@ final class SubscriptionRefreshFailureTests: XCTestCase {
     let restored = try JSONDecoder().decode(SubscriptionRefreshFailure.self, from: data)
 
     XCTAssertEqual(restored, failure)
-    let json = String(decoding: data, as: UTF8.self)
+    let json = String(bytes: data, encoding: .utf8) ?? ""
     XCTAssertFalse(json.contains("credential"))
     XCTAssertFalse(json.contains("reference"))
   }

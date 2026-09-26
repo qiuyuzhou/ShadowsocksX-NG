@@ -90,7 +90,7 @@ final class BundleManagedPluginProviderTests: XCTestCase {
     ) {
       try machine.activate(
         id, in: catalog, credentials: credentials, plugins: makeProvider(),
-        listen: ActivationFixture.listen)
+        options: RuntimeDocumentOptions(listen: ActivationFixture.listen))
     }
   }
 
@@ -106,7 +106,7 @@ final class BundleManagedPluginProviderTests: XCTestCase {
 
     let configuration = try machine.activate(
       id, in: catalog, credentials: credentials, plugins: makeProvider(),
-      listen: ActivationFixture.listen)
+      options: RuntimeDocumentOptions(listen: ActivationFixture.listen))
 
     let server = try XCTUnwrap(configuration.document.servers.first)
     XCTAssertEqual(server.plugin, pluginURL.path)

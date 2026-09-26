@@ -209,6 +209,20 @@ extension LegacyImportPlanner {
     let importedServerCount: Int
   }
 
+  /// 通过逐字段校验的服务器数据（失败点由跳过记录承载）。
+  private struct ValidatedServer {
+    let address: String
+    let port: Int
+    let method: String
+    let password: String
+  }
+
+  /// 单条档案的校验结果：有效数据或点名跳过记录。
+  private enum ServerValidation {
+    case valid(ValidatedServer)
+    case skipped(LegacySkippedRecord)
+  }
+
   private static func importServers(
     _ profiles: [LegacyServerSnapshot],
     into catalog: inout ConfigurationCatalog,
@@ -218,83 +232,36 @@ extension LegacyImportPlanner {
     var skippedRecords: [LegacySkippedRecord] = []
     var regeneratedIdentityCount = 0
     var importedServerCount = 0
-    var usedLegacyIDs: [String: Int] = [:]
+    let usedLegacyIDs = legacyIDCounts(of: profiles)
 
     for profile in profiles {
-      if let id = profile.id { usedLegacyIDs[legacyIdentityKey(id), default: 0] += 1 }
-    }
-
-    for profile in profiles {
-      guard profile.isDictionary else {
-        skippedRecords.append(
-          LegacySkippedRecord(
-            index: profile.index, description: "第 \(profile.index + 1) 条记录", reason: .notDictionary)
-        )
-        continue
+      switch validatedServer(of: profile) {
+      case .skipped(let skipped):
+        skippedRecords.append(skipped)
+      case .valid(let server):
+        let passwordRef = CredentialReference.fresh()
+        credentials[passwordRef] = server.password
+        let pluginOptionsRef = storedPluginOptions(of: profile, into: &credentials)
+        let nodeID: NodeID
+        if let reused = reusableLegacyID(
+          of: profile, usedLegacyIDs: usedLegacyIDs, in: catalog)
+        {
+          nodeID = reused
+        } else {
+          nodeID = .fresh()
+          regeneratedIdentityCount += 1
+        }
+        let fields = ServerFields(
+          address: server.address,
+          port: server.port,
+          encryptionMethod: server.method,
+          passwordRef: passwordRef,
+          remark: profile.remark ?? "",
+          pluginProgram: profile.plugin?.isEmpty == false ? profile.plugin : nil,
+          pluginOptionsRef: pluginOptionsRef)
+        try catalog.addServer(fields, id: nodeID, to: groupID)
+        importedServerCount += 1
       }
-      guard let address = profile.address?.trimmingCharacters(in: .whitespacesAndNewlines),
-        !address.isEmpty, isValidHost(address)
-      else {
-        skippedRecords.append(
-          LegacySkippedRecord(
-            index: profile.index, description: profile.address ?? "第 \(profile.index + 1) 条记录",
-            reason: .invalidAddress))
-        continue
-      }
-      guard let port = profile.port, (1...65_535).contains(port) else {
-        skippedRecords.append(
-          LegacySkippedRecord(
-            index: profile.index, description: address, reason: .invalidPort))
-        continue
-      }
-      guard let method = profile.method?.trimmingCharacters(in: .whitespacesAndNewlines),
-        !method.isEmpty
-      else {
-        skippedRecords.append(
-          LegacySkippedRecord(
-            index: profile.index, description: address, reason: .invalidEncryptionMethod))
-        continue
-      }
-      guard let password = profile.password, !password.isEmpty else {
-        skippedRecords.append(
-          LegacySkippedRecord(
-            index: profile.index, description: address, reason: .missingPassword))
-        continue
-      }
-
-      let nodeID: NodeID
-      if let rawID = profile.id,
-        UUID(uuidString: rawID) != nil,
-        usedLegacyIDs[legacyIdentityKey(rawID)] == 1,
-        !containsEquivalentNodeID(rawID, in: catalog)
-      {
-        nodeID = NodeID(rawValue: rawID)
-      } else {
-        nodeID = .fresh()
-        regeneratedIdentityCount += 1
-      }
-
-      let passwordRef = CredentialReference.fresh()
-      credentials[passwordRef] = password
-      let plugin = profile.plugin?.isEmpty == false ? profile.plugin : nil
-      let pluginOptionsRef: CredentialReference?
-      if let pluginOptions = profile.pluginOptions, !pluginOptions.isEmpty {
-        let reference = CredentialReference.fresh()
-        credentials[reference] = pluginOptions
-        pluginOptionsRef = reference
-      } else {
-        pluginOptionsRef = nil
-      }
-      let fields = ServerFields(
-        address: address,
-        port: port,
-        encryptionMethod: method,
-        passwordRef: passwordRef,
-        remark: profile.remark ?? "",
-        pluginProgram: plugin,
-        pluginOptionsRef: pluginOptionsRef)
-      try catalog.addServer(fields, id: nodeID, to: groupID)
-      importedServerCount += 1
     }
 
     return ServerImportResult(
@@ -302,6 +269,72 @@ extension LegacyImportPlanner {
       skippedRecords: skippedRecords,
       regeneratedIdentityCount: regeneratedIdentityCount,
       importedServerCount: importedServerCount)
+  }
+
+  /// 逐字段校验并点名失败原因：非字典、地址、端口、加密方式、密码。
+  private static func validatedServer(
+    of profile: LegacyServerSnapshot
+  ) -> ServerValidation {
+    guard profile.isDictionary else {
+      return .skipped(
+        LegacySkippedRecord(
+          index: profile.index, description: "第 \(profile.index + 1) 条记录",
+          reason: .notDictionary))
+    }
+    guard let address = profile.address?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !address.isEmpty, isValidHost(address)
+    else {
+      return .skipped(
+        LegacySkippedRecord(
+          index: profile.index, description: profile.address ?? "第 \(profile.index + 1) 条记录",
+          reason: .invalidAddress))
+    }
+    guard let port = profile.port, (1...65_535).contains(port) else {
+      return .skipped(
+        LegacySkippedRecord(index: profile.index, description: address, reason: .invalidPort))
+    }
+    guard let method = profile.method?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !method.isEmpty
+    else {
+      return .skipped(
+        LegacySkippedRecord(
+          index: profile.index, description: address, reason: .invalidEncryptionMethod))
+    }
+    guard let password = profile.password, !password.isEmpty else {
+      return .skipped(
+        LegacySkippedRecord(index: profile.index, description: address, reason: .missingPassword))
+    }
+    return .valid(
+      ValidatedServer(address: address, port: port, method: method, password: password))
+  }
+
+  /// 插件选项非空即写入凭据存储并返回其引用；否则 nil。
+  private static func storedPluginOptions(
+    of profile: LegacyServerSnapshot, into credentials: inout [CredentialReference: String]
+  ) -> CredentialReference? {
+    guard let pluginOptions = profile.pluginOptions, !pluginOptions.isEmpty else { return nil }
+    let reference = CredentialReference.fresh()
+    credentials[reference] = pluginOptions
+    return reference
+  }
+
+  /// 旧 UUID 可复用仅当合法、全表唯一且不与目录现有节点等价；否则 nil（发新身份）。
+  private static func reusableLegacyID(
+    of profile: LegacyServerSnapshot, usedLegacyIDs: [String: Int],
+    in catalog: ConfigurationCatalog
+  ) -> NodeID? {
+    guard let rawID = profile.id, UUID(uuidString: rawID) != nil,
+      usedLegacyIDs[legacyIdentityKey(rawID)] == 1, !containsEquivalentNodeID(rawID, in: catalog)
+    else { return nil }
+    return NodeID(rawValue: rawID)
+  }
+
+  private static func legacyIDCounts(of profiles: [LegacyServerSnapshot]) -> [String: Int] {
+    var counts: [String: Int] = [:]
+    for profile in profiles {
+      if let id = profile.id { counts[legacyIdentityKey(id), default: 0] += 1 }
+    }
+    return counts
   }
 
   private static func legacyIdentityKey(_ rawID: String) -> String {
@@ -339,111 +372,5 @@ extension LegacyImportPlanner {
     let pattern =
       "^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]*[a-zA-Z0-9])\\.)*([A-Za-z0-9]|[A-Za-z0-9][a-zA-Z0-9\\-]*[A-Za-z0-9])$"
     return value.range(of: pattern, options: .regularExpression) != nil
-  }
-}
-
-/// Coordinates the pure plan with the catalog, credential store, and import
-/// completion marker. Preferences and activation state are intentionally absent
-/// from this transaction.
-final class LegacyImportService {
-  private let source: LegacySnapshotProviding
-  private let catalogStore: LegacyCatalogStoring
-  private let credentials: CredentialStoring
-  private let marker: LegacyImportMarkerStoring
-
-  init(
-    source: LegacySnapshotProviding = UserDefaultsLegacySnapshotProvider(),
-    catalogStore: LegacyCatalogStoring = CatalogFileStore(
-      fileURL: CatalogFileStore.defaultFileURL()),
-    credentials: CredentialStoring = KeychainCredentialStore(),
-    marker: LegacyImportMarkerStoring = UserDefaultsLegacyImportMarkerStore()
-  ) {
-    self.source = source
-    self.catalogStore = catalogStore
-    self.credentials = credentials
-    self.marker = marker
-  }
-
-  func readSnapshot() throws -> LegacySnapshot? {
-    try source.readSnapshot()
-  }
-
-  func isCompleted() throws -> Bool {
-    try marker.isCompleted()
-  }
-
-  func importCurrentSnapshot(reimport: Bool = false) throws -> LegacyImportOutcome {
-    guard let snapshot = try source.readSnapshot() else {
-      throw LegacyImportError.noSnapshot
-    }
-    return try importSnapshot(snapshot, reimport: reimport)
-  }
-
-  func importSnapshot(_ snapshot: LegacySnapshot, reimport: Bool = false)
-    throws -> LegacyImportOutcome
-  {
-    let wasCompleted = try marker.isCompleted()
-    guard !wasCompleted || reimport else {
-      throw LegacyImportError.alreadyCompleted
-    }
-
-    let originalDocument = try catalogStore.load()
-    let plan = try LegacyImportPlanner.makePlan(
-      snapshot: snapshot, existingDocument: originalDocument)
-    let touchedReferences = Set(plan.credentials.keys)
-    var originalSecrets: [CredentialReference: String?] = [:]
-    for reference in touchedReferences {
-      originalSecrets[reference] = try credentials.secret(for: reference)
-    }
-
-    do {
-      for (reference, secret) in plan.credentials {
-        try credentials.save(secret, for: reference)
-      }
-      try catalogStore.save(plan.document)
-      try marker.setCompleted(true)
-    } catch {
-      _ = rollback(
-        originalDocument: originalDocument,
-        wasCompleted: wasCompleted,
-        originalSecrets: originalSecrets)
-      throw LegacyImportError.commitFailed
-    }
-
-    return LegacyImportOutcome(
-      groupID: plan.groupID,
-      report: plan.report)
-  }
-}
-
-extension LegacyImportService {
-  fileprivate func rollback(
-    originalDocument: CatalogDocument,
-    wasCompleted: Bool,
-    originalSecrets: [CredentialReference: String?]
-  ) -> [String] {
-    var failures: [String] = []
-    do {
-      try marker.setCompleted(wasCompleted)
-    } catch {
-      failures.append("完成标记：\(error)")
-    }
-    do {
-      try catalogStore.save(originalDocument)
-    } catch {
-      failures.append("目录：\(error)")
-    }
-    for (reference, secret) in originalSecrets {
-      do {
-        if let secret {
-          try credentials.save(secret, for: reference)
-        } else {
-          try credentials.delete(reference)
-        }
-      } catch {
-        failures.append("凭据 \(reference.rawValue)：\(error)")
-      }
-    }
-    return failures
   }
 }

@@ -6,6 +6,23 @@ enum ActivationEffect: Equatable, Sendable {
   case clearedAndStopped(ActivationFailure)
 }
 
+/// 派生运行时文档的监听与行为设置；聚合状态机接口的传参。
+struct RuntimeDocumentOptions: Equatable, Sendable {
+  var listen: SslocalListenSettings
+  var timeout: Int = 60
+  var verbose: Bool = false
+  var pacUserRules: String = ""
+}
+
+extension ProxySettings {
+  /// 激活派生所用选项即用户设置中的运行时文档旋钮。
+  var runtimeDocumentOptions: RuntimeDocumentOptions {
+    RuntimeDocumentOptions(
+      listen: listen, timeout: timeoutSeconds, verbose: verboseLogging,
+      pacUserRules: pacUserRules)
+  }
+}
+
 /// 激活状态机（spec #21 D3 激活族）：持久化活动目标（服务器或分组的节点身份）。
 /// 激活是单缝原子操作——成功替换目标并产出派生文档，失败点名原因且状态不动；
 /// 目录提交后立即重展开，目标失效即清除并发出停止意图。运行时文件写入与
@@ -27,14 +44,10 @@ struct ActivationStateMachine: Equatable, Sendable {
     in catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
     plugins: ManagedPluginProviding,
-    listen: SslocalListenSettings,
-    timeout: Int = 60,
-    verbose: Bool = false,
-    pacUserRules: String = ""
+    options: RuntimeDocumentOptions
   ) throws -> RuntimeConfiguration {
     let outcome = derive(
-      target: target, in: catalog, credentials: credentials, plugins: plugins, listen: listen,
-      timeout: timeout, verbose: verbose, pacUserRules: pacUserRules)
+      target: target, in: catalog, credentials: credentials, plugins: plugins, options: options)
     switch outcome {
     case .success(let configuration):
       activeTargetID = target
@@ -53,15 +66,11 @@ struct ActivationStateMachine: Equatable, Sendable {
     _ catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
     plugins: ManagedPluginProviding,
-    listen: SslocalListenSettings,
-    timeout: Int = 60,
-    verbose: Bool = false,
-    pacUserRules: String = ""
+    options: RuntimeDocumentOptions
   ) -> ActivationEffect? {
     guard let target = activeTargetID else { return nil }
     let outcome = derive(
-      target: target, in: catalog, credentials: credentials, plugins: plugins, listen: listen,
-      timeout: timeout, verbose: verbose, pacUserRules: pacUserRules)
+      target: target, in: catalog, credentials: credentials, plugins: plugins, options: options)
     switch outcome {
     case .success(let configuration):
       return .deployed(configuration)
@@ -81,17 +90,10 @@ struct ActivationStateMachine: Equatable, Sendable {
     in catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
     plugins: ManagedPluginProviding,
-    listen: SslocalListenSettings,
-    timeout: Int,
-    verbose: Bool,
-    pacUserRules: String
+    options: RuntimeDocumentOptions
   ) -> Result<RuntimeConfiguration, ActivationFailure> {
     guard catalog.contains(target) else { return .failure(.targetNotFound(target)) }
-    let isGroup: Bool = {
-      guard let entry = catalog.entry(for: target) else { return false }
-      if case .group = entry.kind { return true }
-      return false
-    }()
+    let isGroup = isGroupTarget(target, in: catalog)
     var leaves: [NodeID] = []
     if isGroup {
       collectServerLeaves(of: target, in: catalog, into: &leaves)
@@ -103,26 +105,18 @@ struct ActivationStateMachine: Equatable, Sendable {
     var servers: [SslocalServerDocument] = []
     var skippedServers: [SkippedServer] = []
     for leafID in leaves {
-      guard let entry = catalog.entry(for: leafID), case .server(let fields) = entry.kind else {
-        preconditionFailure("展开结果只含服务器叶子")
-      }
-      let validation = ServerValidation.evaluate(fields, credentials: credentials, plugins: plugins)
-      if let issue = validation.issues.first {
-        if isGroup {
-          skippedServers.append(SkippedServer(id: leafID, reason: issue))
-          continue
-        }
-        return .failure(.invalidLeaf(node: leafID, reason: issue))
-      }
-      switch derivedServer(leafID, in: catalog, credentials: credentials, plugins: plugins) {
-      case .success(let server):
+      switch deriveLeaf(leafID, in: catalog, credentials: credentials, plugins: plugins) {
+      case .server(let server):
         servers.append(server)
-      case .failure(let failure):
-        if isGroup, case .invalidLeaf(let node, let reason) = failure {
-          skippedServers.append(SkippedServer(id: node, reason: reason))
+      case .skippedCandidate(let skipped):
+        // 分组目标跳过已知无效叶子；单服务器目标整体拒绝且状态不动。
+        if isGroup {
+          skippedServers.append(skipped)
         } else {
-          return .failure(failure)
+          return .failure(.invalidLeaf(node: skipped.id, reason: skipped.reason))
         }
+      case .failed(let failure):
+        return .failure(failure)
       }
     }
     guard !servers.isEmpty else { return .failure(.targetExpandsToNothing(target)) }
@@ -131,11 +125,49 @@ struct ActivationStateMachine: Equatable, Sendable {
         targetID: target,
         document: SslocalRuntimeDocument(
           servers: servers,
-          listen: listen,
-          timeout: timeout,
-          verbose: verbose,
-          pacUserRules: pacUserRules),
+          listen: options.listen,
+          timeout: options.timeout,
+          verbose: options.verbose,
+          pacUserRules: options.pacUserRules),
         skippedServers: skippedServers))
+  }
+
+  private func isGroupTarget(_ target: NodeID, in catalog: ConfigurationCatalog) -> Bool {
+    guard let entry = catalog.entry(for: target) else { return false }
+    if case .group = entry.kind { return true }
+    return false
+  }
+
+  /// 单叶派生结果。`.skippedCandidate` 携带点名原因，分组语义下可跳过，
+  /// 单服务器目标由调用方转成整体拒绝。
+  private enum LeafDerival {
+    case server(SslocalServerDocument)
+    case skippedCandidate(SkippedServer)
+    case failed(ActivationFailure)
+  }
+
+  private func deriveLeaf(
+    _ leafID: NodeID,
+    in catalog: ConfigurationCatalog,
+    credentials: CredentialStoring,
+    plugins: ManagedPluginProviding
+  ) -> LeafDerival {
+    guard let entry = catalog.entry(for: leafID), case .server(let fields) = entry.kind else {
+      preconditionFailure("展开结果只含服务器叶子")
+    }
+    let validation = ServerValidation.evaluate(fields, credentials: credentials, plugins: plugins)
+    if let issue = validation.issues.first {
+      return .skippedCandidate(SkippedServer(id: leafID, reason: issue))
+    }
+    switch derivedServer(leafID, in: catalog, credentials: credentials, plugins: plugins) {
+    case .success(let server):
+      return .server(server)
+    case .failure(let failure):
+      if case .invalidLeaf(let node, let reason) = failure {
+        return .skippedCandidate(SkippedServer(id: node, reason: reason))
+      }
+      return .failed(failure)
+    }
   }
 
   /// 按显式子序深度优先收集全部服务器叶子；有效性在派生阶段统一预检。

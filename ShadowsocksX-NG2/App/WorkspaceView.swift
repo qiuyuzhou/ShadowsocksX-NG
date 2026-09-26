@@ -172,7 +172,9 @@ struct ServersView: View {
     }
     return true
   }
+}
 
+extension ServersView {
   // MARK: - 详情区
 
   @ViewBuilder

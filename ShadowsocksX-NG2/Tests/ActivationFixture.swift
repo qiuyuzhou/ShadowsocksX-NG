@@ -74,7 +74,8 @@ enum ActivationFixture {
     credentials: CredentialStoring
   ) throws -> RuntimeConfiguration {
     try machine.activate(
-      target, in: catalog, credentials: credentials, plugins: plugins, listen: listen)
+      target, in: catalog, credentials: credentials, plugins: plugins,
+      options: RuntimeDocumentOptions(listen: listen))
   }
 
   static func commit(
@@ -83,7 +84,8 @@ enum ActivationFixture {
     credentials: CredentialStoring
   ) -> ActivationEffect? {
     machine.catalogDidCommit(
-      catalog, credentials: credentials, plugins: plugins, listen: listen)
+      catalog, credentials: credentials, plugins: plugins,
+      options: RuntimeDocumentOptions(listen: listen))
   }
 
   /// 断言激活以指定原因原子失败（错误类型与值都点名）。

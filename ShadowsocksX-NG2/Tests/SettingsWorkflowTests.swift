@@ -149,6 +149,7 @@ final class SettingsWorkflowTests: XCTestCase {
   }
 
   private enum FakeSaveError: Error, CustomStringConvertible {
+    // swiftlint:disable:next identifier_name
     case io
 
     var description: String { "fake-io-error" }

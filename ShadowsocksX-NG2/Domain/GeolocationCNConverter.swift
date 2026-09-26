@@ -39,62 +39,55 @@ enum GeolocationParser {
     return entries
   }
 
-  static func parseLine(_ rawLine: String) -> GeolocationEntry? {
+  /// typed 前缀 → 条目构造的对照表；裸域名（无前缀）按 bareDomain 处理。
+  private static let typedPrefixes:
+    [(prefix: String, make: (String, [String]) -> GeolocationEntry)] = [
+      ("include:", { .include(name: $0, attributes: $1) }),
+      ("domain:", { .domain($0, attributes: $1) }),
+      ("full:", { .full($0, attributes: $1) }),
+      ("keyword:", { .keyword($0, attributes: $1) }),
+      ("regexp:", { .regexp($0, attributes: $1) }),
+    ]
+
+  /// 去掉整行 `#` 注释与行内 ` #` 注释并修剪空白；空行返回 nil。
+  private static func codeLine(from rawLine: String) -> String? {
+    guard !rawLine.hasPrefix("#") else { return nil }
     var line = rawLine
-    // 去掉行内注释：` #` 之后（保留 `#` 开头的整行注释跳过）。
-    if line.hasPrefix("#") { return nil }
     if let hashIndex = line.firstIndex(of: "#") {
       // 行内注释前必须有空白，避免切断 `regexp:` 中的 `#`。
-      let before = line[line.index(before: hashIndex)]
-      if before.isWhitespace {
+      if line[line.index(before: hashIndex)].isWhitespace {
         line = String(line[line.startIndex..<hashIndex])
       }
     }
     line = line.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !line.isEmpty else { return nil }
+    return line.isEmpty ? nil : line
+  }
 
+  /// 剥离尾部 `@attr` 属性（可多个，空格分隔），返回剩余内容与属性列表。
+  private static func extractingAttributes(from line: String) -> (
+    content: String, attributes: [String]
+  ) {
+    var parts = line.split(separator: " ", omittingEmptySubsequences: true)
     var attributes: [String] = []
-    // 尾部 `@attr` 属性（可多个，空格分隔）。
-    while true {
-      let parts = line.split(separator: " ", omittingEmptySubsequences: true)
-      guard let last = parts.last, last.hasPrefix("@") else { break }
+    while let last = parts.last, last.hasPrefix("@") {
       attributes.insert(String(last.dropFirst()), at: 0)
-      line = parts.dropLast().joined(separator: " ")
+      parts.removeLast()
     }
-    line = line.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !line.isEmpty else { return nil }
+    return (parts.joined(separator: " "), attributes)
+  }
 
-    if line.hasPrefix("include:") {
-      let name = String(line.dropFirst("include:".count))
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !name.isEmpty else { return nil }
-      return .include(name: name, attributes: attributes)
-    }
-    if line.hasPrefix("domain:") {
-      let value = String(line.dropFirst("domain:".count))
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !value.isEmpty else { return nil }
-      return .domain(value, attributes: attributes)
-    }
-    if line.hasPrefix("full:") {
-      let value = String(line.dropFirst("full:".count))
+  static func parseLine(_ rawLine: String) -> GeolocationEntry? {
+    guard let line = codeLine(from: rawLine) else { return nil }
+    let (content, attributes) = extractingAttributes(from: line)
+    guard !content.isEmpty else { return nil }
+    for typed in Self.typedPrefixes {
+      guard content.hasPrefix(typed.prefix) else { continue }
+      let value = String(content.dropFirst(typed.prefix.count))
         .trimmingCharacters(in: .whitespacesAndNewlines)
       guard !value.isEmpty else { return nil }
-      return .full(value, attributes: attributes)
+      return typed.make(value, attributes)
     }
-    if line.hasPrefix("keyword:") {
-      let value = String(line.dropFirst("keyword:".count))
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !value.isEmpty else { return nil }
-      return .keyword(value, attributes: attributes)
-    }
-    if line.hasPrefix("regexp:") {
-      let value = String(line.dropFirst("regexp:".count))
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !value.isEmpty else { return nil }
-      return .regexp(value, attributes: attributes)
-    }
-    return .bareDomain(line, attributes: attributes)
+    return .bareDomain(content, attributes: attributes)
   }
 }
 
@@ -136,12 +129,18 @@ struct GeolocationCNConverter {
     case invalidEntry(String)
   }
 
+  /// 快照元数据中由人工输入提供、与具体输入文本无关的部分；
+  /// `source` 与 `inputDigest` 由转换器自行补齐。
+  struct Provenance: Sendable {
+    let fetchedAt: Date
+    let upstreamReference: String
+    let license: String
+    let attribution: String
+  }
+
   func convert(
     document: String,
-    fetchedAt: Date,
-    upstreamReference: String,
-    license: String,
-    attribution: String,
+    provenance: Provenance,
     provider: DocumentProvider
   ) throws -> RuleSnapshot {
     var report = RuleConversionLossReport()
@@ -186,11 +185,11 @@ struct GeolocationCNConverter {
 
     let metadata = RuleSnapshotMetadata(
       source: source,
-      upstreamReference: upstreamReference,
+      upstreamReference: provenance.upstreamReference,
       inputDigest: ProxyACLDocument.digest(Data(document.utf8)),
-      fetchedAt: fetchedAt,
-      license: license,
-      attribution: attribution)
+      fetchedAt: provenance.fetchedAt,
+      license: provenance.license,
+      attribution: provenance.attribution)
     return RuleSnapshot(
       metadata: metadata,
       rules: absorption.rules,

@@ -83,87 +83,106 @@ enum SubscriptionRefreshFailure: Codable, Equatable, Sendable {
     case unknown
   }
 
+  /// 无 payload 的失败值 ↔ kind 对照表：编解码共用，保持与 Kind 枚举一一对应。
+  private static let payloadlessKinds: [(kind: Kind, failure: SubscriptionRefreshFailure)] = [
+    (.invalidURL, .invalidURL),
+    (.unsupportedScheme, .unsupportedScheme),
+    (.insecureRedirect, .insecureRedirect),
+    (.decodingFailure, .decodingFailure),
+    (.unsupportedSchemaVersion, .unsupportedSchemaVersion),
+    (.missingServers, .missingServers),
+    (.duplicateIdentity, .duplicateIdentity),
+    (.legacy, .legacy),
+    (.unknown, .unknown),
+  ]
+
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    switch try container.decode(Kind.self, forKey: .kind) {
-    case .invalidURL:
-      self = .invalidURL
-    case .unsupportedScheme:
-      self = .unsupportedScheme
-    case .insecureRedirect:
-      self = .insecureRedirect
+    let kind = try container.decode(Kind.self, forKey: .kind)
+    if let payloadless = Self.payloadlessKinds.first(where: { $0.kind == kind })?.failure {
+      self = payloadless
+    } else {
+      self = try Self.decodePayload(kind: kind, from: container)
+    }
+  }
+
+  /// 带 payload 的 kind → 关联值解码；无 payload 的 kind 由对照表处理，
+  /// 这里显式列出以保持对 Kind 枚举的穷举检查。
+  private static func decodePayload(
+    kind: Kind, from container: KeyedDecodingContainer<CodingKeys>
+  ) throws -> SubscriptionRefreshFailure {
+    switch kind {
     case .transport:
-      self = .transport(try container.decode(TransportCategory.self, forKey: .category))
+      return .transport(try container.decode(TransportCategory.self, forKey: .category))
     case .httpStatus:
-      self = .httpStatus(code: try container.decode(Int.self, forKey: .code))
+      return .httpStatus(code: try container.decode(Int.self, forKey: .code))
     case .contentType:
-      self = .contentType(try container.decode(ContentTypeCategory.self, forKey: .category))
-    case .decodingFailure:
-      self = .decodingFailure
-    case .unsupportedSchemaVersion:
-      self = .unsupportedSchemaVersion
-    case .missingServers:
-      self = .missingServers
+      return .contentType(try container.decode(ContentTypeCategory.self, forKey: .category))
     case .recordValidation:
-      self = .recordValidation(
+      return .recordValidation(
         index: try container.decode(Int.self, forKey: .index),
         field: try container.decode(RecordField.self, forKey: .field))
-    case .duplicateIdentity:
-      self = .duplicateIdentity
     case .credential:
-      self = .credential(category: try container.decode(CredentialCategory.self, forKey: .category))
+      return .credential(category: try container.decode(CredentialCategory.self, forKey: .category))
     case .commit:
-      self = .commit(
+      return .commit(
         category: try container.decode(CommitCategory.self, forKey: .category),
         rollback: try container.decode(CredentialRollbackStatus.self, forKey: .rollback))
-    case .legacy:
-      self = .legacy
-    case .unknown:
-      self = .unknown
+    case .invalidURL, .unsupportedScheme, .insecureRedirect, .decodingFailure,
+      .unsupportedSchemaVersion, .missingServers, .duplicateIdentity, .legacy, .unknown:
+      preconditionFailure("无 payload 的失败种类应由对照表处理")
     }
   }
 
   func encode(to encoder: Encoder) throws {
     var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(kind, forKey: .kind)
+    try encodePayload(to: &container)
+  }
+
+  private var kind: Kind {
+    if let kind = Self.payloadlessKinds.first(where: { $0.failure == self })?.kind {
+      return kind
+    }
     switch self {
-    case .invalidURL:
-      try container.encode(Kind.invalidURL, forKey: .kind)
-    case .unsupportedScheme:
-      try container.encode(Kind.unsupportedScheme, forKey: .kind)
-    case .insecureRedirect:
-      try container.encode(Kind.insecureRedirect, forKey: .kind)
+    case .transport:
+      return .transport
+    case .httpStatus:
+      return .httpStatus
+    case .contentType:
+      return .contentType
+    case .recordValidation:
+      return .recordValidation
+    case .credential:
+      return .credential
+    case .commit:
+      return .commit
+    case .invalidURL, .unsupportedScheme, .insecureRedirect, .decodingFailure,
+      .unsupportedSchemaVersion, .missingServers, .duplicateIdentity, .legacy, .unknown:
+      preconditionFailure("无 payload 的失败种类应由对照表处理")
+    }
+  }
+
+  /// 仅 payload 字段；kind 已由 encode(to:) 写入。穷举保持编译期检查。
+  private func encodePayload(to container: inout KeyedEncodingContainer<CodingKeys>) throws {
+    switch self {
     case .transport(let category):
-      try container.encode(Kind.transport, forKey: .kind)
       try container.encode(category, forKey: .category)
     case .httpStatus(let code):
-      try container.encode(Kind.httpStatus, forKey: .kind)
       try container.encode(code, forKey: .code)
     case .contentType(let category):
-      try container.encode(Kind.contentType, forKey: .kind)
       try container.encode(category, forKey: .category)
-    case .decodingFailure:
-      try container.encode(Kind.decodingFailure, forKey: .kind)
-    case .unsupportedSchemaVersion:
-      try container.encode(Kind.unsupportedSchemaVersion, forKey: .kind)
-    case .missingServers:
-      try container.encode(Kind.missingServers, forKey: .kind)
     case .recordValidation(let index, let field):
-      try container.encode(Kind.recordValidation, forKey: .kind)
       try container.encode(index, forKey: .index)
       try container.encode(field, forKey: .field)
-    case .duplicateIdentity:
-      try container.encode(Kind.duplicateIdentity, forKey: .kind)
     case .credential(let category):
-      try container.encode(Kind.credential, forKey: .kind)
       try container.encode(category, forKey: .category)
     case .commit(let category, let rollback):
-      try container.encode(Kind.commit, forKey: .kind)
       try container.encode(category, forKey: .category)
       try container.encode(rollback, forKey: .rollback)
-    case .legacy:
-      try container.encode(Kind.legacy, forKey: .kind)
-    case .unknown:
-      try container.encode(Kind.unknown, forKey: .kind)
+    case .invalidURL, .unsupportedScheme, .insecureRedirect, .decodingFailure,
+      .unsupportedSchemaVersion, .missingServers, .duplicateIdentity, .legacy, .unknown:
+      break
     }
   }
 }

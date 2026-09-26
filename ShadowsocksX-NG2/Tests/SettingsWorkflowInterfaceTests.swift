@@ -7,8 +7,8 @@ import XCTest
 /// 全部注入替身，不碰真实偏好文件、钥匙串与系统端口。
 @MainActor
 final class SettingsWorkflowInterfaceTests: XCTestCase {
-  private var committing: FakeSettingsCommitter!
-  private var probe: FakeOccupancyProbe!
+  var committing: FakeSettingsCommitter!
+  var probe: FakeOccupancyProbe!
 
   override func setUpWithError() throws {
     try super.setUpWithError()
@@ -16,7 +16,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     probe = FakeOccupancyProbe()
   }
 
-  private func makeWorkflow() -> SettingsWorkflow {
+  func makeWorkflow() -> SettingsWorkflow {
     SettingsWorkflow(committing: committing, occupancyProbe: probe)
   }
 
@@ -324,172 +324,6 @@ extension SettingsWorkflowInterfaceTests {
     XCTAssertEqual(committing.updateCalls.first?.preferredMode, .global, "草稿不编辑当前模式")
   }
 
-  // MARK: - PAC 失效确认
-
-  func testPACPortChangeArmsConfirmationBeforeCommit() async throws {
-    let workflow = makeWorkflow()
-    workflow.draft.pacPort = 13089
-
-    _ = await workflow.save()
-
-    guard case .pacInvalidation(_, let nextPort)? = workflow.pendingConfirmation else {
-      return XCTFail("应挂起 PAC 失效确认，实际 \(String(describing: workflow.pendingConfirmation))")
-    }
-    XCTAssertEqual(nextPort, 13089)
-    XCTAssertTrue(
-      AppPresentation.message(for: .pacInvalidation(previousPort: 11089, nextPort: nextPort))
-        .contains("13089"))
-    XCTAssertTrue(committing.updateCalls.isEmpty, "未确认失效提示不得提交")
-
-    _ = await workflow.confirmPACNotice()
-    await waitUntil(!workflow.isCommitting)
-    XCTAssertNil(workflow.pendingConfirmation)
-    XCTAssertEqual(committing.updateCalls.first?.listen.pacPort, 13089)
-  }
-
-  func testCancelingPACNoticeKeepsDraftAndDoesNotCommit() async throws {
-    let workflow = makeWorkflow()
-    workflow.draft.pacPort = 13089
-
-    _ = await workflow.save()
-    _ = await workflow.cancelPACNotice()
-
-    XCTAssertNil(workflow.pendingConfirmation)
-    XCTAssertTrue(committing.updateCalls.isEmpty)
-    XCTAssertEqual(workflow.draft.pacPort, 13089, "取消后草稿保留待调整值")
-    XCTAssertEqual(committing.committedSettings.listen.pacPort, 11089)
-    XCTAssertTrue(workflow.isDirty)
-  }
-
-  // MARK: - 重置确认
-
-  func testResetArmsConfirmationWithScopeSummaryFromSeam() async throws {
-    let workflow = makeWorkflow()
-
-    _ = await workflow.reset()
-
-    guard case .resetPreferences? = workflow.pendingConfirmation else {
-      return XCTFail("应挂起重置确认，实际 \(String(describing: workflow.pendingConfirmation))")
-    }
-    let summary = AppPresentation.message(for: .resetPreferences)
-    XCTAssertTrue(summary.contains("端口"))
-    XCTAssertTrue(summary.contains("监听范围"))
-    XCTAssertTrue(summary.contains("PAC"))
-    XCTAssertTrue(summary.contains("全部偏好"), "摘要范围与重置事务一致")
-    XCTAssertTrue(summary.contains("代理"), "摘要点名运行中代理会停止")
-    XCTAssertTrue(committing.updateCalls.isEmpty)
-    XCTAssertEqual(committing.resetCallCount, 0)
-  }
-
-  func testConfirmingResetUsesTheResetCommitEntry() async throws {
-    let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 120
-
-    _ = await workflow.reset()
-    _ = await workflow.confirmReset()
-    await waitUntil(!workflow.isCommitting)
-    XCTAssertEqual(committing.resetCallCount, 1)
-
-    XCTAssertNil(workflow.pendingConfirmation)
-    XCTAssertTrue(committing.updateCalls.isEmpty, "重置走重置提交入口，不走设置提交")
-    XCTAssertEqual(workflow.draft, SettingsDraftAdapter.draft(from: ProxySettings()))
-  }
-
-  func testResetReturnsPersistedDefaultsAndIndependentRuntimeFailure() async throws {
-    let runtimeFailure = RuntimeFailureFacts.systemProxy(.ownershipConflict)
-    committing.resetOutcome = .failed(runtimeFailure)
-    let workflow = makeWorkflow()
-
-    _ = await workflow.reset()
-    let outcome = await workflow.confirmReset()
-
-    XCTAssertEqual(outcome, .persisted(runtime: .failed(runtimeFailure)))
-    XCTAssertEqual(workflow.lastFailure, .runtime(runtimeFailure))
-    XCTAssertEqual(workflow.draft, SettingsDraftAdapter.draft(from: ProxySettings()))
-  }
-
-  func testCancelingResetDoesNotCommit() async throws {
-    let workflow = makeWorkflow()
-
-    _ = await workflow.reset()
-    _ = await workflow.cancelReset()
-
-    XCTAssertNil(workflow.pendingConfirmation)
-    XCTAssertEqual(committing.resetCallCount, 0)
-    XCTAssertTrue(committing.updateCalls.isEmpty)
-  }
-
-  // MARK: - 提交中与失败点名文案
-
-  func testCommitFailureSurfacesNamedReasonAndKeepsDraft() async throws {
-    committing.updateError = FakeCommitError.io
-    let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 120
-
-    _ = await workflow.save()
-    await waitUntil(workflow.lastFailure != nil)
-
-    XCTAssertEqual(workflow.lastFailure, .unknown)
-    XCTAssertEqual(workflow.lastFailure?.presentableMessage, AppPresentation.unknownError)
-    XCTAssertFalse(workflow.isCommitting)
-    XCTAssertEqual(workflow.draft.timeoutSeconds, 120, "失败不吞掉草稿")
-    XCTAssertEqual(committing.committedSettings.timeoutSeconds, 60, "失败不半提交")
-    XCTAssertTrue(workflow.isDirty)
-  }
-
-  func testStorageAndCredentialFailuresNameTheReason() async throws {
-    let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 120
-
-    committing.updateError = ProxySettingsStoreError.ioFailure(detail: "disk full")
-    _ = await workflow.save()
-    await waitUntil(!workflow.isCommitting)
-    XCTAssertEqual(
-      workflow.lastFailure,
-      .store(.ioFailure(detail: "disk full")))
-    XCTAssertTrue(workflow.lastFailure?.presentableMessage.contains("偏好文件") == true)
-
-    committing.updateError = ProxySettingsStoreError.missingCredential(
-      ProxySettingsFileStore.gfwListReference)
-    _ = await workflow.save()
-    await waitUntil(
-      workflow.lastFailure
-        == .store(
-          .missingCredential(ProxySettingsFileStore.gfwListReference)))
-    XCTAssertEqual(
-      workflow.lastFailure,
-      .store(.missingCredential(ProxySettingsFileStore.gfwListReference)))
-  }
-
-  func testCommittingStateBlocksRepeatedSave() async throws {
-    committing.updateGate = AsyncGate()
-    let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 120
-
-    let first = Task { await workflow.save() }
-    await Task.yield()
-    await waitUntil(workflow.isCommitting)
-    XCTAssertTrue(workflow.isCommitting)
-    XCTAssertFalse(workflow.canSave, "提交中保存门禁关闭")
-
-    let second = await workflow.save()
-    committing.updateGate?.release()
-    _ = await first.value
-    XCTAssertEqual(second, .rejected(.inProgress))
-    XCTAssertEqual(committing.updateCalls.count, 1, "提交中不得重复触发")
-  }
-
-  func testResetFailureSurfacesNamedReason() async throws {
-    committing.resetError = FakeCommitError.io
-    let workflow = makeWorkflow()
-
-    _ = await workflow.reset()
-    _ = await workflow.confirmReset()
-    await waitUntil(workflow.lastFailure != nil)
-
-    XCTAssertEqual(workflow.lastFailure, .unknown)
-  }
-
   // MARK: - 占用探测代际
 
   func testStaleOccupancyResultDoesNotOverrideNewerGeneration() async throws {
@@ -522,11 +356,5 @@ extension SettingsWorkflowInterfaceTests {
     XCTAssertEqual(
       workflow.portFieldState(for: .socks).occupancy, .occupied(occupier: "later"),
       "监听设置未变的刷新仍产生新占用事实")
-  }
-
-  private enum FakeCommitError: Error, CustomStringConvertible {
-    case io
-
-    var description: String { "fake-io-error" }
   }
 }

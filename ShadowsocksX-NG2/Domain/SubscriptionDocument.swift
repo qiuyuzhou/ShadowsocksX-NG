@@ -178,23 +178,46 @@ enum SubscriptionDocumentParser {
 
     var groups: [String: ExtensionGroup] = [:]
     for groupDTO in groupDTOs {
-      guard let id = groupDTO.id, !id.isEmpty else { return nil }
-      // 分组 ID 与服务器 ID 在整个扩展文档内保持唯一（research issue #4）。
-      guard groups[id] == nil, records["id:\(id)"] == nil else { return nil }
-      var children: [ExtensionChild] = []
-      for childDTO in groupDTO.children ?? [] {
-        guard let childID = childDTO.id, !childID.isEmpty else { return nil }
-        switch childDTO.type {
-        case "group": children.append(.group(childID))
-        case "server": children.append(.server(childID))
-        default: return nil
-        }
+      guard let parsed = extensionGroup(from: groupDTO, existing: groups, records: records) else {
+        return nil
       }
-      groups[id] = ExtensionGroup(name: groupDTO.name ?? "", children: children)
+      groups[parsed.id] = parsed.group
     }
     guard groups[rootGroupID] != nil else { return nil }
+    guard isSingleParentTree(rootedAt: rootGroupID, groups: groups, records: records) else {
+      return nil
+    }
+    return ExtensionTree(rootGroupID: rootGroupID, groups: groups)
+  }
 
-    // 单父 + 无环：从根出发遍历，重复到达即共享父或环。
+  /// 单个分组 DTO → 带唯一 ID 的分组；ID 缺失、与已有分组或服务器 ID 冲突、
+  /// 子引用类型未知即拒绝（分组 ID 与服务器 ID 在整个扩展文档内保持唯一，
+  /// research issue #4）。
+  private static func extensionGroup(
+    from groupDTO: GroupDTO, existing: [String: ExtensionGroup],
+    records: [String: RemoteServerRecord]
+  ) -> (id: String, group: ExtensionGroup)? {
+    guard let id = groupDTO.id, !id.isEmpty else { return nil }
+    guard existing[id] == nil, records["id:\(id)"] == nil else { return nil }
+    var children: [ExtensionChild] = []
+    for childDTO in groupDTO.children ?? [] {
+      guard let childID = childDTO.id, !childID.isEmpty else { return nil }
+      switch childDTO.type {
+      case "group": children.append(.group(childID))
+      case "server": children.append(.server(childID))
+      default: return nil
+      }
+    }
+    return (id, ExtensionGroup(name: groupDTO.name ?? "", children: children))
+  }
+
+  /// 单父 + 无环：从根出发遍历，重复到达即共享父或环；服务器子引用复用
+  /// `servers[].id`，无稳定 ID 的记录没有可引用身份（作为「未引用」落根分组）。
+  private static func isSingleParentTree(
+    rootedAt rootGroupID: String,
+    groups: [String: ExtensionGroup],
+    records: [String: RemoteServerRecord]
+  ) -> Bool {
     var visited = Set<String>()
     func walk(_ groupID: String) -> Bool {
       guard visited.insert(groupID).inserted else { return false }
@@ -204,15 +227,12 @@ enum SubscriptionDocumentParser {
         case .group(let id):
           guard walk(id) else { return false }
         case .server(let id):
-          // 服务器子引用复用 `servers[].id`；无稳定 ID 的记录没有可引用身份，
-          // 只能作为「未引用」落在根分组。
           guard records["id:\(id)"] != nil else { return false }
         }
       }
       return true
     }
-    guard walk(rootGroupID) else { return nil }
-    return ExtensionTree(rootGroupID: rootGroupID, groups: groups)
+    return walk(rootGroupID)
   }
 
   // MARK: - 快照组装

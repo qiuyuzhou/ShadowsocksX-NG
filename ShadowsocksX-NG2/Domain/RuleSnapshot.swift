@@ -121,10 +121,6 @@ enum RuleSnapshotError: Error, Equatable, Sendable {
 struct RuleSnapshotStore {
   let fileURL: URL
 
-  init(fileURL: URL) {
-    self.fileURL = fileURL
-  }
-
   func load() throws -> RuleSnapshot {
     guard FileManager.default.fileExists(atPath: fileURL.path) else {
       throw RuleSnapshotError.missing

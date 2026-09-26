@@ -32,52 +32,54 @@ enum StatusMenuModel {
   /// 运行状态 → 摘要映射（与主窗口诊断区口径一致）：输入是代理控制工作流
   /// 的整体 snapshot（issue #47/#60），菜单不再拆装控制器或运行时字段。
   static func summary(from snapshot: ProxyControlSnapshot) -> Summary {
-    let status: String
-    switch snapshot.runtime.status {
-    case .off:
-      status = "代理未运行"
-    case .starting:
-      status = "正在启动代理…"
-    case .running:
-      status = "代理运行中"
-    case .firewallBlocked:
-      status = "代理运行中（局域网受阻）"
-    case .launchFailed:
-      status = "启动失败"
-    case .requiresApproval:
-      status = "等待允许后台代理"
-    case .serviceFailed:
-      status = "服务管理失败"
-    }
     let agentDetail =
       snapshot.runtime.failure.map { AppPresentation.message(for: $0) }
       ?? snapshot.activationFailure.map { AppPresentation.message(for: $0) }
-    let stateLabel: String
-    let systemProxyDetail: String?
-    switch snapshot.systemProxyApplication {
-    case .idle:
-      stateLabel = "未接管"
-      systemProxyDetail = nil
-    case .pending:
-      stateLabel = "待应用"
-      systemProxyDetail = nil
-    case .applied:
-      stateLabel = "已应用"
-      systemProxyDetail = nil
-    case .failed(let facts):
-      stateLabel = "应用失败"
-      systemProxyDetail = AppPresentation.message(for: RuntimeFailureFacts.systemProxy(facts))
-    }
+    let systemProxy = systemProxyPresentation(for: snapshot.systemProxyApplication)
     return Summary(
       agentIntentEnabled: snapshot.agentIntentEnabled,
       isOn: snapshot.runtime.isOn,
-      status: status,
+      status: statusText(for: snapshot.runtime.status),
       detail: agentDetail,
       systemProxyIntentEnabled: snapshot.systemProxyIntentEnabled,
-      systemProxyStatus: "系统代理：\(stateLabel)",
-      systemProxyStateLabel: stateLabel,
-      systemProxyDetail: systemProxyDetail,
+      systemProxyStatus: "系统代理：\(systemProxy.label)",
+      systemProxyStateLabel: systemProxy.label,
+      systemProxyDetail: systemProxy.detail,
       modeLabel: snapshot.proxyMode.label,
       targetPath: snapshot.activeTarget?.pathSummary)
+  }
+
+  private static func statusText(for status: ProxyRuntimeStatus) -> String {
+    switch status {
+    case .off:
+      return "代理未运行"
+    case .starting:
+      return "正在启动代理…"
+    case .running:
+      return "代理运行中"
+    case .firewallBlocked:
+      return "代理运行中（局域网受阻）"
+    case .launchFailed:
+      return "启动失败"
+    case .requiresApproval:
+      return "等待允许后台代理"
+    case .serviceFailed:
+      return "服务管理失败"
+    }
+  }
+
+  private static func systemProxyPresentation(
+    for application: SystemProxyApplicationFacts
+  ) -> (label: String, detail: String?) {
+    switch application {
+    case .idle:
+      return ("未接管", nil)
+    case .pending:
+      return ("待应用", nil)
+    case .applied:
+      return ("已应用", nil)
+    case .failed(let facts):
+      return ("应用失败", AppPresentation.message(for: RuntimeFailureFacts.systemProxy(facts)))
+    }
   }
 }

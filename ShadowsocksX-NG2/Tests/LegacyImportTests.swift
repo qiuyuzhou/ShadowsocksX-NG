@@ -180,38 +180,37 @@ extension LegacyImportTests {
     ]
   }
 
+  /// 精简档案；`id` 为 nil 时缺省 Id 键（模拟无稳定身份的旧记录）。
+  fileprivate static func profile(
+    id: String?, host: String, port: Int, method: String, password: String
+  ) -> [String: Any] {
+    var profile: [String: Any] = [
+      "ServerHost": host,
+      "ServerPort": port,
+      "Method": method,
+      "Password": password,
+    ]
+    if let id { profile["Id"] = id }
+    return profile
+  }
+
   fileprivate static func makeSnapshot() throws -> LegacySnapshot {
     try LegacySnapshot(
       propertyList: [
         "ServerProfiles": [
           validProfile(),
-          [
-            "Id": "not-a-uuid",
-            "ServerHost": "198.51.100.8",
-            "ServerPort": 8389,
-            "Method": "chacha20-ietf-poly1305",
-            "Password": "password-2",
-          ],
-          [
-            "Id": duplicateID,
-            "ServerHost": "198.51.100.9",
-            "ServerPort": 8390,
-            "Method": "aes-128-gcm",
-            "Password": "password-3",
-          ],
-          [
-            "Id": duplicateID,
-            "ServerHost": "198.51.100.10",
-            "ServerPort": 8391,
-            "Method": "aes-128-gcm",
-            "Password": "password-4",
-          ],
-          [
-            "ServerHost": "not a host",
-            "ServerPort": 8392,
-            "Method": "aes-128-gcm",
-            "Password": "password-5",
-          ],
+          profile(
+            id: "not-a-uuid", host: "198.51.100.8", port: 8389,
+            method: "chacha20-ietf-poly1305", password: "password-2"),
+          profile(
+            id: duplicateID, host: "198.51.100.9", port: 8390,
+            method: "aes-128-gcm", password: "password-3"),
+          profile(
+            id: duplicateID, host: "198.51.100.10", port: 8391,
+            method: "aes-128-gcm", password: "password-4"),
+          profile(
+            id: nil, host: "not a host", port: 8392,
+            method: "aes-128-gcm", password: "password-5"),
           "not-a-profile",
         ],
         "ActiveServerProfileId": validID,

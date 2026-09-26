@@ -17,7 +17,9 @@ final class ProxyRuleTests: XCTestCase {
   func testMatchKindsCoverDomainAndCIDR() throws {
     let exact = try RuleMatch(domainExact: "api.example.com")
     let suffix = try RuleMatch(domainSuffix: "example.com")
+    // swiftlint:disable:next identifier_name
     let v4 = try RuleMatch(ipv4CIDR: "203.0.113.0/24")
+    // swiftlint:disable:next identifier_name
     let v6 = try RuleMatch(ipv6CIDR: "2001:db8::/32")
 
     XCTAssertEqual(exact, .domainExact("api.example.com"))
