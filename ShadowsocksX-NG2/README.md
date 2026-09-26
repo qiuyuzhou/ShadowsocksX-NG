@@ -47,7 +47,8 @@ task lint
 task lint:fix  # 需要自动修复 SwiftLint 违规时使用；执行后再运行 task lint
 task gen:prj   # 生成 Xcode 工程
 task build     # 构建 Debug 版本 app
-task test      # 运行单元测试
+task test      # 运行单元测试（不含真实进程冒烟）
+task test:smoke  # 运行真实进程冒烟测试（拉起真实 sslocal，见下节发布门槛）
 ```
 
 `task format` 会格式化 `App/`、`Tests/`、`Domain/` 和 `Agent/` 下的 Swift 文件；`task lint:fix` 会修改源文件，执行后检查并复核 diff。
@@ -59,10 +60,14 @@ Scripts/fetch-external-binaries.sh
 task gen:prj
 ```
 
-发布前对构建产物运行打包门槛检查：
+`Tests/Smoke/` 是真实进程冒烟（经 wrapper 拉起真实 sslocal 验证启动、握手、
+ACL 路由与插件监管），不在默认 `task test` 内，由独立 scheme 按需运行。
+
+发布前运行发布门槛检查：
 
 ```bash
-# 打包门槛（对构建产物；发布前必须全绿）
+# 发布门槛（必须全绿）：真实进程冒烟 + 打包门槛
+task test:smoke
 Scripts/packaging-gate.sh \
   .build/derivedData/Build/Products/Debug/ShadowsocksX-NG2.app
 ```

@@ -50,6 +50,17 @@ tasks:
         -derivedDataPath {{ .DERIVED_DATA_DIR }}
         test
 
+  test:smoke:
+    desc: 'Run real-process smoke tests (real sslocal; release gate)'
+    cmds:
+      - >-
+        xcodebuild
+        -project ShadowsocksX-NG2.xcodeproj
+        -scheme ShadowsocksX-NG2Smoke
+        -destination 'platform=macOS,arch=arm64'
+        -derivedDataPath {{ .DERIVED_DATA_DIR }}
+        test
+
   clean:
     cmds:
       - rm -rf {{ .BUILD_DIR }}

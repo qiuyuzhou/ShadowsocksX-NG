@@ -40,6 +40,12 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       if signal == SIGUSR1 {
         reloadReceipt?()
       }
+      // kill(_, 0) 判活语义：只对夹具约定的存活 pid（42 与本测试进程）报告
+      // 在跑；陈旧残留 pid 返回 ESRCH，停止协议才不必空等退出超时上限。
+      if signal == 0 {
+        return pid == 42 || pid == ProcessInfo.processInfo.processIdentifier
+          ? 0 : Int32(ESRCH)
+      }
       return 0
     }
   }

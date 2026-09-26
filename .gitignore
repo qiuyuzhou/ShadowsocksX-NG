@@ -99,6 +99,7 @@ ShadowsocksX-NG2/*.xcodeproj
 ShadowsocksX-NG2/App/Info.plist
 ShadowsocksX-NG2/App/ShadowsocksX-NG2.entitlements
 ShadowsocksX-NG2/Tests/Info.plist
+ShadowsocksX-NG2/Tests/Smoke/Info.plist
 
 ####
 # NG2 external binary cache (fetched & hash-verified by

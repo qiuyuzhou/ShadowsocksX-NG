@@ -129,6 +129,9 @@ targets:
     platform: macOS
     sources:
       - path: Tests
+        # 真实进程冒烟归 SmokeTests target，不进默认 task test 快车道。
+        excludes:
+          - "Smoke"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.Tests
@@ -140,3 +143,29 @@ targets:
       properties: {}
     dependencies:
       - target: ShadowsocksX-NG2
+  ShadowsocksX-NG2SmokeTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/Smoke
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.SmokeTests
+        # 同 Team 签名理由同 ShadowsocksX-NG2Tests。
+        CODE_SIGN_IDENTITY: "Apple Development"
+    info:
+      path: Tests/Smoke/Info.plist
+      properties: {}
+    dependencies:
+      - target: ShadowsocksX-NG2
+schemes:
+  # 真实进程冒烟独立 scheme（task test:smoke）：拉起真实 sslocal，按需执行；
+  # 发布门槛要求与 packaging-gate 一起全绿。
+  ShadowsocksX-NG2Smoke:
+    build:
+      targets:
+        ShadowsocksX-NG2: [build]
+        ShadowsocksX-NG2SmokeTests: [test]
+    test:
+      targets:
+        - ShadowsocksX-NG2SmokeTests
