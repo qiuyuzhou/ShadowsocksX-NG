@@ -106,7 +106,9 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     let restored =
       settingsRestore
       ?? RestoredProxySettings(
-        settings: settings ?? ProxySettings(listen: listen), unreadableError: nil)
+        // 控制器行为用例默认「用户已打开 Agent」；出厂默认 off 由 ProxySettingsTests 锁定。
+        settings: settings ?? ProxySettings(listen: listen, agentEnabled: true),
+        unreadableError: nil)
     return ProxyRuntimeController(
       catalogSnapshotReader: ProxyRuntimeFixture.catalogSnapshotReader(at: catalogFileURL),
       activationFileStore: ActivationStateFileStore(fileURL: activationFileURL),
@@ -178,6 +180,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       settings: ProxySettings(
         listen: ActivationFixture.listen,
         preferredMode: .global,
+        agentEnabled: true,
         systemProxyEnabled: true),
       proxyMode: .global)
 

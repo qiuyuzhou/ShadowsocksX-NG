@@ -12,11 +12,13 @@ func loadContract() -> ContractLoad {
   guard let data = try? Data(contentsOf: contractURL) else { return .missing }
   guard let document = SslocalRuntimeDocument.decodeValidated(data) else { return .invalid }
   if let acl = document.aclRuntime {
+    // ADR-0011：契约只带身份；Agent 不读 ACL 内容、不核摘要，只保证链接
+    // 解析后落在运行目录内（防逃逸）且文件存在。
     guard
       document.aclFilePath == aclFileURL.standardizedFileURL.path,
       acl.path == aclFileURL.standardizedFileURL.path,
-      let aclData = try? Data(contentsOf: aclFileURL),
-      aclData == Data(acl.content.utf8)
+      ACLActiveLinkPolicy.resolvesToRegularFile(
+        inside: aclFileURL.deletingLastPathComponent(), linkURL: aclFileURL)
     else { return .invalid }
   }
   return .loaded(document)

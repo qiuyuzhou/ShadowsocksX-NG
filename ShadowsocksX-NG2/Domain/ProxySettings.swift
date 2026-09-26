@@ -16,8 +16,8 @@ struct ProxySettings: Equatable, Sendable {
   var preferredMode: ProxyModeKind
   /// 规则模式子选项（issue #63）：未匹配默认动作，出厂「未匹配时代理」。
   var ruleDefaultAction: RuleDefaultAction
-  /// 代理 agent 意图（issue #60）：首次运行默认开启；用户显式关闭的选择
-  /// 持久化，GUI 重启后仍生效。
+  /// 代理 agent 意图（issue #60，ADR-0011）：默认关闭——全新用户没有服务器
+  /// 配置，默认启动没有意义；用户显式打开的选择持久化，且偏好重置不改变它。
   var agentEnabled: Bool
   /// 系统代理意图（issue #60）：默认关闭；与 agent 意图相互独立，开关关闭
   /// 只恢复 NG2 持有的系统设置，不影响本地监听。
@@ -30,7 +30,7 @@ struct ProxySettings: Equatable, Sendable {
     proxyExceptions: String = ProxySettings.defaultProxyExceptions,
     preferredMode: ProxyModeKind = .rule,
     ruleDefaultAction: RuleDefaultAction = .proxyWhenUnmatched,
-    agentEnabled: Bool = true,
+    agentEnabled: Bool = false,
     systemProxyEnabled: Bool = false
   ) {
     self.listen = listen

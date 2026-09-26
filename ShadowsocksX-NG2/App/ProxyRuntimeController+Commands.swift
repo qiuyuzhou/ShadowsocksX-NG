@@ -113,9 +113,9 @@ extension ProxyRuntimeController {
 
   // MARK: - 动作执行
 
-  /// Agent 意图开启的收敛：注册态不是事实来源，意图才是——未注册也会注册
-  /// （首次运行默认开启），已注册则重校验目标并部署。
-  private func convergeAgent() async {
+  /// Agent 意图开启的收敛：注册态不是事实来源，意图才是——未注册也会注册，
+  /// 已注册则重校验目标并部署。偏好重置后也走此路径，把运行时收敛到出厂设置。
+  func convergeAgent() async {
     let catalog = catalogSnapshotReader.catalogSnapshot
     switch reexpand(in: catalog) {
     case .deployed(let configuration):

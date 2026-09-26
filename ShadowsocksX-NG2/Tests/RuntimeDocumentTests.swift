@@ -105,7 +105,7 @@ final class RuntimeDocumentTests: XCTestCase {
 
   func testACLPathAndMetadataRoundTripAsUpstreamAndWrapperFields() throws {
     let acl = ProxyACLDocument.direct(
-      at: URL(fileURLWithPath: "/tmp/ssxng-tests/sslocal-active.acl"))
+      at: URL(fileURLWithPath: "/tmp/ssxng-tests/acl-active.ini"))
     let document = SslocalRuntimeDocument(
       servers: [], listen: SslocalListenSettings(), acl: acl)
     let dictionary = try encodedDictionary(document)
@@ -115,14 +115,32 @@ final class RuntimeDocumentTests: XCTestCase {
     XCTAssertEqual(dictionary["acl"] as? String, acl.path, "上游配置引用 ACL sidecar")
     XCTAssertEqual(aclMetadata["path"] as? String, acl.path)
     XCTAssertEqual(aclMetadata["sha256"] as? String, acl.sha256)
-    XCTAssertEqual(aclMetadata["content"] as? String, acl.content)
     XCTAssertEqual(aclMetadata["summary"] as? String, "direct")
+    XCTAssertFalse(
+      aclMetadata.keys.contains("content"),
+      "契约只传 path/summary/sha256，不再内嵌 ACL 全文（ADR-0011）")
     XCTAssertEqual(
       SslocalRuntimeDocument.decodeValidated(try document.jsonData()), document)
 
     let changedPath = document.replacingACL(
       .direct(at: URL(fileURLWithPath: "/tmp/ssxng-tests/other.acl")))
     XCTAssertNotEqual(document.listenFingerprint, changedPath.listenFingerprint)
+  }
+
+  func testDecodedACLIdentityMatchesGeneratedDocumentWithoutContent() throws {
+    let acl = ProxyACLDocument.direct(
+      at: URL(fileURLWithPath: "/tmp/ssxng-tests/acl-active.ini"))
+    let document = SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings(), acl: acl)
+    let decoded = try XCTUnwrap(SslocalRuntimeDocument.decodeValidated(try document.jsonData()))
+
+    XCTAssertEqual(
+      decoded.aclRuntime, acl,
+      "解码后身份（path/summary/sha256）与生成文档相等，content 不参与")
+    XCTAssertEqual(decoded.aclRuntime?.content.isEmpty, true, "契约不携带 content")
+    XCTAssertEqual(
+      decoded.listenFingerprint, document.listenFingerprint,
+      "监听指纹只看 ACL 身份字段，content 不参与")
   }
 
   func testLoopbackScopeDerivesBothSslocalInbounds() {

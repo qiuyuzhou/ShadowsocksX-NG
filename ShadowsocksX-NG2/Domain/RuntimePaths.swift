@@ -14,9 +14,10 @@ enum RuntimePaths {
     runtimeDirectory().appendingPathComponent("sslocal-active.json")
   }
 
-  /// ACL sidecar referenced by the upstream `acl` runtime configuration key.
+  /// ACL 稳定链接（ADR-0011）：sslocal 经契约 `acl` 键读取；指向某个
+  /// `acl-<summary>.ini` 变体，换模式只改链接指向。
   static func aclFileURL() -> URL {
-    runtimeDirectory().appendingPathComponent("sslocal-active.acl")
+    runtimeDirectory().appendingPathComponent("acl-active.ini")
   }
 
   /// wrapper 进程 pid 文件：SMAppService.Status 不暴露运行中 agent 的 pid，
@@ -42,5 +43,26 @@ enum RuntimePaths {
   /// system proxy settings. It is protected like the other runtime files.
   static func systemProxyOwnershipURL() -> URL {
     runtimeDirectory().appendingPathComponent("system-proxy-ownership.json")
+  }
+}
+
+/// ACL 活动链接的防逃逸校验（ADR-0011）：解析 symlink 后必须仍是运行目录
+/// 内的普通文件。目录与目标都做 symlink 解析，避免 `/var` vs `/private/var`
+/// 造成假阴性。GUI 写入侧与 Agent 加载侧共用此判定。
+enum ACLActiveLinkPolicy {
+  static func resolvesToRegularFile(inside directory: URL, linkURL: URL) -> Bool {
+    let fileManager = FileManager.default
+    let linkPath = linkURL.standardizedFileURL.path
+    guard fileManager.fileExists(atPath: linkPath) else { return false }
+    let resolved = URL(fileURLWithPath: linkPath).resolvingSymlinksInPath().standardizedFileURL
+    let resolvedDirectory = URL(fileURLWithPath: directory.path).resolvingSymlinksInPath()
+      .standardizedFileURL.path
+    guard resolved.path == resolvedDirectory || resolved.path.hasPrefix(resolvedDirectory + "/")
+    else { return false }
+    var isDirectory: ObjCBool = false
+    guard fileManager.fileExists(atPath: resolved.path, isDirectory: &isDirectory) else {
+      return false
+    }
+    return !isDirectory.boolValue
   }
 }

@@ -73,44 +73,126 @@ final class RuntimeFileStoreTests: XCTestCase {
 
     XCTAssertEqual(try permissions(of: runtime.directory), 0o700)
     XCTAssertEqual(try permissions(of: runtime.contract), 0o600)
-    XCTAssertEqual(try permissions(of: store.aclFileURL), 0o600)
+    XCTAssertEqual(
+      try permissions(of: store.aclVariantFileURL(summary: "direct")), 0o600,
+      "变体文件 0600；链接权限由文件系统决定，不作断言")
     XCTAssertEqual(try store.loadDocument(), document)
   }
 
-  func testACLSidecarMismatchRejectsTheRuntimeDocument() throws {
-    let document = SslocalRuntimeDocument(
-      servers: [],
-      listen: SslocalListenSettings(),
+  /// ADR-0011：变体落在 `acl-<summary>.ini`，契约路径是稳定的 `acl-active.ini`
+  /// 链接；换模式只换链接指向，不重写变体内容。
+  func testWriteMaterializesVariantFileAndActiveLink() throws {
+    let direct = SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings(),
       acl: .direct(at: store.aclFileURL))
-    try store.write(document)
-    try Data("[proxy_all]\n".utf8).write(to: store.aclFileURL)
+    try store.write(direct)
 
-    XCTAssertNil(store.loadDocument(), "wrapper 与 GUI 都拒绝摘要不符的 ACL sidecar")
+    let variantURL = store.aclVariantFileURL(summary: "direct")
+    XCTAssertTrue(FileManager.default.fileExists(atPath: variantURL.path))
+    let linkTarget = try FileManager.default.destinationOfSymbolicLink(
+      atPath: store.aclFileURL.path)
+    XCTAssertEqual(linkTarget, variantURL.lastPathComponent, "链接指向同目录变体文件")
+
+    let global = SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings(),
+      acl: .global(at: store.aclFileURL))
+    try store.write(global)
+
+    XCTAssertEqual(
+      try FileManager.default.destinationOfSymbolicLink(atPath: store.aclFileURL.path),
+      store.aclVariantFileURL(summary: "global").lastPathComponent)
+    XCTAssertTrue(
+      FileManager.default.fileExists(atPath: variantURL.path),
+      "旧变体文件保留，切换只改链接指向")
   }
 
-  func testContractWriteFailureRestoresPreviousACLSidecar() throws {
+  /// digest 清单让未变内容免于重写（ADR-0011）：同内容二次落盘时变体文件
+  /// 修改时间不变。
+  func testUnchangedVariantContentSkipsRewrite() throws {
+    let document = SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings(),
+      acl: .direct(at: store.aclFileURL))
+    try store.write(document)
+    let variantURL = store.aclVariantFileURL(summary: "direct")
+    let firstAttributes = try FileManager.default.attributesOfItem(atPath: variantURL.path)
+    let firstModification = try XCTUnwrap(firstAttributes[.modificationDate] as? Date)
+
+    try store.write(document)
+
+    let secondAttributes = try FileManager.default.attributesOfItem(atPath: variantURL.path)
+    let secondModification = try XCTUnwrap(secondAttributes[.modificationDate] as? Date)
+    XCTAssertEqual(firstModification, secondModification, "digest 相同跳过变体写入")
+  }
+
+  /// Q12-A：读取侧不读 ACL 内容、不核摘要；链接逃逸出运行目录才拒绝。
+  func testLoadDocumentRejectsLinkEscapingRuntimeDirectory() throws {
+    let document = SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings(),
+      acl: .direct(at: store.aclFileURL))
+    try store.write(document)
+    let outside = runtime.directory.deletingLastPathComponent()
+      .appendingPathComponent("outside-\(UUID().uuidString).ini")
+    try Data("[bypass_all]\n".utf8).write(to: outside)
+    defer { try? FileManager.default.removeItem(at: outside) }
+    try FileManager.default.removeItem(at: store.aclFileURL)
+    try FileManager.default.createSymbolicLink(
+      atPath: store.aclFileURL.path, withDestinationPath: outside.path)
+
+    XCTAssertNil(store.loadDocument(), "链接解析后落在运行目录之外即拒绝")
+  }
+
+  func testContractWriteFailureRestoresPreviousVariantAndLink() throws {
+    let contractURL = runtime.contract
+    let previous = SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings(),
+      acl: .direct(at: store.aclFileURL))
+    try store.write(previous)
+
+    let failingStore = RuntimeFileStore(fileURL: contractURL) { data, url in
+      guard url != contractURL else { throw NSError(domain: "test", code: 1) }
+      try AtomicFileWriter.write(data, to: url)
+    }
+    let next = SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings(),
+      acl: .global(at: failingStore.aclFileURL))
+    XCTAssertThrowsError(try failingStore.write(next))
+
+    XCTAssertEqual(
+      try FileManager.default.destinationOfSymbolicLink(atPath: failingStore.aclFileURL.path),
+      failingStore.aclVariantFileURL(summary: "direct").lastPathComponent,
+      "契约写失败后链接回到此前指向")
+    XCTAssertEqual(
+      try failingStore.loadDocument(), previous,
+      "契约未写成功，读取侧仍看到此前文档")
+  }
+
+  /// digest 清单不得先于契约写落盘：否则回滚后清单说新内容、盘上是旧内容，
+  /// 下次写同一新内容会被错误跳过。
+  func testContractWriteFailureDoesNotLeakNewDigestIntoManifest() throws {
+    let previous = SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings(),
+      acl: .direct(at: store.aclFileURL))
+    try store.write(previous)
+
     let contractURL = runtime.contract
     let failingStore = RuntimeFileStore(fileURL: contractURL) { data, url in
       guard url != contractURL else { throw NSError(domain: "test", code: 1) }
       try AtomicFileWriter.write(data, to: url)
     }
-    let previousACL = ProxyACLDocument(
-      path: failingStore.aclFileURL.standardizedFileURL.path,
-      summary: "previous",
-      content: "[bypass_all]\n# previous\n")
-    try Data(previousACL.content.utf8).write(to: failingStore.aclFileURL)
-    let document = SslocalRuntimeDocument(
-      servers: [],
-      listen: SslocalListenSettings(),
-      acl: ProxyACLDocument(
-        path: failingStore.aclFileURL.standardizedFileURL.path,
-        summary: "next",
-        content: "[bypass_all]\n# next\n"))
+    let next = SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings(),
+      acl: .global(at: failingStore.aclFileURL))
+    XCTAssertThrowsError(try failingStore.write(next))
 
-    XCTAssertThrowsError(try failingStore.write(document))
-    XCTAssertTrue(
-      try Data(contentsOf: failingStore.aclFileURL) == Data(previousACL.content.utf8),
-      "运行时契约写失败后恢复此前的 ACL sidecar")
+    // 回滚成功后重试同一「global」写入：必须真写出 global 变体，不得被清单跳过。
+    let retryStore = RuntimeFileStore(fileURL: contractURL)
+    try retryStore.write(next)
+
+    XCTAssertEqual(
+      try Data(contentsOf: retryStore.aclFileURL),
+      Data(ProxyACLDocument.global(at: retryStore.aclFileURL).content.utf8),
+      "失败回滚后重试同一变体必须真正落盘")
+    XCTAssertEqual(retryStore.loadDocument(), next)
   }
 
   // MARK: 读取侧判定
@@ -148,6 +230,9 @@ final class RuntimeFileStoreTests: XCTestCase {
     try store.write(
       SslocalRuntimeDocument(
         servers: [], listen: SslocalListenSettings(), acl: .direct(at: store.aclFileURL)))
+    try store.write(
+      SslocalRuntimeDocument(
+        servers: [], listen: SslocalListenSettings(), acl: .global(at: store.aclFileURL)))
     try Data("1086".utf8).write(to: runtime.pidFile)
     try Data("status".utf8).write(to: store.runtimeStatusFileURL)
     let staleTemporary = runtime.directory.appendingPathComponent(".sslocal-active.json.tmp-stale")
@@ -158,6 +243,12 @@ final class RuntimeFileStoreTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.pidFile.path))
     XCTAssertFalse(FileManager.default.fileExists(atPath: store.aclFileURL.path))
+    XCTAssertFalse(
+      FileManager.default.fileExists(atPath: store.aclVariantFileURL(summary: "direct").path))
+    XCTAssertFalse(
+      FileManager.default.fileExists(atPath: store.aclVariantFileURL(summary: "global").path))
+    XCTAssertFalse(
+      FileManager.default.fileExists(atPath: store.aclDigestManifestURL.path))
     XCTAssertFalse(FileManager.default.fileExists(atPath: store.runtimeStatusFileURL.path))
     XCTAssertFalse(FileManager.default.fileExists(atPath: staleTemporary.path))
   }

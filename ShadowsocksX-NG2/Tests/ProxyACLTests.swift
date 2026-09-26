@@ -57,20 +57,62 @@ final class ProxyACLTests: XCTestCase {
 
   func testACLRejectsChangedDigestAndNonAbsolutePath() {
     let valid = ProxyACLDocument.direct(
-      at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"))
+      at: URL(fileURLWithPath: "/tmp/ssxng-test/acl-active.ini"))
     let badDigest = ProxyACLDocument(
       path: valid.path,
       summary: valid.summary,
       content: valid.content,
       sha256: String(repeating: "0", count: 64))
     let relativePath = ProxyACLDocument(
-      path: "sslocal-active.acl",
+      path: "acl-active.ini",
       summary: valid.summary,
       content: valid.content,
       sha256: valid.sha256)
 
     XCTAssertFalse(badDigest.isWellFormed)
     XCTAssertFalse(relativePath.isWellFormed)
+  }
+
+  /// ADR-0011：契约只传身份字段。解码后的文档没有 content，等式与 well-formed
+  /// 校验只看 path/summary/sha256；生成侧 content 存在时仍自证摘要。
+  func testACLIdentityEqualityIgnoresContentPresence() {
+    let generated = ProxyACLDocument.direct(
+      at: URL(fileURLWithPath: "/tmp/ssxng-test/acl-active.ini"))
+    let decodedShape = ProxyACLDocument(
+      path: generated.path,
+      summary: generated.summary,
+      content: "",
+      sha256: generated.sha256)
+
+    XCTAssertEqual(generated, decodedShape, "content 不参与身份等式")
+    XCTAssertTrue(decodedShape.isWellFormed, "无 content 时按身份形状校验")
+    XCTAssertFalse(
+      ProxyACLDocument(
+        path: generated.path, summary: "", content: "", sha256: generated.sha256
+      ).isWellFormed,
+      "summary 为空仍拒绝")
+    XCTAssertFalse(
+      ProxyACLDocument(
+        path: generated.path, summary: generated.summary, content: "",
+        sha256: "not-a-digest"
+      ).isWellFormed,
+      "摘要形状无效仍拒绝")
+    let mismatchedContent = ProxyACLDocument(
+      path: generated.path, summary: generated.summary, content: "[proxy_all]\n",
+      sha256: generated.sha256)
+    XCTAssertFalse(mismatchedContent.isWellFormed, "携带 content 时仍自证摘要")
+  }
+
+  func testACLIdentityChangeBreaksEquality() {
+    let base = ProxyACLDocument.direct(
+      at: URL(fileURLWithPath: "/tmp/ssxng-test/acl-active.ini"))
+    let otherPath = ProxyACLDocument.direct(
+      at: URL(fileURLWithPath: "/tmp/ssxng-test/other/acl-active.ini"))
+    let otherSummary = ProxyACLDocument.global(
+      at: URL(fileURLWithPath: "/tmp/ssxng-test/acl-active.ini"))
+
+    XCTAssertNotEqual(base, otherPath)
+    XCTAssertNotEqual(base, otherSummary)
   }
 
   // MARK: - 规则模式（issue #63）

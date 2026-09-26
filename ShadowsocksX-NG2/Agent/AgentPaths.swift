@@ -17,7 +17,7 @@ let runtimeDirectoryOverride: URL? = environment["SSXNG_RUNTIME_DIR"].map {
 }
 
 let aclFileURL: URL =
-  runtimeDirectoryOverride?.appendingPathComponent("sslocal-active.acl")
+  runtimeDirectoryOverride?.appendingPathComponent("acl-active.ini")
   ?? RuntimePaths.aclFileURL()
 
 let pidFileURL: URL =

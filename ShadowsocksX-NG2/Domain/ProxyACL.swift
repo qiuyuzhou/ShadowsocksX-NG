@@ -39,13 +39,19 @@ enum FixedLocalProxyRanges {
   }
 }
 
-/// A generated sslocal ACL and its safe runtime identity. The wrapper extension
-/// carries the content so it can validate the sidecar before starting sslocal.
+/// A generated sslocal ACL and its runtime identity (ADR-0011). The contract
+/// carries only path/summary/sha256; `content` stays in memory for the GUI's
+/// variant-file write and is never serialized. Identity equality ignores content
+/// so a decoded (empty-content) document compares equal to its generated source.
 struct ProxyACLDocument: Codable, Equatable, Sendable {
   let path: String
   let summary: String
   let content: String
   let sha256: String
+
+  enum CodingKeys: String, CodingKey {
+    case path, summary, sha256
+  }
 
   init(path: String, summary: String, content: String) {
     self.init(path: path, summary: summary, content: content, sha256: Self.digest(content))
@@ -56,6 +62,25 @@ struct ProxyACLDocument: Codable, Equatable, Sendable {
     self.summary = summary
     self.content = content
     self.sha256 = sha256
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    path = try container.decode(String.self, forKey: .path)
+    summary = try container.decode(String.self, forKey: .summary)
+    sha256 = try container.decode(String.self, forKey: .sha256)
+    content = ""
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(path, forKey: .path)
+    try container.encode(summary, forKey: .summary)
+    try container.encode(sha256, forKey: .sha256)
+  }
+
+  static func == (lhs: ProxyACLDocument, rhs: ProxyACLDocument) -> Bool {
+    lhs.path == rhs.path && lhs.summary == rhs.summary && lhs.sha256 == rhs.sha256
   }
 
   /// Direct mode deliberately has no `proxy_list`: `bypass_all` supplies the
@@ -127,10 +152,16 @@ struct ProxyACLDocument: Codable, Equatable, Sendable {
   }
 
   var isWellFormed: Bool {
-    path.hasPrefix("/")
-      && !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      && !content.isEmpty
-      && content.utf8.allSatisfy { $0 < 128 }
+    guard
+      path.hasPrefix("/"),
+      !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+      sha256.count == 64,
+      sha256.allSatisfy({ $0.isHexDigit })
+    else { return false }
+    // 生成侧携带 content 时自证摘要；解码侧无 content，按身份形状收下
+    // （ADR-0011：Agent 不读 sidecar，摘要一致性由 GUI 写入序保证）。
+    if content.isEmpty { return true }
+    return content.utf8.allSatisfy { $0 < 128 }
       && sha256 == Self.digest(content)
   }
 

@@ -204,7 +204,7 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
   var proxyExceptions: String = ProxySettings.defaultProxyExceptions
   var preferredMode: ProxyModeKind = .rule
   var ruleDefaultAction: RuleDefaultAction = .proxyWhenUnmatched
-  var agentEnabled: Bool = true
+  var agentEnabled: Bool = false
   var systemProxyEnabled: Bool = false
 
   init() {}
@@ -237,8 +237,8 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
     ruleDefaultAction =
       try container.decodeIfPresent(RuleDefaultAction.self, forKey: .ruleDefaultAction)
       ?? .proxyWhenUnmatched
-    // 首次运行缺省：agent 默认开启，系统代理默认关闭（issue #60）。
-    agentEnabled = try container.decodeIfPresent(Bool.self, forKey: .agentEnabled) ?? true
+    // 未发版无迁移：缺省 agent off、系统代理 off（ADR-0011）。
+    agentEnabled = try container.decodeIfPresent(Bool.self, forKey: .agentEnabled) ?? false
     systemProxyEnabled =
       try container.decodeIfPresent(Bool.self, forKey: .systemProxyEnabled) ?? false
   }

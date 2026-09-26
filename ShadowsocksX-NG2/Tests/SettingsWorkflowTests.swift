@@ -92,7 +92,9 @@ final class SettingsWorkflowTests: XCTestCase {
     _ = await pair.workflow.confirmReset()
 
     XCTAssertEqual(pair.workflow.draft, SettingsDraftAdapter.draft(from: ProxySettings()))
-    XCTAssertNil(settingsStore.saved)
+    XCTAssertEqual(
+      settingsStore.saved, ProxySettings(),
+      "重置后落盘的是出厂默认；Agent switch 的现值被特判保留（此处默认即 off）")
   }
 
   // MARK: - 夹具

@@ -101,22 +101,32 @@ extension ProxyRuntimeController {
     return settingsRuntimeOutcome()
   }
 
-  /// Restores factory defaults, removes the persisted snapshot and stops any
-  /// active runtime before the next user action can use the defaults. Factory
-  /// intents are agent on / system proxy off, so held system settings are
-  /// restored and the agent stops until the next convergence.
+  /// Restores factory defaults and rewrites the persisted snapshot. The agent
+  /// switch is an independent choice: reset never changes it and never stops a
+  /// running agent (ADR-0011). Factory intents are agent off / system proxy off,
+  /// so a held system-proxy application is returned and a still-enabled agent
+  /// converges onto the factory runtime instead of keeping a stale contract.
   func resetPreferences() async throws -> SettingsRuntimeOutcome {
+    let preservedAgentEnabled = settings.agentEnabled
+    let heldSystemProxy = settings.systemProxyEnabled
     try settingsStore.reset()
     settings = ProxySettings()
+    settings.agentEnabled = preservedAgentEnabled
+    try settingsStore.save(settings)
     listenSettingsUnreadable = false
     settingsUnreadable = false
     proxyMode = .rule
     lastActivationFailure = nil
-    await stopAgent()
+    if heldSystemProxy {
+      systemProxyState = restoreSystemProxyOutcome()
+    }
+    if preservedAgentEnabled, state != .off {
+      await convergeAgent()
+    }
     if case .failed(let facts) = systemProxyState {
       return .failed(.systemProxy(facts))
     }
-    return .stopped
+    return preservedAgentEnabled ? settingsRuntimeOutcome() : .stopped
   }
 
   /// Applies the post-import 2.0 runtime boundary without touching

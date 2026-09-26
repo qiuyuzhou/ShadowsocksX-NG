@@ -13,7 +13,7 @@ extension ProxyRuntimeControllerTests {
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       settingsStore: settingsStore,
       settings: ProxySettings(
-        listen: ActivationFixture.listen, systemProxyEnabled: true))
+        listen: ActivationFixture.listen, agentEnabled: true, systemProxyEnabled: true))
     try await controller.activate(seeded.server)
     XCTAssertEqual(controller.systemProxyState, .applied)
     let unregisterCount = agent.unregisterCount
@@ -29,11 +29,12 @@ extension ProxyRuntimeControllerTests {
       agent.unregisterCount, unregisterCount + 1, "ACL 变化触发完整 agent 重启")
     let document = try XCTUnwrap(runtimeStore.loadDocument())
     XCTAssertEqual(document.aclRuntime?.summary, "global")
-    XCTAssertEqual(
-      document.aclRuntime?.content.hasPrefix("[proxy_all]\n[bypass_list]\n"), true)
+    let expectedACL = ProxyACLDocument.global(at: runtimeStore.aclFileURL)
+    XCTAssertTrue(expectedACL.content.hasPrefix("[proxy_all]\n[bypass_list]\n"))
     XCTAssertEqual(
       try Data(contentsOf: runtimeStore.aclFileURL),
-      Data(try XCTUnwrap(document.aclRuntime).content.utf8))
+      Data(expectedACL.content.utf8),
+      "链接解析后的内容是 global 变体")
     XCTAssertEqual(
       systemProxy.applied.last?.target,
       .socks(host: "127.0.0.1", port: ActivationFixture.listen.socksPort))
@@ -53,7 +54,7 @@ extension ProxyRuntimeControllerTests {
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       settingsStore: settingsStore,
       settings: ProxySettings(
-        listen: ActivationFixture.listen, systemProxyEnabled: true))
+        listen: ActivationFixture.listen, agentEnabled: true, systemProxyEnabled: true))
     await controller.resyncOnLaunch()
     XCTAssertEqual(controller.state, .running, "无活动目标时 agent 仍监听")
     XCTAssertNil(controller.activeTargetID)
@@ -93,7 +94,7 @@ extension ProxyRuntimeControllerTests {
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       settingsStore: settingsStore,
       settings: ProxySettings(
-        listen: ActivationFixture.listen, systemProxyEnabled: true),
+        listen: ActivationFixture.listen, agentEnabled: true, systemProxyEnabled: true),
       launchHealthTimeoutSeconds: 0.05)
     try await controller.activate(seeded.server)
     XCTAssertEqual(controller.systemProxyState, .applied)

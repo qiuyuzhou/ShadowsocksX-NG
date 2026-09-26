@@ -46,7 +46,7 @@ extension ProxyRuntimeControllerTests {
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       settingsStore: settingsStore,
       settings: ProxySettings(
-        listen: ActivationFixture.listen, systemProxyEnabled: true))
+        listen: ActivationFixture.listen, agentEnabled: true, systemProxyEnabled: true))
 
     await controller.resyncOnLaunch()
     XCTAssertEqual(controller.state, .running)
@@ -64,9 +64,11 @@ extension ProxyRuntimeControllerTests {
     let document = try XCTUnwrap(runtimeStore.loadDocument())
     XCTAssertTrue(document.servers.isEmpty, "直连模式允许空服务器列表")
     XCTAssertEqual(document.aclRuntime?.summary, "direct")
+    let expectedACL = ProxyACLDocument.direct(at: runtimeStore.aclFileURL)
     XCTAssertEqual(
       try Data(contentsOf: runtimeStore.aclFileURL),
-      Data(try XCTUnwrap(document.aclRuntime).content.utf8))
+      Data(expectedACL.content.utf8),
+      "链接解析后的内容是 direct 变体")
     XCTAssertEqual(
       systemProxy.applied.last?.target,
       .socks(host: "127.0.0.1", port: ActivationFixture.listen.socksPort))
@@ -96,7 +98,7 @@ extension ProxyRuntimeControllerTests {
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       settingsStore: settingsStore,
       settings: ProxySettings(
-        listen: ActivationFixture.listen, systemProxyEnabled: true),
+        listen: ActivationFixture.listen, agentEnabled: true, systemProxyEnabled: true),
       launchHealthTimeoutSeconds: 0.05)
     try await controller.activate(seeded.server)
     XCTAssertEqual(controller.systemProxyState, .applied)
@@ -151,7 +153,7 @@ extension ProxyRuntimeControllerTests {
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       settingsStore: settingsStore,
       settings: ProxySettings(
-        listen: ActivationFixture.listen, systemProxyEnabled: true),
+        listen: ActivationFixture.listen, agentEnabled: true, systemProxyEnabled: true),
       processIsAlive: { processLiveness.isAlive($0) })
     try await controller.activate(seeded.server)
     XCTAssertEqual(controller.systemProxyState, .applied)

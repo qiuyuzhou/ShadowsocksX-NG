@@ -202,7 +202,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     let composition = makeProxies(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       settings: ProxySettings(
-        listen: ActivationFixture.listen, systemProxyEnabled: true))
+        listen: ActivationFixture.listen, agentEnabled: true, systemProxyEnabled: true))
     _ = try await composition.catalog.activate(server)
     _ = await composition.control.setAgentEnabled(true)
     XCTAssertEqual(composition.control.snapshot.systemProxyApplication, .applied)

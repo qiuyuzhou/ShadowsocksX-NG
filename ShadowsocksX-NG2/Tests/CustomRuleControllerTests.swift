@@ -23,10 +23,17 @@ extension ProxyRuntimeControllerTests {
     makeController(
       probe: probe,
       settingsStore: InMemoryProxySettingsStore(),
-      settings: settings ?? ProxySettings(listen: ActivationFixture.listen),
+      settings: settings
+        ?? ProxySettings(listen: ActivationFixture.listen, agentEnabled: true),
       proxyMode: proxyMode,
       launchHealthTimeoutSeconds: launchHealthTimeoutSeconds,
       customRuleStore: store)
+  }
+
+  /// 从链接解析读取当前 ACL 变体内容（契约不再内嵌 content）。
+  private func activeACLContent(_ store: RuntimeFileStore) throws -> String {
+    let data = try Data(contentsOf: store.aclFileURL)
+    return String(bytes: data, encoding: .utf8) ?? ""
   }
 
   /// 规则内容变化重编译 ACL 并按完整重启路径生效。
@@ -36,7 +43,8 @@ extension ProxyRuntimeControllerTests {
     let settings = ProxySettings(
       listen: ActivationFixture.listen,
       preferredMode: .rule,
-      ruleDefaultAction: .proxyWhenUnmatched)
+      ruleDefaultAction: .proxyWhenUnmatched,
+      agentEnabled: true)
     let controller = makeControllerWithCustomRules(
       store: store, settings: settings, proxyMode: .rule)
     try await controller.activate(seeded.server)
@@ -51,9 +59,11 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(outcome, .saved)
     XCTAssertEqual(try store.load(), [rule])
     XCTAssertEqual(agent.unregisterCount, unregisterBefore + 1, "ACL 变化触发完整 agent 重启")
-    let document = try XCTUnwrap(RuntimeFileStore(fileURL: runtime.contract).loadDocument())
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    let document = try XCTUnwrap(runtimeStore.loadDocument())
+    XCTAssertEqual(document.aclRuntime?.summary, "rule-proxy-default")
     XCTAssertTrue(
-      document.aclRuntime?.content.contains("||internal.example") == true,
+      try activeACLContent(runtimeStore).contains("||internal.example"),
       "自定义直连规则应进入规则模式 ACL")
   }
 
@@ -67,7 +77,8 @@ extension ProxyRuntimeControllerTests {
     let settings = ProxySettings(
       listen: ActivationFixture.listen,
       preferredMode: .rule,
-      ruleDefaultAction: .proxyWhenUnmatched)
+      ruleDefaultAction: .proxyWhenUnmatched,
+      agentEnabled: true)
     let controller = makeControllerWithCustomRules(
       store: store, settings: settings, proxyMode: .rule)
     try await controller.activate(seeded.server)
@@ -95,6 +106,7 @@ extension ProxyRuntimeControllerTests {
       listen: ActivationFixture.listen,
       preferredMode: .rule,
       ruleDefaultAction: .proxyWhenUnmatched,
+      agentEnabled: true,
       systemProxyEnabled: true)
     let controller = makeControllerWithCustomRules(
       store: store, settings: settings, proxyMode: .rule, launchHealthTimeoutSeconds: 0.05)
@@ -106,9 +118,12 @@ extension ProxyRuntimeControllerTests {
 
     agent.onRegister = { [runtimeStore, previousDocument] in
       guard let requested = runtimeStore.loadDocument() else { return }
-      // 新 ACL 实例不被接受，模拟验证失败。
+      // 新 ACL 实例不被接受，模拟验证失败（按磁盘变体内容识别新规则）。
+      let content =
+        (try? Data(contentsOf: runtimeStore.aclFileURL))
+        .flatMap { String(bytes: $0, encoding: .utf8) } ?? ""
       let accepted =
-        requested.aclRuntime?.content.contains("new-rule.example") == true
+        content.contains("new-rule.example")
         ? previousDocument : requested
       try? runtimeStore.writeRuntimeReceipt(for: accepted, processID: 42)
     }
@@ -121,7 +136,8 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(try store.load(), [existing], "部署失败回滚旧规则")
     XCTAssertEqual(runtimeStore.loadDocument(), previousDocument, "回滚旧运行时")
     XCTAssertFalse(
-      runtimeStore.loadDocument()?.aclRuntime?.content.contains("new-rule.example") == true)
+      try activeACLContent(runtimeStore).contains("new-rule.example"),
+      "回滚后活动变体不含新规则")
     XCTAssertEqual(controller.state, .running, "旧运行时恢复后重新呈现健康")
     XCTAssertEqual(systemProxy.applied.count, previousApplicationCount)
     XCTAssertEqual(systemProxy.restoreCount, 0, "切换失败期间保持原系统代理应用")
@@ -133,7 +149,8 @@ extension ProxyRuntimeControllerTests {
     let (store, _) = try makeCustomRuleStore()
     let settings = ProxySettings(
       listen: ActivationFixture.listen,
-      preferredMode: .global)
+      preferredMode: .global,
+      agentEnabled: true)
     let controller = makeControllerWithCustomRules(
       store: store, settings: settings, proxyMode: .global)
     try await controller.activate(seeded.server)
@@ -147,9 +164,10 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(outcome, .saved)
     XCTAssertEqual(try store.load(), [rule])
     XCTAssertEqual(agent.unregisterCount, unregisterBefore, "全局模式 ACL 不含自定义规则，无需重启")
-    let document = try XCTUnwrap(RuntimeFileStore(fileURL: runtime.contract).loadDocument())
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    let document = try XCTUnwrap(runtimeStore.loadDocument())
     XCTAssertEqual(document.aclRuntime?.summary, "global")
-    XCTAssertFalse(document.aclRuntime?.content.contains("internal.example") == true)
+    XCTAssertFalse(try activeACLContent(runtimeStore).contains("internal.example"))
   }
 
   /// 诊断摘要只含数量与内容版本（issue #66 AC5）。

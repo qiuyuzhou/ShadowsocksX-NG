@@ -23,19 +23,22 @@ extension ProxyRuntimeControllerTests {
     XCTAssertTrue(systemProxy.applied.isEmpty, "系统代理意图关闭，不写系统设置")
     XCTAssertEqual(controller.systemProxyState, .idle)
   }
-  /// 首次运行默认语义（issue #60）：GUI 重同步即按默认意图注册并监听，系统
-  /// 代理保持未接管。
-  func testFirstRunResyncStartsAgentWithoutSystemProxy() async throws {
+  /// 首次运行默认语义（ADR-0011）：全新用户没有服务器配置，GUI 重同步不
+  /// 注册、不拉起 Agent；系统代理保持未接管。
+  func testFirstRunResyncKeepsAgentOffWithoutSystemProxy() async throws {
     _ = try makeSeededCatalog()
-    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
 
     await controller.resyncOnLaunch()
 
-    XCTAssertEqual(controller.state, .running)
-    XCTAssertEqual(agent.registerCount, 1, "首次运行默认启动 agent")
-    let onDisk = try XCTUnwrap(
-      RuntimeFileStore(fileURL: runtime.contract).loadDocument())
-    XCTAssertTrue(onDisk.servers.isEmpty)
+    XCTAssertEqual(controller.state, .off)
+    XCTAssertEqual(agent.registerCount, 0, "首次运行默认不启动 agent")
+    XCTAssertFalse(controller.settings.agentEnabled)
+    XCTAssertNil(
+      RuntimeFileStore(fileURL: runtime.contract).loadDocument(),
+      "Agent 未启用时不写运行时契约")
     XCTAssertEqual(controller.systemProxyState, .idle)
     XCTAssertTrue(systemProxy.applied.isEmpty)
   }
@@ -45,8 +48,10 @@ extension ProxyRuntimeControllerTests {
     let seeded = try makeSeededCatalog()
     let settingsStore = InMemoryProxySettingsStore()
     let controller = makeController(
-      probe: ProxyRuntimeFixture.FakeProbe.reachable(), settingsStore: settingsStore)
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(), settingsStore: settingsStore,
+      settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: true))
     try await controller.activate(seeded.server)
+    await controller.setAgentEnabled(true)
     await controller.setAgentEnabled(false)
     XCTAssertEqual(settingsStore.saved?.agentEnabled, false, "关闭选择已持久化")
 
@@ -174,7 +179,7 @@ extension ProxyRuntimeControllerTests {
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       settings: ProxySettings(
-        listen: ActivationFixture.listen, systemProxyEnabled: true))
+        listen: ActivationFixture.listen, agentEnabled: true, systemProxyEnabled: true))
     try await controller.activate(seeded.server)
     await controller.setAgentEnabled(true)
     XCTAssertEqual(controller.systemProxyState, .applied)
@@ -195,7 +200,7 @@ extension ProxyRuntimeControllerTests {
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       settings: ProxySettings(
-        listen: ActivationFixture.listen, systemProxyEnabled: true))
+        listen: ActivationFixture.listen, agentEnabled: true, systemProxyEnabled: true))
     try await controller.activate(seeded.server)
     await controller.setAgentEnabled(true)
     XCTAssertEqual(controller.systemProxyState, .applied)

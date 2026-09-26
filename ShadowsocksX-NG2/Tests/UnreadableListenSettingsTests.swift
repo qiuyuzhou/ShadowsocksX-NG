@@ -30,7 +30,8 @@ final class UnreadableListenSettingsTests: XCTestCase {
 
   private func makeController(
     agentStatus: LaunchAgentStatus,
-    listenUnreadable: ListenSettingsStoreError
+    listenUnreadable: ListenSettingsStoreError,
+    settingsRestore: RestoredProxySettings? = nil
   ) -> ProxyRuntimeController {
     agent.setStatus(agentStatus)
     let catalogSnapshotReader = CatalogCommitCoordinator.bootstrap(
@@ -44,6 +45,7 @@ final class UnreadableListenSettingsTests: XCTestCase {
       plugins: ActivationFixture.plugins,
       listenRestore: RestoredListenSettings(
         settings: SslocalListenSettings(), unreadableError: listenUnreadable),
+      settingsRestore: settingsRestore,
       agent: agent,
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       systemProxy: systemProxy,
@@ -88,7 +90,10 @@ final class UnreadableListenSettingsTests: XCTestCase {
     try RuntimeFileStore(fileURL: runtime.contract).write(ProxyRuntimeFixture.makeDocument())
     let controller = makeController(
       agentStatus: .registered,
-      listenUnreadable: .corrupt(detail: "test"))
+      listenUnreadable: .corrupt(detail: "test"),
+      settingsRestore: RestoredProxySettings(
+        settings: ProxySettings(listen: SslocalListenSettings(), agentEnabled: true),
+        unreadableError: .legacyListenSettings(.corrupt(detail: "test"))))
 
     await controller.resyncOnLaunch()
 
