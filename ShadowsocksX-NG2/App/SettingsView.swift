@@ -232,7 +232,7 @@ extension SettingsView {
           initialDraft: workflow.beginPortSettingsEditing())
       } label: {
         HStack(spacing: 8) {
-          Text("SOCKS5 \(socksPort) / HTTP \(httpPort)")
+          Text("SOCKS \(socksPort) / HTTP \(httpPort)")
             .monospacedDigit()
           Image(systemName: "chevron.right")
             .font(.caption.weight(.semibold))
@@ -240,7 +240,7 @@ extension SettingsView {
       }
       .buttonStyle(.bordered)
       .accessibilityLabel("端口设置")
-      .accessibilityValue("SOCKS5 \(socksPort)，HTTP 代理 \(httpPort)")
+      .accessibilityValue("SOCKS \(socksPort)，HTTP 代理 \(httpPort)")
     }
   }
 
