@@ -128,7 +128,7 @@ extension AppPresentation {
 
   static func message(for issue: SettingsFieldIssue) -> String {
     switch issue {
-    case .port(_, let error), .advertisedAddress(let error):
+    case .port(_, let error):
       return message(for: error)
     }
   }
@@ -146,9 +146,6 @@ extension AppPresentation {
   static func message(for failure: SettingsWorkflowFailure) -> String {
     switch failure {
     case .store(let error): return settingsStore(error)
-    case .mode(let error): return proxyMode(error)
-    case .runtime(let runtimeFailure):
-      return runtimeFailure.map { message(for: $0) } ?? unknownError
     case .unknown: return unknownError
     }
   }
@@ -275,7 +272,6 @@ extension AppPresentation {
       return Self.port(.portOutOfRange(endpoint: endpoint, port: port))
     case .duplicatePort(let endpoint, let otherEndpoint, let port):
       return Self.port(.duplicatePort(endpoint: endpoint, otherEndpoint: otherEndpoint, port: port))
-    case .invalidHostAddress: return "主机地址无效，必须是非回环 IPv4 地址"
     }
   }
 

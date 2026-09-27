@@ -5,18 +5,17 @@ enum ProxyPortRange {
   static let valid = 1000...65_535
 }
 
-/// 本地端点与单一监听范围的派生设置。HTTP 入站恒开启，与 SOCKS 共用同一
-/// 范围；默认端口与 Legacy 隔离（11086/11087）。PAC 端点已随 issue #67 移除。
+/// 本地端点与单一监听方式的派生设置。HTTP 入站恒开启，与 SOCKS 共用同一
+/// 监听方式；默认端口与 Legacy 隔离（11086/11087）。
 struct SslocalListenSettings: Equatable, Sendable {
   static let defaultSocksPort = 11086
   static let defaultHTTPPort = 11087
 
-  var scope: ListenScope = .loopback
+  var listenerMode: ListenerMode = .localhost
   var socksPort: Int = Self.defaultSocksPort
   var httpPort: Int = Self.defaultHTTPPort
 
-  var bindAddress: String { scope.bindAddress }
-  var advertisedAddress: String { scope.advertisedAddress }
+  var bindAddress: String { listenerMode.bindAddress }
   var mode: String { "tcp_and_udp" }
 
   var locals: [SslocalLocalDocument] {
@@ -36,54 +35,45 @@ struct SslocalListenSettings: Equatable, Sendable {
 }
 
 /// Typed effective listener facts exposed by the runtime boundary. This is the
-/// complete identity of the listeners that are actually intended to be bound:
-/// scope carries both bind and advertised addresses, while the ports prevent a
-/// same-port comparison from masquerading as a match.
+/// complete identity of the listeners that are actually intended to be bound.
 struct RuntimeListenFacts: Equatable, Sendable {
-  let scope: ListenScope
+  let listenerMode: ListenerMode
   let socksPort: Int
   let httpPort: Int
 
   init(listen: SslocalListenSettings) {
     self.init(
-      scope: listen.scope,
+      listenerMode: listen.listenerMode,
       socksPort: listen.socksPort,
       httpPort: listen.httpPort)
   }
 
   init(
-    scope: ListenScope,
+    listenerMode: ListenerMode,
     socksPort: Int,
     httpPort: Int
   ) {
-    self.scope = scope
+    self.listenerMode = listenerMode
     self.socksPort = socksPort
     self.httpPort = httpPort
   }
 
   init(document: SslocalRuntimeDocument) {
-    let scope: ListenScope
-    switch document.listen.listenScope {
-    case .loopback:
-      scope = .loopback
-    case .host:
-      scope = .host(advertisedAddress: document.listen.advertisedAddress)
-    }
     let socks = document.locals.first { $0.inboundProtocol == "socks" }
     let http = document.locals.first { $0.inboundProtocol == "http" }
     self.init(
-      scope: scope,
+      listenerMode: document.listen.listenerMode,
       socksPort: socks?.localPort ?? 0,
       httpPort: http?.localPort ?? SslocalListenSettings.defaultHTTPPort)
   }
 
-  var bindAddress: String { scope.bindAddress }
-  var advertisedAddress: String { scope.advertisedAddress }
+  var bindAddress: String { listenerMode.bindAddress }
 }
 
 /// 监听指纹（spec #21 D5/D7）：服务器列表变化可热重载；任一本地入站、
 /// ACL 内容/路径/摘要变化都必须由 wrapper 完整重启 sslocal。
 struct SslocalListenFingerprint: Equatable, Sendable {
   let locals: [SslocalLocalDocument]
+  let ipv6Only: Bool?
   let acl: ProxyACLDocument?
 }

@@ -46,6 +46,18 @@ final class SettingsWorkflowTests: XCTestCase {
       "提交后草稿回到已提交快照")
   }
 
+  func testListenerModeSavePersistsWithoutStartingAnOffAgent() async throws {
+    let pair = makePair()
+
+    let outcome = await pair.workflow.saveListenerMode(.allIPv4AndIPv6Interfaces)
+
+    XCTAssertEqual(outcome, .saved(unknownOccupancy: []))
+    XCTAssertEqual(pair.controller.settings.listen.listenerMode, .allIPv4AndIPv6Interfaces)
+    XCTAssertEqual(settingsStore.saved?.listen.listenerMode, .allIPv4AndIPv6Interfaces)
+    XCTAssertEqual(pair.controller.state, .off)
+    XCTAssertEqual(agent.registerCount, 0)
+  }
+
   func testOccupiedPortMatchingTheRunningRuntimeDoesNotBlockSave() async throws {
     probe = FakeOccupancyProbe(occupiedPorts: [11086])
     let pair = try await makeRunningPair()

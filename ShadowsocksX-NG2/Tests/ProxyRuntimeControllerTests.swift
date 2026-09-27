@@ -173,6 +173,29 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(probe.ports, [11086, 11087], "健康门先探测 SOCKS 和 HTTP 入站")
   }
 
+  func testEffectiveRuntimeListenerProcessIDRequiresCurrentLiveReceipt() throws {
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(), processIsAlive: { $0 == 42 })
+    let document = SslocalRuntimeDocument(servers: [], listen: ActivationFixture.listen)
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    try runtimeStore.write(document)
+    try runtimeStore.writeRuntimeReceipt(for: document, processID: 42)
+    controller.lastDocument = document
+    controller.state = .running
+
+    XCTAssertEqual(controller.effectiveRuntimeListenerProcessID, 42)
+
+    let staleDocument = SslocalRuntimeDocument(
+      servers: [],
+      listen: SslocalListenSettings(socksPort: 11088, httpPort: 11089))
+    try runtimeStore.writeRuntimeReceipt(for: staleDocument, processID: 42)
+    XCTAssertNil(controller.effectiveRuntimeListenerProcessID, "回执必须匹配当前运行契约")
+
+    try runtimeStore.writeRuntimeReceipt(for: document, processID: 42)
+    controller.state = .off
+    XCTAssertNil(controller.effectiveRuntimeListenerProcessID, "已停止 runtime 不得拥有监听器")
+  }
+
   func testSwitchingGlobalAndRuleModesIsImmediateAndRestoresOnAgentOff() async throws {
     let seeded = try makeSeededCatalog()
     let controller = makeController(

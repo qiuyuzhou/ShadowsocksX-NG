@@ -1,37 +1,53 @@
-import Darwin
 import Foundation
 
-/// 用户可见监听范围。主机地址态把对外公布地址与通配绑定地址绑定在同一个值
-/// 对象中，避免监听身份与实际绑定范围各自漂移（spec #21 D7，issue #28）。
-enum ListenScope: Equatable, Sendable {
-  case loopback
-  case host(advertisedAddress: String)
-
-  var kind: ListenScopeKind {
-    switch self {
-    case .loopback: .loopback
-    case .host: .host
-    }
-  }
+/// One of the supported address-family policies for both local proxy inbounds.
+enum ListenerMode: String, Codable, CaseIterable, Equatable, Sendable {
+  case localhost
+  case allIPv4Interfaces = "all_ipv4_interfaces"
+  case allIPv4AndIPv6Interfaces = "all_ipv4_and_ipv6_interfaces"
+  case allIPv6Interfaces = "all_ipv6_interfaces"
 
   var bindAddress: String {
     switch self {
-    case .loopback: "127.0.0.1"
-    case .host: "0.0.0.0"
+    case .localhost: "127.0.0.1"
+    case .allIPv4Interfaces: "0.0.0.0"
+    case .allIPv4AndIPv6Interfaces, .allIPv6Interfaces: "::"
     }
   }
 
-  var advertisedAddress: String {
+  /// `nil` omits the upstream option for IPv4 listeners. IPv6 wildcard modes
+  /// explicitly select dual-stack or IPv6-only behavior.
+  var ipv6Only: Bool? {
     switch self {
-    case .loopback: "127.0.0.1"
-    case .host(let address): address
+    case .localhost, .allIPv4Interfaces: nil
+    case .allIPv4AndIPv6Interfaces: false
+    case .allIPv6Interfaces: true
     }
   }
-}
 
-enum ListenScopeKind: String, Codable, Equatable, Sendable {
-  case loopback
-  case host
+  var proxyLoopbackAddress: String {
+    self == .allIPv6Interfaces ? "::1" : "127.0.0.1"
+  }
+
+  var bindingHint: String {
+    switch self {
+    case .localhost: "127.0.0.1"
+    case .allIPv4Interfaces: "0.0.0.0"
+    case .allIPv4AndIPv6Interfaces: ":: / IPV6_V6ONLY=false"
+    case .allIPv6Interfaces: ":: / IPV6_V6ONLY=true"
+    }
+  }
+
+  var displayName: String {
+    switch self {
+    case .localhost: "仅本机"
+    case .allIPv4Interfaces: "所有 IPv4 接口"
+    case .allIPv4AndIPv6Interfaces: "所有 IPv4 与 IPv6 接口"
+    case .allIPv6Interfaces: "仅所有 IPv6 接口"
+    }
+  }
+
+  var exposesNetworkInterfaces: Bool { self != .localhost }
 }
 
 /// `sslocal` 的一个本地入站。上游 v1.25.0 通过 `locals[]` 同时承载 SOCKS5
@@ -54,14 +70,12 @@ struct SslocalLocalDocument: Codable, Equatable, Sendable {
 /// `x_shadowsocksx_ng_listen` 下，上游 sslocal 会忽略该扩展；wrapper 与 GUI
 /// 仍从同一原子文件读取同一份事实。
 struct RuntimeListenDocument: Codable, Equatable, Sendable {
-  let listenScope: ListenScopeKind
+  let listenerMode: ListenerMode
   let bindAddress: String
-  let advertisedAddress: String
 
   enum CodingKeys: String, CodingKey {
-    case listenScope = "listen_scope"
+    case listenerMode = "listener_mode"
     case bindAddress = "bind_address"
-    case advertisedAddress = "advertised_address"
   }
 }
 
@@ -70,6 +84,7 @@ struct RuntimeListenDocument: Codable, Equatable, Sendable {
 struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
   let servers: [SslocalServerDocument]
   let locals: [SslocalLocalDocument]
+  let ipv6Only: Bool?
   let listen: RuntimeListenDocument
   /// Upstream sslocal ACL file path. The wrapper-owned extension carries the
   /// matching content and digest so both inbounds use the same validated file.
@@ -78,6 +93,7 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
 
   enum CodingKeys: String, CodingKey {
     case servers, locals
+    case ipv6Only = "ipv6_only"
     case aclFilePath = "acl"
     case aclRuntime = "x_shadowsocksx_ng_acl"
     case listen = "x_shadowsocksx_ng_listen"
@@ -91,9 +107,9 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     self.servers = servers
     locals = listen.locals
     self.listen = RuntimeListenDocument(
-      listenScope: listen.scope.kind,
-      bindAddress: listen.bindAddress,
-      advertisedAddress: listen.advertisedAddress)
+      listenerMode: listen.listenerMode,
+      bindAddress: listen.bindAddress)
+    ipv6Only = listen.listenerMode.ipv6Only
     aclFilePath = acl?.path
     aclRuntime = acl
   }
@@ -102,11 +118,13 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     servers: [SslocalServerDocument],
     locals: [SslocalLocalDocument],
     listen: RuntimeListenDocument,
+    ipv6Only: Bool?,
     acl: ProxyACLDocument?
   ) {
     self.servers = servers
     self.locals = locals
     self.listen = listen
+    self.ipv6Only = ipv6Only
     aclFilePath = acl?.path
     aclRuntime = acl
   }
@@ -115,6 +133,7 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     servers = try container.decode([SslocalServerDocument].self, forKey: .servers)
     locals = try container.decode([SslocalLocalDocument].self, forKey: .locals)
+    ipv6Only = try container.decodeIfPresent(Bool.self, forKey: .ipv6Only)
     listen = try container.decode(RuntimeListenDocument.self, forKey: .listen)
     aclFilePath = try container.decodeIfPresent(String.self, forKey: .aclFilePath)
     aclRuntime = try container.decodeIfPresent(ProxyACLDocument.self, forKey: .aclRuntime)
@@ -134,6 +153,7 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
       servers: servers,
       locals: locals,
       listen: listen,
+      ipv6Only: ipv6Only,
       acl: acl)
   }
 
@@ -168,7 +188,11 @@ extension SslocalLocalDocument {
   /// 探测用主机名：通配绑定地址按回环探测（wrapper 监听判定与 GUI 健康门
   /// 共用口径，issue #38）。
   var probeHost: String {
-    localAddress == "0.0.0.0" ? "127.0.0.1" : localAddress
+    switch localAddress {
+    case "0.0.0.0": "127.0.0.1"
+    case "::": "::1"
+    default: localAddress
+    }
   }
 }
 
@@ -182,7 +206,7 @@ extension SslocalRuntimeDocument {
   }
 
   var listenFingerprint: SslocalListenFingerprint {
-    SslocalListenFingerprint(locals: locals, acl: aclRuntime)
+    SslocalListenFingerprint(locals: locals, ipv6Only: ipv6Only, acl: aclRuntime)
   }
 
   var socksLocal: SslocalLocalDocument? {
@@ -204,29 +228,13 @@ extension SslocalRuntimeDocument {
   /// 接受空 servers 并照常绑定本地入站。
   var isWellFormed: Bool {
     guard
-      !listen.advertisedAddress.isEmpty
-    else { return false }
-
-    guard
       (aclFilePath == nil) == (aclRuntime == nil),
       aclRuntime.map({ $0.isWellFormed && $0.path == aclFilePath }) ?? true
     else { return false }
 
-    let expectedBind = listen.listenScope == .loopback ? "127.0.0.1" : "0.0.0.0"
-    guard listen.bindAddress == expectedBind else {
+    let expectedBind = listen.listenerMode.bindAddress
+    guard listen.bindAddress == expectedBind, ipv6Only == listen.listenerMode.ipv6Only else {
       return false
-    }
-    switch listen.listenScope {
-    case .loopback:
-      guard listen.advertisedAddress == "127.0.0.1" else { return false }
-    case .host:
-      guard
-        isIPv4Address(listen.advertisedAddress),
-        listen.advertisedAddress != "0.0.0.0",
-        listen.advertisedAddress != "127.0.0.1"
-      else {
-        return false
-      }
     }
 
     let socks = locals.filter { $0.inboundProtocol == "socks" }
@@ -255,9 +263,4 @@ extension SslocalRuntimeDocument {
         && !server.method.isEmpty
     }
   }
-}
-
-private func isIPv4Address(_ value: String) -> Bool {
-  var address = in_addr()
-  return value.withCString { inet_pton(AF_INET, $0, &address) == 1 }
 }

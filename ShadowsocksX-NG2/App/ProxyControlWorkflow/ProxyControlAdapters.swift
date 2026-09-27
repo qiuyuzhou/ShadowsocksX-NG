@@ -71,11 +71,13 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
   }
 }
 
-/// HTTP 导出能力的唯一派生点：监听设置 → 可复制导出行。地址取监听范围的
-/// 对外地址（回环态 127.0.0.1，主机态为对外公布地址），供局域网客户端手动配置。
+/// HTTP 导出能力的唯一派生点：监听设置 → 本机终端使用的可复制导出行。
+/// 环境变量始终指向回环地址，避免将命令误用于其他设备。
 extension HTTPExportCapability {
   init(listen: SslocalListenSettings) {
-    let endpoint = "http://\(listen.scope.advertisedAddress):\(listen.httpPort)"
+    let host = listen.listenerMode.proxyLoopbackAddress
+    let urlHost = host.contains(":") ? "[\(host)]" : host
+    let endpoint = "http://\(urlHost):\(listen.httpPort)"
     self.init(copyableLine: "export http_proxy=\(endpoint);export https_proxy=\(endpoint);")
   }
 }

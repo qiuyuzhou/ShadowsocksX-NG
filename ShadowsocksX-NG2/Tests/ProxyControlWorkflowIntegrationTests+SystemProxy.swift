@@ -101,4 +101,40 @@ extension ProxyControlWorkflowIntegrationTests {
     XCTAssertEqual(composition.control.snapshot.systemProxyApplication, .applied, "激活后自动收敛")
     XCTAssertEqual(systemProxy.applied.count, 1)
   }
+
+  // MARK: - HTTP 导出能力派生（生产 adapter 的唯一点）
+
+  func testHTTPExportCapabilityDerivesSafeCopyableLineForLoopback() {
+    XCTAssertEqual(
+      HTTPExportCapability(listen: SslocalListenSettings()).copyableLine,
+      "export http_proxy=http://127.0.0.1:11087;export https_proxy=http://127.0.0.1:11087;")
+  }
+
+  func testHTTPExportCapabilityUsesLoopbackAddressForAllIPv4Interfaces() {
+    var listen = SslocalListenSettings()
+    listen.listenerMode = .allIPv4Interfaces
+    listen.httpPort = 8080
+    XCTAssertEqual(
+      HTTPExportCapability(listen: listen).copyableLine,
+      "export http_proxy=http://127.0.0.1:8080;export https_proxy=http://127.0.0.1:8080;")
+  }
+
+  func testHTTPExportCapabilityUsesIPv4LoopbackForDualStackMode() {
+    var listen = SslocalListenSettings()
+    listen.listenerMode = .allIPv4AndIPv6Interfaces
+    listen.httpPort = 8080
+
+    XCTAssertEqual(
+      HTTPExportCapability(listen: listen).copyableLine,
+      "export http_proxy=http://127.0.0.1:8080;export https_proxy=http://127.0.0.1:8080;")
+  }
+
+  func testHTTPExportCapabilityBracketsIPv6LoopbackOnlyForIPv6OnlyMode() {
+    var listen = SslocalListenSettings()
+    listen.listenerMode = .allIPv6Interfaces
+    listen.httpPort = 8080
+    XCTAssertEqual(
+      HTTPExportCapability(listen: listen).copyableLine,
+      "export http_proxy=http://[::1]:8080;export https_proxy=http://[::1]:8080;")
+  }
 }

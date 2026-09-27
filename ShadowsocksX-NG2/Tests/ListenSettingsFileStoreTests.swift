@@ -39,9 +39,9 @@ final class ListenSettingsFileStoreTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
   }
 
-  func testSaveAndLoadRoundTripPreservesUserPortsAndScope() throws {
+  func testSaveAndLoadRoundTripPreservesUserPortsAndListenerMode() throws {
     var settings = SslocalListenSettings()
-    settings.scope = .host(advertisedAddress: "192.168.2.89")
+    settings.listenerMode = .allIPv4AndIPv6Interfaces
     settings.socksPort = 2086
     settings.httpPort = 2087
 
@@ -50,13 +50,15 @@ final class ListenSettingsFileStoreTests: XCTestCase {
     XCTAssertEqual(try store.load(), settings)
     let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
     XCTAssertFalse(raw.contains("udpRelayEnabled"))
+    XCTAssertFalse(raw.contains("advertisedAddress"))
+    XCTAssertTrue(raw.contains("all_ipv4_and_ipv6_interfaces"))
     XCTAssertEqual(try permissions(of: directory), 0o700)
     XCTAssertEqual(try permissions(of: store.fileURL), 0o600)
   }
 
   func testLoadIgnoresRemovedUDPRelayAndPACPreferencesAndPreservesLegacyDefaultPorts() throws {
     try writeRaw(
-      #"{"scopeKind":"loopback","advertisedAddress":null,"socksPort":1086,"#
+      #"{"listenerMode":"localhost","socksPort":1086,"#
         + #""httpProxyEnabled":true,"httpPort":1087,"pacPort":1089,"udpRelayEnabled":false}"#)
 
     let settings = try store.load()
@@ -68,7 +70,7 @@ final class ListenSettingsFileStoreTests: XCTestCase {
 
   func testMissingPortFieldsUseNewFactoryDefaults() throws {
     try writeRaw(
-      #"{"scopeKind":"loopback","advertisedAddress":null,"httpProxyEnabled":true,"#
+      #"{"listenerMode":"localhost","httpProxyEnabled":true,"#
         + #""udpRelayEnabled":false}"#)
 
     XCTAssertEqual(try store.load(), SslocalListenSettings())
@@ -118,7 +120,7 @@ final class ListenSettingsFileStoreTests: XCTestCase {
 
   func testLoadRejectsPersistedDuplicatePorts() throws {
     try writeRaw(
-      #"{"scopeKind":"loopback","advertisedAddress":null,"socksPort":1086,"#
+      #"{"listenerMode":"localhost","socksPort":1086,"#
         + #""httpProxyEnabled":true,"httpPort":1086,"udpRelayEnabled":false}"#)
 
     XCTAssertThrowsError(try store.load()) { error in

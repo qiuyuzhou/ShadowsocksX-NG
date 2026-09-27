@@ -43,6 +43,18 @@ extension ProxyRuntimeController {
     return RuntimeListenFacts(document: lastDocument)
   }
 
+  /// PID of the sslocal child that owns the active runtime document. A process
+  /// name alone is not sufficient to treat an occupied listener as replaceable.
+  var effectiveRuntimeListenerProcessID: Int32? {
+    guard effectiveRuntimeListenFacts != nil,
+      let lastDocument,
+      let receipt = runtimeFileStore.readRuntimeReceipt(),
+      receipt.contractSHA256 == lastDocument.deploymentSHA256,
+      processIsAlive(receipt.processID)
+    else { return nil }
+    return receipt.processID
+  }
+
   /// 运行时契约的脱敏摘要（数量与协议元数据，D5）；契约缺失或无效返回 nil。
   /// 诊断导出不读契约内容，只携带此摘要。
   func runtimeDocumentSummary() -> String? {

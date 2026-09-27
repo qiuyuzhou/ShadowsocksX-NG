@@ -7,7 +7,7 @@ import XCTest
 final class SystemProxyTests: XCTestCase {
   func testSupportedModesProjectTheSameLocalEndpoints() throws {
     let document = ProxyRuntimeFixture.makeDocument(
-      localAddress: "192.168.2.89", localPort: 2086)
+      listenerMode: .allIPv4Interfaces, localPort: 2086)
 
     let expected = SystemProxyConfiguration(
       socks: .init(host: "127.0.0.1", port: 2086),
@@ -22,14 +22,24 @@ final class SystemProxyTests: XCTestCase {
       "全局模式的系统例外使用固定本地范围，与 ACL 安全策略一致")
   }
 
+  func testIPv6OnlyModeProjectsSystemProxyToIPv6Loopback() throws {
+    let document = SslocalRuntimeDocument(
+      servers: [], listen: SslocalListenSettings(listenerMode: .allIPv6Interfaces))
+
+    let configuration = try ProxyMode.rule.systemProxyConfiguration(for: document)
+
+    XCTAssertEqual(configuration.socks.host, "::1")
+    XCTAssertEqual(configuration.http.host, "::1")
+  }
+
   func testMissingHTTPInboundIsRejectedInsteadOfPointingAtAWildcardPort() throws {
     // 防御路径：well-formed 文档允许缺 HTTP 入站；此时不得把系统代理指向
     // 无效端口 0，而应按模式错误拒绝。
     let json = """
       {"servers":[],"locals":[{"protocol":"socks","local_address":"127.0.0.1",\
       "local_port":11086,"mode":"tcp_and_udp"}],\
-      "x_shadowsocksx_ng_listen":{"listen_scope":"loopback",\
-      "bind_address":"127.0.0.1","advertised_address":"127.0.0.1"}}
+      "x_shadowsocksx_ng_listen":{"listener_mode":"localhost",\
+      "bind_address":"127.0.0.1"}}
       """
     let document = try XCTUnwrap(SslocalRuntimeDocument.decodeValidated(Data(json.utf8)))
 

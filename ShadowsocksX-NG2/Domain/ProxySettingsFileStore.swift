@@ -86,15 +86,7 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
 
   private func settings(from record: ProxySettingsRecord) throws -> ProxySettings {
     var listen = SslocalListenSettings()
-    switch record.scopeKind {
-    case .loopback:
-      listen.scope = .loopback
-    case .host:
-      guard let address = record.advertisedAddress else {
-        throw ProxySettingsStoreError.corrupt(detail: "主机监听缺少 advertisedAddress")
-      }
-      listen.scope = .host(advertisedAddress: address)
-    }
+    listen.listenerMode = record.listenerMode
     listen.socksPort = record.socksPort
     listen.httpPort = record.httpPort
 
@@ -110,11 +102,7 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
 
   private func record(from settings: ProxySettings) -> ProxySettingsRecord {
     var record = ProxySettingsRecord()
-    record.scopeKind = settings.listen.scope.kind
-    record.advertisedAddress = {
-      if case .host(let address) = settings.listen.scope { return address }
-      return nil
-    }()
+    record.listenerMode = settings.listen.listenerMode
     record.socksPort = settings.listen.socksPort
     record.httpPort = settings.listen.httpPort
     record.proxyExceptions = settings.proxyExceptions
@@ -133,8 +121,7 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
 }
 
 private struct ProxySettingsRecord: Codable, Equatable, Sendable {
-  var scopeKind: ListenScopeKind = .loopback
-  var advertisedAddress: String?
+  var listenerMode: ListenerMode = .localhost
   var socksPort: Int = SslocalListenSettings.defaultSocksPort
   var httpPort: Int = SslocalListenSettings.defaultHTTPPort
   var proxyExceptions: String = ProxySettings.defaultProxyExceptions
@@ -147,8 +134,8 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
 
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    scopeKind = try container.decodeIfPresent(ListenScopeKind.self, forKey: .scopeKind) ?? .loopback
-    advertisedAddress = try container.decodeIfPresent(String.self, forKey: .advertisedAddress)
+    listenerMode =
+      try container.decodeIfPresent(ListenerMode.self, forKey: .listenerMode) ?? .localhost
     socksPort =
       try container.decodeIfPresent(Int.self, forKey: .socksPort)
       ?? SslocalListenSettings.defaultSocksPort
@@ -180,7 +167,7 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
 
 extension ProxySettingsRecord {
   fileprivate enum CodingKeys: String, CodingKey {
-    case scopeKind, advertisedAddress, socksPort, httpPort
+    case listenerMode, socksPort, httpPort
     case proxyExceptions
     case preferredMode
     case ruleDefaultAction

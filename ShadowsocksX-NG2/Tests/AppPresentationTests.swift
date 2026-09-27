@@ -99,8 +99,7 @@ final class AppPresentationTests: XCTestCase {
     }
 
     let issues: [SettingsFieldIssue] = [
-      .port(.socks, error: .portOutOfRange(endpoint: .socks, port: 0)),
-      .advertisedAddress(error: .invalidHostAddress("127.0.0.1")),
+      .port(.socks, error: .portOutOfRange(endpoint: .socks, port: 0))
     ]
     for issue in issues {
       XCTAssertFalse(AppPresentation.message(for: issue).isEmpty)

@@ -9,6 +9,7 @@ struct SettingsView: View {
   @ObservedObject var workflow: SettingsWorkflow
   @ObservedObject var loginController: LaunchAtLoginController
   @State private var portSettingsEditor: PortSettingsEditorSession?
+  @State private var listenerModeEditor: ListenerModeEditorSession?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -27,6 +28,9 @@ struct SettingsView: View {
     }
     .sheet(item: $portSettingsEditor) { session in
       PortSettingsEditorSheet(workflow: workflow, initialDraft: session.initialDraft)
+    }
+    .sheet(item: $listenerModeEditor) { session in
+      ListenerModeEditorSheet(workflow: workflow, initialMode: session.initialMode)
     }
   }
 
@@ -86,47 +90,24 @@ struct SettingsView: View {
           .font(.footnote)
           .foregroundStyle(.red)
       }
-      settingRow("监听范围") {
-        Picker("监听范围", selection: $workflow.draft.isHostScope) {
-          Text("仅本机").tag(false)
-          Text("局域网").tag(true)
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(width: 170)
-      }
-      if workflow.draft.isHostScope {
-        VStack(alignment: .leading, spacing: 8) {
-          LabeledContent {
-            TextField("对外公布的 IPv4 地址", text: $workflow.draft.advertisedAddress)
-              .textFieldStyle(.roundedBorder)
-              .frame(width: 170)
-          } label: {
-            settingCopy("对外公布的地址")
+      settingRow("监听方式") {
+        Button {
+          listenerModeEditor = ListenerModeEditorSession(
+            initialMode: workflow.beginListenerModeEditing())
+        } label: {
+          HStack(spacing: 8) {
+            Text(workflow.committedListenerMode.displayName)
+            Image(systemName: "chevron.right")
+              .font(.caption.weight(.semibold))
           }
-          issuesRow(.advertisedAddress)
-          if workflow.draft.advertisedAddress.isEmpty {
-            Text("请输入本机可路由的局域网 IPv4 地址。")
-              .font(.caption)
-              .foregroundStyle(.red)
-          }
-          Label(
-            "局域网模式会把无鉴权的代理端口开放给局域网；请确认防火墙允许所需程序，并只在可信网络使用。",
-            systemImage: "exclamationmark.triangle"
-          )
-          .font(.caption)
-          .foregroundStyle(.orange)
-          Text(
-            "若状态显示防火墙阻止，请前往系统设置 → 网络 → 防火墙 → 选项，允许 ShadowsocksX-NG2Agent 接收入站连接。"
-          )
-          .font(.caption)
-          .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 2)
+        .buttonStyle(.bordered)
+        .accessibilityLabel("监听方式")
+        .accessibilityValue(workflow.committedListenerMode.displayName)
       }
       portSettingsRow
     } header: {
-      sectionHeader("代理端点", subtitle: "监听范围和本地服务端口", trailing: "不会自动换端口")
+      sectionHeader("代理端点", subtitle: "监听方式和本地服务端口", trailing: "不会自动换端口")
     }
   }
 
@@ -232,13 +213,6 @@ extension SettingsView {
     }
   }
 
-  fileprivate func issuesRow(_ field: SettingsFieldID) -> some View {
-    ForEach(workflow.issues(for: field), id: \.self) { issue in
-      Text(AppPresentation.message(for: issue))
-        .font(.caption)
-        .foregroundStyle(.red)
-    }
-  }
 }
 
 private struct PortSettingsEditorSession: Identifiable {

@@ -22,7 +22,7 @@ final class SettingsWorkflow: ObservableObject {
 
   /// 各端口的尽力而为占用判定（非权威，只影响编辑期提示与保存门禁）。
   @Published private var occupancyByPort: [SettingsPortID: SettingsPortOccupancy] = [:]
-  /// 独立端口设置编辑器的占用事实；基于已提交的监听范围和编辑中的端口对。
+  /// 独立端口设置编辑器的占用事实；基于已提交的监听方式和编辑中的端口对。
   @Published private var portEditorOccupancyByPort: [SettingsPortID: SettingsPortOccupancy] = [:]
   private var portEditorOccupancyDraft: SettingsPortDraft?
   private var portEditorOccupancyGeneration = 0
@@ -88,6 +88,15 @@ final class SettingsWorkflow: ObservableObject {
     return SettingsPortDraft(socksPort: listen.socksPort, httpPort: listen.httpPort)
   }
 
+  var committedListenerMode: ListenerMode {
+    committing.committedSettings.listen.listenerMode
+  }
+
+  func beginListenerModeEditing() -> ListenerMode {
+    lastFailure = nil
+    return committedListenerMode
+  }
+
   /// 打开独立端口设置项时，从已提交值开始，丢弃上次编辑器探测的暂存事实。
   func beginPortSettingsEditing() -> SettingsPortDraft {
     lastFailure = nil
@@ -97,7 +106,7 @@ final class SettingsWorkflow: ObservableObject {
     return committedPortDraft
   }
 
-  /// 编辑器端口字段状态；监听范围取已提交设置，不受设置页其他草稿影响。
+  /// 编辑器端口字段状态；监听方式取已提交设置，不受设置页其他草稿影响。
   func portFieldState(
     for id: SettingsPortID, editorDraft: SettingsPortDraft
   ) -> SettingsPortFieldState {
@@ -289,7 +298,8 @@ extension SettingsWorkflow {
   // MARK: - 提交与占用探测（implementation，UI 不可见）
 
   private func makeSettings(from draft: SettingsDraft) -> ProxySettings {
-    SettingsDraftAdapter.settings(from: draft, preservingModeOf: committing.committedSettings)
+    SettingsDraftAdapter.settings(
+      from: draft, preservingUneditedFieldsOf: committing.committedSettings)
   }
 
   private func listenSettings(for editorDraft: SettingsPortDraft) -> SslocalListenSettings {
@@ -330,7 +340,7 @@ extension SettingsWorkflow {
     isCommitting = true
     lastFailure = nil
     do {
-      let runtime = try await committing.updateSettings(proposed)
+      try await committing.updateSettings(proposed)
       var nextDraft = draft
       nextDraft.socksPort = committing.committedSettings.listen.socksPort
       nextDraft.httpPort = committing.committedSettings.listen.httpPort
@@ -339,7 +349,7 @@ extension SettingsWorkflow {
       // Port persistence succeeded. Runtime convergence failure is owned by runtime
       // status and does not become a separate settings-page error for this item.
       lastFailure = nil
-      return record(.persisted(runtime: runtime))
+      return record(.persisted)
     } catch {
       isCommitting = false
       let failure = Self.workflowFailure(for: error)
@@ -356,7 +366,7 @@ extension SettingsWorkflow {
   }
 
   private func listenFacts(of draft: SettingsDraft) -> RuntimeListenFacts {
-    SettingsDraftAdapter.listenFacts(from: draft)
+    SettingsDraftAdapter.listenFacts(from: draft, preservingModeOf: committing.committedSettings)
   }
 
   private func commit(_ proposed: ProxySettings) async -> SettingsCommandOutcome {
@@ -364,25 +374,16 @@ extension SettingsWorkflow {
     isCommitting = true
     lastFailure = nil
     do {
-      let runtime = try await committing.updateSettings(proposed)
+      try await committing.updateSettings(proposed)
       adoptCommittedSettings()
       isCommitting = false
-      return record(persistedOutcome(for: runtime))
+      return record(.persisted)
     } catch {
       isCommitting = false
       let failure = Self.workflowFailure(for: error)
       lastFailure = failure
       return record(.persistenceFailed(Self.persistenceFailure(for: error)))
     }
-  }
-
-  private func persistedOutcome(for runtime: SettingsRuntimeOutcome) -> SettingsCommandOutcome {
-    if case .failed(let failure) = runtime {
-      lastFailure = .runtime(failure)
-    } else {
-      lastFailure = nil
-    }
-    return .persisted(runtime: runtime)
   }
 
   /// 提交成功或回到已提交快照：草稿回到已提交快照；监听设置未变时 didSet
@@ -431,9 +432,56 @@ extension SettingsWorkflow {
     if let error = error as? ProxySettingsStoreError {
       return .store(error)
     }
-    if let error = error as? ProxyModeError {
-      return .mode(error)
-    }
     return .unknown
+  }
+}
+
+extension SettingsWorkflow {
+  /// Save the listener mode as its own setting item. Occupancy is checked for
+  /// the selected address family; unknown results do not block persistence.
+  @discardableResult
+  func saveListenerMode(_ mode: ListenerMode) async -> ListenerModeSaveOutcome {
+    guard !isCommitting else { return .rejected(.inProgress) }
+    guard mode != committedListenerMode else { return .saved(unknownOccupancy: []) }
+    isCommitting = true
+    lastFailure = nil
+
+    var listen = committing.committedSettings.listen
+    listen.listenerMode = mode
+    let facts = RuntimeListenFacts(listen: listen)
+    let runtime = committing.runtimeListenFacts
+    let probe = occupancyProbe
+    let results = await Task.detached(priority: .utility) {
+      Dictionary(
+        uniqueKeysWithValues: SettingsPortID.allCases.map { id in
+          let endpoint = SettingsDraftAdapter.endpoint(for: id)
+          let request = PortOccupancyProbeRequest(endpoint: endpoint, listen: facts)
+          return (id, probe.occupancy(for: request))
+        })
+    }.value
+
+    let occupancyContext = ListenerModeOccupancyContext(
+      listenerMode: mode, proposedListen: facts, runtimeListen: runtime,
+      runtimeProcessID: committing.runtimeListenerProcessID)
+    let blocked = ListenerModeOccupancyGate.blockedPortIDs(
+      results: results, context: occupancyContext)
+    guard blocked.isEmpty else {
+      isCommitting = false
+      return .rejected(.occupied(blocked))
+    }
+
+    let unknown = ListenerModeOccupancyGate.unknownPortIDs(in: results)
+    do {
+      try await committing.updateListenerMode(mode)
+      isCommitting = false
+      lastFailure = nil
+      refreshOccupancy()
+      return .saved(unknownOccupancy: unknown)
+    } catch {
+      isCommitting = false
+      let failure = Self.workflowFailure(for: error)
+      lastFailure = failure
+      return .persistenceFailed(Self.persistenceFailure(for: error))
+    }
   }
 }

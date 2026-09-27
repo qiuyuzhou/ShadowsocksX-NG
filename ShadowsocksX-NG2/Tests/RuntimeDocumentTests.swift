@@ -46,9 +46,10 @@ final class RuntimeDocumentTests: XCTestCase {
     XCTAssertEqual(locals[1]["local_port"] as? Int, 11087)
     XCTAssertEqual(locals[1]["protocol"] as? String, "http")
     let listen = try XCTUnwrap(dictionary["x_shadowsocksx_ng_listen"] as? [String: Any])
-    XCTAssertEqual(listen["listen_scope"] as? String, "loopback")
+    XCTAssertEqual(listen["listener_mode"] as? String, "localhost")
     XCTAssertEqual(listen["bind_address"] as? String, "127.0.0.1")
-    XCTAssertEqual(listen["advertised_address"] as? String, "127.0.0.1")
+    XCTAssertFalse(listen.keys.contains("advertised_address"))
+    XCTAssertFalse(dictionary.keys.contains("ipv6_only"))
     XCTAssertFalse(listen.keys.contains("verbose"))
     XCTAssertFalse(dictionary.keys.contains("timeout"))
     let servers = try XCTUnwrap(dictionary["servers"] as? [[String: Any]])
@@ -142,14 +143,13 @@ final class RuntimeDocumentTests: XCTestCase {
       "监听指纹只看 ACL 身份字段，content 不参与")
   }
 
-  func testLoopbackScopeDerivesBothSslocalInbounds() {
+  func testLocalhostModeDerivesBothSslocalInbounds() {
     let listen = SslocalListenSettings(
-      scope: .loopback,
+      listenerMode: .localhost,
       socksPort: 1086,
       httpPort: 1087)
 
     XCTAssertEqual(listen.bindAddress, "127.0.0.1")
-    XCTAssertEqual(listen.advertisedAddress, "127.0.0.1")
     XCTAssertEqual(
       listen.locals,
       [
@@ -162,20 +162,62 @@ final class RuntimeDocumentTests: XCTestCase {
       ])
   }
 
-  func testHostScopeUsesWildcardBindingsAndAdvertisedNetworkAddress() {
+  func testAllIPv4ModeUsesWildcardBindings() {
     let listen = SslocalListenSettings(
-      scope: .host(advertisedAddress: "192.168.2.89"),
+      listenerMode: .allIPv4Interfaces,
       socksPort: 1086,
       httpPort: 1087)
 
     XCTAssertEqual(listen.bindAddress, "0.0.0.0")
-    XCTAssertEqual(listen.advertisedAddress, "192.168.2.89")
     XCTAssertEqual(Set(listen.locals.map(\.localAddress)), ["0.0.0.0"])
+  }
+
+  func testDualStackModeSetsIPv6OnlyFalseAndChangesListenerFingerprint() throws {
+    var listen = SslocalListenSettings()
+    listen.listenerMode = .allIPv4AndIPv6Interfaces
+    let dualStack = SslocalRuntimeDocument(servers: [], listen: listen)
+    let dictionary = try encodedDictionary(dualStack)
+
+    XCTAssertEqual(dictionary["ipv6_only"] as? Bool, false)
+    XCTAssertEqual(dualStack.socksLocal?.probeHost, "::1")
+
+    listen.listenerMode = .allIPv6Interfaces
+    let ipv6Only = SslocalRuntimeDocument(servers: [], listen: listen)
+
+    XCTAssertEqual(try encodedDictionary(ipv6Only)["ipv6_only"] as? Bool, true)
+    XCTAssertNotEqual(
+      dualStack.listenFingerprint, ipv6Only.listenFingerprint,
+      "IPv6_ONLY 差异必须使 wrapper 重启 sslocal，即使两者都绑定 ::")
+  }
+
+  func testDecoderRejectsIPv6OnlyFlagThatDoesNotMatchListenerMode() throws {
+    let document = SslocalRuntimeDocument(
+      servers: [],
+      listen: SslocalListenSettings(listenerMode: .allIPv6Interfaces))
+    var dictionary = try encodedDictionary(document)
+    dictionary["ipv6_only"] = false
+    let data = try JSONSerialization.data(withJSONObject: dictionary)
+
+    XCTAssertNil(SslocalRuntimeDocument.decodeValidated(data))
+  }
+
+  func testListenerModeBindingsAndProxyLoopbackAddresses() {
+    XCTAssertEqual(
+      ListenerMode.allCases.map(\.bindingHint),
+      [
+        "127.0.0.1",
+        "0.0.0.0",
+        ":: / IPV6_V6ONLY=false",
+        ":: / IPV6_V6ONLY=true",
+      ])
+    XCTAssertEqual(
+      ListenerMode.allCases.map(\.proxyLoopbackAddress),
+      ["127.0.0.1", "127.0.0.1", "127.0.0.1", "::1"])
   }
 
   func testHTTPInboundIsAlwaysPresentAlongsideSOCKS() {
     let listen = SslocalListenSettings(
-      scope: .loopback, socksPort: 2086, httpPort: 2087)
+      listenerMode: .localhost, socksPort: 2086, httpPort: 2087)
 
     XCTAssertEqual(listen.locals.map(\.inboundProtocol), ["socks", "http"])
   }

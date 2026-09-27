@@ -23,16 +23,15 @@ final class ProxySettingsTests: XCTestCase {
     XCTAssertEqual(settings.proxyExceptionList, ["localhost", "127.0.0.1", "::1"])
   }
 
-  func testInvalidAdvancedSettingsNameEveryProblem() {
+  func testListenerModeDoesNotAddAddressTextValidation() {
     var settings = ProxySettings()
-    settings.listen.scope = .host(advertisedAddress: "127.0.0.1")
+    settings.listen.listenerMode = .allIPv6Interfaces
     settings.listen.socksPort = settings.listen.httpPort
 
     XCTAssertEqual(
       settings.validationErrors,
       [
-        .duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 11087),
-        .invalidHostAddress("127.0.0.1"),
+        .duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 11087)
       ])
   }
 }

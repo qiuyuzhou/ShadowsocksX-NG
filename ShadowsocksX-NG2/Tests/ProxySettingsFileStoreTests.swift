@@ -39,7 +39,7 @@ final class ProxySettingsFileStoreTests: XCTestCase {
 
   func testRoundTripKeepsPreferences() throws {
     var settings = ProxySettings()
-    settings.listen.scope = .host(advertisedAddress: "192.168.2.89")
+    settings.listen.listenerMode = .allIPv6Interfaces
     settings.listen.socksPort = 2086
     settings.listen.httpPort = 2087
     settings.proxyExceptions = "localhost, 127.0.0.1"
@@ -52,7 +52,19 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     XCTAssertFalse(raw.contains("udpRelayEnabled"))
     XCTAssertFalse(raw.contains("timeoutSeconds"))
     XCTAssertFalse(raw.contains("verboseLogging"))
+    XCTAssertFalse(raw.contains("advertisedAddress"))
+    XCTAssertTrue(raw.contains("all_ipv6_interfaces"))
     XCTAssertEqual(try store.load().listen.mode, "tcp_and_udp")
+  }
+
+  func testEveryListenerModeRoundTripsWithoutAnAdvertisedAddress() throws {
+    for mode in ListenerMode.allCases {
+      try store.save(ProxySettings(listen: SslocalListenSettings(listenerMode: mode)))
+
+      XCTAssertEqual(try store.load().listen.listenerMode, mode)
+      let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
+      XCTAssertFalse(raw.contains("advertisedAddress"))
+    }
   }
 
   func testLoadPreservesPersistedLegacyDefaultPortsWithoutImplicitMigration() throws {

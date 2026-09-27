@@ -293,20 +293,4 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertNil(summary.systemProxyDetail)
   }
 
-  // MARK: - HTTP 导出能力派生（生产 adapter 的唯一点）
-
-  func testHTTPExportCapabilityDerivesSafeCopyableLineForLoopback() {
-    XCTAssertEqual(
-      HTTPExportCapability(listen: SslocalListenSettings()).copyableLine,
-      "export http_proxy=http://127.0.0.1:11087;export https_proxy=http://127.0.0.1:11087;")
-  }
-
-  func testHTTPExportCapabilityUsesAdvertisedAddressAndPortInHostScope() {
-    var listen = SslocalListenSettings()
-    listen.scope = .host(advertisedAddress: "192.168.1.10")
-    listen.httpPort = 8080
-    XCTAssertEqual(
-      HTTPExportCapability(listen: listen).copyableLine,
-      "export http_proxy=http://192.168.1.10:8080;export https_proxy=http://192.168.1.10:8080;")
-  }
 }

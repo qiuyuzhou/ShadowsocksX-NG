@@ -99,14 +99,11 @@ enum ProxyRuntimeFixture {
     serverAddress: String = "203.0.113.7",
     password: String = "resolved-password",
     pluginOpts: String? = nil,
-    localAddress: String = "127.0.0.1",
+    listenerMode: ListenerMode = .localhost,
     localPort: Int? = nil,
     inboundProtocol: String = "socks"
   ) -> SslocalRuntimeDocument {
     precondition(inboundProtocol == "socks")
-    let scope: ListenScope =
-      localAddress == "127.0.0.1"
-      ? .loopback : .host(advertisedAddress: localAddress)
     let socksPort: Int
     let httpPort: Int
     if let localPort {
@@ -130,7 +127,7 @@ enum ProxyRuntimeFixture {
         )
       ],
       listen: SslocalListenSettings(
-        scope: scope,
+        listenerMode: listenerMode,
         socksPort: socksPort,
         httpPort: httpPort))
   }

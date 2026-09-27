@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 /// #33 的用户偏好快照。监听端点仍是运行时契约的输入，但不会把偏好文件
@@ -53,17 +52,7 @@ struct ProxySettings: Equatable, Sendable {
   }
 
   var validationErrors: [ProxySettingsValidationError] {
-    var errors = listen.portValidationErrors().map(ProxySettingsValidationError.init)
-    if case .host(let address) = listen.scope, !Self.isUsableHostAddress(address) {
-      errors.append(.invalidHostAddress(address))
-    }
-    return errors
-  }
-
-  private static func isUsableHostAddress(_ value: String) -> Bool {
-    guard value != "0.0.0.0", value != "127.0.0.1" else { return false }
-    var address = in_addr()
-    return value.withCString { inet_pton(AF_INET, $0, &address) == 1 }
+    listen.portValidationErrors().map(ProxySettingsValidationError.init)
   }
 }
 
@@ -71,7 +60,6 @@ struct ProxySettings: Equatable, Sendable {
 enum ProxySettingsValidationError: Error, Hashable, Sendable {
   case portOutOfRange(endpoint: ProxyEndpointKind, port: Int)
   case duplicatePort(endpoint: ProxyEndpointKind, otherEndpoint: ProxyEndpointKind, port: Int)
-  case invalidHostAddress(String)
 
   init(_ error: PortSettingError) {
     switch error {

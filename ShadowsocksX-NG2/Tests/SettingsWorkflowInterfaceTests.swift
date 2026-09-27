@@ -52,14 +52,13 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     XCTAssertEqual(workflow.issues(for: .port(.http)), [.port(.http, error: error)])
   }
 
-  func testHostAddressIssueLandsOnAdvertisedAddressField() {
+  func testCommittedListenerModeIsReadSeparatelyFromTheFormDraft() {
     let workflow = makeWorkflow()
-    workflow.draft.isHostScope = true
-    workflow.draft.advertisedAddress = "127.0.0.1"
+    committing.committedSettings.listen.listenerMode = .allIPv6Interfaces
 
-    XCTAssertEqual(workflow.fieldIssues.map(\.field), [.advertisedAddress])
-    XCTAssertTrue(
-      AppPresentation.message(for: workflow.issues(for: .advertisedAddress)[0]).contains("主机地址"))
+    XCTAssertEqual(workflow.beginListenerModeEditing(), .allIPv6Interfaces)
+    XCTAssertTrue(workflow.fieldIssues.isEmpty)
+    XCTAssertFalse(workflow.isDirty)
   }
 
   // MARK: - 端口 field state
@@ -83,11 +82,10 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
   }
 
   func testOccupancyProbeReceivesTheCompleteEffectiveListenIdentity() async throws {
-    let workflow = makeWorkflow()
-    workflow.draft.isHostScope = true
-    workflow.draft.advertisedAddress = "192.168.2.89"
+    committing.committedSettings.listen.listenerMode = .allIPv4Interfaces
+    _ = makeWorkflow()
     let expected = RuntimeListenFacts(
-      scope: .host(advertisedAddress: "192.168.2.89"),
+      listenerMode: .allIPv4Interfaces,
       socksPort: 11086,
       httpPort: 11087)
 
@@ -153,7 +151,7 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     XCTAssertTrue(workflow.portFieldState(for: .socks).isRuntimePortException)
 
     committing.runtimeListenFacts = RuntimeListenFacts(
-      scope: .host(advertisedAddress: "192.168.2.89"),
+      listenerMode: .allIPv4Interfaces,
       socksPort: 11086,
       httpPort: 11087)
     _ = await workflow.reloadFromCommitted()
@@ -215,7 +213,7 @@ extension SettingsWorkflowInterfaceTests {
     XCTAssertTrue(workflow.canSave)
     let outcome = await workflow.save()
 
-    XCTAssertEqual(outcome, .persisted(runtime: .notRunning))
+    XCTAssertEqual(outcome, .persisted)
     XCTAssertEqual(committing.updateCalls.first?.proxyExceptions, "localhost")
   }
 
@@ -232,16 +230,14 @@ extension SettingsWorkflowInterfaceTests {
     XCTAssertTrue(committing.updateCalls.isEmpty)
   }
 
-  func testSaveReportsPersistedSettingsAndIndependentRuntimeFailure() async throws {
-    let runtimeFailure = RuntimeFailureFacts.service(.persistence)
-    committing.updateOutcome = .failed(runtimeFailure)
+  func testSettingsSaveDoesNotExposeProxyRuntimeStatus() async throws {
     let workflow = makeWorkflow()
     workflow.draft.proxyExceptions = "localhost"
 
     let outcome = await workflow.save()
 
-    XCTAssertEqual(outcome, .persisted(runtime: .failed(runtimeFailure)))
-    XCTAssertEqual(workflow.lastFailure, .runtime(runtimeFailure))
+    XCTAssertEqual(outcome, .persisted)
+    XCTAssertNil(workflow.lastFailure)
     XCTAssertEqual(committing.committedSettings.proxyExceptions, "localhost")
   }
 
@@ -258,7 +254,7 @@ extension SettingsWorkflowInterfaceTests {
     let firstOutcome = await first.value
 
     XCTAssertEqual(second, .rejected(.inProgress))
-    XCTAssertEqual(firstOutcome, .persisted(runtime: .notRunning))
+    XCTAssertEqual(firstOutcome, .persisted)
     XCTAssertEqual(committing.updateCalls.count, 1)
   }
 
@@ -281,16 +277,41 @@ extension SettingsWorkflowInterfaceTests {
     XCTAssertEqual(workflow.draft.proxyExceptions, "localhost")
   }
 
-  func testHiddenHostAddressLeftoverDoesNotReportDirty() {
+  func testListenerModeSavePreservesUnrelatedUnsavedFormChanges() async throws {
     let workflow = makeWorkflow()
-    workflow.draft.isHostScope = true
-    workflow.draft.advertisedAddress = "192.168.1.10"
-    XCTAssertTrue(workflow.isDirty)
+    workflow.draft.proxyExceptions = "unsaved.example"
 
-    workflow.draft.isHostScope = false
-    XCTAssertFalse(
-      workflow.isDirty,
-      "仅本机模式下残留的地址文本不改变已提交快照，不算未保存修改")
+    let outcome = await workflow.saveListenerMode(.allIPv4AndIPv6Interfaces)
+
+    XCTAssertEqual(outcome, .saved(unknownOccupancy: []))
+    XCTAssertEqual(committing.committedSettings.listen.listenerMode, .allIPv4AndIPv6Interfaces)
+    XCTAssertEqual(
+      committing.committedSettings.proxyExceptions, ProxySettings.defaultProxyExceptions)
+    XCTAssertEqual(workflow.draft.proxyExceptions, "unsaved.example")
+    XCTAssertTrue(workflow.isDirty)
+    XCTAssertFalse(committing.committedSettings.agentEnabled, "保存监听方式不启动已关闭的代理")
+    XCTAssertEqual(committing.updateCalls.count, 1)
+  }
+
+  func testListenerModeKnownExternalPortConflictBlocksOnlyThatSave() async throws {
+    probe = FakeOccupancyProbe(occupiedPorts: [11087])
+    let workflow = makeWorkflow()
+
+    let outcome = await workflow.saveListenerMode(.allIPv4Interfaces)
+
+    XCTAssertEqual(outcome, .rejected(.occupied([.http])))
+    XCTAssertTrue(committing.updateCalls.isEmpty)
+    XCTAssertEqual(committing.committedSettings.listen.listenerMode, .localhost)
+  }
+
+  func testListenerModeSavesWhenOccupancyIsUnknownAndReturnsWarningFacts() async throws {
+    probe = FakeOccupancyProbe(unknownPorts: [11086])
+    let workflow = makeWorkflow()
+
+    let outcome = await workflow.saveListenerMode(.allIPv6Interfaces)
+
+    XCTAssertEqual(outcome, .saved(unknownOccupancy: [.socks]))
+    XCTAssertEqual(committing.committedSettings.listen.listenerMode, .allIPv6Interfaces)
   }
 
   func testModeIsNotPartOfTheDraft() async throws {
@@ -310,7 +331,10 @@ extension SettingsWorkflowInterfaceTests {
 
   func testStaleOccupancyResultDoesNotOverrideNewerGeneration() async throws {
     let gated = GatedOccupancyProbe(
-      gatedAnswer: .occupied(occupier: "stale"), passThroughAnswer: .free)
+      gatedAnswer: .occupied(
+        PortOccupancyFacts(
+          occupier: "stale", occupiedFamilies: [.ipv4], verifiedFamilies: [.ipv4])),
+      passThroughAnswer: .free)
     let workflow = SettingsWorkflow(committing: committing, occupancyProbe: gated)
 
     await waitUntil(gated.entered > 0)
@@ -331,7 +355,9 @@ extension SettingsWorkflowInterfaceTests {
     _ = await workflow.reloadFromCommitted()
     await waitUntil(workflow.portFieldState(for: .socks).occupancy == .free)
 
-    probe.setAnswer(.occupied(occupier: "later"))
+    let laterOccupancy = PortOccupancyFacts(
+      occupier: "later", occupiedFamilies: [.ipv4], verifiedFamilies: [.ipv4])
+    probe.setAnswer(.occupied(laterOccupancy))
     _ = await workflow.reloadFromCommitted()
     await waitUntil(workflow.portFieldState(for: .socks).occupancy != .free)
 

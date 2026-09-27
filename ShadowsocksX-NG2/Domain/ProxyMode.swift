@@ -86,8 +86,9 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
       throw ProxyModeError.invalidHTTPPort(document.httpPort)
     }
     return SystemProxyConfiguration(
-      socks: .init(host: "127.0.0.1", port: document.socksPort),
-      http: .init(host: "127.0.0.1", port: document.httpPort),
+      socks: .init(
+        host: document.listen.listenerMode.proxyLoopbackAddress, port: document.socksPort),
+      http: .init(host: document.listen.listenerMode.proxyLoopbackAddress, port: document.httpPort),
       exceptions: FixedLocalProxyRanges.systemProxyExceptions(including: exceptions))
   }
 }

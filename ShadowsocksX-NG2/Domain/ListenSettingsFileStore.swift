@@ -25,9 +25,9 @@ struct RestoredListenSettings: Equatable {
   let unreadableError: ListenSettingsStoreError?
 }
 
-/// 用户监听设置（端口、监听范围）的磁盘持久化，落盘
+/// 用户监听设置（端口、监听方式）的磁盘持久化，落盘
 /// `~/Library/Application Support/ShadowsocksX-NG2/listen-settings.json`。
-/// 只承载用户显式确认过的配置；与运行时契约文件分离。监听范围只按
+/// 只承载用户显式确认过的配置；与运行时契约文件分离。监听方式只按
 /// 原样保留，有效性由派生文档的读取侧校验兜底。
 struct ListenSettingsFileStore: ListenSettingsStoring {
   private static let jsonEncoder: JSONEncoder = {
@@ -111,9 +111,7 @@ struct ListenSettingsFileStore: ListenSettingsStoring {
 
 /// 持久化记录只由本存储读写；测试以原始 JSON 夹具覆盖解码契约。
 private struct ListenSettingsRecord: Codable, Equatable, Sendable {
-  var scopeKind: ListenScopeKind = .loopback
-  /// 主机态的对外公布地址；回环态为 nil。
-  var advertisedAddress: String?
+  var listenerMode: ListenerMode = .localhost
   var socksPort: Int = SslocalListenSettings.defaultSocksPort
   var httpPort: Int = SslocalListenSettings.defaultHTTPPort
 
@@ -121,8 +119,8 @@ private struct ListenSettingsRecord: Codable, Equatable, Sendable {
 
   init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
-    scopeKind = try container.decode(ListenScopeKind.self, forKey: .scopeKind)
-    advertisedAddress = try container.decodeIfPresent(String.self, forKey: .advertisedAddress)
+    listenerMode =
+      try container.decodeIfPresent(ListenerMode.self, forKey: .listenerMode) ?? .localhost
     socksPort =
       try container.decodeIfPresent(Int.self, forKey: .socksPort)
       ?? SslocalListenSettings.defaultSocksPort
@@ -132,17 +130,14 @@ private struct ListenSettingsRecord: Codable, Equatable, Sendable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case scopeKind, advertisedAddress, socksPort, httpPort
+    case listenerMode, socksPort, httpPort
   }
 }
 
 extension ListenSettingsFileStore {
   private static func record(from settings: SslocalListenSettings) -> ListenSettingsRecord {
     var record = ListenSettingsRecord()
-    record.scopeKind = settings.scope.kind
-    if case .host(let address) = settings.scope {
-      record.advertisedAddress = address
-    }
+    record.listenerMode = settings.listenerMode
     record.socksPort = settings.socksPort
     record.httpPort = settings.httpPort
     return record
@@ -150,9 +145,7 @@ extension ListenSettingsFileStore {
 
   private static func settings(from record: ListenSettingsRecord) -> SslocalListenSettings {
     var settings = SslocalListenSettings()
-    if record.scopeKind == .host, let address = record.advertisedAddress {
-      settings.scope = .host(advertisedAddress: address)
-    }
+    settings.listenerMode = record.listenerMode
     settings.socksPort = record.socksPort
     settings.httpPort = record.httpPort
     return settings

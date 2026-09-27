@@ -94,13 +94,13 @@ final class ProxyPortSemanticsTests: XCTestCase {
     let port = held.port
     let probe = SystemPortOccupancyProbe()
 
-    guard case .occupied = probe.occupancy(port: port, bindAddress: "127.0.0.1") else {
+    guard case .occupied = probe.occupancy(port: port, listenerMode: .localhost) else {
       return XCTFail("已被本测试进程监听的端口必须判为占用")
     }
 
     held.close()
 
-    guard case .free = probe.occupancy(port: port, bindAddress: "127.0.0.1") else {
+    guard case .free = probe.occupancy(port: port, listenerMode: .localhost) else {
       return XCTFail("关闭监听后同一端口必须判为空闲")
     }
   }
@@ -113,6 +113,22 @@ final class ProxyPortSemanticsTests: XCTestCase {
     }
   }
 
+  func testIPv6OnlyBindCanShareAnIPv4PortWhileDualStackCannot() throws {
+    let held = try ListenerFixture(listenerMode: .allIPv4Interfaces)
+    defer { held.close() }
+    let probe = SystemPortOccupancyProbe()
+
+    guard case .free = probe.occupancy(port: held.port, listenerMode: .allIPv6Interfaces) else {
+      return XCTFail("IPv6-only 探测不应与 IPv4 通配监听冲突")
+    }
+    guard
+      case .occupied = probe.occupancy(
+        port: held.port, listenerMode: .allIPv4AndIPv6Interfaces)
+    else {
+      return XCTFail("双栈探测必须覆盖 IPv4，因而与 IPv4 通配监听冲突")
+    }
+  }
+
   func testOccupierNameParsedFromLsofOutputFixture() {
     let output = """
       COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
@@ -120,6 +136,14 @@ final class ProxyPortSemanticsTests: XCTestCase {
       TestApp 12346 qiu    8u  IPv4  0xabce      0t0  TCP 127.0.0.1:1086 (LISTEN)
       """
     XCTAssertEqual(SystemPortOccupancyProbe.occupierProcessName(fromLsofOutput: output), "sslocal")
+    XCTAssertEqual(
+      SystemPortOccupancyProbe.occupierProcessIDs(fromLsofOutput: output), [12345, 12346])
+    XCTAssertEqual(
+      SystemPortOccupancyProbe.lsofArguments(port: 1086, addressFamily: .ipv4),
+      ["-nP", "-i4TCP:1086", "-sTCP:LISTEN"])
+    XCTAssertEqual(
+      SystemPortOccupancyProbe.lsofArguments(port: 1086, addressFamily: .ipv6),
+      ["-nP", "-i6TCP:1086", "-sTCP:LISTEN"])
     XCTAssertNil(SystemPortOccupancyProbe.occupierProcessName(fromLsofOutput: "  \n"))
     XCTAssertNil(
       SystemPortOccupancyProbe.occupierProcessName(fromLsofOutput: "COMMAND PID USER FD"),
@@ -132,14 +156,17 @@ private final class ListenerFixture {
   let descriptor: Int32
   let port: Int
 
-  init() throws {
+  init(listenerMode: ListenerMode = .localhost) throws {
     let listenerFD = socket(AF_INET, SOCK_STREAM, 0)
     guard listenerFD >= 0 else { throw POSIXError(.ENOTSOCK) }
     var address = sockaddr_in()
     address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
     address.sin_family = sa_family_t(AF_INET)
     address.sin_port = 0
-    address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+    guard inet_pton(AF_INET, listenerMode.bindAddress, &address.sin_addr) == 1 else {
+      Darwin.close(listenerFD)
+      throw POSIXError(.EADDRNOTAVAIL)
+    }
     let bindResult = withUnsafePointer(to: &address) { pointer in
       pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
         bind(listenerFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))

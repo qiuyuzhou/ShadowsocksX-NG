@@ -106,7 +106,7 @@ final class DiagnosticReportTests: XCTestCase {
     // 允许类目的事实必须在场：状态、数量、权限、存在性、脱敏元数据。
     XCTAssertTrue(report.contains("激活失败"), "缺少代理状态行：\n\(report)")
     XCTAssertTrue(report.contains("活动目标：已设置"))
-    XCTAssertTrue(report.contains("监听范围：回环"))
+    XCTAssertTrue(report.contains("监听方式：仅本机（127.0.0.1）"))
     XCTAssertTrue(report.contains("SOCKS5 端口 11086"))
     XCTAssertTrue(report.contains("HTTP 端口 11087"))
     XCTAssertTrue(report.contains("servers=1 protocols=socks,http mode=tcp_and_udp"), "缺少契约脱敏摘要")
@@ -140,16 +140,15 @@ final class DiagnosticReportTests: XCTestCase {
     XCTAssertTrue(report.contains("（本版本未打包任何插件）"))
   }
 
-  /// 主机地址态：对外公布的 LAN 地址不进入导出（D7 只允许回环/非回环两态）。
-  func testHostScopeDoesNotLeakAdvertisedAddress() {
+  /// 监听方式与实际绑定地址进入报告；设置不再收集单独的 LAN 地址。
+  func testAllIPv4ListenerModeReportsItsBindingAddress() {
     var snapshot = DiagnosticSnapshot()
-    snapshot.listen = SslocalListenSettings(scope: .host(advertisedAddress: "192.0.2.77"))
+    snapshot.listen = SslocalListenSettings(listenerMode: .allIPv4Interfaces)
     snapshot.homePathForRedaction = nil
 
     let report = DiagnosticReportBuilder.markdown(from: snapshot)
 
-    XCTAssertTrue(report.contains("非回环（主机地址，对局域网无鉴权开放）"))
-    XCTAssertFalse(report.contains("192.0.2.77"))
+    XCTAssertTrue(report.contains("监听方式：所有 IPv4 接口（0.0.0.0）"))
   }
 
   /// 契约摘要走 Redactor：完整订阅 URL 只保留 scheme+host。

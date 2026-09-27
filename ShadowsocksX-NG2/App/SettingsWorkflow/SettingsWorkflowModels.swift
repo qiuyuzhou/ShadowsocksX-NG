@@ -29,12 +29,9 @@ struct SettingsPortDraft: Equatable, Sendable {
   }
 }
 
-/// 平坦的 UI 形状编辑草稿：字段全部是 UI 原语。监听范围拆成布尔开关与公布
-/// 地址文本两个字段；持久化的当前模式不在草稿中。
-/// 与 Domain 快照的互转只在 `SettingsDraftAdapter`。
+/// 平坦的 UI 形状编辑草稿：只包含由整体「保存设置」提交的字段。
+/// 监听方式由独立编辑器单项提交，不进入此草稿。
 struct SettingsDraft: Equatable, Sendable {
-  var isHostScope: Bool
-  var advertisedAddress: String
   var socksPort: Int
   var httpPort: Int
   var proxyExceptions: String
@@ -58,7 +55,6 @@ struct SettingsDraft: Equatable, Sendable {
 
 /// 字段标识（按字段归位查询）；端口问题用端口标识变体。
 enum SettingsFieldID: Hashable, Sendable {
-  case advertisedAddress
   case port(SettingsPortID)
 }
 
@@ -66,18 +62,16 @@ enum SettingsFieldID: Hashable, Sendable {
 /// presentation edge 派生。
 enum SettingsFieldIssue: Hashable, Sendable {
   case port(SettingsPortID, error: ProxySettingsValidationError)
-  case advertisedAddress(error: ProxySettingsValidationError)
 
   var field: SettingsFieldID {
     switch self {
     case .port(let id, _): .port(id)
-    case .advertisedAddress: .advertisedAddress
     }
   }
 
   var error: ProxySettingsValidationError {
     switch self {
-    case .port(_, let error), .advertisedAddress(let error):
+    case .port(_, let error):
       error
     }
   }
@@ -121,35 +115,29 @@ enum SettingsCommandRejection: Equatable, Sendable {
   case noFreePort(SettingsPortID)
 }
 
-/// Runtime convergence is deliberately separate from settings persistence.
-/// A persisted snapshot can therefore be retained even when the runtime has
-/// an independent, safely projected failure.
-enum SettingsRuntimeOutcome: Equatable, Sendable {
-  case notRunning
-  case converged
-  case stopped
-  case failed(RuntimeFailureFacts?)
-}
-
 enum SettingsPersistenceFailure: Error, Equatable, Sendable {
   case store(ProxySettingsStoreError)
   case unknown
 }
 
-/// Result returned by every discrete SettingsWorkflow command. Draft-only
-/// changes, persistence and runtime facts remain distinguishable.
+/// Result returned by every discrete SettingsWorkflow command. Proxy runtime
+/// status is presented by its owning status UI, not this settings interface.
 enum SettingsCommandOutcome: Equatable, Sendable {
   case rejected(SettingsCommandRejection)
   case draftUpdated(port: SettingsPortID, value: Int)
   case reloaded
-  case persisted(runtime: SettingsRuntimeOutcome)
+  case persisted
   case persistenceFailed(SettingsPersistenceFailure)
 }
 
 /// Settings workflow 的最后失败仍是 typed；workflow 不提前渲染句子。
 enum SettingsWorkflowFailure: Error, Equatable, Sendable {
   case store(ProxySettingsStoreError)
-  case mode(ProxyModeError)
-  case runtime(RuntimeFailureFacts?)
   case unknown
+}
+
+enum ListenerModeSaveOutcome: Equatable, Sendable {
+  case saved(unknownOccupancy: [SettingsPortID])
+  case rejected(SettingsCommandRejection)
+  case persistenceFailed(SettingsPersistenceFailure)
 }

@@ -23,8 +23,8 @@ func waitUntil(
 final class FakeSettingsCommitter: SettingsCommitting {
   var committedSettings: ProxySettings = ProxySettings()
   var runtimeListenFacts: RuntimeListenFacts?
+  var runtimeListenerProcessID: Int32?
   var updateError: Error?
-  var updateOutcome: SettingsRuntimeOutcome = .notRunning
   var updateGate: AsyncGate?
   private(set) var updateCalls: [ProxySettings] = []
 
@@ -35,12 +35,17 @@ final class FakeSettingsCommitter: SettingsCommitting {
     }
   }
 
-  func updateSettings(_ proposed: ProxySettings) async throws -> SettingsRuntimeOutcome {
+  func updateSettings(_ proposed: ProxySettings) async throws {
     if let updateError { throw updateError }
     if let updateGate { await updateGate.wait() }
     updateCalls.append(proposed)
     committedSettings = proposed
-    return updateOutcome
+  }
+
+  func updateListenerMode(_ mode: ListenerMode) async throws {
+    var proposed = committedSettings
+    proposed.listen.listenerMode = mode
+    try await updateSettings(proposed)
   }
 }
 
@@ -78,13 +83,28 @@ final class FakeOccupancyProbe: PortOccupancyProbing, @unchecked Sendable {
   private let lock = NSLock()
   private let occupiedPorts: Set<Int>
   private let unknownPorts: Set<Int>
+  private let occupierName: String
+  private let occupierIPv4ProcessIDs: Set<Int32>
+  private let occupierIPv6ProcessIDs: Set<Int32>
+  private let explicitOccupiedFamilies: Set<PortOccupancyAddressFamily>?
+  private let unverifiedFamilyDetail: String?
   private var requestedPorts: [Int] = []
   private var requestedRequests: [PortOccupancyProbeRequest] = []
   private var answerOverride: PortOccupancy?
 
-  init(occupiedPorts: Set<Int> = [], unknownPorts: Set<Int> = []) {
+  init(
+    occupiedPorts: Set<Int> = [], unknownPorts: Set<Int> = [], occupierName: String = "other-app",
+    occupierProcessIDs: Set<Int32> = [], occupierIPv6ProcessIDs: Set<Int32> = [],
+    occupiedFamilies: Set<PortOccupancyAddressFamily>? = nil,
+    unverifiedFamilyDetail: String? = nil
+  ) {
     self.occupiedPorts = occupiedPorts
     self.unknownPorts = unknownPorts
+    self.occupierName = occupierName
+    occupierIPv4ProcessIDs = occupierProcessIDs
+    self.occupierIPv6ProcessIDs = occupierIPv6ProcessIDs
+    explicitOccupiedFamilies = occupiedFamilies
+    self.unverifiedFamilyDetail = unverifiedFamilyDetail
   }
 
   var requested: [Int] {
@@ -121,7 +141,26 @@ final class FakeOccupancyProbe: PortOccupancyProbing, @unchecked Sendable {
     if unknownPorts.contains(request.port) {
       return .unknown(detail: "无法判定")
     }
-    return occupiedPorts.contains(request.port) ? .occupied(occupier: "other-app") : .free
+    return occupiedPorts.contains(request.port)
+      ? .occupied(
+        PortOccupancyFacts(
+          occupier: occupierName, ipv4ProcessIDs: occupierIPv4ProcessIDs,
+          ipv6ProcessIDs: occupierIPv6ProcessIDs,
+          occupiedFamilies: explicitOccupiedFamilies
+            ?? occupiedFamilies(for: request.listen.listenerMode),
+          verifiedFamilies: Set(PortOccupancyAddressFamily.allCases),
+          unverifiedFamilyDetail: unverifiedFamilyDetail)) : .free
+  }
+
+  private func occupiedFamilies(for mode: ListenerMode) -> Set<PortOccupancyAddressFamily> {
+    switch mode {
+    case .localhost, .allIPv4Interfaces:
+      [.ipv4]
+    case .allIPv4AndIPv6Interfaces:
+      [.ipv4, .ipv6]
+    case .allIPv6Interfaces:
+      [.ipv6]
+    }
   }
 }
 

@@ -57,39 +57,16 @@ extension ProxyRuntimeController {
     }
   }
 
-  /// SettingsWorkflow 只需要知道 runtime 是否独立收敛，以及失败的安全 typed
-  /// fact；它不消费控制器内部的 state machine。
-  private func settingsRuntimeOutcome() -> SettingsRuntimeOutcome {
-    if case .failed(let facts) = systemProxyState {
-      return .failed(.systemProxy(facts))
-    }
-    switch state {
-    case .off:
-      return .notRunning
-    case .running:
-      return .converged
-    case .firewallBlocked(let facts):
-      return .failed(.firewallBlocked(facts))
-    case .launchFailed(let facts):
-      return .failed(.launch(facts))
-    case .requiresApproval:
-      return .failed(.requiresApproval)
-    case .serviceFailed(let facts):
-      return .failed(.service(facts))
-    case .starting:
-      return .failed(nil)
-    }
-  }
-
   /// Persists a fully validated settings snapshot and, when the agent is
-  /// running, re-derives the same runtime path with the new snapshot.
-  func updateSettings(_ proposed: ProxySettings) async throws -> SettingsRuntimeOutcome {
+  /// running, re-derives the same runtime path with the new snapshot. Runtime
+  /// status remains observable through the controller's status stream.
+  func updateSettings(_ proposed: ProxySettings) async throws {
     let catalog = catalogSnapshotReader.catalogSnapshot
     try settingsStore.save(proposed)
     settings = proposed
     listenSettingsUnreadable = false
     settingsUnreadable = false
-    guard state != .off else { return .notRunning }
+    guard state != .off else { return }
     switch reexpand(in: catalog) {
     case .deployed(let configuration):
       await deploy(configuration.document)
@@ -98,7 +75,6 @@ extension ProxyRuntimeController {
     case nil:
       await deployListeningWithoutTarget()
     }
-    return settingsRuntimeOutcome()
   }
 
   /// Applies the post-import 2.0 runtime boundary without touching

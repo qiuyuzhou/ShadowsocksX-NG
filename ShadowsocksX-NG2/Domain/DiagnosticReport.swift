@@ -198,7 +198,7 @@ enum DiagnosticReportBuilder {
     lines.append("- 代理状态：\(snapshot.proxyState.label)")
     lines.append("- 活动目标：\(snapshot.hasActiveTarget ? "已设置" : "未设置")")
     if let listen = snapshot.listen {
-      lines.append("- 监听范围：\(scopeDescription(listen.scope))")
+      lines.append("- 监听方式：\(listen.listenerMode.displayName)（\(listen.bindAddress)）")
       lines.append("- 本地监听：\(listenDescription(listen))")
     }
     if let summary = snapshot.runtimeDocumentSummary {
@@ -257,16 +257,6 @@ enum DiagnosticReportBuilder {
         + "手动 \(counts.manualServers) / 订阅 \(counts.subscriptionServers)）",
       "- 分组：\(counts.groups)",
     ]
-  }
-
-  /// 监听范围两态（D7）：主机地址态的对外公布地址（LAN IP）不进入导出。
-  private static func scopeDescription(_ scope: ListenScope) -> String {
-    switch scope {
-    case .loopback:
-      return "回环"
-    case .host:
-      return "非回环（主机地址，对局域网无鉴权开放）"
-    }
   }
 
   /// 本地端点只以端口事实呈现（端口语义 #28/#30）。

@@ -4,7 +4,7 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 extension ProxyRuntimeControllerTests {
-  func testLoopbackScopeNeverQueriesApplicationFirewall() async throws {
+  func testLocalhostModeNeverQueriesApplicationFirewall() async throws {
     let seeded = try makeSeededCatalog()
     let firewall = ProxyRuntimeFixture.FakeFirewallChecker(.blocked)
     let controller = makeController(
@@ -15,14 +15,14 @@ extension ProxyRuntimeControllerTests {
 
     XCTAssertEqual(controller.state, .running)
     XCTAssertTrue(firewall.checkedURLs.isEmpty, "回环态与应用防火墙零交互")
-    XCTAssertEqual(controller.effectiveRuntimeListenFacts?.scope, .loopback)
+    XCTAssertEqual(controller.effectiveRuntimeListenFacts?.listenerMode, .localhost)
   }
 
-  func testHostScopeBlockedByFirewallPresentsTargetedRepair() async throws {
+  func testAllIPv4InterfacesBlockedByFirewallPresentsTargetedRepair() async throws {
     let seeded = try makeSeededCatalog()
     let firewall = ProxyRuntimeFixture.FakeFirewallChecker(.blocked)
     let listen = SslocalListenSettings(
-      scope: .host(advertisedAddress: "192.168.2.89"),
+      listenerMode: .allIPv4Interfaces,
       socksPort: 1086,
       httpPort: 1087)
     let controller = makeController(
@@ -41,14 +41,14 @@ extension ProxyRuntimeControllerTests {
     XCTAssertTrue(AppPresentation.message(for: controller.state).contains("允许传入连接"))
     XCTAssertEqual(firewall.checkedURLs.map(\.lastPathComponent), ["sslocal"])
     XCTAssertEqual(
-      controller.effectiveRuntimeListenFacts?.scope,
-      .host(advertisedAddress: "192.168.2.89"))
+      controller.effectiveRuntimeListenFacts?.listenerMode,
+      .allIPv4Interfaces)
   }
 
-  func testHostScopeDetectsFirewallRefusalAfterInitialHealthyPresentation() async throws {
+  func testAllInterfaceModeDetectsFirewallRefusalAfterInitialHealthyPresentation() async throws {
     let seeded = try makeSeededCatalog()
     let firewall = ProxyRuntimeFixture.FakeFirewallChecker(outcomes: [.permitted, .blocked])
-    let listen = SslocalListenSettings(scope: .host(advertisedAddress: "192.168.2.89"))
+    let listen = SslocalListenSettings(listenerMode: .allIPv4Interfaces)
     let controller = makeController(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       listen: listen,
