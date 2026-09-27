@@ -216,6 +216,11 @@ extension SslocalRuntimeDocument {
   var socksPort: Int { socksLocal?.localPort ?? 0 }
   var socksMode: String { socksLocal?.mode ?? "" }
 
+  /// HTTP 入站端口；缺 HTTP 入站时为 0（无效端口，系统代理投影层拒绝）。
+  var httpPort: Int {
+    locals.first { $0.inboundProtocol == "http" }?.localPort ?? 0
+  }
+
   /// wrapper 读取侧防御校验：端口、协议与共享范围必须一致；无效文件按 D5
   /// 停止并清理，不能交给 KeepAlive 无限重放。空 `servers` 合法（issue #60）：
   /// 无活动目标时 agent 以空服务器列表提供本地监听；上游 sslocal v1.25.0

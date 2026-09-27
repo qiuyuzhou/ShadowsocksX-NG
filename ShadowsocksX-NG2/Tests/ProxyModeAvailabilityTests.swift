@@ -18,23 +18,29 @@ final class ProxyModeAvailabilityTests: XCTestCase {
     let configuration = try ProxyMode.direct.systemProxyConfiguration(for: document)
 
     XCTAssertEqual(
-      configuration.target,
-      .socks(host: "127.0.0.1", port: SslocalListenSettings.defaultSocksPort))
+      configuration.socks,
+      .init(host: "127.0.0.1", port: SslocalListenSettings.defaultSocksPort))
+    XCTAssertEqual(
+      configuration.http,
+      .init(host: "127.0.0.1", port: SslocalListenSettings.defaultHTTPPort))
     XCTAssertEqual(
       configuration.exceptions,
       FixedLocalProxyRanges.systemProxyExceptions)
   }
 
-  /// 全局模式（issue #62）：系统 SOCKS 投影 + 固定本地例外，与直连共用同一
-  /// 安全范围；公网路由由 ACL 决定，不由系统例外决定。
+  /// 全局模式（issue #62）：系统 SOCKS/HTTP 投影 + 固定本地例外，与直连共用
+  /// 同一安全范围；公网路由由 ACL 决定，不由系统例外决定。
   func testGlobalModeUsesLocalSOCKSAndIncludesFixedBypasses() throws {
     let document = SslocalRuntimeDocument(servers: [], listen: SslocalListenSettings())
 
     let configuration = try ProxyMode.global.systemProxyConfiguration(for: document)
 
     XCTAssertEqual(
-      configuration.target,
-      .socks(host: "127.0.0.1", port: SslocalListenSettings.defaultSocksPort))
+      configuration.socks,
+      .init(host: "127.0.0.1", port: SslocalListenSettings.defaultSocksPort))
+    XCTAssertEqual(
+      configuration.http,
+      .init(host: "127.0.0.1", port: SslocalListenSettings.defaultHTTPPort))
     XCTAssertEqual(
       configuration.exceptions,
       FixedLocalProxyRanges.systemProxyExceptions)

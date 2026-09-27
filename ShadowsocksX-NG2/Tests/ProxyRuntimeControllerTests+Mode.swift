@@ -70,8 +70,11 @@ extension ProxyRuntimeControllerTests {
       Data(expectedACL.content.utf8),
       "链接解析后的内容是 direct 变体")
     XCTAssertEqual(
-      systemProxy.applied.last?.target,
-      .socks(host: "127.0.0.1", port: ActivationFixture.listen.socksPort))
+      systemProxy.applied.last?.socks,
+      .init(host: "127.0.0.1", port: ActivationFixture.listen.socksPort))
+    XCTAssertEqual(
+      systemProxy.applied.last?.http,
+      .init(host: "127.0.0.1", port: ActivationFixture.listen.httpPort))
     XCTAssertTrue(
       Set(FixedLocalProxyRanges.systemProxyExceptions).isSubset(
         of: Set(systemProxy.applied.last?.exceptions ?? [])))

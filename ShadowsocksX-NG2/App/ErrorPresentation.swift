@@ -255,6 +255,7 @@ extension AppPresentation {
   static func proxyMode(_ error: ProxyModeError) -> String {
     switch error {
     case .invalidSOCKSPort: return "SOCKS 端口无效"
+    case .invalidHTTPPort: return "HTTP 端口无效"
     }
   }
 

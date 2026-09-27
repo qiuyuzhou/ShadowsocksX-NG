@@ -73,7 +73,8 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   static var availableModes: [ProxyMode] { [.rule, .global, .direct] }
 
   /// Derives the only system-proxy state that this mode is allowed to own.
-  /// All three modes are projected as a local SOCKS target (issue #59/#67).
+  /// All three modes are projected as the local SOCKS and HTTP inbounds
+  /// (issue #59/#67)：SOCKS 之外，系统 HTTP/HTTPS 代理指向恒开启的 HTTP 入站。
   func systemProxyConfiguration(
     for document: SslocalRuntimeDocument,
     exceptions: [String]? = nil
@@ -81,29 +82,41 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
     guard (1...65535).contains(document.socksPort) else {
       throw ProxyModeError.invalidSOCKSPort(document.socksPort)
     }
+    guard (1...65535).contains(document.httpPort) else {
+      throw ProxyModeError.invalidHTTPPort(document.httpPort)
+    }
     return SystemProxyConfiguration(
-      target: .socks(host: "127.0.0.1", port: document.socksPort),
+      socks: .init(host: "127.0.0.1", port: document.socksPort),
+      http: .init(host: "127.0.0.1", port: document.httpPort),
       exceptions: FixedLocalProxyRanges.systemProxyExceptions(including: exceptions))
   }
 }
 
 /// The part of the system proxy dictionary that 2.0 intentionally controls.
+/// SOCKS 与 HTTP/HTTPS 两个协议族同时写入，各指向 sslocal 的对应本地入站；
+/// HTTPS 走 HTTP 入站的 CONNECT 代理，与 SOCKS 共用同一实例。
 struct SystemProxyConfiguration: Equatable, Sendable {
-  enum Target: Equatable, Sendable {
-    case socks(host: String, port: Int)
+  /// 一个系统代理协议族指向的本地端点。
+  struct Endpoint: Equatable, Sendable {
+    let host: String
+    let port: Int
   }
 
-  let target: Target
+  let socks: Endpoint
+  /// 系统 HTTP 与 HTTPS 代理共同指向的 HTTP 入站端点。
+  let http: Endpoint
   /// `nil` preserves the user's original ExceptionsList. A non-nil value is
   /// explicitly owned by the app and is projected on every activation.
   let exceptions: [String]?
 
-  init(target: Target, exceptions: [String]? = nil) {
-    self.target = target
+  init(socks: Endpoint, http: Endpoint, exceptions: [String]? = nil) {
+    self.socks = socks
+    self.http = http
     self.exceptions = exceptions
   }
 }
 
 enum ProxyModeError: Error, Equatable, Sendable {
   case invalidSOCKSPort(Int)
+  case invalidHTTPPort(Int)
 }

@@ -190,7 +190,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       systemProxy.applied,
       [
         SystemProxyConfiguration(
-          target: .socks(host: "127.0.0.1", port: 11086),
+          socks: .init(host: "127.0.0.1", port: 11086),
+          http: .init(host: "127.0.0.1", port: 11087),
           exceptions: FixedLocalProxyRanges.systemProxyExceptions(
             including: ProxySettings().proxyExceptionList))
       ])
@@ -201,7 +202,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertEqual(
       systemProxy.applied.last,
       SystemProxyConfiguration(
-        target: .socks(host: "127.0.0.1", port: 11086),
+        socks: .init(host: "127.0.0.1", port: 11086),
+        http: .init(host: "127.0.0.1", port: 11087),
         exceptions: FixedLocalProxyRanges.systemProxyExceptions(
           including: ProxySettings().proxyExceptionList)))
 

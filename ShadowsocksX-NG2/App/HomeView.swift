@@ -193,7 +193,7 @@ private struct ModeCard: View {
     case .rule:
       "按内置规则在代理与直连间选择；未匹配目标走默认动作。"
     case .global:
-      "所有系统代理流量通过本地 SOCKS5 端点转发，不使用规则分流。"
+      "所有系统代理流量通过本地 SOCKS 与 HTTP 入口转发，不使用规则分流。"
     case .direct:
       "通过本地 SOCKS 与 HTTP 入口直连，不使用 Shadowsocks 服务器。"
     }

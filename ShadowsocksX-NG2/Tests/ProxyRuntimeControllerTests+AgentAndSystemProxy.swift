@@ -86,7 +86,8 @@ extension ProxyRuntimeControllerTests {
       systemProxy.applied,
       [
         SystemProxyConfiguration(
-          target: .socks(host: "127.0.0.1", port: ActivationFixture.listen.socksPort),
+          socks: .init(host: "127.0.0.1", port: ActivationFixture.listen.socksPort),
+          http: .init(host: "127.0.0.1", port: ActivationFixture.listen.httpPort),
           exceptions: FixedLocalProxyRanges.systemProxyExceptions(
             including: ProxySettings().proxyExceptionList))
       ],
