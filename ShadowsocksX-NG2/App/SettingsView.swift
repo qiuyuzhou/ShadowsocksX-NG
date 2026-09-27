@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 设置分区（issue #33/#44，地图 #52 票 #57）：常规、代理端点和系统代理三张
+/// 设置分区（issue #33/#44，地图 #52 票 #57）：常规、后台代理客户端和系统代理三张
 /// 分组卡，行式呈现（主文案 + 次说明 + 行尾控件）。设置项由各自编辑器独立保存；
 /// 登录项开关绑定独立控制器。
 struct SettingsView: View {
@@ -58,11 +58,11 @@ struct SettingsView: View {
       }
       .padding(.vertical, 4)
     } header: {
-      sectionHeader("常规", subtitle: "应用启动与常用代理行为")
+      sectionHeader("常规")
     }
   }
 
-  // MARK: - 代理端点
+  // MARK: - 后台代理客户端
 
   private var endpointSection: some View {
     Section {
@@ -88,7 +88,7 @@ struct SettingsView: View {
       }
       portSettingsRow
     } header: {
-      sectionHeader("代理端点", subtitle: "监听方式和本地服务端口", trailing: "不会自动换端口")
+      sectionHeader("后台代理客户端")
     }
   }
 
@@ -116,38 +116,20 @@ struct SettingsView: View {
         .accessibilityHint("编辑并保存额外的系统代理例外")
       }
     } header: {
-      sectionHeader("系统代理", subtitle: "附加例外与应用固定的绕过规则")
+      sectionHeader("系统代理")
     }
   }
 
   // MARK: - 呈现组件
 
-  /// 分组卡标题行：标题 + 副题 + 可选尾随徽标（票 #57）。
-  private func sectionHeader(_ title: String, subtitle: String, trailing: String? = nil)
-    -> some View
-  {
-    HStack(alignment: .firstTextBaseline) {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title)
-          .font(.headline)
-        Text(subtitle)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      Spacer(minLength: 12)
-      if let trailing {
-        Text(trailing)
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(.tint)
-          .padding(.horizontal, 8)
-          .padding(.vertical, 3)
-          .background(Color.accentColor.opacity(0.12), in: Capsule())
-      }
-    }
-    .padding(.vertical, 2)
+  /// 分组卡标题行（票 #57）。
+  private func sectionHeader(_ title: String) -> some View {
+    Text(title)
+      .font(.headline)
+      .padding(.vertical, 2)
   }
 
-  /// 主文案 + 可选次说明（票 #57 原型行式；代理端点区不配次说明）。
+  /// 主文案 + 可选次说明（票 #57 原型行式；后台代理客户端区不配次说明）。
   private func settingCopy(_ title: String, note: String? = nil) -> some View {
     VStack(alignment: .leading, spacing: 2) {
       Text(title)
