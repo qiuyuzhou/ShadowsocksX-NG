@@ -1,5 +1,10 @@
 import Foundation
 
+/// The allowed range for local proxy listener ports.
+enum ProxyPortRange {
+  static let valid = 1000...65_535
+}
+
 /// 本地端点与单一监听范围的派生设置。HTTP 入站恒开启，与 SOCKS 共用同一
 /// 范围；默认端口与 Legacy 隔离（11086/11087）。PAC 端点已随 issue #67 移除。
 struct SslocalListenSettings: Equatable, Sendable {

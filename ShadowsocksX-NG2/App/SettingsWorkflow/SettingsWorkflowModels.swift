@@ -9,6 +9,26 @@ enum SettingsPortID: CaseIterable, Hashable, Sendable {
   case http
 }
 
+/// The SOCKS5 and HTTP ports edited and saved together as one settings item.
+struct SettingsPortDraft: Equatable, Sendable {
+  var socksPort: Int
+  var httpPort: Int
+
+  func portValue(for id: SettingsPortID) -> Int {
+    switch id {
+    case .socks: socksPort
+    case .http: httpPort
+    }
+  }
+
+  mutating func setPortValue(_ value: Int, for id: SettingsPortID) {
+    switch id {
+    case .socks: socksPort = value
+    case .http: httpPort = value
+    }
+  }
+}
+
 /// 平坦的 UI 形状编辑草稿：字段全部是 UI 原语。监听范围拆成布尔开关与公布
 /// 地址文本两个字段，端口与超时保持整数；持久化的当前模式不在草稿中。
 /// 与 Domain 快照的互转只在 `SettingsDraftAdapter`。
@@ -47,7 +67,7 @@ enum SettingsFieldID: Hashable, Sendable {
 
 /// 按字段归位的校验问题：每条保留 Domain 的 typed fact；文案由 App
 /// presentation edge 派生。
-enum SettingsFieldIssue: Equatable, Sendable {
+enum SettingsFieldIssue: Hashable, Sendable {
   case port(SettingsPortID, error: ProxySettingsValidationError)
   case advertisedAddress(error: ProxySettingsValidationError)
   case timeoutSeconds(error: ProxySettingsValidationError)

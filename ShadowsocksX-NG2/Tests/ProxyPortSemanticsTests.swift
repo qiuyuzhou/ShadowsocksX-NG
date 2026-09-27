@@ -46,7 +46,7 @@ final class ProxyPortSemanticsTests: XCTestCase {
     XCTAssertEqual(
       AppPresentation.message(
         for: PortSettingError.portOutOfRange(endpoint: .http, port: 70000)),
-      "HTTP 端口 70000 无效，必须是 1–65535 之间的整数")
+      "HTTP 端口 70000 无效，必须是 1000–65535 之间的整数")
     XCTAssertEqual(
       AppPresentation.message(
         for: PortSettingError.duplicatePort(

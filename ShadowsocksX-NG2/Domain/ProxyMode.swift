@@ -79,10 +79,10 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
     for document: SslocalRuntimeDocument,
     exceptions: [String]? = nil
   ) throws -> SystemProxyConfiguration {
-    guard (1...65535).contains(document.socksPort) else {
+    guard ProxyPortRange.valid.contains(document.socksPort) else {
       throw ProxyModeError.invalidSOCKSPort(document.socksPort)
     }
-    guard (1...65535).contains(document.httpPort) else {
+    guard ProxyPortRange.valid.contains(document.httpPort) else {
       throw ProxyModeError.invalidHTTPPort(document.httpPort)
     }
     return SystemProxyConfiguration(

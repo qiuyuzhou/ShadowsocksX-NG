@@ -77,7 +77,7 @@ struct ProxySettings: Equatable, Sendable {
 }
 
 /// 设置快照的点名校验错误；端口错误保留 D8 的端点与数值信息。
-enum ProxySettingsValidationError: Error, Equatable, Sendable {
+enum ProxySettingsValidationError: Error, Hashable, Sendable {
   case portOutOfRange(endpoint: ProxyEndpointKind, port: Int)
   case duplicatePort(endpoint: ProxyEndpointKind, otherEndpoint: ProxyEndpointKind, port: Int)
   case invalidTimeout(Int)

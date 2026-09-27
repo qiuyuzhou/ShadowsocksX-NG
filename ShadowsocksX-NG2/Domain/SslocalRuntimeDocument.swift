@@ -267,7 +267,7 @@ extension SslocalRuntimeDocument {
       locals.allSatisfy({ local in
         let expectedMode = local.inboundProtocol == "socks" ? "tcp_and_udp" : "tcp_only"
         return local.localAddress == expectedBind
-          && (1...65535).contains(local.localPort)
+          && ProxyPortRange.valid.contains(local.localPort)
           && local.mode == expectedMode
       })
     else { return false }

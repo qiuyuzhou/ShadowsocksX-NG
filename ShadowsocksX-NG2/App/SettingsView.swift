@@ -8,6 +8,7 @@ import SwiftUI
 struct SettingsView: View {
   @ObservedObject var workflow: SettingsWorkflow
   @ObservedObject var loginController: LaunchAtLoginController
+  @State private var portSettingsEditor: PortSettingsEditorSession?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -23,6 +24,9 @@ struct SettingsView: View {
     .padding(.trailing, 24)
     .onAppear {
       Task { _ = await workflow.reloadFromCommitted() }
+    }
+    .sheet(item: $portSettingsEditor) { session in
+      PortSettingsEditorSheet(workflow: workflow, initialDraft: session.initialDraft)
     }
   }
 
@@ -132,8 +136,7 @@ struct SettingsView: View {
         }
         .padding(.vertical, 2)
       }
-      portRow(.socks, title: "SOCKS5 端口")
-      portRow(.http, title: "HTTP 代理端口")
+      portSettingsRow
     } header: {
       sectionHeader("代理端点", subtitle: "监听范围和本地服务端口", trailing: "不会自动换端口")
     }
@@ -150,7 +153,7 @@ struct SettingsView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       if workflow.hasBlockingPortOccupancy {
-        Label("检测到端口已被占用；请先使用对应的「建议空闲端口」，再保存设置。", systemImage: "exclamationmark.triangle")
+        Label("检测到端口已被占用；请在「端口设置」中选择建议空闲端口并保存。", systemImage: "exclamationmark.triangle")
           .font(.footnote)
           .foregroundStyle(.orange)
       }
@@ -216,68 +219,154 @@ struct SettingsView: View {
   }
 }
 
-// MARK: - 端口行（同文件扩展，保持 private 访问）
+// MARK: - 端口设置摘要与编辑框
 
 extension SettingsView {
-  private func portRow(_ id: SettingsPortID, title: String) -> some View {
-    let state = workflow.portFieldState(for: id)
-    return settingRow(title) {
-      VStack(alignment: .trailing, spacing: 4) {
-        TextField(
-          title,
-          value: portBinding(for: id),
-          format: .number.grouping(.never)
-        )
-        .textFieldStyle(.roundedBorder)
-        .labelsHidden()
-        .multilineTextAlignment(.trailing)
-        .frame(width: 96)
-        ForEach(Array(state.issues.enumerated()), id: \.offset) { _, issue in
-          Text(AppPresentation.message(for: issue))
-            .font(.caption)
-            .foregroundStyle(.red)
-            .frame(width: 220, alignment: .trailing)
-        }
-        if let occupancy = state.occupancy {
-          Text(occupancyText(occupancy, state: state))
-            .font(.caption)
-            .foregroundStyle(occupancyColor(occupancy))
-            .frame(width: 220, alignment: .trailing)
-        }
-        if state.canSuggestFreePort {
-          Button("建议空闲端口") {
-            Task { _ = await workflow.suggestFreePort(for: id) }
-          }
-          .font(.caption)
+  fileprivate var portSettingsRow: some View {
+    let ports = workflow.committedPortDraft
+    return settingRow("端口设置") {
+      Button {
+        portSettingsEditor = PortSettingsEditorSession(
+          initialDraft: workflow.beginPortSettingsEditing())
+      } label: {
+        HStack(spacing: 8) {
+          Text("SOCKS5 \(ports.socksPort) / HTTP \(ports.httpPort)")
+            .monospacedDigit()
+          Image(systemName: "chevron.right")
+            .font(.caption.weight(.semibold))
         }
       }
+      .buttonStyle(.bordered)
+      .accessibilityLabel("端口设置")
+      .accessibilityValue("SOCKS5 \(ports.socksPort)，HTTP 代理 \(ports.httpPort)")
     }
-    .padding(.vertical, 2)
   }
 
-  private func portBinding(for id: SettingsPortID) -> Binding<Int> {
-    Binding(
-      get: { workflow.draft.portValue(for: id) },
-      set: { workflow.draft.setPortValue($0, for: id) })
-  }
-
-  private func issuesRow(_ field: SettingsFieldID) -> some View {
-    ForEach(Array(workflow.issues(for: field).enumerated()), id: \.offset) { _, issue in
+  fileprivate func issuesRow(_ field: SettingsFieldID) -> some View {
+    ForEach(workflow.issues(for: field), id: \.self) { issue in
       Text(AppPresentation.message(for: issue))
         .font(.caption)
         .foregroundStyle(.red)
     }
   }
+}
 
-  private func occupancyText(
-    _ occupancy: SettingsPortOccupancy, state: SettingsPortFieldState
-  ) -> String {
+private struct PortSettingsEditorSession: Identifiable {
+  let id = UUID()
+  let initialDraft: SettingsPortDraft
+}
+
+private struct PortSettingsEditorSheet: View {
+  @ObservedObject var workflow: SettingsWorkflow
+  @Environment(\.dismiss) private var dismiss
+  @State private var draft: SettingsPortDraft
+
+  init(workflow: SettingsWorkflow, initialDraft: SettingsPortDraft) {
+    self.workflow = workflow
+    _draft = State(initialValue: initialDraft)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("端口设置")
+        .font(.title2)
+      Text("端口范围为 1000–65535，SOCKS5 与 HTTP 代理端口必须不同。")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+      VStack(alignment: .leading, spacing: 14) {
+        portField(.socks, title: "SOCKS 代理端口")
+        portField(.http, title: "HTTP 代理端口")
+      }
+
+      if let failure = workflow.lastFailure {
+        Label(failure.presentableMessage, systemImage: "exclamationmark.triangle.fill")
+          .font(.footnote)
+          .foregroundStyle(.red)
+      }
+
+      HStack {
+        Spacer()
+        Button("取消", role: .cancel) {
+          dismiss()
+        }
+        .keyboardShortcut(.cancelAction)
+        .disabled(workflow.isCommitting)
+
+        Button(workflow.isCommitting ? "保存中…" : "保存") {
+          Task {
+            if case .persisted = await workflow.savePortSettings(draft) {
+              dismiss()
+            }
+          }
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(!workflow.canSavePortSettings(draft))
+      }
+    }
+    .padding(24)
+    .frame(width: 460)
+    .interactiveDismissDisabled(workflow.isCommitting)
+    .task(id: draft) {
+      workflow.refreshPortEditorOccupancy(for: draft)
+    }
+  }
+
+  private func portField(_ id: SettingsPortID, title: String) -> some View {
+    let state = workflow.portFieldState(for: id, editorDraft: draft)
+    return VStack(alignment: .leading, spacing: 5) {
+      HStack(spacing: 16) {
+        Text(title)
+        Spacer(minLength: 12)
+        TextField(title, value: portBinding(for: id), format: .number.grouping(.never))
+          .textFieldStyle(.roundedBorder)
+          .multilineTextAlignment(.trailing)
+          .monospacedDigit()
+          .frame(width: 112)
+          .disabled(workflow.isCommitting)
+      }
+
+      ForEach(state.issues, id: \.self) { issue in
+        Text(AppPresentation.message(for: issue))
+          .font(.caption)
+          .foregroundStyle(.red)
+      }
+
+      if let occupancy = occupancyMessage(for: state) {
+        Text(occupancy)
+          .font(.caption)
+          .foregroundStyle(occupancyColor(for: state))
+      }
+
+      if state.canSuggestFreePort {
+        Button("建议空闲端口") {
+          Task {
+            let outcome = await workflow.suggestFreePort(for: id, from: draft)
+            if case .draftUpdated(let port, let value) = outcome {
+              draft.setPortValue(value, for: port)
+            }
+          }
+        }
+        .font(.caption)
+        .disabled(workflow.isCommitting)
+      }
+    }
+  }
+
+  private func portBinding(for id: SettingsPortID) -> Binding<Int> {
+    Binding(
+      get: { draft.portValue(for: id) },
+      set: { draft.setPortValue($0, for: id) })
+  }
+
+  private func occupancyMessage(for state: SettingsPortFieldState) -> String? {
+    guard let occupancy = state.occupancy else { return nil }
     switch occupancy {
     case .free:
-      return "当前端口可用"
+      return nil
     case .occupied(let occupier):
       if state.isRuntimePortException {
-        return "当前代理正在使用此端口，保存其他设置不会触发冲突"
+        return "当前代理正在使用此端口"
       }
       return "当前端口已占用" + (occupier.map { "（" + $0 + "）" } ?? "")
     case .unknown(let detail):
@@ -285,12 +374,13 @@ extension SettingsView {
     }
   }
 
-  private func occupancyColor(_ occupancy: SettingsPortOccupancy) -> Color {
+  private func occupancyColor(for state: SettingsPortFieldState) -> Color {
+    guard let occupancy = state.occupancy else { return .secondary }
     switch occupancy {
-    case .free: .secondary
-    case .occupied: .orange
-    case .unknown: .secondary
+    case .free, .unknown:
+      return .secondary
+    case .occupied:
+      return state.isRuntimePortException ? .secondary : .orange
     }
   }
-
 }

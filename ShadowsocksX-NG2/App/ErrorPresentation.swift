@@ -254,15 +254,15 @@ extension AppPresentation {
 
   static func proxyMode(_ error: ProxyModeError) -> String {
     switch error {
-    case .invalidSOCKSPort: return "SOCKS 端口无效"
-    case .invalidHTTPPort: return "HTTP 端口无效"
+    case .invalidSOCKSPort: return "SOCKS 端口无效，必须是 1000–65535 之间的整数"
+    case .invalidHTTPPort: return "HTTP 端口无效，必须是 1000–65535 之间的整数"
     }
   }
 
   private static func port(_ error: PortSettingError) -> String {
     switch error {
     case .portOutOfRange(let endpoint, let portNumber):
-      return "\(endpoint.displayName) 端口 \(portNumber) 无效，必须是 1–65535 之间的整数"
+      return "\(endpoint.displayName) 端口 \(portNumber) 无效，必须是 1000–65535 之间的整数"
     case .duplicatePort(let endpoint, let otherEndpoint, let portNumber):
       return
         "\(endpoint.displayName) 端口与 \(otherEndpoint.displayName) 端口冲突（都是 \(portNumber)），请为每个端点配置不同的端口"

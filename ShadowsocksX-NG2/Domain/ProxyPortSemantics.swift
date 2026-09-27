@@ -5,7 +5,7 @@
 /// 期尽力而为的即时提示。
 
 /// 本地代理端点；显示名与 D8 及诊断报告的措辞一致。PAC 端点已随 issue #67 移除。
-enum ProxyEndpointKind: Equatable, Sendable, CaseIterable {
+enum ProxyEndpointKind: Hashable, Sendable, CaseIterable {
   case socks
   case http
 
@@ -18,7 +18,7 @@ enum ProxyEndpointKind: Equatable, Sendable, CaseIterable {
 }
 
 /// 端口配置校验错误：点名端点与端口（D8 错误信息要求）。
-enum PortSettingError: Error, Equatable, Sendable {
+enum PortSettingError: Error, Hashable, Sendable {
   case portOutOfRange(endpoint: ProxyEndpointKind, port: Int)
   /// 两个端点的配置端口相同；`endpoint` 在枚举序（socks → http）中在前。
   case duplicatePort(endpoint: ProxyEndpointKind, otherEndpoint: ProxyEndpointKind, port: Int)
@@ -46,13 +46,13 @@ extension SslocalListenSettings {
     }
   }
 
-  /// 端口配置校验：范围 1–65535、两端点配置值互异。错误按固定次序
+  /// 端口配置校验：范围 1000–65535、两端点配置值互异。错误按固定次序
   /// （socks/http 范围检查，再 socks-http 冲突）。
   func portValidationErrors() -> [PortSettingError] {
     var errors: [PortSettingError] = []
     for endpoint in ProxyEndpointKind.allCases {
       let port = configuredPort(for: endpoint)
-      if !(1...65535).contains(port) {
+      if !ProxyPortRange.valid.contains(port) {
         errors.append(.portOutOfRange(endpoint: endpoint, port: port))
       }
     }
