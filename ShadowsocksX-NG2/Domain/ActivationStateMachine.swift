@@ -9,15 +9,12 @@ enum ActivationEffect: Equatable, Sendable {
 /// 派生运行时文档的监听与行为设置；聚合状态机接口的传参。
 struct RuntimeDocumentOptions: Equatable, Sendable {
   var listen: SslocalListenSettings
-  var timeout: Int = 60
-  var verbose: Bool = false
 }
 
 extension ProxySettings {
-  /// 激活派生所用选项即用户设置中的运行时文档旋钮。
+  /// 激活派生所用的监听配置。
   var runtimeDocumentOptions: RuntimeDocumentOptions {
-    RuntimeDocumentOptions(
-      listen: listen, timeout: timeoutSeconds, verbose: verboseLogging)
+    RuntimeDocumentOptions(listen: listen)
   }
 }
 
@@ -123,9 +120,7 @@ struct ActivationStateMachine: Equatable, Sendable {
         targetID: target,
         document: SslocalRuntimeDocument(
           servers: servers,
-          listen: options.listen,
-          timeout: options.timeout,
-          verbose: options.verbose),
+          listen: options.listen),
         skippedServers: skippedServers))
   }
 

@@ -28,12 +28,12 @@
 - **Proxy runtime**: The per-user background host process, independent of the GUI's lifetime, that runs the external tunnel service and loads the optional generated ACL sidecar.
 - **Legacy configuration**: The server list and preferences persisted by the frozen implementation in `Legacy/`.
 - **Legacy import**: The user-confirmed, read-only translation of a Legacy configuration's server records into a separate manual group in 2.0. It migrates no preferences, activates no target, and neither starts proxying nor alters the Legacy source.
-- **Runtime configuration file**: The derived JSON document used by the external tunnel service for the active target; it is not the user-managed server configuration or subscription document.
+- **Runtime configuration file**: The derived JSON document used by the external tunnel service for the active target. Fields NG2 omits are left to the bundled `sslocal` defaults; the file is not the user-managed server configuration or subscription document.
 - **Sensitive information**: Server passwords, plugin options (sensitive in their entirety), and nonempty user-provided remote URLs, including subscription URLs.
 - **Credential exposure boundary**: This product reduces accidental disclosure and exposure to other user accounts, but does not guarantee protection against a compromised same-user process, root access, or APFS snapshots and backups; it does not promise secure erasure.
 - **Credential reference**: A non-secret association from a server configuration, subscription, or remote-URL setting to its durable credential; the credential value is kept outside the configuration tree and resolved only when needed.
 - **Diagnostic report**: A user-requested, redacted document containing only approved runtime state, endpoint metadata, aggregate catalog facts, managed-plugin presence, file metadata, and safe GUI event lines. It never contains passwords, plugin options, Keychain values, full remote URLs or tokens, runtime JSON, server addresses, remarks, or raw wrapper log text.
-- **Diagnostic log view**: The explicit view/copy surface for GUI event lines and the raw wrapper `agent.log` tail. Raw wrapper log text is not part of a diagnostic report.
+- **Diagnostic log view**: The explicit view/copy surface for GUI event lines and the raw wrapper `agent.log` tail; child-process verbosity follows `sslocal` defaults unless an external `RUST_LOG` is inherited. Raw wrapper log text is not part of a diagnostic report.
 - **Diagnostic facts**: Aggregate, redacted facts about the catalog and proxy runtime that can enter a diagnostic projection without exposing catalog entries, server addresses, remarks, credential references, URLs, paths, or other sensitive information.
 - **System-level shortcut**: A user-configurable keyboard action registered by the app that can trigger an app action even when the app has no focus.
   _Avoid_: global hotkey, global shortcut.

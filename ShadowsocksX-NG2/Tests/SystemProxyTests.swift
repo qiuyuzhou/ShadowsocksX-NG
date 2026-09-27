@@ -27,9 +27,9 @@ final class SystemProxyTests: XCTestCase {
     // 无效端口 0，而应按模式错误拒绝。
     let json = """
       {"servers":[],"locals":[{"protocol":"socks","local_address":"127.0.0.1",\
-      "local_port":11086,"mode":"tcp_and_udp"}],"timeout":60,\
+      "local_port":11086,"mode":"tcp_and_udp"}],\
       "x_shadowsocksx_ng_listen":{"listen_scope":"loopback",\
-      "bind_address":"127.0.0.1","advertised_address":"127.0.0.1","verbose":false}}
+      "bind_address":"127.0.0.1","advertised_address":"127.0.0.1"}}
       """
     let document = try XCTUnwrap(SslocalRuntimeDocument.decodeValidated(Data(json.utf8)))
 

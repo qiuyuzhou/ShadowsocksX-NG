@@ -48,11 +48,7 @@ func spawnSslocal(_ document: SslocalRuntimeDocument) -> Process? {
   child.executableURL = sslocalURL
   child.arguments = ["-c", contractURL.path]
   var childEnvironment = environment
-  // 上游默认日志级别会把服务器地址写进普通日志（D5）：常规模式压到 warn，
-  // 用户明确打开 verbose 后才放宽到 debug。显式外部 RUST_LOG 仍可用于诊断。
-  if childEnvironment["RUST_LOG"] == nil {
-    childEnvironment["RUST_LOG"] = document.listen.verbose ? "debug" : "warn"
-  }
+  // 不配置 sslocal 日志级别；未设置时使用上游默认值，显式外部 RUST_LOG 原样透传。
   // macOS 的 resolv.conf 可能含带 zone id 的链路本地 nameserver（RA 下发的
   // RDNSS，如 fe80::…%en0），hickory 解析不了该后缀（hickory-dns#3713），
   // 每次启动都报错再回退 builtin。强制 builtin getaddrinfo 即回退后的实际

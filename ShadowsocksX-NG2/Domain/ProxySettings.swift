@@ -8,8 +8,6 @@ struct ProxySettings: Equatable, Sendable {
     "127.0.0.1, localhost, 192.168.0.0/16, 10.0.0/8, FE80::/64, ::1, FD00::/8"
 
   var listen: SslocalListenSettings
-  var timeoutSeconds: Int
-  var verboseLogging: Bool
   var proxyExceptions: String
   /// The persisted current mode: the mode selector's choice survives GUI
   /// restarts. First run defaults to rule mode (issue #67).
@@ -25,8 +23,6 @@ struct ProxySettings: Equatable, Sendable {
 
   init(
     listen: SslocalListenSettings = SslocalListenSettings(),
-    timeoutSeconds: Int = 60,
-    verboseLogging: Bool = false,
     proxyExceptions: String = ProxySettings.defaultProxyExceptions,
     preferredMode: ProxyModeKind = .rule,
     ruleDefaultAction: RuleDefaultAction = .proxyWhenUnmatched,
@@ -34,8 +30,6 @@ struct ProxySettings: Equatable, Sendable {
     systemProxyEnabled: Bool = false
   ) {
     self.listen = listen
-    self.timeoutSeconds = timeoutSeconds
-    self.verboseLogging = verboseLogging
     self.proxyExceptions = proxyExceptions
     self.preferredMode = preferredMode
     self.ruleDefaultAction = ruleDefaultAction
@@ -60,9 +54,6 @@ struct ProxySettings: Equatable, Sendable {
 
   var validationErrors: [ProxySettingsValidationError] {
     var errors = listen.portValidationErrors().map(ProxySettingsValidationError.init)
-    if !(1...86_400).contains(timeoutSeconds) {
-      errors.append(.invalidTimeout(timeoutSeconds))
-    }
     if case .host(let address) = listen.scope, !Self.isUsableHostAddress(address) {
       errors.append(.invalidHostAddress(address))
     }
@@ -80,7 +71,6 @@ struct ProxySettings: Equatable, Sendable {
 enum ProxySettingsValidationError: Error, Hashable, Sendable {
   case portOutOfRange(endpoint: ProxyEndpointKind, port: Int)
   case duplicatePort(endpoint: ProxyEndpointKind, otherEndpoint: ProxyEndpointKind, port: Int)
-  case invalidTimeout(Int)
   case invalidHostAddress(String)
 
   init(_ error: PortSettingError) {

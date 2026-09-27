@@ -52,30 +52,16 @@ struct SslocalLocalDocument: Codable, Equatable, Sendable {
 
 /// wrapper 自有的监听身份扩展（issue #67 取代已删除的 PAC 扩展）。字段收在
 /// `x_shadowsocksx_ng_listen` 下，上游 sslocal 会忽略该扩展；wrapper 与 GUI
-/// 仍从同一原子文件读取同一份事实。verbose 决定 sslocal 的 RUST_LOG 级别。
+/// 仍从同一原子文件读取同一份事实。
 struct RuntimeListenDocument: Codable, Equatable, Sendable {
   let listenScope: ListenScopeKind
   let bindAddress: String
   let advertisedAddress: String
-  let verbose: Bool
 
   enum CodingKeys: String, CodingKey {
     case listenScope = "listen_scope"
     case bindAddress = "bind_address"
     case advertisedAddress = "advertised_address"
-    case verbose
-  }
-
-  init(
-    listenScope: ListenScopeKind,
-    bindAddress: String,
-    advertisedAddress: String,
-    verbose: Bool = false
-  ) {
-    self.listenScope = listenScope
-    self.bindAddress = bindAddress
-    self.advertisedAddress = advertisedAddress
-    self.verbose = verbose
   }
 }
 
@@ -85,14 +71,13 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
   let servers: [SslocalServerDocument]
   let locals: [SslocalLocalDocument]
   let listen: RuntimeListenDocument
-  let timeout: Int
   /// Upstream sslocal ACL file path. The wrapper-owned extension carries the
   /// matching content and digest so both inbounds use the same validated file.
   let aclFilePath: String?
   let aclRuntime: ProxyACLDocument?
 
   enum CodingKeys: String, CodingKey {
-    case servers, locals, timeout
+    case servers, locals
     case aclFilePath = "acl"
     case aclRuntime = "x_shadowsocksx_ng_acl"
     case listen = "x_shadowsocksx_ng_listen"
@@ -101,8 +86,6 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
   init(
     servers: [SslocalServerDocument],
     listen: SslocalListenSettings,
-    timeout: Int = 60,
-    verbose: Bool = false,
     acl: ProxyACLDocument? = nil
   ) {
     self.servers = servers
@@ -110,9 +93,7 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     self.listen = RuntimeListenDocument(
       listenScope: listen.scope.kind,
       bindAddress: listen.bindAddress,
-      advertisedAddress: listen.advertisedAddress,
-      verbose: verbose)
-    self.timeout = timeout
+      advertisedAddress: listen.advertisedAddress)
     aclFilePath = acl?.path
     aclRuntime = acl
   }
@@ -121,13 +102,11 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     servers: [SslocalServerDocument],
     locals: [SslocalLocalDocument],
     listen: RuntimeListenDocument,
-    timeout: Int,
     acl: ProxyACLDocument?
   ) {
     self.servers = servers
     self.locals = locals
     self.listen = listen
-    self.timeout = timeout
     aclFilePath = acl?.path
     aclRuntime = acl
   }
@@ -137,7 +116,6 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
     servers = try container.decode([SslocalServerDocument].self, forKey: .servers)
     locals = try container.decode([SslocalLocalDocument].self, forKey: .locals)
     listen = try container.decode(RuntimeListenDocument.self, forKey: .listen)
-    timeout = try container.decodeIfPresent(Int.self, forKey: .timeout) ?? 60
     aclFilePath = try container.decodeIfPresent(String.self, forKey: .aclFilePath)
     aclRuntime = try container.decodeIfPresent(ProxyACLDocument.self, forKey: .aclRuntime)
   }
@@ -156,7 +134,6 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
       servers: servers,
       locals: locals,
       listen: listen,
-      timeout: timeout,
       acl: acl)
   }
 
@@ -205,7 +182,7 @@ extension SslocalRuntimeDocument {
   }
 
   var listenFingerprint: SslocalListenFingerprint {
-    SslocalListenFingerprint(locals: locals, acl: aclRuntime, verbose: listen.verbose)
+    SslocalListenFingerprint(locals: locals, acl: aclRuntime)
   }
 
   var socksLocal: SslocalLocalDocument? {
@@ -227,7 +204,6 @@ extension SslocalRuntimeDocument {
   /// 接受空 servers 并照常绑定本地入站。
   var isWellFormed: Bool {
     guard
-      (1...86_400).contains(timeout),
       !listen.advertisedAddress.isEmpty
     else { return false }
 

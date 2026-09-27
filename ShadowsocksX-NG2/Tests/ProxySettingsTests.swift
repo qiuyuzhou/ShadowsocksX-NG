@@ -10,8 +10,6 @@ final class ProxySettingsTests: XCTestCase {
 
     XCTAssertEqual(settings.listen.socksPort, 11086)
     XCTAssertEqual(settings.listen.httpPort, 11087)
-    XCTAssertEqual(settings.timeoutSeconds, 60)
-    XCTAssertFalse(settings.verboseLogging)
     XCTAssertEqual(settings.listen.mode, "tcp_and_udp")
     XCTAssertFalse(settings.agentEnabled, "全新用户无服务器配置，Agent 默认 off")
     XCTAssertFalse(settings.systemProxyEnabled)
@@ -27,7 +25,6 @@ final class ProxySettingsTests: XCTestCase {
 
   func testInvalidAdvancedSettingsNameEveryProblem() {
     var settings = ProxySettings()
-    settings.timeoutSeconds = 0
     settings.listen.scope = .host(advertisedAddress: "127.0.0.1")
     settings.listen.socksPort = settings.listen.httpPort
 
@@ -35,7 +32,6 @@ final class ProxySettingsTests: XCTestCase {
       settings.validationErrors,
       [
         .duplicatePort(endpoint: .socks, otherEndpoint: .http, port: 11087),
-        .invalidTimeout(0),
         .invalidHostAddress("127.0.0.1"),
       ])
   }

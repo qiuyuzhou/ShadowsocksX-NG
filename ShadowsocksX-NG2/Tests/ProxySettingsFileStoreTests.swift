@@ -42,8 +42,6 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     settings.listen.scope = .host(advertisedAddress: "192.168.2.89")
     settings.listen.socksPort = 2086
     settings.listen.httpPort = 2087
-    settings.timeoutSeconds = 120
-    settings.verboseLogging = true
     settings.proxyExceptions = "localhost, 127.0.0.1"
     settings.preferredMode = .direct
 
@@ -52,6 +50,8 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     XCTAssertEqual(try store.load(), settings)
     let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
     XCTAssertFalse(raw.contains("udpRelayEnabled"))
+    XCTAssertFalse(raw.contains("timeoutSeconds"))
+    XCTAssertFalse(raw.contains("verboseLogging"))
     XCTAssertEqual(try store.load().listen.mode, "tcp_and_udp")
   }
 
@@ -86,6 +86,7 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     try writeRaw(
       """
       {"preferredMode":"pac","socksPort":2086,"httpPort":2087,"timeoutSeconds":120,
+       "verboseLogging":true,
        "pacUserRules":"@@example.com","gfwListURLConfigured":true,"pacPort":2089}
       """)
 
@@ -93,18 +94,17 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     XCTAssertEqual(loaded.preferredMode, .rule)
     XCTAssertEqual(loaded.listen.socksPort, 2086)
     XCTAssertEqual(loaded.listen.httpPort, 2087)
-    XCTAssertEqual(loaded.timeoutSeconds, 120)
   }
 
   func testInvalidSaveDoesNotTouchExistingSettings() throws {
     try store.save(ProxySettings())
     var invalid = ProxySettings()
-    invalid.timeoutSeconds = 0
+    invalid.listen.socksPort = 0
 
     XCTAssertThrowsError(try store.save(invalid)) { error in
       XCTAssertEqual(
         error as? ProxySettingsStoreError,
-        .invalid([.invalidTimeout(0)]))
+        .invalid([.portOutOfRange(endpoint: .socks, port: 0)]))
     }
     XCTAssertEqual(try store.load(), ProxySettings())
   }
@@ -127,6 +127,5 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     let loaded = try store.load()
 
     XCTAssertEqual(loaded.listen, legacy)
-    XCTAssertEqual(loaded.timeoutSeconds, 60)
   }
 }

@@ -36,11 +36,11 @@ final class SettingsWorkflowTests: XCTestCase {
   func testSaveCommitsThroughTheRuntimeController() async throws {
     let pair = makePair()
 
-    pair.workflow.draft.timeoutSeconds = 120
+    pair.workflow.draft.proxyExceptions = "localhost"
     _ = await pair.workflow.save()
 
-    XCTAssertEqual(settingsStore.saved?.timeoutSeconds, 120)
-    XCTAssertEqual(pair.controller.settings.timeoutSeconds, 120)
+    XCTAssertEqual(settingsStore.saved?.proxyExceptions, "localhost")
+    XCTAssertEqual(pair.controller.settings.proxyExceptions, "localhost")
     XCTAssertEqual(
       pair.workflow.draft, SettingsDraftAdapter.draft(from: pair.controller.settings),
       "提交后草稿回到已提交快照")
@@ -61,23 +61,24 @@ final class SettingsWorkflowTests: XCTestCase {
     XCTAssertFalse(pair.workflow.hasBlockingPortOccupancy)
     XCTAssertTrue(pair.workflow.canSave)
 
-    pair.workflow.draft.timeoutSeconds = 120
+    pair.workflow.draft.proxyExceptions = "localhost"
     _ = await pair.workflow.save()
-    XCTAssertEqual(settingsStore.saved?.timeoutSeconds, 120)
+    XCTAssertEqual(settingsStore.saved?.proxyExceptions, "localhost")
   }
 
   func testCommitFailureSurfacesPresentedReasonAndKeepsCommittedValues() async throws {
     settingsStore.saveError = FakeSaveError.io
     let pair = makePair()
 
-    pair.workflow.draft.timeoutSeconds = 120
+    pair.workflow.draft.proxyExceptions = "localhost"
     _ = await pair.workflow.save()
 
     XCTAssertEqual(pair.workflow.lastFailure, .unknown)
     XCTAssertEqual(pair.workflow.lastFailure?.presentableMessage, AppPresentation.unknownError)
     XCTAssertNil(settingsStore.saved)
-    XCTAssertEqual(pair.controller.settings.timeoutSeconds, 60, "失败保留旧值")
-    XCTAssertEqual(pair.workflow.draft.timeoutSeconds, 120, "草稿保留待修改值")
+    XCTAssertEqual(
+      pair.controller.settings.proxyExceptions, ProxySettings.defaultProxyExceptions, "失败保留旧值")
+    XCTAssertEqual(pair.workflow.draft.proxyExceptions, "localhost", "草稿保留待修改值")
   }
 
   // MARK: - 夹具

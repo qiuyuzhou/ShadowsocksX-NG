@@ -30,15 +30,13 @@ struct SettingsPortDraft: Equatable, Sendable {
 }
 
 /// 平坦的 UI 形状编辑草稿：字段全部是 UI 原语。监听范围拆成布尔开关与公布
-/// 地址文本两个字段，端口与超时保持整数；持久化的当前模式不在草稿中。
+/// 地址文本两个字段；持久化的当前模式不在草稿中。
 /// 与 Domain 快照的互转只在 `SettingsDraftAdapter`。
 struct SettingsDraft: Equatable, Sendable {
   var isHostScope: Bool
   var advertisedAddress: String
   var socksPort: Int
   var httpPort: Int
-  var timeoutSeconds: Int
-  var verboseLogging: Bool
   var proxyExceptions: String
 
   func portValue(for id: SettingsPortID) -> Int {
@@ -62,7 +60,6 @@ struct SettingsDraft: Equatable, Sendable {
 enum SettingsFieldID: Hashable, Sendable {
   case advertisedAddress
   case port(SettingsPortID)
-  case timeoutSeconds
 }
 
 /// 按字段归位的校验问题：每条保留 Domain 的 typed fact；文案由 App
@@ -70,19 +67,17 @@ enum SettingsFieldID: Hashable, Sendable {
 enum SettingsFieldIssue: Hashable, Sendable {
   case port(SettingsPortID, error: ProxySettingsValidationError)
   case advertisedAddress(error: ProxySettingsValidationError)
-  case timeoutSeconds(error: ProxySettingsValidationError)
 
   var field: SettingsFieldID {
     switch self {
     case .port(let id, _): .port(id)
     case .advertisedAddress: .advertisedAddress
-    case .timeoutSeconds: .timeoutSeconds
     }
   }
 
   var error: ProxySettingsValidationError {
     switch self {
-    case .port(_, let error), .advertisedAddress(let error), .timeoutSeconds(let error):
+    case .port(_, let error), .advertisedAddress(let error):
       error
     }
   }

@@ -144,9 +144,7 @@ extension ProxyRuntimeController {
   func deployListeningWithoutTarget() async {
     let document = SslocalRuntimeDocument(
       servers: [],
-      listen: settings.listen,
-      timeout: settings.timeoutSeconds,
-      verbose: settings.verboseLogging)
+      listen: settings.listen)
     await deploy(document)
   }
 

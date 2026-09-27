@@ -38,8 +38,6 @@ enum SettingsDraftAdapter {
       advertisedAddress: advertisedAddress,
       socksPort: settings.listen.socksPort,
       httpPort: settings.listen.httpPort,
-      timeoutSeconds: settings.timeoutSeconds,
-      verboseLogging: settings.verboseLogging,
       proxyExceptions: settings.proxyExceptions)
   }
 
@@ -54,8 +52,6 @@ enum SettingsDraftAdapter {
     listen.httpPort = draft.httpPort
     return ProxySettings(
       listen: listen,
-      timeoutSeconds: draft.timeoutSeconds,
-      verboseLogging: draft.verboseLogging,
       proxyExceptions: draft.proxyExceptions,
       preferredMode: base.preferredMode)
   }
@@ -91,8 +87,6 @@ enum SettingsDraftAdapter {
           .port(portID(for: endpoint), error: error),
           .port(portID(for: otherEndpoint), error: error),
         ]
-      case .invalidTimeout:
-        return [.timeoutSeconds(error: error)]
       case .invalidHostAddress:
         return [.advertisedAddress(error: error)]
       }

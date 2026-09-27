@@ -52,16 +52,6 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
     XCTAssertEqual(workflow.issues(for: .port(.http)), [.port(.http, error: error)])
   }
 
-  func testTimeoutIssueLandsOnTimeoutField() {
-    let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 0
-
-    XCTAssertEqual(
-      workflow.fieldIssues,
-      [.timeoutSeconds(error: .invalidTimeout(0))])
-    XCTAssertTrue(workflow.issues(for: .port(.socks)).isEmpty)
-  }
-
   func testHostAddressIssueLandsOnAdvertisedAddressField() {
     let workflow = makeWorkflow()
     workflow.draft.isHostScope = true
@@ -196,7 +186,7 @@ extension SettingsWorkflowInterfaceTests {
 
   func testValidationIssuesBlockSave() async throws {
     let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 0
+    workflow.draft.socksPort = 0
 
     XCTAssertFalse(workflow.canSave)
 
@@ -220,24 +210,24 @@ extension SettingsWorkflowInterfaceTests {
 
   func testSaveCommitsWhenGateClear() async throws {
     let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 120
+    workflow.draft.proxyExceptions = "localhost"
 
     XCTAssertTrue(workflow.canSave)
     let outcome = await workflow.save()
 
     XCTAssertEqual(outcome, .persisted(runtime: .notRunning))
-    XCTAssertEqual(committing.updateCalls.first?.timeoutSeconds, 120)
+    XCTAssertEqual(committing.updateCalls.first?.proxyExceptions, "localhost")
   }
 
   func testSaveReturnsAValidationRejectionWithoutStartingACommit() async throws {
     let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 0
+    workflow.draft.socksPort = 0
 
     let outcome = await workflow.save()
 
     XCTAssertEqual(
       outcome,
-      .rejected(.validation([.timeoutSeconds(error: .invalidTimeout(0))])))
+      .rejected(.validation([.port(.socks, error: .portOutOfRange(endpoint: .socks, port: 0))])))
     XCTAssertFalse(workflow.isCommitting)
     XCTAssertTrue(committing.updateCalls.isEmpty)
   }
@@ -246,19 +236,19 @@ extension SettingsWorkflowInterfaceTests {
     let runtimeFailure = RuntimeFailureFacts.service(.persistence)
     committing.updateOutcome = .failed(runtimeFailure)
     let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 120
+    workflow.draft.proxyExceptions = "localhost"
 
     let outcome = await workflow.save()
 
     XCTAssertEqual(outcome, .persisted(runtime: .failed(runtimeFailure)))
     XCTAssertEqual(workflow.lastFailure, .runtime(runtimeFailure))
-    XCTAssertEqual(committing.committedSettings.timeoutSeconds, 120)
+    XCTAssertEqual(committing.committedSettings.proxyExceptions, "localhost")
   }
 
   func testRepeatedSaveReturnsAnInProgressRejection() async throws {
     committing.updateGate = AsyncGate()
     let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 120
+    workflow.draft.proxyExceptions = "localhost"
 
     let first = Task { await workflow.save() }
     await Task.yield()
@@ -278,17 +268,17 @@ extension SettingsWorkflowInterfaceTests {
     let workflow = makeWorkflow()
     XCTAssertFalse(workflow.isDirty)
 
-    workflow.draft.timeoutSeconds = 120
+    workflow.draft.proxyExceptions = "localhost"
     XCTAssertTrue(workflow.isDirty)
 
     _ = await workflow.reloadFromCommitted()
     XCTAssertFalse(workflow.isDirty)
 
-    workflow.draft.timeoutSeconds = 120
+    workflow.draft.proxyExceptions = "localhost"
     _ = await workflow.save()
     await waitUntil(!workflow.isCommitting)
     XCTAssertFalse(workflow.isDirty, "提交成功后草稿回到已提交快照")
-    XCTAssertEqual(workflow.draft.timeoutSeconds, 120)
+    XCTAssertEqual(workflow.draft.proxyExceptions, "localhost")
   }
 
   func testHiddenHostAddressLeftoverDoesNotReportDirty() {
@@ -309,7 +299,7 @@ extension SettingsWorkflowInterfaceTests {
     committing.committedSettings = committed
 
     let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 120
+    workflow.draft.proxyExceptions = "localhost"
     _ = await workflow.save()
     await waitUntil(!workflow.isCommitting)
 

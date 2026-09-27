@@ -128,7 +128,7 @@ extension AppPresentation {
 
   static func message(for issue: SettingsFieldIssue) -> String {
     switch issue {
-    case .port(_, let error), .advertisedAddress(let error), .timeoutSeconds(let error):
+    case .port(_, let error), .advertisedAddress(let error):
       return message(for: error)
     }
   }
@@ -275,8 +275,6 @@ extension AppPresentation {
       return Self.port(.portOutOfRange(endpoint: endpoint, port: port))
     case .duplicatePort(let endpoint, let otherEndpoint, let port):
       return Self.port(.duplicatePort(endpoint: endpoint, otherEndpoint: otherEndpoint, port: port))
-    case .invalidTimeout(let seconds):
-      return "超时 \(seconds) 秒无效，必须是 1–86400 之间的整数"
     case .invalidHostAddress: return "主机地址无效，必须是非回环 IPv4 地址"
     }
   }

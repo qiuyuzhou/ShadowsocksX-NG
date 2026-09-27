@@ -101,8 +101,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     return try validated(
       ProxySettings(
         listen: listen,
-        timeoutSeconds: record.timeoutSeconds,
-        verboseLogging: record.verboseLogging,
         proxyExceptions: record.proxyExceptions,
         preferredMode: record.preferredMode,
         ruleDefaultAction: record.ruleDefaultAction,
@@ -119,8 +117,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     }()
     record.socksPort = settings.listen.socksPort
     record.httpPort = settings.listen.httpPort
-    record.timeoutSeconds = settings.timeoutSeconds
-    record.verboseLogging = settings.verboseLogging
     record.proxyExceptions = settings.proxyExceptions
     record.preferredMode = settings.preferredMode
     record.ruleDefaultAction = settings.ruleDefaultAction
@@ -141,8 +137,6 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
   var advertisedAddress: String?
   var socksPort: Int = SslocalListenSettings.defaultSocksPort
   var httpPort: Int = SslocalListenSettings.defaultHTTPPort
-  var timeoutSeconds: Int = 60
-  var verboseLogging: Bool = false
   var proxyExceptions: String = ProxySettings.defaultProxyExceptions
   var preferredMode: ProxyModeKind = .rule
   var ruleDefaultAction: RuleDefaultAction = .proxyWhenUnmatched
@@ -161,8 +155,6 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
     httpPort =
       try container.decodeIfPresent(Int.self, forKey: .httpPort)
       ?? SslocalListenSettings.defaultHTTPPort
-    timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds) ?? 60
-    verboseLogging = try container.decodeIfPresent(Bool.self, forKey: .verboseLogging) ?? false
     proxyExceptions =
       try container.decodeIfPresent(String.self, forKey: .proxyExceptions)
       ?? ProxySettings.defaultProxyExceptions
@@ -189,7 +181,7 @@ private struct ProxySettingsRecord: Codable, Equatable, Sendable {
 extension ProxySettingsRecord {
   fileprivate enum CodingKeys: String, CodingKey {
     case scopeKind, advertisedAddress, socksPort, httpPort
-    case timeoutSeconds, verboseLogging, proxyExceptions
+    case proxyExceptions
     case preferredMode
     case ruleDefaultAction
     case agentEnabled, systemProxyEnabled

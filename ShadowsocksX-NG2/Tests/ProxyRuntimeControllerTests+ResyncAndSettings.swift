@@ -78,16 +78,14 @@ extension ProxyRuntimeControllerTests {
     await controller.setAgentEnabled(true)
 
     var next = controller.settings
-    next.timeoutSeconds = 120
-    next.verboseLogging = true
+    next.listen.httpPort = 2088
     next.proxyExceptions = "localhost, 127.0.0.1"
     try await controller.updateSettings(next)
 
     let document = try XCTUnwrap(RuntimeFileStore(fileURL: runtime.contract).loadDocument())
     XCTAssertEqual(controller.settings, next)
     XCTAssertEqual(settingsStore.saved, next)
-    XCTAssertEqual(document.timeout, 120)
-    XCTAssertTrue(document.listen.verbose)
+    XCTAssertEqual(document.httpPort, 2088)
     XCTAssertEqual(
       systemProxy.applied.last?.exceptions,
       FixedLocalProxyRanges.systemProxyExceptions(including: ["localhost", "127.0.0.1"]),

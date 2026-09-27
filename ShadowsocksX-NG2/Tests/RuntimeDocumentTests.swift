@@ -49,7 +49,8 @@ final class RuntimeDocumentTests: XCTestCase {
     XCTAssertEqual(listen["listen_scope"] as? String, "loopback")
     XCTAssertEqual(listen["bind_address"] as? String, "127.0.0.1")
     XCTAssertEqual(listen["advertised_address"] as? String, "127.0.0.1")
-    XCTAssertEqual(listen["verbose"] as? Bool, false)
+    XCTAssertFalse(listen.keys.contains("verbose"))
+    XCTAssertFalse(dictionary.keys.contains("timeout"))
     let servers = try XCTUnwrap(dictionary["servers"] as? [[String: Any]])
     XCTAssertEqual(servers.count, 1)
     let server = servers[0]
@@ -86,21 +87,19 @@ final class RuntimeDocumentTests: XCTestCase {
     XCTAssertEqual(listen.locals.map(\.mode), ["tcp_and_udp", "tcp_only"])
   }
 
-  func testRuntimeDocumentCarriesTimeoutAndVerbose() throws {
+  func testRuntimeDocumentLeavesTimeoutAndLoggingAtUpstreamDefaults() throws {
     let document = SslocalRuntimeDocument(
       servers: [
         SslocalServerDocument(
           id: "server-1", remarks: "test", server: "example.com", serverPort: 8388,
           password: "pw", method: "aes-256-gcm", plugin: nil, pluginOpts: nil)
       ],
-      listen: SslocalListenSettings(),
-      timeout: 120,
-      verbose: true)
+      listen: SslocalListenSettings())
 
-    let decoded = try XCTUnwrap(SslocalRuntimeDocument.decodeValidated(try document.jsonData()))
-
-    XCTAssertEqual(decoded.timeout, 120)
-    XCTAssertTrue(decoded.listen.verbose)
+    let dictionary = try encodedDictionary(document)
+    let listen = try XCTUnwrap(dictionary["x_shadowsocksx_ng_listen"] as? [String: Any])
+    XCTAssertFalse(dictionary.keys.contains("timeout"))
+    XCTAssertFalse(listen.keys.contains("verbose"))
   }
 
   func testACLPathAndMetadataRoundTripAsUpstreamAndWrapperFields() throws {

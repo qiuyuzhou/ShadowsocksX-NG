@@ -72,18 +72,6 @@ struct SettingsView: View {
         }
       }
       .padding(.vertical, 4)
-      settingRow("超时", note: "连接超时秒数（1–86400）") {
-        Stepper(value: $workflow.draft.timeoutSeconds, in: 1...86_400) {
-          Text("\(workflow.draft.timeoutSeconds) 秒")
-            .monospacedDigit()
-        }
-        .frame(maxWidth: 160, alignment: .trailing)
-      }
-      issuesRow(.timeoutSeconds)
-      Toggle(isOn: $workflow.draft.verboseLogging) {
-        settingCopy("详细日志（verbose）", note: "仅在需要排障时临时启用")
-      }
-      .toggleStyle(.switch)
     } header: {
       sectionHeader("常规", subtitle: "应用启动与常用代理行为")
     }

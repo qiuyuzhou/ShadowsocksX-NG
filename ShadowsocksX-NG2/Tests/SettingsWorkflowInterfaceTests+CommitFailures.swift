@@ -8,7 +8,7 @@ extension SettingsWorkflowInterfaceTests {
   func testCommitFailureSurfacesNamedReasonAndKeepsDraft() async throws {
     committing.updateError = FakeCommitError.io
     let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 120
+    workflow.draft.proxyExceptions = "localhost"
 
     _ = await workflow.save()
     await waitUntil(workflow.lastFailure != nil)
@@ -16,14 +16,17 @@ extension SettingsWorkflowInterfaceTests {
     XCTAssertEqual(workflow.lastFailure, .unknown)
     XCTAssertEqual(workflow.lastFailure?.presentableMessage, AppPresentation.unknownError)
     XCTAssertFalse(workflow.isCommitting)
-    XCTAssertEqual(workflow.draft.timeoutSeconds, 120, "失败不吞掉草稿")
-    XCTAssertEqual(committing.committedSettings.timeoutSeconds, 60, "失败不半提交")
+    XCTAssertEqual(workflow.draft.proxyExceptions, "localhost", "失败不吞掉草稿")
+    XCTAssertEqual(
+      committing.committedSettings.proxyExceptions,
+      ProxySettings.defaultProxyExceptions,
+      "失败不半提交")
     XCTAssertTrue(workflow.isDirty)
   }
 
   func testStorageAndCredentialFailuresNameTheReason() async throws {
     let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 120
+    workflow.draft.proxyExceptions = "localhost"
 
     committing.updateError = ProxySettingsStoreError.ioFailure(detail: "disk full")
     _ = await workflow.save()
@@ -47,7 +50,7 @@ extension SettingsWorkflowInterfaceTests {
   func testCommittingStateBlocksRepeatedSave() async throws {
     committing.updateGate = AsyncGate()
     let workflow = makeWorkflow()
-    workflow.draft.timeoutSeconds = 120
+    workflow.draft.proxyExceptions = "localhost"
 
     let first = Task { await workflow.save() }
     await Task.yield()
