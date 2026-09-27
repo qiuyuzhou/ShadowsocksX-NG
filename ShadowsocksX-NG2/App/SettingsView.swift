@@ -224,13 +224,15 @@ struct SettingsView: View {
 extension SettingsView {
   fileprivate var portSettingsRow: some View {
     let ports = workflow.committedPortDraft
+    let socksPort = ports.socksPort.formatted(.number.grouping(.never))
+    let httpPort = ports.httpPort.formatted(.number.grouping(.never))
     return settingRow("端口设置") {
       Button {
         portSettingsEditor = PortSettingsEditorSession(
           initialDraft: workflow.beginPortSettingsEditing())
       } label: {
         HStack(spacing: 8) {
-          Text("SOCKS5 \(ports.socksPort) / HTTP \(ports.httpPort)")
+          Text("SOCKS5 \(socksPort) / HTTP \(httpPort)")
             .monospacedDigit()
           Image(systemName: "chevron.right")
             .font(.caption.weight(.semibold))
@@ -238,7 +240,7 @@ extension SettingsView {
       }
       .buttonStyle(.bordered)
       .accessibilityLabel("端口设置")
-      .accessibilityValue("SOCKS5 \(ports.socksPort)，HTTP 代理 \(ports.httpPort)")
+      .accessibilityValue("SOCKS5 \(socksPort)，HTTP 代理 \(httpPort)")
     }
   }
 
@@ -330,12 +332,16 @@ private struct PortSettingsEditorSheet: View {
         Text(AppPresentation.message(for: issue))
           .font(.caption)
           .foregroundStyle(.red)
+          .multilineTextAlignment(.trailing)
+          .frame(maxWidth: .infinity, alignment: .trailing)
       }
 
       if let occupancy = occupancyMessage(for: state) {
         Text(occupancy)
           .font(.caption)
           .foregroundStyle(occupancyColor(for: state))
+          .multilineTextAlignment(.trailing)
+          .frame(maxWidth: .infinity, alignment: .trailing)
       }
 
       if state.canSuggestFreePort {
