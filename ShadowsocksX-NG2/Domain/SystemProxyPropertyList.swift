@@ -4,6 +4,7 @@ import Foundation
 /// key mapping here makes the mutually exclusive enablement rules testable
 /// without opening a real SCPreferences session. PAC projection is gone
 /// (issue #67)；SOCKS 与 HTTP/HTTPS 同时指向本地入站（ADR 0012）。
+/// The app fixes simple-hostname exclusion on whenever it owns this dictionary.
 enum SystemProxyPropertyList {
   static let httpEnabled = "HTTPEnable"
   static let httpsEnabled = "HTTPSEnable"
@@ -19,6 +20,7 @@ enum SystemProxyPropertyList {
   static let pacJavaScript = "ProxyAutoConfigJavaScript"
   static let autoDiscoveryEnabled = "ProxyAutoDiscoveryEnable"
   static let exceptionsList = "ExceptionsList"
+  static let excludeSimpleHostnames = "ExcludeSimpleHostnames"
 
   static func applying(
     _ configuration: SystemProxyConfiguration, to original: [String: Any]
@@ -43,6 +45,7 @@ enum SystemProxyPropertyList {
     dictionary[httpsEnabled] = 1
     dictionary[httpsProxy] = configuration.http.host
     dictionary[httpsPort] = configuration.http.port
+    dictionary[excludeSimpleHostnames] = 1
 
     if let exceptions = configuration.exceptions {
       dictionary[exceptionsList] = exceptions

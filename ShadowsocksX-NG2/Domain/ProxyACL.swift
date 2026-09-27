@@ -1,8 +1,8 @@
 import CryptoKit
 import Foundation
 
-/// Fixed local targets bypass the system proxy. Their IP ranges are also
-/// included in the direct-mode sslocal ACL for requests reaching either inbound.
+/// Fixed local targets bypass the system proxy. Their IP ranges and host rules
+/// also enter the sslocal ACL for requests reaching either inbound.
 enum FixedLocalProxyRanges {
   static let ipRanges = [
     "127.0.0.0/8",
@@ -15,7 +15,7 @@ enum FixedLocalProxyRanges {
     "fc00::/7",
   ]
 
-  static let systemProxyHostExceptions = ["localhost", "*.local", "<local>"]
+  static let systemProxyHostExceptions = ["localhost", "*.local"]
 
   static var systemProxyExceptions: [String] {
     ipRanges + systemProxyHostExceptions

@@ -20,7 +20,7 @@ struct ParsedCIDR: Equatable, Sendable {
 /// sslocal 域名代理 / IP 直连优先级遮蔽。每条附可解释说明。
 enum CustomRuleRejection: Equatable, Sendable {
   /// 代理动作覆盖固定本地范围（回环/私有/链路本地/localhost/*.local/无点主机名）。
-  /// 系统绕过列表始终高于用户规则，该规则不会按用户意图生效。
+  /// 应用固定的本地绕过规则始终优先于用户代理规则；冲突规则不会生效。
   case conflictsWithFixedLocalScope
   /// 域名直连规则被更宽（或同覆盖）的域名代理规则遮蔽：sslocal 域名匹配
   /// 时 proxy_list 优先于 bypass_list。
@@ -314,7 +314,7 @@ enum CustomRuleValidator {
     return RejectedCustomRule(
       rule: rule,
       reason: .conflictsWithFixedLocalScope,
-      explanation: "系统绕过列表始终高于用户规则；代理固定本地目标不会生效")
+      explanation: "应用固定的本地绕过规则优先；这些本地目标不会经代理")
   }
 
   /// ACL 优先级遮蔽检查：

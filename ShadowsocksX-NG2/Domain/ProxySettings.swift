@@ -3,10 +3,10 @@ import Foundation
 /// #33 的用户偏好快照。监听端点仍是运行时契约的输入，但不会把偏好文件
 /// 当作运行时文件使用；代理启动前由控制器从快照重新派生完整契约。
 struct ProxySettings: Equatable, Sendable {
-  static let defaultProxyExceptions =
-    "127.0.0.1, localhost, 192.168.0.0/16, 10.0.0/8, FE80::/64, ::1, FD00::/8"
+  static let defaultProxyExceptions = ""
 
   var listen: SslocalListenSettings
+  /// User-added system-proxy exceptions; these entries do not become ACL rules.
   var proxyExceptions: String
   /// The persisted current mode: the mode selector's choice survives GUI
   /// restarts. First run defaults to rule mode (issue #67).

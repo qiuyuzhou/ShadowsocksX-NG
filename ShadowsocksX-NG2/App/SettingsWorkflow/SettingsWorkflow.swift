@@ -92,9 +92,18 @@ final class SettingsWorkflow: ObservableObject {
     committing.committedSettings.listen.listenerMode
   }
 
+  var committedProxyExceptionCount: Int {
+    committing.committedSettings.proxyExceptionList.count
+  }
+
   func beginListenerModeEditing() -> ListenerMode {
     lastFailure = nil
     return committedListenerMode
+  }
+
+  func beginProxyExceptionsEditing() -> String {
+    lastFailure = nil
+    return committing.committedSettings.proxyExceptions
   }
 
   /// 打开独立端口设置项时，从已提交值开始，丢弃上次编辑器探测的暂存事实。
@@ -213,6 +222,38 @@ final class SettingsWorkflow: ObservableObject {
     proposed.listen.socksPort = editorDraft.socksPort
     proposed.listen.httpPort = editorDraft.httpPort
     return await commitPortSettings(proposed)
+  }
+
+  /// Save only the user-added system-proxy exceptions. Fixed local ACL rules
+  /// and unrelated setting-item drafts remain untouched.
+  @discardableResult
+  func saveProxyExceptions(_ rawValue: String) async -> SettingsCommandOutcome {
+    guard !isCommitting else { return record(.rejected(.inProgress)) }
+    let value =
+      rawValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : rawValue
+    guard value != committing.committedSettings.proxyExceptions else {
+      lastFailure = nil
+      return record(.persisted)
+    }
+
+    var proposed = committing.committedSettings
+    proposed.proxyExceptions = value
+    isCommitting = true
+    lastFailure = nil
+    do {
+      try await committing.updateSettings(proposed)
+      var nextDraft = draft
+      nextDraft.proxyExceptions = committing.committedSettings.proxyExceptions
+      draft = nextDraft
+      isCommitting = false
+      lastFailure = nil
+      return record(.persisted)
+    } catch {
+      isCommitting = false
+      let failure = Self.workflowFailure(for: error)
+      lastFailure = failure
+      return record(.persistenceFailed(Self.persistenceFailure(for: error)))
+    }
   }
 
   /// 明确阻塞保存的端口。
