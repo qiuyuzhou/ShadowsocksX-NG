@@ -97,7 +97,6 @@ enum ProxySettingsValidationError: Error, Equatable, Sendable {
 protocol ProxySettingsStoring {
   func load() throws -> ProxySettings
   func save(_ settings: ProxySettings) throws
-  func reset() throws
 }
 
 enum ProxySettingsStoreError: Error, Equatable {
@@ -106,7 +105,6 @@ enum ProxySettingsStoreError: Error, Equatable {
   case ioFailure(detail: String)
   case missingCredential(CredentialReference)
   case credentialFailure(detail: String)
-  case rollbackFailed
   case legacyListenSettings(ListenSettingsStoreError)
 }
 

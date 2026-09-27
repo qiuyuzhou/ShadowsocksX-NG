@@ -4,7 +4,7 @@ The GUI's login-item registration is its own preference domain, separate from pr
 
 ## Status
 
-Accepted.
+Accepted. (2026-09: the holistic preferences reset referenced below has since been removed from the product; the statements about it describe a capability that no longer exists.)
 
 ## Considered options
 

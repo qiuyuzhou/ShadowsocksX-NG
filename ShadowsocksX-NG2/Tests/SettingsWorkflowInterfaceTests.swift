@@ -201,7 +201,7 @@ extension SettingsWorkflowInterfaceTests {
     XCTAssertFalse(workflow.canSave)
 
     _ = await workflow.save()
-    await waitUntil(!workflow.isCommitting && workflow.pendingConfirmation == nil)
+    await waitUntil(!workflow.isCommitting)
     XCTAssertTrue(committing.updateCalls.isEmpty)
   }
 

@@ -65,35 +65,6 @@ extension ProxyRuntimeControllerTests {
     XCTAssertTrue(systemProxy.applied.isEmpty, "导入边界不应重新应用系统代理")
   }
 
-  /// 偏好重置不触碰 Agent switch，也不停掉正在运行的 Agent（ADR-0011 连带）；
-  /// 系统代理意图被重置为 off 时归还已应用设置，Agent 仍开则收敛到出厂运行时。
-  func testResetPreferencesKeepsAgentChoiceAndDoesNotStopAgent() async throws {
-    let seeded = try makeSeededCatalog()
-    let settingsStore = InMemoryProxySettingsStore()
-    let controller = makeController(
-      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
-      settingsStore: settingsStore,
-      settings: ProxySettings(
-        listen: ActivationFixture.listen, agentEnabled: true, systemProxyEnabled: true))
-    try await controller.activate(seeded.server)
-    await controller.setAgentEnabled(true)
-    XCTAssertEqual(controller.state, .running)
-    XCTAssertEqual(controller.systemProxyState, .applied)
-    // 夹具约定的存活 wrapper pid：收敛路径才走 signalReload 而不是重注册。
-    try Data("42".utf8).write(to: runtime.pidFile)
-    let unregisterBefore = agent.unregisterCount
-
-    let outcome = try await controller.resetPreferences()
-
-    XCTAssertEqual(controller.settings.agentEnabled, true, "Agent switch 不受偏好重置影响")
-    XCTAssertEqual(settingsStore.saved?.agentEnabled, true)
-    XCTAssertFalse(controller.settings.systemProxyEnabled, "系统代理意图回到出厂 off")
-    XCTAssertEqual(systemProxy.restoreCount, 1, "已应用的系统代理设置被归还")
-    XCTAssertEqual(agent.unregisterCount, unregisterBefore, "重置不停止 Agent")
-    XCTAssertEqual(controller.state, .running, "保留的 Agent 收敛到出厂运行时")
-    XCTAssertNotEqual(outcome, .stopped, "重置不是停止协议")
-  }
-
   func testUpdatingSettingsPersistsAndReactivatesTheRuntimeContract() async throws {
     let seeded = try makeSeededCatalog()
     let settingsStore = InMemoryProxySettingsStore()

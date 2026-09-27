@@ -129,12 +129,4 @@ final class ProxySettingsFileStoreTests: XCTestCase {
     XCTAssertEqual(loaded.listen, legacy)
     XCTAssertEqual(loaded.timeoutSeconds, 60)
   }
-
-  func testResetRemovesSettingsAndLeavesFactoryDefaultsAvailable() throws {
-    try store.save(ProxySettings())
-    try store.reset()
-
-    XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
-    XCTAssertEqual(try store.load(), ProxySettings())
-  }
 }

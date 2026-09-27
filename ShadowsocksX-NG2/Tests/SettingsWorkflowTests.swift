@@ -80,23 +80,6 @@ final class SettingsWorkflowTests: XCTestCase {
     XCTAssertEqual(pair.workflow.draft.timeoutSeconds, 120, "草稿保留待修改值")
   }
 
-  func testConfirmedResetRestoresFactorySnapshotThroughTheRuntimeController() async throws {
-    let pair = makePair()
-    var custom = pair.controller.settings
-    custom.timeoutSeconds = 120
-    _ = try await pair.controller.updateSettings(custom)
-    XCTAssertEqual(pair.controller.settings.timeoutSeconds, 120)
-
-    _ = await pair.workflow.reset()
-    XCTAssertNotNil(pair.workflow.pendingConfirmation, "重置恒先经 seam 裁定的确认")
-    _ = await pair.workflow.confirmReset()
-
-    XCTAssertEqual(pair.workflow.draft, SettingsDraftAdapter.draft(from: ProxySettings()))
-    XCTAssertEqual(
-      settingsStore.saved, ProxySettings(),
-      "重置后落盘的是出厂默认；Agent switch 的现值被特判保留（此处默认即 off）")
-  }
-
   // MARK: - 夹具
 
   private func makePair() -> (controller: ProxyRuntimeController, workflow: SettingsWorkflow) {
@@ -161,10 +144,6 @@ final class SettingsWorkflowTests: XCTestCase {
     func save(_ settings: ProxySettings) throws {
       if let saveError { throw saveError }
       saved = settings
-    }
-
-    func reset() throws {
-      saved = nil
     }
   }
 }

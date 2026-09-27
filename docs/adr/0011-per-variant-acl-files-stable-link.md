@@ -2,6 +2,8 @@
 
 **Status**: accepted
 
+(2026-09: the holistic preferences reset referenced below has since been removed from the product.)
+
 **Supersedes in part**: ADR-0009 and ADR-0010's "ACL path, content, digest, and summary are runtime identity" — content is no longer carried in the contract, and the ACL path is a stable link that does not change across mode switches. The restart-on-change rule itself stands.
 
 ## Context

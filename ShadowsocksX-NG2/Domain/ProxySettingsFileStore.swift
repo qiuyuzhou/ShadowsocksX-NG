@@ -63,23 +63,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     }
   }
 
-  func reset() throws {
-    let settingsSnapshot = try fileSnapshot(at: fileURL)
-    let legacySnapshot = try fileSnapshot(at: legacyListenFileURL)
-    do {
-      try removeIfPresent(fileURL)
-      try removeIfPresent(legacyListenFileURL)
-    } catch {
-      let filesRestored =
-        restore(settingsSnapshot, at: fileURL)
-        && restore(legacySnapshot, at: legacyListenFileURL)
-      guard filesRestored else {
-        throw ProxySettingsStoreError.rollbackFailed
-      }
-      throw asStoreError(error)
-    }
-  }
-
   static func restored(store: ProxySettingsFileStore = ProxySettingsFileStore())
     -> RestoredProxySettings
   {
@@ -151,47 +134,6 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     return encoder
   }()
-
-  private func asStoreError(_ error: Error) -> ProxySettingsStoreError {
-    if let error = error as? ProxySettingsStoreError { return error }
-    return .ioFailure(detail: String(describing: error))
-  }
-
-  private func fileSnapshot(at url: URL) throws -> Data? {
-    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-    do {
-      return try Data(contentsOf: url)
-    } catch {
-      throw ProxySettingsStoreError.ioFailure(detail: String(describing: error))
-    }
-  }
-
-  private func removeIfPresent(_ url: URL) throws {
-    guard FileManager.default.fileExists(atPath: url.path) else { return }
-    do {
-      try FileManager.default.removeItem(at: url)
-    } catch {
-      throw ProxySettingsStoreError.ioFailure(detail: String(describing: error))
-    }
-  }
-
-  private func restore(_ snapshot: Data?, at url: URL) -> Bool {
-    guard let snapshot else {
-      guard FileManager.default.fileExists(atPath: url.path) else { return true }
-      do {
-        try FileManager.default.removeItem(at: url)
-        return true
-      } catch {
-        return false
-      }
-    }
-    do {
-      try AtomicFileWriter.write(snapshot, to: url)
-      return true
-    } catch {
-      return false
-    }
-  }
 }
 
 private struct ProxySettingsRecord: Codable, Equatable, Sendable {

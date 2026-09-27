@@ -93,25 +93,16 @@ struct SettingsPortFieldState: Equatable, Sendable {
   let canSuggestFreePort: Bool
 }
 
-// MARK: - 统一确认事实
-
-/// 确认事实（统一种类）：seam 裁定动作是否需要确认及摘要内容；视图只持有
-/// alert 呈现状态并把用户选择作为 typed command 发回。
-enum SettingsConfirmation: Equatable, Sendable {
-  /// 重置偏好；范围由这个 typed fact 固定，文案由 presentation edge 派生。
-  case resetPreferences
-}
+// MARK: - 命令结果与拒绝原因
 
 /// Typed reasons why a command cannot proceed. The workflow exposes facts,
 /// not localized strings or a Boolean that makes validation and occupancy
 /// failures indistinguishable.
 enum SettingsCommandRejection: Equatable, Sendable {
   case inProgress
-  case confirmationPending
   case superseded
   case validation([SettingsFieldIssue])
   case occupied([SettingsPortID])
-  case noPendingConfirmation
   case noFreePort(SettingsPortID)
 }
 
@@ -130,12 +121,10 @@ enum SettingsPersistenceFailure: Error, Equatable, Sendable {
   case unknown
 }
 
-/// Result returned by every discrete SettingsWorkflow command. Confirmation,
-/// draft-only changes, persistence and runtime facts remain distinguishable.
+/// Result returned by every discrete SettingsWorkflow command. Draft-only
+/// changes, persistence and runtime facts remain distinguishable.
 enum SettingsCommandOutcome: Equatable, Sendable {
   case rejected(SettingsCommandRejection)
-  case confirmationRequired(SettingsConfirmation)
-  case confirmationCancelled
   case draftUpdated(port: SettingsPortID, value: Int)
   case reloaded
   case persisted(runtime: SettingsRuntimeOutcome)

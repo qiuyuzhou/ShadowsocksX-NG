@@ -62,17 +62,6 @@ extension SettingsWorkflowInterfaceTests {
     XCTAssertEqual(committing.updateCalls.count, 1, "提交中不得重复触发")
   }
 
-  func testResetFailureSurfacesNamedReason() async throws {
-    committing.resetError = FakeCommitError.io
-    let workflow = makeWorkflow()
-
-    _ = await workflow.reset()
-    _ = await workflow.confirmReset()
-    await waitUntil(workflow.lastFailure != nil)
-
-    XCTAssertEqual(workflow.lastFailure, .unknown)
-  }
-
   private enum FakeCommitError: Error, CustomStringConvertible {
     // swiftlint:disable:next identifier_name
     case io

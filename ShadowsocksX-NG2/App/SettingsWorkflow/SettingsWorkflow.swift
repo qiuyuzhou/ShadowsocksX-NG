@@ -2,10 +2,9 @@ import Foundation
 
 /// 设置工作流 module（issue #48）：设置窗口的唯一 UI-facing seam。以平坦的
 /// UI 形状草稿为编辑态唯一 source of truth，向 UI 只提供字段归位的校验问题、
-/// 端口 field state、保存门禁/脏态/提交中/typed outcome、统一确认事实与具名
-/// async command。视图不再拆装 Domain 枚举、翻译占用事实、推导门禁或自备
-/// 确认文案；alert、sheet 与窗口状态仍由 UI 持有。登录启动项是独立偏好域，
-/// 不经本 module。
+/// 端口 field state、保存门禁/脏态/提交中/typed outcome 与具名 async command。
+/// 视图不再拆装 Domain 枚举或翻译占用事实；alert、sheet 与窗口状态仍由 UI
+/// 持有。登录启动项是独立偏好域，不经本 module。
 ///
 /// 内部沿用既有深 module：`ProxySettings` 的点名校验、`ProxyPortSemantics` 的
 /// 端口互异/建议算法与 typed occupancy request。写入侧只依赖窄 seam
@@ -23,14 +22,12 @@ final class SettingsWorkflow: ObservableObject {
 
   /// 各端口的尽力而为占用判定（非权威，只影响编辑期提示与保存门禁）。
   @Published private var occupancyByPort: [SettingsPortID: SettingsPortOccupancy] = [:]
-  /// 提交/重置进行中（按钮进入进行中状态且不可重复触发）。
+  /// 提交进行中（按钮进入进行中状态且不可重复触发）。
   @Published private(set) var isCommitting = false
-  /// 最近一次提交/重置失败的 typed fact（nil = 无）。
+  /// 最近一次提交失败的 typed fact（nil = 无）。
   @Published private(set) var lastFailure: SettingsWorkflowFailure?
   /// 最近一次离散 command 的结构化结果，供 UI 观察而无需解析字符串。
   @Published private(set) var lastOutcome: SettingsCommandOutcome?
-  /// 等待用户裁定的确认事实（重置偏好）；视图只持有 alert 呈现状态。
-  @Published private(set) var pendingConfirmation: SettingsConfirmation?
 
   private let committing: SettingsCommitting
   private let occupancyProbe: PortOccupancyProbing
@@ -95,12 +92,11 @@ final class SettingsWorkflow: ObservableObject {
 
   // MARK: - 操作区只读投影
 
-  /// 保存门禁：校验问题清零、无阻塞性占用、不在提交中且没有待裁定确认。
+  /// 保存门禁：校验问题清零、无阻塞性占用且不在提交中。
   var canSave: Bool {
     fieldIssues.isEmpty
       && blockingPortIDs.isEmpty
       && !isCommitting
-      && pendingConfirmation == nil
   }
 
   /// 脏态：草稿若提交会不会改变已提交快照（草稿经唯一 adapter 归一后比较，
@@ -116,9 +112,6 @@ final class SettingsWorkflow: ObservableObject {
   @discardableResult
   func save() async -> SettingsCommandOutcome {
     guard !isCommitting else { return record(.rejected(.inProgress)) }
-    guard pendingConfirmation == nil else {
-      return record(.rejected(.confirmationPending))
-    }
     guard fieldIssues.isEmpty else {
       return record(.rejected(.validation(fieldIssues)))
     }
@@ -126,51 +119,6 @@ final class SettingsWorkflow: ObservableObject {
       return record(.rejected(.occupied(blockingPortIDs)))
     }
     return await commit(makeSettings(from: draft))
-  }
-
-  /// 重置偏好：seam 裁定恒需确认，挂起重置确认事实（摘要范围与重置事务
-  /// 一致）。登录启动项与快捷键意图是独立偏好域，不在此事务内。
-  @discardableResult
-  func reset() async -> SettingsCommandOutcome {
-    guard !isCommitting else { return record(.rejected(.inProgress)) }
-    guard pendingConfirmation == nil else {
-      return record(.rejected(.confirmationPending))
-    }
-    pendingConfirmation = .resetPreferences
-    return record(.confirmationRequired(.resetPreferences))
-  }
-
-  /// 用户裁定重置后走重置提交入口：恢复出厂值并停止运行中的代理。
-  @discardableResult
-  func confirmReset() async -> SettingsCommandOutcome {
-    guard case .resetPreferences = pendingConfirmation else {
-      return record(.rejected(.noPendingConfirmation))
-    }
-    pendingConfirmation = nil
-    guard !isCommitting else { return record(.rejected(.inProgress)) }
-    isCommitting = true
-    lastFailure = nil
-    do {
-      let runtime = try await committing.resetPreferences()
-      adoptCommittedSettings()
-      isCommitting = false
-      return record(persistedOutcome(for: runtime))
-    } catch {
-      isCommitting = false
-      let failure = Self.workflowFailure(for: error)
-      lastFailure = failure
-      return record(.persistenceFailed(Self.persistenceFailure(for: error)))
-    }
-  }
-
-  /// 取消重置：不发生任何提交。
-  @discardableResult
-  func cancelReset() async -> SettingsCommandOutcome {
-    guard case .resetPreferences = pendingConfirmation else {
-      return record(.rejected(.noPendingConfirmation))
-    }
-    pendingConfirmation = nil
-    return record(.confirmationCancelled)
   }
 
   /// 为端口建议一个空闲端口：只把候选写进草稿对应字段，绝不替用户保存。

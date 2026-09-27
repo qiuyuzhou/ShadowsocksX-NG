@@ -285,8 +285,4 @@ final class InMemoryProxySettingsStore: ProxySettingsStoring {
     if let saveError { throw saveError }
     saved = settings
   }
-
-  func reset() throws {
-    saved = nil
-  }
 }

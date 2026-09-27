@@ -17,19 +17,16 @@ func waitUntil(
   XCTAssertTrue(condition(), file: file, line: line)
 }
 
-/// 设置工作流测试的写入缝替身（issue #44）：记录提交与重置调用，可注入
-/// 失败；不触碰真实偏好文件、钥匙串或运行时。
+/// 设置工作流测试的写入缝替身（issue #44）：记录提交调用，可注入失败；
+/// 不触碰真实偏好文件、钥匙串或运行时。
 @MainActor
 final class FakeSettingsCommitter: SettingsCommitting {
   var committedSettings: ProxySettings = ProxySettings()
   var runtimeListenFacts: RuntimeListenFacts?
   var updateError: Error?
-  var resetError: Error?
   var updateOutcome: SettingsRuntimeOutcome = .notRunning
-  var resetOutcome: SettingsRuntimeOutcome = .notRunning
   var updateGate: AsyncGate?
   private(set) var updateCalls: [ProxySettings] = []
-  private(set) var resetCallCount = 0
 
   var isProxyRunning: Bool {
     get { runtimeListenFacts != nil }
@@ -44,13 +41,6 @@ final class FakeSettingsCommitter: SettingsCommitting {
     updateCalls.append(proposed)
     committedSettings = proposed
     return updateOutcome
-  }
-
-  func resetPreferences() async throws -> SettingsRuntimeOutcome {
-    if let resetError { throw resetError }
-    resetCallCount += 1
-    committedSettings = ProxySettings()
-    return resetOutcome
   }
 }
 

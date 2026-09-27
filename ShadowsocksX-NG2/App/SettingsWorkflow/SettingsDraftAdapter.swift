@@ -1,7 +1,7 @@
 import Foundation
 
 /// 写入侧窄 seam（issue #48）：设置工作流只依赖已提交快照、当前 runtime 的
-/// typed listener facts 与两个提交入口。生产实现是 `ProxyRuntimeController`
+/// typed listener facts 与提交入口。生产实现是 `ProxyRuntimeController`
 /// 的薄扩展；测试注入 fake。Domain 快照类型只出现在本缝与 adapter。读取侧是
 /// 运行时控制器的主 actor 状态，本缝随之主 actor 绑定。
 @MainActor
@@ -9,7 +9,6 @@ protocol SettingsCommitting: AnyObject {
   var committedSettings: ProxySettings { get }
   var runtimeListenFacts: RuntimeListenFacts? { get }
   func updateSettings(_ proposed: ProxySettings) async throws -> SettingsRuntimeOutcome
-  func resetPreferences() async throws -> SettingsRuntimeOutcome
 }
 
 extension ProxyRuntimeController: SettingsCommitting {

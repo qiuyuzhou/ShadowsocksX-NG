@@ -126,13 +126,6 @@ extension AppPresentation {
     }
   }
 
-  static func message(for confirmation: SettingsConfirmation) -> String {
-    switch confirmation {
-    case .resetPreferences:
-      return "端口、监听范围等全部偏好都会恢复为出厂值，运行中的代理会停止。"
-    }
-  }
-
   static func message(for issue: SettingsFieldIssue) -> String {
     switch issue {
     case .port(_, let error), .advertisedAddress(let error), .timeoutSeconds(let error):
@@ -294,7 +287,6 @@ extension AppPresentation {
     case .ioFailure: return "偏好文件读写失败"
     case .missingCredential: return "偏好中的敏感 URL 无法从钥匙串读取"
     case .credentialFailure: return "偏好中的敏感 URL 无法写入钥匙串"
-    case .rollbackFailed: return "偏好保存失败，旧设置或凭据未能完整恢复"
     case .legacyListenSettings(let error): return "旧版监听设置无法读取：\(listenStore(error))"
     }
   }

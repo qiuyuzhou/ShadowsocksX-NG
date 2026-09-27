@@ -4,7 +4,7 @@ The proxy mode selector (status menu, the single entry point since the settings-
 
 ## Status
 
-Superseded by [ADR-0007](0007-remove-manual-and-external-pac.md).
+Superseded by [ADR-0007](0007-remove-manual-and-external-pac.md). (2026-09: the holistic preferences reset referenced below has since been removed from the product; the reset and PAC wording here is historical — the factory mode was rule before that removal.)
 
 ## Considered options
 

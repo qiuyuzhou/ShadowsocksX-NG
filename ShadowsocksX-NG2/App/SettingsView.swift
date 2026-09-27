@@ -1,12 +1,10 @@
 import SwiftUI
 
 /// 设置分区（issue #33/#44，地图 #52 票 #57）：按原型重排为常规 / 代理端点 /
-/// 高级三张分组卡，行式呈现（主文案 + 次说明 + 行尾控件）；保存/恢复默认是
-/// 表单级提交动作，固定在本视图内容顶部行（不进窗口工具栏，避免动作与表单
-/// 脱节），确认弹窗由本视图的 alert 呈现。
+/// 高级三张分组卡，行式呈现（主文案 + 次说明 + 行尾控件）；保存是表单级提交
+/// 动作，固定在本视图内容顶部行（不进窗口工具栏，避免动作与表单脱节）。
 /// 字段绑定编辑 workflow 的扁平 UI-shaped draft；issues 按字段渲染；端口行读
-/// typed field state；是否需要确认及摘要来自 seam 的统一事实；登录项开关
-/// 绑定独立控制器。
+/// typed field state；登录项开关绑定独立控制器。
 struct SettingsView: View {
   @ObservedObject var workflow: SettingsWorkflow
   @ObservedObject var loginController: LaunchAtLoginController
@@ -26,32 +24,15 @@ struct SettingsView: View {
     .onAppear {
       Task { _ = await workflow.reloadFromCommitted() }
     }
-    .alert(
-      workflow.pendingConfirmation.map { confirmationPresentation(for: $0).title } ?? "",
-      isPresented: confirmationBinding,
-      presenting: workflow.pendingConfirmation
-    ) { confirmation in
-      let presentation = confirmationPresentation(for: confirmation)
-      Button(
-        presentation.confirmTitle, role: presentation.confirmRole, action: presentation.confirm)
-      Button("取消", role: .cancel, action: presentation.cancel)
-    } message: { confirmation in
-      Text(AppPresentation.message(for: confirmation))
-    }
   }
 
   // MARK: - 提交动作行（内容顶部，固定不随表单滚动）
 
-  /// 保存/恢复默认（原壳动作槽位，票 #57）：表单级提交动作与表单同置；
-  /// 保存走 Return 默认键位。恢复默认的确认经 pendingConfirmation 由本视图
-  /// alert 呈现。
+  /// 保存（原壳动作槽位，票 #57）：表单级提交动作与表单同置；保存走 Return
+  /// 默认键位。
   private var commitActionsRow: some View {
     HStack(spacing: 8) {
       Spacer(minLength: 0)
-      Button("恢复默认") {
-        Task { _ = await workflow.reset() }
-      }
-      .disabled(workflow.isCommitting)
       Button(workflow.isCommitting ? "保存中…" : "保存设置") {
         Task { _ = await workflow.save() }
       }
@@ -232,44 +213,6 @@ struct SettingsView: View {
       Spacer(minLength: 16)
       control()
     }
-  }
-
-  // MARK: - 确认 alert 呈现（视图只持有呈现状态，事实来自 seam）
-
-  private func confirmationPresentation(
-    for confirmation: SettingsConfirmation
-  ) -> ConfirmationPresentation {
-    switch confirmation {
-    case .resetPreferences:
-      ConfirmationPresentation(
-        title: "重置所有偏好？",
-        confirmTitle: "重置",
-        confirmRole: .destructive,
-        confirm: { Task { _ = await workflow.confirmReset() } },
-        cancel: { Task { _ = await workflow.cancelReset() } })
-    }
-  }
-
-  private var confirmationBinding: Binding<Bool> {
-    Binding(
-      get: { workflow.pendingConfirmation != nil },
-      set: { presented in
-        if !presented, let confirmation = workflow.pendingConfirmation {
-          confirmationPresentation(for: confirmation).cancel()
-        }
-      })
-  }
-}
-
-// MARK: - 确认 alert 呈现（同文件扩展，保持 private 访问）
-
-extension SettingsView {
-  private struct ConfirmationPresentation {
-    let title: String
-    let confirmTitle: String
-    let confirmRole: ButtonRole?
-    let confirm: () -> Void
-    let cancel: () -> Void
   }
 }
 
