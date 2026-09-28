@@ -22,6 +22,7 @@ struct ServersView: View {
   @State private var newGroupParent: NodeID?
   @State private var newGroupName = ""
   @State private var isPresentingNewGroup = false
+  @State private var isPresentingNewServer = false
   @State private var deleteTarget: NodeID?
   @State private var moveTarget: NodeID?
   @State private var rootDropHovering = false
@@ -84,6 +85,12 @@ struct ServersView: View {
     ) { context in
       MoveNodeSheet(workflow: workflow, errors: errors, nodeID: context.nodeID)
     }
+    .sheet(isPresented: $isPresentingNewServer) {
+      NewServerSheet(
+        workflow: workflow, errors: errors,
+        parent: workflow.importTargetParent(for: selection),
+        selection: $selection)
+    }
   }
 
   private var serverSidebar: some View {
@@ -121,7 +128,7 @@ struct ServersView: View {
       if workflow.tree.isEmpty {
         ContentUnavailableView(
           "暂无服务器", systemImage: "server.rack",
-          description: Text("用工具栏的「添加」菜单导入 ss:// 链接，或用「新建分组」按钮创建分组")
+          description: Text("用工具栏的「新建服务器」按钮手动录入，或用「添加」菜单导入 ss:// 链接、创建分组")
         )
         .allowsHitTesting(false)
       }
@@ -181,10 +188,19 @@ extension ServersView {
     }
   }
 
-  // MARK: - 工具栏（新建分组）
+  // MARK: - 工具栏（新建服务器 / 新建分组）
 
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
+    ToolbarItem(placement: .primaryAction) {
+      Button {
+        isPresentingNewServer = true
+      } label: {
+        Label("新建服务器", systemImage: "plus")
+      }
+      .labelStyle(.iconOnly)
+      .help("新建服务器")
+    }
     ToolbarItem(placement: .primaryAction) {
       Button {
         presentNewGroup(in: workflow.importTargetParent(for: selection))

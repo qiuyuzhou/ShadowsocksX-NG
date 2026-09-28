@@ -27,7 +27,48 @@ extension CatalogWorkflow {
     ).encode()
   }
 
-  // MARK: - URI → 服务器叶子
+  // MARK: - URI 批量导入与叶子字段
+
+  /// ss:// 批量导入（URL 表单和二维码识别入口的共同落点，story 20/21）。
+  /// 逐行解码，可解析行全部添加（每次新建身份，不按内容去重）；每条失败行以
+  /// 行号 + 类型化原因点名，已成功记录不被局部失败回滚。
+  func createServers(fromURIs text: String, into parent: NodeID?) async throws
+    -> BatchImportOutcome
+  {
+    var prepared: [(uri: SsUri, fields: ServerFields)] = []
+    var failures: [ImportLineFailure] = []
+    for (index, line) in text.split(whereSeparator: \.isNewline).enumerated() {
+      do {
+        let uri = try SsUri.decode(String(line))
+        let fields = try Self.serverFields(from: uri, credentials: dependencies.credentials)
+        prepared.append((uri: uri, fields: fields))
+      } catch {
+        let reason: ImportLineFailureReason
+        if let uriError = error as? SsUriError {
+          reason = .decode(uriError)
+        } else if let credentialError = error as? CredentialStoreError {
+          reason = .credential(credentialError)
+        } else {
+          reason = .decode(.malformed(detail: String(describing: error)))
+        }
+        failures.append(ImportLineFailure(lineIndex: index, reason: reason))
+      }
+    }
+    guard !prepared.isEmpty else { return BatchImportOutcome(addedCount: 0, failures: failures) }
+    do {
+      try commit { catalog in
+        for item in prepared {
+          try catalog.addServer(item.fields, to: parent)
+        }
+      }
+    } catch {
+      for item in prepared {
+        Self.deleteCredentialRefs(for: item.fields, credentials: dependencies.credentials)
+      }
+      throw error
+    }
+    return BatchImportOutcome(addedCount: prepared.count, failures: failures)
+  }
 
   /// URI → 服务器叶子字段：密码与插件参数入凭据存储、目录只持引用。
   static func serverFields(

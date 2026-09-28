@@ -171,6 +171,35 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
     }
   }
 
+  // MARK: - story 13：表单新建持久化失败 → 新写凭据回滚为不存在
+
+  func testCreateServerRollsBackFreshCredentialWhenPersistenceFails() async throws {
+    let workflow = makeWorkflow()
+    // 先落一份空目录建立 gate 存储（写入器才会创建父目录），再破坏持久化。
+    try CatalogFileStore(fileURL: fileURL).save(CatalogDocument(catalog: ConfigurationCatalog()))
+
+    try breakPersistence()
+
+    await expectThrowsAsync {
+      try await workflow.createServer(
+        ServerEditDraft(
+          address: "198.51.100.9", port: 8388, encryptionMethod: "aes-256-gcm",
+          password: "新密码", remark: "", plugin: .none, pluginOptions: nil),
+        into: nil)
+    } onThrow: { error in
+      guard let commitError = error as? CommitError else {
+        XCTFail("预期 CommitError，收到 \(error)")
+        return
+      }
+      guard case .restored(let refs) = commitError.credentialRollback, refs.count == 1 else {
+        return XCTFail("预期恰有一个全新引用回滚为删除，实际 \(commitError.credentialRollback)")
+      }
+    }
+
+    XCTAssertTrue(workflow.tree.isEmpty, "目录提交失败则已发布状态不动")
+    XCTAssertTrue(credentials.storageSnapshot.isEmpty, "新写秘密已删除，不留孤儿")
+  }
+
   // MARK: - story 38：提交完成与运行时收敛是分离的观察面
 
   func testCommitCompletesWhileRuntimeConvergenceIsStillSyncing() async throws {

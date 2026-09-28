@@ -130,45 +130,44 @@ final class CatalogWorkflow: ObservableObject {
 
   // MARK: - 手动服务器/分组命令
 
-  /// ss:// 批量导入（URL 表单和二维码识别入口的共同落点，story 20/21）。
-  /// 逐行解码，可解析行全部添加（每次新建身份，不按内容去重）；每条失败行以
-  /// 行号 + 类型化原因点名，已成功记录不被局部失败回滚。
-  func createServers(fromURIs text: String, into parent: NodeID?) async throws
-    -> BatchImportOutcome
-  {
-    var prepared: [(uri: SsUri, fields: ServerFields)] = []
-    var failures: [ImportLineFailure] = []
-    for (index, line) in text.split(whereSeparator: \.isNewline).enumerated() {
-      do {
-        let uri = try SsUri.decode(String(line))
-        let fields = try Self.serverFields(from: uri, credentials: dependencies.credentials)
-        prepared.append((uri: uri, fields: fields))
-      } catch {
-        let reason: ImportLineFailureReason
-        if let uriError = error as? SsUriError {
-          reason = .decode(uriError)
-        } else if let credentialError = error as? CredentialStoreError {
-          reason = .credential(credentialError)
-        } else {
-          reason = .decode(.malformed(detail: String(describing: error)))
-        }
-        failures.append(ImportLineFailure(lineIndex: index, reason: reason))
-      }
+  /// 表单新建手动服务器：校验与提交语义与编辑对称——表单校验在建 journal
+  /// 前失败保持裸 `ServerFormError`；密码与可选插件参数和目录作为一个逻辑
+  /// 变更提交，持久化失败经 journal 回滚并以 `CommitError` 报出。新身份恒
+  /// 全新 UUID，不按内容去重（CONTEXT.md 不变量）；返回新节点身份供选中。
+  @discardableResult
+  func createServer(_ draft: ServerEditDraft, into parent: NodeID?) async throws -> NodeID {
+    let trimmedAddress = draft.address.trimmingCharacters(in: .whitespaces)
+    guard !trimmedAddress.isEmpty else { throw ServerFormError.invalidAddress }
+    guard (1...65_535).contains(draft.port) else { throw ServerFormError.invalidPort }
+    let trimmedMethod = draft.encryptionMethod.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedMethod.isEmpty else { throw ServerFormError.missingEncryptionMethod }
+    guard EncryptionMethodCatalog.isSupported(trimmedMethod) else {
+      throw ServerFormError.unsupportedEncryptionMethod(trimmedMethod)
     }
-    guard !prepared.isEmpty else { return BatchImportOutcome(addedCount: 0, failures: failures) }
+    guard !draft.password.isEmpty else { throw ServerFormError.invalidPassword }
+    // 插件表单校验与其它字段同处写入之前：表单拒绝不触碰凭据、不进提交管线。
+    if case .managed(let program) = draft.plugin,
+      ManagedPluginCatalog.info(forProgram: program) == nil
+    {
+      throw ServerFormError.pluginNotManaged(program)
+    }
+    var journal = CredentialWriteJournal(credentials: dependencies.credentials)
     do {
-      try commit { catalog in
-        for item in prepared {
-          try catalog.addServer(item.fields, to: parent)
-        }
+      return try commit { [self] catalog in
+        let passwordRef = CredentialReference.fresh()
+        try journal.save(draft.password, for: passwordRef)
+        var fields = ServerFields(
+          address: trimmedAddress, port: draft.port, encryptionMethod: trimmedMethod,
+          passwordRef: passwordRef,
+          remark: draft.remark.trimmingCharacters(in: .whitespaces))
+        try Self.applyPluginSelection(
+          draft.plugin, options: draft.pluginOptions, to: &fields,
+          credentials: dependencies.credentials, journal: &journal)
+        return try catalog.addServer(fields, to: parent)
       }
     } catch {
-      for item in prepared {
-        Self.deleteCredentialRefs(for: item.fields, credentials: dependencies.credentials)
-      }
-      throw error
+      throw CommitError(underlying: error, credentialRollback: journal.rollback())
     }
-    return BatchImportOutcome(addedCount: prepared.count, failures: failures)
   }
 
   /// 新建空手动分组（story 5）；返回新分组身份。
@@ -253,8 +252,9 @@ final class CatalogWorkflow: ObservableObject {
 
   // MARK: - 提交管线（module 内部；UI 不得调用，独立 target 拆分前靠 deletion check）
 
-  /// 仅目录变更的提交便捷入口（订阅扩展经 `commitSubscriptionDocument`）。
-  private func commit<T>(
+  /// 仅目录变更的提交便捷入口（module 内部扩展共用，同 `commitSubscriptionDocument`
+  /// 的窄缝口径）。
+  func commit<T>(
     _ mutate: (inout ConfigurationCatalog) throws -> T
   ) throws -> T {
     try commitDocument { catalog, _ in
