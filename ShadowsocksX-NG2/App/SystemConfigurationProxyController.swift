@@ -297,7 +297,7 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
 
     guard
       let preferences = SCPreferencesCreateWithAuthorization(
-        nil, "ShadowsocksX-NG" as CFString, nil, authorization)
+        nil, "ShadowsocksX-NG2" as CFString, nil, authorization)
     else { throw SystemProxyError.preferencesUnavailable }
     try body(preferences)
   }

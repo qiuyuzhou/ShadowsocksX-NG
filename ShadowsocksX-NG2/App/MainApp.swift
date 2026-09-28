@@ -59,7 +59,7 @@ private struct StatusMenuLabel: View {
 
   var body: some View {
     Image(systemName: "network")
-      .accessibilityLabel("ShadowsocksX-NG 2.0")
+      .accessibilityLabel("ShadowsocksX-NG2")
       .task {
         guard !ApplicationDependencies.isUnitTesting else { return }
         // 先开窗再 resync：resync 可能 await launchd 往返，不能挡在开窗前面。

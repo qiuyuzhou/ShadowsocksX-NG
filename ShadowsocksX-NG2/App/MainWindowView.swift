@@ -204,7 +204,7 @@ extension MainWindowView {
           .foregroundStyle(Color(nsColor: .windowBackgroundColor))
       }
       .frame(width: 30, height: 30)
-      Text("ShadowsocksX-NG")
+      Text("ShadowsocksX-NG2")
         .font(.headline)
       Spacer(minLength: 0)
     }

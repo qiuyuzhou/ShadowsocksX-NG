@@ -161,7 +161,7 @@ enum DiagnosticReportBuilder {
 
   static func markdown(from snapshot: DiagnosticSnapshot) -> String {
     var lines: [String] = []
-    lines.append("# ShadowsocksX-NG 2.0 诊断报告")
+    lines.append("# ShadowsocksX-NG2 诊断报告")
     lines.append("")
     lines.append("- 生成时间：\(timestamp(snapshot.generatedAt))")
     lines.append("- 应用版本：\(snapshot.appVersion ?? "未提供")")

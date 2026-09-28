@@ -185,7 +185,7 @@ final class DiagnosticsWorkflow: ObservableObject {
 
   /// 保存面板的建议文件名（UI 在打开面板前取用；时间戳来自注入时钟）。
   func suggestedReportFileName() -> String {
-    "ShadowsocksX-NG-诊断-\(fileStamp()).txt"
+    "ShadowsocksX-NG2-诊断-\(fileStamp()).txt"
   }
 
   /// 准备脱敏诊断报告：只读采样各事实源（best-effort，单一来源缺失不阻止

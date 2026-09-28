@@ -120,7 +120,7 @@ struct ProxyStatusMenu: View {
     Divider()
 
     // ⑧ 退出：仅退 GUI；agent 由 launchd 持有，代理不受影响（构造上成立）。
-    Button("退出 ShadowsocksX-NG 2.0（代理仍在后台运行）") {
+    Button("退出 ShadowsocksX-NG2（代理仍在后台运行）") {
       NSApp.terminate(nil)
     }
   }

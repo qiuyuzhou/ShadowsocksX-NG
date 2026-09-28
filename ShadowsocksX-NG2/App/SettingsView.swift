@@ -39,11 +39,11 @@ struct SettingsView: View {
             get: { loginController.isEnabled },
             set: { loginController.setEnabled($0) })
         ) {
-          settingCopy("登录时启动 ShadowsocksX-NG", note: "启动菜单栏应用，不会自动开启代理")
+          settingCopy("登录时启动 ShadowsocksX-NG2", note: "启动菜单栏应用，不会自动开启代理")
         }
         .toggleStyle(.switch)
         if loginController.requiresApproval {
-          Text("请在系统设置 → 登录项 → 允许在后台运行中批准 ShadowsocksX-NG。")
+          Text("请在系统设置 → 登录项 → 允许在后台运行中批准 ShadowsocksX-NG2。")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
