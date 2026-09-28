@@ -2,9 +2,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 设置工作流与真实 `ProxyRuntimeController` 的提交路径集成（issue #44）：
-/// 界面投影与命令面已由 `SettingsWorkflowInterfaceTests` 用 fake 写入缝覆盖；
-/// 本文件保留确需端到端的场景，证明窄缝两端与运行时控制器的提交事务对齐。
+/// SettingsWorkflow 与真实 ProxyRuntimeController 的监听设置提交集成。
 @MainActor
 final class SettingsWorkflowTests: XCTestCase {
   private var runtime: ProxyRuntimeFixture.TemporaryRuntime!
@@ -14,7 +12,6 @@ final class SettingsWorkflowTests: XCTestCase {
   private var agent: ProxyRuntimeFixture.FakeLaunchAgent!
   private var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
   private var settingsStore: InMemorySettingsStore!
-  private var probe: FakeOccupancyProbe!
 
   override func setUpWithError() throws {
     try super.setUpWithError()
@@ -25,25 +22,11 @@ final class SettingsWorkflowTests: XCTestCase {
     agent = ProxyRuntimeFixture.FakeLaunchAgent()
     systemProxy = ProxyRuntimeFixture.FakeSystemProxy()
     settingsStore = InMemorySettingsStore()
-    probe = FakeOccupancyProbe()
   }
 
   override func tearDownWithError() throws {
     try? FileManager.default.removeItem(at: runtime.directory)
     try super.tearDownWithError()
-  }
-
-  func testSaveCommitsThroughTheRuntimeController() async throws {
-    let pair = makePair()
-
-    pair.workflow.draft.proxyExceptions = "localhost"
-    _ = await pair.workflow.save()
-
-    XCTAssertEqual(settingsStore.saved?.proxyExceptions, "localhost")
-    XCTAssertEqual(pair.controller.settings.proxyExceptions, "localhost")
-    XCTAssertEqual(
-      pair.workflow.draft, SettingsDraftAdapter.draft(from: pair.controller.settings),
-      "提交后草稿回到已提交快照")
   }
 
   func testListenerModeSavePersistsWithoutStartingAnOffAgent() async throws {
@@ -57,43 +40,6 @@ final class SettingsWorkflowTests: XCTestCase {
     XCTAssertEqual(pair.controller.state, .off)
     XCTAssertEqual(agent.registerCount, 0)
   }
-
-  func testOccupiedPortMatchingTheRunningRuntimeDoesNotBlockSave() async throws {
-    probe = FakeOccupancyProbe(occupiedPorts: [11086])
-    let pair = try await makeRunningPair()
-
-    _ = await pair.workflow.reloadFromCommitted()
-    await waitUntil(pair.workflow.portFieldState(for: .socks).occupancy != nil)
-
-    XCTAssertEqual(
-      pair.workflow.portFieldState(for: .socks).occupancy, .occupied(occupier: "other-app"))
-    XCTAssertTrue(
-      pair.workflow.portFieldState(for: .socks).isRuntimePortException,
-      "代理自身监听的端口不算冲突")
-    XCTAssertFalse(pair.workflow.hasBlockingPortOccupancy)
-    XCTAssertTrue(pair.workflow.canSave)
-
-    pair.workflow.draft.proxyExceptions = "localhost"
-    _ = await pair.workflow.save()
-    XCTAssertEqual(settingsStore.saved?.proxyExceptions, "localhost")
-  }
-
-  func testCommitFailureSurfacesPresentedReasonAndKeepsCommittedValues() async throws {
-    settingsStore.saveError = FakeSaveError.io
-    let pair = makePair()
-
-    pair.workflow.draft.proxyExceptions = "localhost"
-    _ = await pair.workflow.save()
-
-    XCTAssertEqual(pair.workflow.lastFailure, .unknown)
-    XCTAssertEqual(pair.workflow.lastFailure?.presentableMessage, AppPresentation.unknownError)
-    XCTAssertNil(settingsStore.saved)
-    XCTAssertEqual(
-      pair.controller.settings.proxyExceptions, ProxySettings.defaultProxyExceptions, "失败保留旧值")
-    XCTAssertEqual(pair.workflow.draft.proxyExceptions, "localhost", "草稿保留待修改值")
-  }
-
-  // MARK: - 夹具
 
   private func makePair() -> (controller: ProxyRuntimeController, workflow: SettingsWorkflow) {
     let catalogSnapshotReader = CatalogCommitCoordinator.bootstrap(
@@ -121,41 +67,19 @@ final class SettingsWorkflowTests: XCTestCase {
       launchHealthTimeoutSeconds: 0.05,
       sendSignal: { _, _ in 0 },
       processIsAlive: { $0 == 42 })
-    let workflow = SettingsWorkflow(committing: controller, occupancyProbe: probe)
+    let workflow = SettingsWorkflow(
+      committing: controller, occupancyProbe: FakeOccupancyProbe())
     return (controller, workflow)
-  }
-
-  private func makeRunningPair() async throws -> (
-    controller: ProxyRuntimeController, workflow: SettingsWorkflow
-  ) {
-    var catalog = ConfigurationCatalog()
-    let server = try ActivationFixture.addPlainServer(
-      "香港 01", in: &catalog, credentials: credentials)
-    try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
-    let pair = makePair()
-    try await pair.controller.activate(server)
-    await pair.controller.setAgentEnabled(true)
-    await waitUntil(pair.controller.state == .running)
-    return pair
-  }
-
-  private enum FakeSaveError: Error, CustomStringConvertible {
-    // swiftlint:disable:next identifier_name
-    case io
-
-    var description: String { "fake-io-error" }
   }
 
   final class InMemorySettingsStore: ProxySettingsStoring {
     var saved: ProxySettings?
-    var saveError: Error?
 
     func load() throws -> ProxySettings {
       saved ?? ProxySettings()
     }
 
     func save(_ settings: ProxySettings) throws {
-      if let saveError { throw saveError }
       saved = settings
     }
   }

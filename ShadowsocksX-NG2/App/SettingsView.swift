@@ -17,9 +17,6 @@ struct SettingsView: View {
     .formStyle(.grouped)
     .padding(.leading, 20)
     .padding(.trailing, 24)
-    .onAppear {
-      Task { _ = await workflow.reloadFromCommitted() }
-    }
     .sheet(item: $presentedEditor) { editor in
       switch editor {
       case .ports(let session):
@@ -394,7 +391,7 @@ private struct PortSettingsEditorSheet: View {
         Button("建议空闲端口") {
           Task {
             let outcome = await workflow.suggestFreePort(for: id, from: draft)
-            if case .draftUpdated(let port, let value) = outcome {
+            if case .suggestedPort(let port, let value) = outcome {
               draft.setPortValue(value, for: port)
             }
           }

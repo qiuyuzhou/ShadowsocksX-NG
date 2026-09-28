@@ -25,40 +25,8 @@ extension ProxyRuntimeController: SettingsCommitting {
   }
 }
 
-/// 平坦草稿与 Domain 快照的单一 adapter（story 45）：字段清单变化只改此处。
-/// 校验错误到字段问题、UI 端口标识到端点类型的映射同属字段清单，一并收在
-/// 本文件；Domain 快照类型不出现在 UI-facing interface。
-enum SettingsDraftAdapter {
-  /// 已提交快照 → 整体设置草稿；独立保存的监听方式不会进入此草稿。
-  static func draft(from settings: ProxySettings) -> SettingsDraft {
-    return SettingsDraft(
-      socksPort: settings.listen.socksPort,
-      httpPort: settings.listen.httpPort,
-      proxyExceptions: settings.proxyExceptions)
-  }
-
-  /// 平坦草稿 → Domain 快照。监听方式与其它未编辑偏好从 `base` 保留。
-  static func settings(
-    from draft: SettingsDraft, preservingUneditedFieldsOf base: ProxySettings
-  ) -> ProxySettings {
-    var settings = base
-    settings.listen.socksPort = draft.socksPort
-    settings.listen.httpPort = draft.httpPort
-    settings.proxyExceptions = draft.proxyExceptions
-    return settings
-  }
-
-  /// 平坦草稿对应的完整有效监听身份。占用探测和 runtime 例外判断共用此
-  /// adapter，避免在 workflow 内复制 scope/address/endpoint 字段清单。
-  static func listenFacts(
-    from draft: SettingsDraft, preservingModeOf base: ProxySettings
-  ) -> RuntimeListenFacts {
-    var listen = base.listen
-    listen.socksPort = draft.socksPort
-    listen.httpPort = draft.httpPort
-    return RuntimeListenFacts(listen: listen)
-  }
-
+/// Settings field adapters keep port IDs, endpoints, and validation facts aligned.
+enum SettingsPortAdapter {
   /// UI 形状端口标识 → 端点类型（module 内部复用 Domain 端口语义）。
   static func endpoint(for id: SettingsPortID) -> ProxyEndpointKind {
     switch id {

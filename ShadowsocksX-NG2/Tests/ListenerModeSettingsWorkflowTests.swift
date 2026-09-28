@@ -83,4 +83,39 @@ extension SettingsWorkflowInterfaceTests {
     XCTAssertEqual(
       committing.committedSettings.listen.listenerMode, .allIPv4AndIPv6Interfaces)
   }
+
+  func testListenerModeSavePreservesOtherCommittedSettings() async {
+    committing.committedSettings.listen.socksPort = 12_086
+    committing.committedSettings.listen.httpPort = 12_087
+    committing.committedSettings.proxyExceptions = "existing.example"
+    committing.committedSettings.preferredMode = .global
+    committing.committedSettings.agentEnabled = true
+    committing.committedSettings.systemProxyEnabled = true
+    let original = committing.committedSettings
+    let workflow = makeWorkflow()
+
+    let outcome = await workflow.saveListenerMode(.allIPv4AndIPv6Interfaces)
+
+    var expected = original
+    expected.listen.listenerMode = .allIPv4AndIPv6Interfaces
+    XCTAssertEqual(outcome, .saved(unknownOccupancy: []))
+    XCTAssertEqual(committing.updateCalls, [expected])
+    XCTAssertEqual(committing.committedSettings, expected)
+  }
+
+  func testListenerModePersistenceFailurePreservesCommittedSettings() async {
+    let original = committing.committedSettings
+    committing.updateError = ProxySettingsStoreError.ioFailure(detail: "disk full")
+    let workflow = makeWorkflow()
+
+    let outcome = await workflow.saveListenerMode(.allIPv6Interfaces)
+
+    XCTAssertEqual(
+      outcome,
+      .persistenceFailed(.store(.ioFailure(detail: "disk full"))))
+    XCTAssertEqual(workflow.lastFailure, .store(.ioFailure(detail: "disk full")))
+    XCTAssertEqual(committing.committedSettings, original)
+    XCTAssertTrue(committing.updateCalls.isEmpty)
+    XCTAssertFalse(workflow.isCommitting)
+  }
 }

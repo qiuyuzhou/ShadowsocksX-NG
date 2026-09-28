@@ -1,9 +1,9 @@
 import Foundation
 
-// MARK: - 平坦草稿（UI 形状，设置编辑态的唯一 source of truth）
+// MARK: - Setting editor models
 
-/// UI 形状端口标识：设置页两个端口字段的稳定标识。端口行与建议空闲端口命令
-/// 都用本标识；视图不导入探测层端点类型。
+/// Stable UI identifier for the SOCKS5 and HTTP port fields. The view does not
+/// need to import the probe layer's endpoint type.
 enum SettingsPortID: CaseIterable, Hashable, Sendable {
   case socks
   case http
@@ -13,28 +13,6 @@ enum SettingsPortID: CaseIterable, Hashable, Sendable {
 struct SettingsPortDraft: Equatable, Sendable {
   var socksPort: Int
   var httpPort: Int
-
-  func portValue(for id: SettingsPortID) -> Int {
-    switch id {
-    case .socks: socksPort
-    case .http: httpPort
-    }
-  }
-
-  mutating func setPortValue(_ value: Int, for id: SettingsPortID) {
-    switch id {
-    case .socks: socksPort = value
-    case .http: httpPort = value
-    }
-  }
-}
-
-/// 平坦的 UI 形状编辑草稿：只包含由整体「保存设置」提交的字段。
-/// 监听方式由独立编辑器单项提交，不进入此草稿。
-struct SettingsDraft: Equatable, Sendable {
-  var socksPort: Int
-  var httpPort: Int
-  var proxyExceptions: String
 
   func portValue(for id: SettingsPortID) -> Int {
     switch id {
@@ -96,7 +74,7 @@ struct SettingsPortFieldState: Equatable, Sendable {
   let occupancy: SettingsPortOccupancy?
   /// 该端口的字段问题事实；文案由 presentation edge 派生。
   let issues: [SettingsFieldIssue]
-  /// 是否为运行中端口例外（代理在跑且端口未变；保存其他设置不会触发冲突）。
+  /// Whether the running listener matches the complete edited listen identity.
   let isRuntimePortException: Bool
   /// 是否可建议空闲端口（被占用且不是运行中端口例外）。
   let canSuggestFreePort: Bool
@@ -120,12 +98,11 @@ enum SettingsPersistenceFailure: Error, Equatable, Sendable {
   case unknown
 }
 
-/// Result returned by every discrete SettingsWorkflow command. Proxy runtime
-/// status is presented by its owning status UI, not this settings interface.
+/// Results for port suggestion and item-save commands. Proxy runtime status is
+/// presented by its owning status UI, not this settings interface.
 enum SettingsCommandOutcome: Equatable, Sendable {
   case rejected(SettingsCommandRejection)
-  case draftUpdated(port: SettingsPortID, value: Int)
-  case reloaded
+  case suggestedPort(port: SettingsPortID, value: Int)
   case persisted
   case persistenceFailed(SettingsPersistenceFailure)
 }

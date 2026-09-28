@@ -1,42 +1,26 @@
 import Foundation
 
-/// 设置工作流 module（issue #48）：设置窗口的唯一 UI-facing seam。以平坦的
-/// UI 形状草稿为编辑态唯一 source of truth，向 UI 只提供字段归位的校验问题、
-/// 端口 field state、保存门禁/脏态/提交中/typed outcome 与具名 async command。
-/// 视图不再拆装 Domain 枚举或翻译占用事实；alert、sheet 与窗口状态仍由 UI
-/// 持有。登录启动项是独立偏好域，不经本 module。
+/// Settings item editors read the committed snapshot and submit one item at a time.
+/// The module exposes validation, occupancy facts, shared commit state, and typed
+/// commands; editor-local drafts and presentation state remain in the UI.
 ///
-/// 内部沿用既有深 module：`ProxySettings` 的点名校验、`ProxyPortSemantics` 的
-/// 端口互异/建议算法与 typed occupancy request。写入侧只依赖窄 seam
-/// `SettingsCommitting`；module 不依赖 SwiftUI。
+/// Writes depend on the narrow `SettingsCommitting` seam. The module does not
+/// depend on SwiftUI, persistence formats, or runtime convergence details.
 @MainActor
 final class SettingsWorkflow: ObservableObject {
-  /// 编辑中的 UI 形状草稿：视图按字段绑定；监听设置变化时自动重探占用。
-  @Published var draft: SettingsDraft {
-    didSet {
-      if listenFacts(of: draft) != listenFacts(of: oldValue) {
-        refreshOccupancy()
-      }
-    }
-  }
-
-  /// 各端口的尽力而为占用判定（非权威，只影响编辑期提示与保存门禁）。
-  @Published private var occupancyByPort: [SettingsPortID: SettingsPortOccupancy] = [:]
-  /// 独立端口设置编辑器的占用事实；基于已提交的监听方式和编辑中的端口对。
+  /// Occupancy facts for the current port editor draft. They are advisory; the
+  /// authoritative bind check still belongs to runtime startup.
   @Published private var portEditorOccupancyByPort: [SettingsPortID: SettingsPortOccupancy] = [:]
   private var portEditorOccupancyDraft: SettingsPortDraft?
   private var portEditorOccupancyGeneration = 0
-  /// 提交进行中（按钮进入进行中状态且不可重复触发）。
+
+  /// Shared gate that prevents concurrent saves across setting items.
   @Published private(set) var isCommitting = false
-  /// 最近一次提交失败的 typed fact（nil = 无）。
+  /// Typed persistence failure for the editor to present.
   @Published private(set) var lastFailure: SettingsWorkflowFailure?
-  /// 最近一次离散 command 的结构化结果，供 UI 观察而无需解析字符串。
-  @Published private(set) var lastOutcome: SettingsCommandOutcome?
 
   private let committing: SettingsCommitting
   private let occupancyProbe: PortOccupancyProbing
-  /// 占用探测代际：草稿快速连续变化时只有最新一轮结果生效。
-  private var occupancyGeneration = 0
 
   init(
     committing: SettingsCommitting,
@@ -44,45 +28,9 @@ final class SettingsWorkflow: ObservableObject {
   ) {
     self.committing = committing
     self.occupancyProbe = occupancyProbe
-    draft = SettingsDraftAdapter.draft(from: committing.committedSettings)
-    refreshOccupancy()
   }
 
-  // MARK: - 字段归位的校验问题
-
-  /// 草稿点名校验问题（随 draft 变化；点名文案来自既有 Domain 错误）。
-  var fieldIssues: [SettingsFieldIssue] {
-    SettingsDraftAdapter.fieldIssues(from: makeSettings(from: draft).validationErrors)
-  }
-
-  /// 按字段归位的问题事实；文案由 presentation edge 派生。
-  func issues(for field: SettingsFieldID) -> [SettingsFieldIssue] {
-    fieldIssues.filter { $0.field == field }
-  }
-
-  // MARK: - 端口 field state
-
-  /// 端口行按统一端口标识取 field state。
-  func portFieldState(for id: SettingsPortID) -> SettingsPortFieldState {
-    let exception = isRuntimePortException(id)
-    let occupancy = occupancyByPort[id]
-    let canSuggest: Bool
-    switch occupancy {
-    case .occupied:
-      canSuggest = !exception
-    case .free, .unknown, nil:
-      canSuggest = false
-    }
-    return SettingsPortFieldState(
-      id: id,
-      draftValue: draft.portValue(for: id),
-      occupancy: occupancy,
-      issues: issues(for: .port(id)),
-      isRuntimePortException: exception,
-      canSuggestFreePort: canSuggest)
-  }
-
-  /// 当前已提交的端口对；设置页摘要与编辑器入口都以此为准。
+  /// Current committed port pair; editors start from this snapshot.
   var committedPortDraft: SettingsPortDraft {
     let listen = committing.committedSettings.listen
     return SettingsPortDraft(socksPort: listen.socksPort, httpPort: listen.httpPort)
@@ -106,7 +54,7 @@ final class SettingsWorkflow: ObservableObject {
     return committing.committedSettings.proxyExceptions
   }
 
-  /// 打开独立端口设置项时，从已提交值开始，丢弃上次编辑器探测的暂存事实。
+  /// Start a port editor from committed values and discard prior probe facts.
   func beginPortSettingsEditing() -> SettingsPortDraft {
     lastFailure = nil
     portEditorOccupancyGeneration += 1
@@ -115,7 +63,8 @@ final class SettingsWorkflow: ObservableObject {
     return committedPortDraft
   }
 
-  /// 编辑器端口字段状态；监听方式取已提交设置，不受设置页其他草稿影响。
+  /// Field state for the port editor. Listener mode always comes from the
+  /// committed snapshot, independent of other editor state.
   func portFieldState(
     for id: SettingsPortID, editorDraft: SettingsPortDraft
   ) -> SettingsPortFieldState {
@@ -139,20 +88,19 @@ final class SettingsWorkflow: ObservableObject {
       canSuggestFreePort: canSuggest)
   }
 
-  /// 刷新编辑器端口对的占用事实。旧结果不能覆盖较新的端口编辑。
+  /// Refresh port occupancy facts. Results from an older editor draft are ignored.
   func refreshPortEditorOccupancy(for editorDraft: SettingsPortDraft) {
     portEditorOccupancyGeneration += 1
     let generation = portEditorOccupancyGeneration
     portEditorOccupancyDraft = editorDraft
     portEditorOccupancyByPort = [:]
-    let listen = listenSettings(for: editorDraft)
-    let facts = RuntimeListenFacts(listen: listen)
+    let facts = RuntimeListenFacts(listen: listenSettings(for: editorDraft))
     let probe = occupancyProbe
     Task { @MainActor in
       let result = await Task.detached(priority: .utility) {
         Dictionary(
           uniqueKeysWithValues: SettingsPortID.allCases.map { id in
-            let endpoint = SettingsDraftAdapter.endpoint(for: id)
+            let endpoint = SettingsPortAdapter.endpoint(for: id)
             let request = PortOccupancyProbeRequest(endpoint: endpoint, listen: facts)
             return (id, SettingsPortOccupancy(probe.occupancy(for: request)))
           })
@@ -164,7 +112,8 @@ final class SettingsWorkflow: ObservableObject {
     }
   }
 
-  /// 编辑器的保存门禁：等待占用探测完成；无效值和已知外部占用阻止保存，未知只提示。
+  /// Invalid ports and known external occupancy block the save. Unknown
+  /// occupancy remains advisory, and probing must finish for this exact draft.
   func canSavePortSettings(_ editorDraft: SettingsPortDraft) -> Bool {
     portIssues(for: editorDraft).isEmpty
       && hasCurrentPortEditorOccupancy(for: editorDraft)
@@ -172,15 +121,16 @@ final class SettingsWorkflow: ObservableObject {
       && !isCommitting
   }
 
-  /// 给编辑器中的端口生成空闲候选；只返回候选，等待用户再次保存端口对。
+  /// Return an available port candidate for the editor to apply. This command
+  /// never persists the candidate.
   @discardableResult
   func suggestFreePort(
     for id: SettingsPortID, from editorDraft: SettingsPortDraft
   ) async -> SettingsCommandOutcome {
-    guard !isCommitting else { return record(.rejected(.inProgress)) }
+    guard !isCommitting else { return .rejected(.inProgress) }
     let listen = listenSettings(for: editorDraft)
     let facts = RuntimeListenFacts(listen: listen)
-    let endpoint = SettingsDraftAdapter.endpoint(for: id)
+    let endpoint = SettingsPortAdapter.endpoint(for: id)
     let generation = portEditorOccupancyGeneration
     let probe = occupancyProbe
     let candidate = await Task.detached(priority: .utility) {
@@ -194,28 +144,28 @@ final class SettingsWorkflow: ObservableObject {
     guard generation == portEditorOccupancyGeneration,
       portEditorOccupancyDraft == editorDraft
     else {
-      return record(.rejected(.superseded))
+      return .rejected(.superseded)
     }
     guard let candidate else {
-      return record(.rejected(.noFreePort(id)))
+      return .rejected(.noFreePort(id))
     }
-    return record(.draftUpdated(port: id, value: candidate))
+    return .suggestedPort(port: id, value: candidate)
   }
 
-  /// 单独保存 SOCKS5/HTTP 端口对，不提交设置页里其他未保存字段。
+  /// Save the SOCKS5 and HTTP ports as one item.
   @discardableResult
   func savePortSettings(_ editorDraft: SettingsPortDraft) async -> SettingsCommandOutcome {
-    guard !isCommitting else { return record(.rejected(.inProgress)) }
+    guard !isCommitting else { return .rejected(.inProgress) }
     let issues = portIssues(for: editorDraft)
     guard issues.isEmpty else {
-      return record(.rejected(.validation(issues)))
+      return .rejected(.validation(issues))
     }
     guard hasCurrentPortEditorOccupancy(for: editorDraft) else {
-      return record(.rejected(.inProgress))
+      return .rejected(.inProgress)
     }
     let blockedPorts = blockingPortIDs(for: editorDraft)
     guard blockedPorts.isEmpty else {
-      return record(.rejected(.occupied(blockedPorts)))
+      return .rejected(.occupied(blockedPorts))
     }
 
     var proposed = committing.committedSettings
@@ -224,16 +174,15 @@ final class SettingsWorkflow: ObservableObject {
     return await commitPortSettings(proposed)
   }
 
-  /// Save only the user-added system-proxy exceptions. Fixed local ACL rules
-  /// and unrelated setting-item drafts remain untouched.
+  /// Save only user-added system-proxy exceptions.
   @discardableResult
   func saveProxyExceptions(_ rawValue: String) async -> SettingsCommandOutcome {
-    guard !isCommitting else { return record(.rejected(.inProgress)) }
+    guard !isCommitting else { return .rejected(.inProgress) }
     let value =
       rawValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : rawValue
     guard value != committing.committedSettings.proxyExceptions else {
       lastFailure = nil
-      return record(.persisted)
+      return .persisted
     }
 
     var proposed = committing.committedSettings
@@ -242,105 +191,14 @@ final class SettingsWorkflow: ObservableObject {
     lastFailure = nil
     do {
       try await committing.updateSettings(proposed)
-      var nextDraft = draft
-      nextDraft.proxyExceptions = committing.committedSettings.proxyExceptions
-      draft = nextDraft
       isCommitting = false
       lastFailure = nil
-      return record(.persisted)
+      return .persisted
     } catch {
       isCommitting = false
-      let failure = Self.workflowFailure(for: error)
-      lastFailure = failure
-      return record(.persistenceFailed(Self.persistenceFailure(for: error)))
+      lastFailure = Self.workflowFailure(for: error)
+      return .persistenceFailed(Self.persistenceFailure(for: error))
     }
-  }
-
-  /// 明确阻塞保存的端口。
-  var blockingPortIDs: [SettingsPortID] {
-    SettingsPortID.allCases.filter { id in
-      guard !isRuntimePortException(id) else { return false }
-      if case .occupied = occupancyByPort[id] { return true }
-      return false
-    }
-  }
-
-  /// 是否存在阻塞保存的端口占用（事实查询，呈现由视图决定）。
-  var hasBlockingPortOccupancy: Bool { !blockingPortIDs.isEmpty }
-
-  // MARK: - 操作区只读投影
-
-  /// 保存门禁：校验问题清零、无阻塞性占用且不在提交中。
-  var canSave: Bool {
-    fieldIssues.isEmpty
-      && blockingPortIDs.isEmpty
-      && !isCommitting
-  }
-
-  /// 脏态：草稿若提交会不会改变已提交快照（草稿经唯一 adapter 归一后比较，
-  /// 隐藏字段里的残留文本不误报未保存修改）。
-  var isDirty: Bool {
-    makeSettings(from: draft) != committing.committedSettings
-  }
-
-  // MARK: - 具名 typed async commands
-
-  /// 保存：先返回 typed gate rejection，否则等待 persistence seam 完成，
-  /// 并把 runtime convergence 独立放进结果。
-  @discardableResult
-  func save() async -> SettingsCommandOutcome {
-    guard !isCommitting else { return record(.rejected(.inProgress)) }
-    guard fieldIssues.isEmpty else {
-      return record(.rejected(.validation(fieldIssues)))
-    }
-    guard blockingPortIDs.isEmpty else {
-      return record(.rejected(.occupied(blockingPortIDs)))
-    }
-    return await commit(makeSettings(from: draft))
-  }
-
-  /// 为端口建议一个空闲端口：只把候选写进草稿对应字段，绝不替用户保存。
-  @discardableResult
-  func suggestFreePort(for id: SettingsPortID) async -> SettingsCommandOutcome {
-    guard !isCommitting else { return record(.rejected(.inProgress)) }
-    let listen = makeSettings(from: draft).listen
-    let facts = RuntimeListenFacts(listen: listen)
-    let endpoint = SettingsDraftAdapter.endpoint(for: id)
-    let generation = occupancyGeneration
-    let probe = occupancyProbe
-    let candidate = await Task.detached(priority: .utility) {
-      listen.suggestedPort(for: endpoint) { port in
-        let request = PortOccupancyProbeRequest(
-          endpoint: endpoint, listen: facts.replacingPort(port, for: endpoint), port: port)
-        if case .free = probe.occupancy(for: request) { return true }
-        return false
-      }
-    }.value
-    guard generation == occupancyGeneration else {
-      return record(.rejected(.superseded))
-    }
-    guard let candidate else {
-      return record(.rejected(.noFreePort(id)))
-    }
-    draft.setPortValue(candidate, for: id)
-    return record(.draftUpdated(port: id, value: candidate))
-  }
-
-  /// 回到已提交快照：放弃未保存修改；监听设置未变时仍刷新占用，避免陈旧提示。
-  @discardableResult
-  func reloadFromCommitted() async -> SettingsCommandOutcome {
-    guard !isCommitting else { return record(.rejected(.inProgress)) }
-    adoptCommittedSettings()
-    return record(.reloaded)
-  }
-}
-
-extension SettingsWorkflow {
-  // MARK: - 提交与占用探测（implementation，UI 不可见）
-
-  private func makeSettings(from draft: SettingsDraft) -> ProxySettings {
-    SettingsDraftAdapter.settings(
-      from: draft, preservingUneditedFieldsOf: committing.committedSettings)
   }
 
   private func listenSettings(for editorDraft: SettingsPortDraft) -> SslocalListenSettings {
@@ -353,7 +211,7 @@ extension SettingsWorkflow {
   private func portIssues(for editorDraft: SettingsPortDraft) -> [SettingsFieldIssue] {
     let errors = listenSettings(for: editorDraft).portValidationErrors()
       .map(ProxySettingsValidationError.init)
-    return SettingsDraftAdapter.fieldIssues(from: errors)
+    return SettingsPortAdapter.fieldIssues(from: errors)
   }
 
   private func isRuntimePortException(editorDraft: SettingsPortDraft) -> Bool {
@@ -377,89 +235,20 @@ extension SettingsWorkflow {
   }
 
   private func commitPortSettings(_ proposed: ProxySettings) async -> SettingsCommandOutcome {
-    guard !isCommitting else { return record(.rejected(.inProgress)) }
+    guard !isCommitting else { return .rejected(.inProgress) }
     isCommitting = true
     lastFailure = nil
     do {
       try await committing.updateSettings(proposed)
-      var nextDraft = draft
-      nextDraft.socksPort = committing.committedSettings.listen.socksPort
-      nextDraft.httpPort = committing.committedSettings.listen.httpPort
-      draft = nextDraft
       isCommitting = false
-      // Port persistence succeeded. Runtime convergence failure is owned by runtime
-      // status and does not become a separate settings-page error for this item.
+      // Persistence succeeded. Runtime convergence is owned by runtime status.
       lastFailure = nil
-      return record(.persisted)
+      return .persisted
     } catch {
       isCommitting = false
-      let failure = Self.workflowFailure(for: error)
-      lastFailure = failure
-      return record(.persistenceFailed(Self.persistenceFailure(for: error)))
+      lastFailure = Self.workflowFailure(for: error)
+      return .persistenceFailed(Self.persistenceFailure(for: error))
     }
-  }
-
-  /// 例外只在当前 runtime 的完整有效监听身份与草稿身份相同时成立。
-  /// 例外只影响保存门禁与提示，不改持久化。
-  private func isRuntimePortException(_ id: SettingsPortID) -> Bool {
-    guard let runtime = committing.runtimeListenFacts else { return false }
-    return runtime == listenFacts(of: draft)
-  }
-
-  private func listenFacts(of draft: SettingsDraft) -> RuntimeListenFacts {
-    SettingsDraftAdapter.listenFacts(from: draft, preservingModeOf: committing.committedSettings)
-  }
-
-  private func commit(_ proposed: ProxySettings) async -> SettingsCommandOutcome {
-    guard !isCommitting else { return record(.rejected(.inProgress)) }
-    isCommitting = true
-    lastFailure = nil
-    do {
-      try await committing.updateSettings(proposed)
-      adoptCommittedSettings()
-      isCommitting = false
-      return record(.persisted)
-    } catch {
-      isCommitting = false
-      let failure = Self.workflowFailure(for: error)
-      lastFailure = failure
-      return record(.persistenceFailed(Self.persistenceFailure(for: error)))
-    }
-  }
-
-  /// 提交成功或回到已提交快照：草稿回到已提交快照；监听设置未变时 didSet
-  /// 不会重探，需显式刷新。
-  private func adoptCommittedSettings() {
-    let next = SettingsDraftAdapter.draft(from: committing.committedSettings)
-    let listenUnchanged = listenFacts(of: draft) == listenFacts(of: next)
-    draft = next
-    if listenUnchanged {
-      refreshOccupancy()
-    }
-  }
-
-  private func refreshOccupancy() {
-    occupancyGeneration += 1
-    let generation = occupancyGeneration
-    let listen = listenFacts(of: draft)
-    let probe = occupancyProbe
-    Task { @MainActor in
-      let result = await Task.detached(priority: .utility) {
-        Dictionary(
-          uniqueKeysWithValues: SettingsPortID.allCases.map { id in
-            let endpoint = SettingsDraftAdapter.endpoint(for: id)
-            let request = PortOccupancyProbeRequest(endpoint: endpoint, listen: listen)
-            return (id, SettingsPortOccupancy(probe.occupancy(for: request)))
-          })
-      }.value
-      guard generation == occupancyGeneration else { return }
-      occupancyByPort = result
-    }
-  }
-
-  private func record(_ outcome: SettingsCommandOutcome) -> SettingsCommandOutcome {
-    lastOutcome = outcome
-    return outcome
   }
 
   private static func persistenceFailure(for error: Error) -> SettingsPersistenceFailure {
@@ -478,8 +267,8 @@ extension SettingsWorkflow {
 }
 
 extension SettingsWorkflow {
-  /// Save the listener mode as its own setting item. Occupancy is checked for
-  /// the selected address family; unknown results do not block persistence.
+  /// Save listener mode as its own setting item. Occupancy is checked for the
+  /// selected address family; unknown results do not block persistence.
   @discardableResult
   func saveListenerMode(_ mode: ListenerMode) async -> ListenerModeSaveOutcome {
     guard !isCommitting else { return .rejected(.inProgress) }
@@ -495,7 +284,7 @@ extension SettingsWorkflow {
     let results = await Task.detached(priority: .utility) {
       Dictionary(
         uniqueKeysWithValues: SettingsPortID.allCases.map { id in
-          let endpoint = SettingsDraftAdapter.endpoint(for: id)
+          let endpoint = SettingsPortAdapter.endpoint(for: id)
           let request = PortOccupancyProbeRequest(endpoint: endpoint, listen: facts)
           return (id, probe.occupancy(for: request))
         })
@@ -516,12 +305,10 @@ extension SettingsWorkflow {
       try await committing.updateListenerMode(mode)
       isCommitting = false
       lastFailure = nil
-      refreshOccupancy()
       return .saved(unknownOccupancy: unknown)
     } catch {
       isCommitting = false
-      let failure = Self.workflowFailure(for: error)
-      lastFailure = failure
+      lastFailure = Self.workflowFailure(for: error)
       return .persistenceFailed(Self.persistenceFailure(for: error))
     }
   }

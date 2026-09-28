@@ -37,7 +37,7 @@ enum ListenerModeOccupancyGate {
     for id: SettingsPortID,
     context: ListenerModeOccupancyContext
   ) -> Bool {
-    let endpoint = SettingsDraftAdapter.endpoint(for: id)
+    let endpoint = SettingsPortAdapter.endpoint(for: id)
     guard
       context.runtimeListen?.port(for: endpoint) == context.proposedListen.port(for: endpoint),
       let processID = context.runtimeProcessID,
