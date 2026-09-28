@@ -1,5 +1,23 @@
 import SwiftUI
 
+private enum WorkspaceSheet: String, Identifiable {
+  case importURL
+  case qrImport
+  case legacyImport
+  case addSubscription
+
+  var id: String { rawValue }
+
+  var destination: WorkspaceDestination {
+    switch self {
+    case .importURL, .qrImport, .legacyImport:
+      .servers
+    case .addSubscription:
+      .subscriptions
+    }
+  }
+}
+
 /// 主窗口外壳（地图 #52，票 #53）：NavigationSplitView 侧栏承载五项导航与
 /// 底部常驻代理状态卡；详情区按 route destination 承载各分区视图。分区大
 /// 标题由窗口标题承担（组合根把 destination label 推给开窗器，见
@@ -20,8 +38,8 @@ struct MainWindowView: View {
   let diagnosticReportExporter: any DiagnosticReportExporter
 
   @State private var selection: NodeID?
-  /// 分区动作的呈现状态（票 #56/#58）：添加订阅 sheet 与诊断导出由壳持有。
-  @State private var showAddSubscription = false
+  /// 全局添加菜单打开的表单，以及诊断导出由窗口壳持有。
+  @State private var presentedWorkspaceSheet: WorkspaceSheet?
   @State private var exportedDiagnosticsPath: String?
   @StateObject private var shellActionErrors = ErrorAlertPresenter()
 
@@ -34,12 +52,27 @@ struct MainWindowView: View {
     }
     .frame(minWidth: 920, minHeight: 580)
     .toolbar {
+      ToolbarItem(placement: .navigation) {
+        addMenu
+      }
       ToolbarItemGroup(placement: .primaryAction) {
         destinationActions
       }
     }
-    .sheet(isPresented: $showAddSubscription) {
-      AddSubscriptionSheet(workflow: workflow, errors: shellActionErrors)
+    .toolbar(removing: .sidebarToggle)
+    .sheet(item: $presentedWorkspaceSheet) { sheet in
+      switch sheet {
+      case .importURL:
+        ImportURLSheet(
+          workflow: workflow, errors: shellActionErrors, clipboard: clipboard,
+          selection: $selection)
+      case .qrImport:
+        QRImportSheet(workflow: workflow, errors: shellActionErrors, selection: $selection)
+      case .legacyImport:
+        LegacyImportSheet(workflow: workflow)
+      case .addSubscription:
+        AddSubscriptionSheet(workflow: workflow, errors: shellActionErrors)
+      }
     }
     .alert(
       "操作失败",
@@ -65,6 +98,31 @@ struct MainWindowView: View {
 
   // MARK: - 分区动作槽位
 
+  private var addMenu: some View {
+    Menu {
+      Button("通过 URL 导入…") { presentWorkspaceSheet(.importURL) }
+      Button("从二维码图片导入…") { presentWorkspaceSheet(.qrImport) }
+      if workflow.legacyImportState.snapshotFound {
+        Button(legacyImportActionTitle) { presentWorkspaceSheet(.legacyImport) }
+      }
+      Divider()
+      Button("添加订阅…") { presentWorkspaceSheet(.addSubscription) }
+    } label: {
+      Label("添加", systemImage: "plus")
+    }
+    .labelStyle(.iconOnly)
+    .help("添加")
+  }
+
+  private var legacyImportActionTitle: String {
+    workflow.legacyImportState.completed ? "再次导入旧版本服务器…" : "导入旧版本服务器…"
+  }
+
+  private func presentWorkspaceSheet(_ sheet: WorkspaceSheet) {
+    route.navigate(to: sheet.destination)
+    presentedWorkspaceSheet = sheet
+  }
+
   /// 分区动作（票 #53/#56/#57）：页级动作随 destination 切换，经工具栏桥接
   /// 出现在窗口工具栏右端；首页/服务器无页级动作。例外：设置的保存/恢复
   /// 默认是表单级提交动作，由 SettingsView 内容顶部行承载（动作与表单同置，
@@ -78,9 +136,6 @@ struct MainWindowView: View {
         if !workflow.refreshingSubscriptionIDs.isEmpty {
           ProgressView()
             .controlSize(.small)
-        }
-        Button("添加订阅", systemImage: "plus") {
-          showAddSubscription = true
         }
         Button("更新全部", systemImage: "arrow.triangle.2.circlepath") {
           Task { await workflow.refreshAllSubscriptions() }

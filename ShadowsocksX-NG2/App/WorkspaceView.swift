@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// 服务器 destination（spec #21 D11，issue #32/#34/#35/#41）：保留服务器目录树、
-/// 详情编辑与导入行为。workspace destination 由外层主窗口壳持有（新壳在
-/// MainWindowView.swift，票 #53）；本视图只持有服务器功能的 sheet、alert、
-/// 确认弹窗与编辑草稿边界；selection 由外层绑定，以便订阅删除仍能清除失效
-/// 的服务器选择。
+/// 服务器 destination（spec #21 D11，issue #32/#34/#35/#41）：承载服务器目录树、
+/// 详情编辑与分组命令。workspace destination 由外层主窗口壳持有（新壳在
+/// MainWindowView.swift，票 #53）；全局导入表单由窗口壳呈现，本视图持有服务器
+/// 功能的 sheet、alert、确认弹窗与编辑草稿边界；selection 由外层绑定，以便订阅
+/// 删除仍能清除失效的服务器选择。
 struct ServersView: View {
 
   @ObservedObject var workflow: CatalogWorkflow
@@ -21,11 +21,9 @@ struct ServersView: View {
   @State private var renameText = ""
   @State private var newGroupParent: NodeID?
   @State private var newGroupName = ""
+  @State private var isPresentingNewGroup = false
   @State private var deleteTarget: NodeID?
   @State private var moveTarget: NodeID?
-  @State private var showImportURLSheet = false
-  @State private var showQRImportSheet = false
-  @State private var showLegacyImportSheet = false
   @State private var rootDropHovering = false
 
   var body: some View {
@@ -51,13 +49,11 @@ struct ServersView: View {
     }
     .alert(
       "新建分组",
-      isPresented: Binding(
-        get: { newGroupParent != nil },
-        set: { if !$0 { newGroupParent = nil } })
+      isPresented: $isPresentingNewGroup
     ) {
       TextField("名称", text: $newGroupName)
       Button("创建") { commitNewGroup() }
-      Button("取消", role: .cancel) { newGroupParent = nil }
+      Button("取消", role: .cancel) { cancelNewGroup() }
     }
     .alert(
       "操作失败",
@@ -81,16 +77,6 @@ struct ServersView: View {
     } message: {
       Text(deleteMessage)
     }
-    .sheet(isPresented: $showImportURLSheet) {
-      ImportURLSheet(
-        workflow: workflow, errors: errors, clipboard: clipboard, selection: $selection)
-    }
-    .sheet(isPresented: $showQRImportSheet) {
-      QRImportSheet(workflow: workflow, errors: errors, selection: $selection)
-    }
-    .sheet(isPresented: $showLegacyImportSheet) {
-      LegacyImportSheet(workflow: workflow)
-    }
     .sheet(
       item: Binding(
         get: { moveTarget.map(MoveContext.init) },
@@ -113,8 +99,7 @@ struct ServersView: View {
             renameText = workflow.displayName(for: id)
           },
           onNewGroup: { parent in
-            newGroupParent = parent
-            newGroupName = ""
+            presentNewGroup(in: parent)
           },
           onMove: { moveTarget = $0 },
           onDelete: { deleteTarget = $0 }
@@ -136,7 +121,7 @@ struct ServersView: View {
       if workflow.tree.isEmpty {
         ContentUnavailableView(
           "暂无服务器", systemImage: "server.rack",
-          description: Text("用工具栏「添加」导入 ss:// 链接或新建分组")
+          description: Text("用工具栏的「添加」菜单导入 ss:// 链接，或用「新建分组」按钮创建分组")
         )
         .allowsHitTesting(false)
       }
@@ -196,34 +181,33 @@ extension ServersView {
     }
   }
 
-  // MARK: - 工具栏（添加与新建分组）
+  // MARK: - 工具栏（新建分组）
 
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
     ToolbarItem(placement: .primaryAction) {
-      Menu {
-        Button("通过 URL 导入…") { showImportURLSheet = true }
-        Button("从二维码图片导入…") { showQRImportSheet = true }
-        if workflow.legacyImportState.snapshotFound {
-          Divider()
-          Button(
-            workflow.legacyImportState.completed ? "再次导入 Legacy 配置…" : "导入 Legacy 配置…"
-          ) {
-            showLegacyImportSheet = true
-          }
-        }
-        Divider()
-        Button("新建分组…") {
-          newGroupParent = workflow.importTargetParent(for: selection)
-          newGroupName = ""
-        }
+      Button {
+        presentNewGroup(in: workflow.importTargetParent(for: selection))
       } label: {
-        Label("添加", systemImage: "plus")
+        Label("新建分组", systemImage: "folder.badge.plus")
       }
+      .labelStyle(.iconOnly)
+      .help("新建分组")
     }
   }
 
   // MARK: - 告警动作
+
+  private func presentNewGroup(in parent: NodeID?) {
+    newGroupParent = parent
+    newGroupName = ""
+    isPresentingNewGroup = true
+  }
+
+  private func cancelNewGroup() {
+    isPresentingNewGroup = false
+    newGroupParent = nil
+  }
 
   private func commitRename() {
     guard let id = renameTarget else { return }
@@ -238,11 +222,12 @@ extension ServersView {
   }
 
   private func commitNewGroup() {
-    guard let parent = newGroupParent else { return }
-    newGroupParent = nil
+    let parent = newGroupParent
+    let name = newGroupName
+    cancelNewGroup()
     Task {
       do {
-        _ = try await workflow.createGroup(named: newGroupName, into: parent)
+        _ = try await workflow.createGroup(named: name, into: parent)
       } catch {
         errors.present(error)
       }
