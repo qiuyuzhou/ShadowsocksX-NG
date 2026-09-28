@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// 服务器 destination（spec #21 D11，issue #32/#34/#35/#41）：承载服务器目录树、
@@ -28,21 +27,14 @@ struct ServersView: View {
   @State private var rootDropHovering = false
 
   var body: some View {
-    // 主窗口持有导航侧栏；此处保留服务器目录与详情的独立宽度。
+    // 主窗口外壳（票 #53）已提供分栏框架；本分区用扁平双栏承载目录与详情
+    // （票 #55 再按原型重排）。
     HStack(alignment: .top, spacing: 0) {
       serverSidebar
         .frame(minWidth: 240, idealWidth: 280, maxWidth: 340)
       Divider()
-      GeometryReader { geometry in
-        serverDetailPane
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .background {
-            NewGroupTitlebarOverlay(detailWidth: geometry.size.width) {
-              presentNewGroup(in: workflow.importTargetParent(for: selection))
-            }
-            .frame(width: 1, height: 1)
-          }
-      }
+      serverDetailPane
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     .frame(minHeight: 420)
     .alert(
@@ -139,6 +131,7 @@ struct ServersView: View {
     } isTargeted: { hovering in
       rootDropHovering = hovering
     }
+    .toolbar { toolbarContent }
   }
 
   /// 删除结果 → selection invalidation（story 18）：仅清除失效选择，不自动
@@ -185,6 +178,21 @@ extension ServersView {
       ContentUnavailableView(
         "未选择节点", systemImage: "sidebar.left",
         description: Text("在左侧选择服务器或分组查看与编辑详情"))
+    }
+  }
+
+  // MARK: - 工具栏（新建分组）
+
+  @ToolbarContentBuilder
+  private var toolbarContent: some ToolbarContent {
+    ToolbarItem(placement: .primaryAction) {
+      Button {
+        presentNewGroup(in: workflow.importTargetParent(for: selection))
+      } label: {
+        Label("新建分组", systemImage: "folder.badge.plus")
+      }
+      .labelStyle(.iconOnly)
+      .help("新建分组")
     }
   }
 
@@ -269,93 +277,4 @@ extension ServersView {
 private struct MoveContext: Identifiable {
   let nodeID: NodeID
   var id: NodeID { nodeID }
-}
-
-/// 将目录动作放到窗口标题栏中，并随详情栏宽度跟踪目录/详情分隔线。
-private struct NewGroupTitlebarOverlay: NSViewRepresentable {
-  let detailWidth: CGFloat
-  let onNewGroup: () -> Void
-
-  func makeCoordinator() -> Coordinator { Coordinator() }
-
-  func makeNSView(context: Context) -> WindowAnchorView {
-    let view = WindowAnchorView()
-    view.onWindowChange = { [weak coordinator = context.coordinator] window in
-      coordinator?.move(to: window)
-    }
-    return view
-  }
-
-  func updateNSView(_ view: WindowAnchorView, context: Context) {
-    context.coordinator.update(detailWidth: detailWidth, onNewGroup: onNewGroup)
-    context.coordinator.move(to: view.window)
-  }
-
-  static func dismantleNSView(_ view: WindowAnchorView, coordinator: Coordinator) {
-    coordinator.move(to: nil)
-    view.onWindowChange = nil
-  }
-
-  @MainActor
-  final class Coordinator {
-    private weak var window: NSWindow?
-    private weak var titlebar: NSView?
-    private let button = NSHostingView(rootView: NewGroupTitlebarButton(action: {}))
-    private var detailWidth: CGFloat = 0
-
-    init() {
-      button.frame.size = NSSize(width: 52, height: 52)
-    }
-
-    func update(detailWidth: CGFloat, onNewGroup: @escaping () -> Void) {
-      button.rootView = NewGroupTitlebarButton(action: onNewGroup)
-      self.detailWidth = detailWidth
-      layoutButton()
-    }
-
-    func move(to newWindow: NSWindow?) {
-      let newTitlebar = newWindow?.standardWindowButton(.closeButton)?.superview
-      guard window !== newWindow || titlebar !== newTitlebar else {
-        layoutButton()
-        return
-      }
-      button.removeFromSuperview()
-      window = newWindow
-      titlebar = newTitlebar
-      newTitlebar?.addSubview(button, positioned: .above, relativeTo: nil)
-      layoutButton()
-    }
-
-    private func layoutButton() {
-      guard let titlebar else { return }
-      button.frame.origin = NSPoint(
-        x: titlebar.bounds.maxX - detailWidth - 60,
-        y: titlebar.bounds.midY - 26)
-    }
-  }
-}
-
-private final class WindowAnchorView: NSView {
-  var onWindowChange: ((NSWindow?) -> Void)?
-
-  override func viewDidMoveToWindow() {
-    super.viewDidMoveToWindow()
-    onWindowChange?(window)
-  }
-}
-
-private struct NewGroupTitlebarButton: View {
-  let action: () -> Void
-
-  var body: some View {
-    Button(action: action) {
-      Image(systemName: "folder.badge.plus")
-    }
-    .buttonStyle(.bordered)
-    .buttonBorderShape(.circle)
-    .controlSize(.large)
-    .help("新建分组")
-    .accessibilityLabel("新建分组")
-    .frame(width: 52, height: 52)
-  }
 }
