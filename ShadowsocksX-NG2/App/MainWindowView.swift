@@ -48,7 +48,7 @@ struct MainWindowView: View {
       sidebar
         .navigationSplitViewColumnWidth(min: 200, ideal: 236, max: 300)
         .toolbar {
-          ToolbarItem(placement: .navigation) {
+          ToolbarItem(placement: .automatic) {
             addMenu
           }
         }
