@@ -19,13 +19,13 @@ private enum WorkspaceSheet: String, Identifiable {
 }
 
 /// 主窗口外壳（地图 #52，票 #53）：NavigationSplitView 侧栏承载五项导航与
-/// 底部常驻代理状态卡；详情区按 route destination 承载各分区视图。分区大
-/// 标题由窗口标题承担（组合根把 destination label 推给开窗器，见
-/// WorkspaceWindowOpeningAdapter.bindTitle）；订阅/诊断的页级动作经 .toolbar
-/// 桥接进窗口工具栏右端（票 #56/#58 的槽位仅呈现位置变化），设置的表单级
-/// 提交动作在其视图内容顶部（见 SettingsView）。路由状态仍由
-/// WorkspaceRoute 持有；代理状态卡的开关、模式与摘要只来自代理控制工作流
-/// 的整体 snapshot（issue #47），与状态菜单同一口径。
+/// 底部常驻代理状态卡；详情区按 route destination 承载各分区视图。分区名即
+/// 窗口标题（navigationTitle 绑定 route destination，ADR 0016 的 scene 版
+/// 窗口原生呈现）；订阅/诊断的页级动作经 .toolbar 桥接进窗口工具栏右端
+/// （票 #56/#58 的槽位仅呈现位置变化），设置的表单级提交动作在其视图内容
+/// 顶部（见 SettingsView）。路由状态仍由 WorkspaceRoute 持有；代理状态卡的
+/// 开关、模式与摘要只来自代理控制工作流的整体 snapshot（issue #47），与状态
+/// 菜单同一口径。
 struct MainWindowView: View {
   @ObservedObject var route: WorkspaceRoute
   @ObservedObject var workflow: CatalogWorkflow
@@ -56,6 +56,7 @@ struct MainWindowView: View {
     } detail: {
       destinationView
     }
+    .navigationTitle(route.destination.label)
     .frame(minWidth: 920, minHeight: 580)
     .toolbar {
       ToolbarItemGroup(placement: .primaryAction) {

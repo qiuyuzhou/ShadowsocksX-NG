@@ -5,17 +5,6 @@ import XCTest
 
 @MainActor
 final class WorkspaceRouteTests: XCTestCase {
-  private final class RecordingWindowOpening: WorkspaceWindowOpening {
-    var openCount = 0
-    var destinationAtOpen: WorkspaceDestination?
-    var onOpen: (() -> Void)?
-
-    func ensureWorkspaceVisible() {
-      openCount += 1
-      onOpen?()
-    }
-  }
-
   func testFreshRouteStartsAtHomeWithoutPersistedState() {
     XCTAssertEqual(WorkspaceRoute().destination, .home)
   }
@@ -26,95 +15,26 @@ final class WorkspaceRouteTests: XCTestCase {
       [.home, .servers, .subscriptions, .settings, .diagnostics])
   }
 
-  func testLaunchPresentsWorkspaceAtHome() {
+  func testNavigateChangesDestinationOnly() {
     let route = WorkspaceRoute()
-    let opening = RecordingWindowOpening()
-    opening.onOpen = { opening.destinationAtOpen = route.destination }
 
-    route.handle(.launch, using: opening)
-
-    XCTAssertEqual(route.destination, .home)
-    XCTAssertEqual(opening.openCount, 1)
-    XCTAssertEqual(opening.destinationAtOpen, .home)
-  }
-
-  func testLaunchPolicyIsAppliedOnlyOnce() {
-    let route = WorkspaceRoute()
-    let opening = RecordingWindowOpening()
-
-    route.handle(.launch, using: opening)
-    route.handle(.launch, using: opening)
-
-    XCTAssertEqual(opening.openCount, 1)
-  }
-
-  func testDelayedLaunchPolicyDoesNotOverwriteExplicitDestination() {
-    let route = WorkspaceRoute()
-    let opening = RecordingWindowOpening()
-    opening.onOpen = { opening.destinationAtOpen = route.destination }
-
-    route.handle(.present(destination: .settings), using: opening)
-    route.handle(.launch, using: opening)
-
-    XCTAssertEqual(route.destination, .settings)
-    XCTAssertEqual(opening.openCount, 2)
-    XCTAssertEqual(opening.destinationAtOpen, .settings)
-  }
-
-  func testExplicitSettingsPresentationSelectsBeforeOpeningWorkspace() {
-    let route = WorkspaceRoute()
-    let opening = RecordingWindowOpening()
-    opening.onOpen = { opening.destinationAtOpen = route.destination }
-
-    route.handle(.present(destination: .settings), using: opening)
-
-    XCTAssertEqual(route.destination, .settings)
-    XCTAssertEqual(opening.openCount, 1)
-    XCTAssertEqual(opening.destinationAtOpen, .settings)
-  }
-
-  func testInWorkspaceNavigationChangesDestinationWithoutOpeningWindow() {
-    let route = WorkspaceRoute()
-    let opening = RecordingWindowOpening()
-
-    route.handle(.navigate(destination: .servers), using: opening)
+    route.navigate(to: .servers)
 
     XCTAssertEqual(route.destination, .servers)
-    XCTAssertEqual(opening.openCount, 0)
   }
 
-  func testExplicitHomePresentationSelectsHomeBeforeOpeningWorkspace() {
-    let route = WorkspaceRoute()
-    let opening = RecordingWindowOpening()
-    opening.onOpen = { opening.destinationAtOpen = route.destination }
-    route.navigate(to: .diagnostics)
-
-    route.handle(.present(destination: .home), using: opening)
-
-    XCTAssertEqual(route.destination, .home)
-    XCTAssertEqual(opening.openCount, 1)
-    XCTAssertEqual(opening.destinationAtOpen, .home)
-  }
-
-  func testPassiveReopenRetainsCurrentDestination() {
-    let route = WorkspaceRoute()
-    let opening = RecordingWindowOpening()
-    opening.onOpen = { opening.destinationAtOpen = route.destination }
-    route.handle(.navigate(destination: .diagnostics), using: opening)
-
-    route.handle(.reopen, using: opening)
-
-    XCTAssertEqual(route.destination, .diagnostics)
-    XCTAssertEqual(opening.openCount, 1)
-    XCTAssertEqual(opening.destinationAtOpen, .diagnostics)
-  }
-
-  func testSceneOpeningEffectsRemainInCompositionRootOrFocusedAdapter() throws {
+  /// 开窗落点纪律（ADR 0016，scene 方式）：主窗口是 SwiftUI `Window` scene，
+  /// `openWindow` 调用只允许出现在状态菜单（关窗后的重开入口；启动呈现由
+  /// 场景 defaultLaunchBehavior 负责）；scene id 字面量只允许定义在 route
+  /// （单点词汇），组合根以常量声明 scene。防视图任意开窗与 scene id 散落
+  /// 回归 AppKit 直控。
+  func testWindowOpeningStaysInSanctionedSurfaces() throws {
     let appDirectory = URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent()
       .deletingLastPathComponent()
       .appendingPathComponent("App", isDirectory: true)
-    let allowedFiles = Set(["MainApp.swift", "WorkspaceWindowOpeningAdapter.swift"])
+    let openWindowAllowed = Set(["ProxyStatusMenu.swift"])
+    let sceneIDLiteralAllowed = Set(["WorkspaceRoute.swift"])
     let fileManager = FileManager.default
     let urls = try XCTUnwrap(
       fileManager.enumerator(
@@ -124,19 +44,24 @@ final class WorkspaceRouteTests: XCTestCase {
       )?.compactMap { $0 as? URL }
         .filter { $0.pathExtension == "swift" })
 
-    let violations = urls.compactMap { url -> String? in
-      guard !allowedFiles.contains(url.lastPathComponent),
-        let source = try? String(contentsOf: url, encoding: .utf8)
-      else { return nil }
-      guard
-        source.contains("openWindow(id:") || source.contains("id: \"main\"")
-          || source.contains("id: \"settings\"")
-      else { return nil }
-      return url.lastPathComponent
+    var openWindowViolations: [String] = []
+    var sceneIDViolations: [String] = []
+    for url in urls {
+      guard let source = try? String(contentsOf: url, encoding: .utf8) else { continue }
+      let name = url.lastPathComponent
+      if !openWindowAllowed.contains(name), source.contains("openWindow(") {
+        openWindowViolations.append(name)
+      }
+      if !sceneIDLiteralAllowed.contains(name), source.contains(#""workspace""#) {
+        sceneIDViolations.append(name)
+      }
     }
 
     XCTAssertTrue(
-      violations.isEmpty,
-      "scene ID 与开窗 effect 只能位于组合根或专用 adapter：\(violations)")
+      openWindowViolations.isEmpty,
+      "openWindow 调用只允许在状态菜单：\(openWindowViolations)")
+    XCTAssertTrue(
+      sceneIDViolations.isEmpty,
+      "scene id 字面量只允许定义在 WorkspaceRoute：\(sceneIDViolations)")
   }
 }

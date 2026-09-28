@@ -7,12 +7,6 @@ final class SkeletonTests: XCTestCase {
   // 以下两个 Bundle.main 断言依赖测试包以 app 为 TEST_HOST 注入（target dependency）；
   // 若移除该依赖，Bundle.main 不再是 app bundle，断言会失效。
 
-  func testMenuBarAppDoesNotTerminateAfterLastWindowClosed() {
-    let delegate = AppDelegate()
-    let shouldTerminate = delegate.applicationShouldTerminateAfterLastWindowClosed(.shared)
-    XCTAssertFalse(shouldTerminate)
-  }
-
   func testAppBundleIDIsDistinctFromLegacy() {
     XCTAssertEqual(Bundle.main.bundleIdentifier, "com.qiuyuzhou.ShadowsocksX-NG2")
     XCTAssertNotEqual(Bundle.main.bundleIdentifier, "com.qiuyuzhou.ShadowsocksX-NG")
@@ -59,11 +53,10 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
   private static let testTargetRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
 
-  /// 豁免文件：组合根（生产 adapter 唯一装配点）、应用生命周期与运行时/
-  /// 系统适配器（合法接触原始目录与凭据类型）。
+  /// 豁免文件：组合根（生产 adapter 唯一装配点）与运行时/系统适配器（合法
+  /// 接触原始目录与凭据类型）。
   private static let exemptedFiles: Set<String> = [
     "MainApp.swift",
-    "AppDelegate.swift",
     "CatalogCommitCoordinator.swift",
     "ProxyRuntimeController.swift",
     // 控制器按命令面/设置与目录同步/系统代理门禁/事实投影分文件（同属运行时适配器）。

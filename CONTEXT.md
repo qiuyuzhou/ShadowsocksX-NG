@@ -43,8 +43,8 @@
 - **Window-local default action shortcut**: A keyboard action bound to the focused app window or form context, such as confirming a dialog; it is distinct from a system-level shortcut.
 - **Workspace destination**: A top-level location in the single 2.0 GUI workspace, such as home, servers, subscriptions, settings, or diagnostics. It is navigation state only; it does not contain a node selection, sheet, alert, or feature draft.
 - **Workspace route**: The in-process navigation choice and intent used to move between workspace destinations from the workspace or another app entry point. It does not persist user configuration or own feature-local state.
-- **Foreground form**: The app presentation while the workspace window is open: the app presents as a regular macOS app with a Dock icon and app-switcher presence. It lasts exactly as long as the workspace window is open; hiding the window does not end it.
-- **Background form**: The menu-bar-only app presentation: the status menu is available and there is no Dock icon or app-switcher presence. The app enters it by closing the workspace window and leaves it by opening the workspace window; every launch starts in the foreground form by presenting the workspace window.
+- **Workspace window**: The single main window hosting the workspace. It is presented at every launch and, once closed, can be reopened only from the status menu; opening, closing, or hiding it does not change the app's presentation.
+- **Menu bar form**: The app's one constant presentation: a menu-bar-only app with the status menu always available and never a Dock icon or app-switcher presence, whether or not the workspace window is open.
 
 ## Relationships and invariants
 
@@ -90,5 +90,5 @@
 - Preferences have no single restore-all-factory-defaults action. Where a reset exists, it is scoped to one configuration item, never to the whole preference set at once.
 - The proxy mode selector's choice and the rule default action persist with the settings snapshot and survive GUI restarts; a persistence failure keeps the previous mode and sub-option in force and names the reason. Rule, global, and direct mode are always available.
 - The GUI is the user-facing manager; the Shadowsocks tunnel service is an external runtime boundary rather than part of the GUI's domain model.
-- The presentation form is governed solely by the workspace window: opening it enters the foreground form, and closing it returns the app to the background form while the GUI process keeps running with the status menu available; hiding the window without closing it does not leave the foreground form.
-- Every launch of the GUI presents the workspace window at startup.
+- The app presents only in the menu bar form: it never gains a Dock icon or app-switcher presence, and its presentation does not change when the workspace window opens, closes, or hides; the GUI process keeps running with the status menu available regardless of the workspace window.
+- Every launch of the GUI presents the workspace window; after it is closed, the status menu is the only way to reopen it.

@@ -2,7 +2,6 @@ import SwiftUI
 
 @main
 struct ShadowsocksXNG2App: App {
-  @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @StateObject private var proxyController: ProxyRuntimeController
   @StateObject private var catalogWorkflow: CatalogWorkflow
   @StateObject private var proxyControl: ProxyControlWorkflow
@@ -12,7 +11,7 @@ struct ShadowsocksXNG2App: App {
   @StateObject private var workspaceRoute: WorkspaceRoute
   private let textClipboard: any TextClipboard
   private let diagnosticReportExporter: any DiagnosticReportExporter
-  private let windowOpening: WorkspaceWindowOpeningAdapter
+  private let workspaceContent: MainWindowView
 
   init() {
     let composition = AppComposition.make()
@@ -25,7 +24,7 @@ struct ShadowsocksXNG2App: App {
     _workspaceRoute = StateObject(wrappedValue: composition.workspaceRoute)
     textClipboard = composition.textClipboard
     diagnosticReportExporter = composition.diagnosticReportExporter
-    windowOpening = composition.windowOpening
+    workspaceContent = composition.workspaceContent
     // GUI 事件接入内存环形缓冲（spec #21 D5，issue #34）：主窗口日志查看器与
     // 诊断导出的来源；wrapper 侧不注册，仍走 stderr → agent.log 收敛。
     RuntimeLog.setSink(RuntimeEventStore.shared)
@@ -36,34 +35,37 @@ struct ShadowsocksXNG2App: App {
       ProxyStatusMenu(
         control: proxyControl,
         catalogWorkflow: catalogWorkflow,
-        route: workspaceRoute,
-        clipboard: textClipboard,
-        windowOpening: windowOpening)
+        clipboard: textClipboard)
     } label: {
-      StatusMenuLabel(
-        control: proxyControl,
-        route: workspaceRoute,
-        windowOpening: windowOpening)
+      StatusMenuLabel(control: proxyControl)
     }
     .menuBarExtraStyle(.menu)
+
+    // 主 workspace 窗口（ADR 0016）：SwiftUI `Window` scene。启动由
+    // defaultLaunchBehavior(.presented) 自动呈现主窗口（scene 方式的启动
+    // 开窗，LSUIElement 下实测生效）；关窗后由状态菜单 ⑦ 经 openWindow 重开。
+    // app 始终保持 accessory 形态，没有激活策略切换；关窗不退进程
+    // （MenuBarExtra 持有进程）。
+    Window("ShadowsocksX-NG2", id: WorkspaceRoute.workspaceSceneID) {
+      workspaceContent
+    }
+    .defaultLaunchBehavior(.presented)
+    .defaultSize(width: 960, height: 640)
   }
 }
 
 /// 状态菜单的标签视图（状态栏图标）。挂载时机与菜单内容视图不同：内容视图
-/// 首次点开才创建，而标签在启动时即挂载——所以启动策略（resync + launch
-/// intent，含开窗）只能挂在这里，挂在菜单内容上等于从不执行。
+/// 首次点开才创建，而标签在启动时即挂载——启动 resync 只能挂在这里，挂在
+/// 菜单内容上等于从不执行。主窗口的启动呈现由 Window scene 的
+/// defaultLaunchBehavior 负责，与本任务无时序耦合。
 private struct StatusMenuLabel: View {
   @ObservedObject var control: ProxyControlWorkflow
-  @ObservedObject var route: WorkspaceRoute
-  let windowOpening: any WorkspaceWindowOpening
 
   var body: some View {
     Image(systemName: "network")
       .accessibilityLabel("ShadowsocksX-NG2")
       .task {
         guard !ApplicationDependencies.isUnitTesting else { return }
-        // 先开窗再 resync：resync 可能 await launchd 往返，不能挡在开窗前面。
-        route.handle(.launch, using: windowOpening)
         await control.resyncOnLaunch()
       }
   }
@@ -72,9 +74,9 @@ private struct StatusMenuLabel: View {
 /// 组合根装配：目录提交协调器与全部生产运行时适配器只在此接线一次，各 scene
 /// 不再重复设置提交回调；目录工作流的实现依赖经 CatalogWorkflowDependencies
 /// 显式装配（workflow 不自行创建生产默认实现）；Legacy 导入后的 2.0 运行时
-/// 边界同为一次性注入。主窗口由 AppKit 直控（见 WorkspaceWindowOpeningAdapter
-/// 文档）；MainWindowView 值廉价且只捕获工作流对象，其 StateObject 状态与
-/// onAppear 副作用在视图首次进入窗口时才发生。
+/// 边界同为一次性注入。主窗口是 SwiftUI `Window` scene（MainApp body 声明），
+/// 内容视图在组合根构造一次；MainWindowView 值廉价且只捕获工作流对象，其
+/// StateObject 状态与 onAppear 副作用在窗口首次打开时才发生。
 @MainActor
 private struct AppComposition {
   let controller: ProxyRuntimeController
@@ -86,7 +88,7 @@ private struct AppComposition {
   let workspaceRoute: WorkspaceRoute
   let textClipboard: any TextClipboard
   let diagnosticReportExporter: any DiagnosticReportExporter
-  let windowOpening: WorkspaceWindowOpeningAdapter
+  let workspaceContent: MainWindowView
 
   static func make() -> AppComposition {
     let dependencies = ApplicationDependencies.make()
@@ -136,7 +138,6 @@ private struct AppComposition {
       loginController: loginController,
       clipboard: textClipboard,
       diagnosticReportExporter: diagnosticReportExporter)
-    let windowOpening = makeWindowOpening(content: workspaceContent, route: workspaceRoute)
     return AppComposition(
       controller: controller,
       catalogWorkflow: catalogWorkflow,
@@ -147,19 +148,7 @@ private struct AppComposition {
       workspaceRoute: workspaceRoute,
       textClipboard: textClipboard,
       diagnosticReportExporter: diagnosticReportExporter,
-      windowOpening: windowOpening)
-  }
-
-  /// 主窗口开窗器装配：AppKit 直控窗口（见 adapter 文档），窗口标题跟随当前
-  /// 分区（首页/服务器/订阅/设置/诊断）——组合根一次性接线，@Published 订阅
-  /// 立即发出当前值，开窗前即完成标题缓存。
-  private static func makeWindowOpening(
-    content: MainWindowView, route: WorkspaceRoute
-  ) -> WorkspaceWindowOpeningAdapter {
-    let windowOpening = WorkspaceWindowOpeningAdapter(
-      makeContentView: { NSHostingView(rootView: content) })
-    windowOpening.bindTitle(route.$destination.map(\.label).eraseToAnyPublisher())
-    return windowOpening
+      workspaceContent: workspaceContent)
   }
 
   /// 目录工作流接线（issue #40/#41/#49）：提交协调器与生产运行时适配器在此

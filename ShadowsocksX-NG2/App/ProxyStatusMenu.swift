@@ -14,10 +14,11 @@ struct ProxyStatusMenu: View {
   /// 代理控制唯一 seam（issue #47）：状态摘要与代理命令的唯一来源。
   @ObservedObject var control: ProxyControlWorkflow
   @ObservedObject var catalogWorkflow: CatalogWorkflow
-  @ObservedObject var route: WorkspaceRoute
   let clipboard: any TextClipboard
-  /// 开窗 seam 由组合根注入（菜单 extra 上下文的 SwiftUI openWindow 实测不可用）。
-  let windowOpening: any WorkspaceWindowOpening
+  /// 主窗口是 SwiftUI `Window` scene（见 MainApp）：启动呈现由场景的
+  /// defaultLaunchBehavior 负责，状态菜单是关窗后的重开入口（ADR 0016）；
+  /// scene id 经 WorkspaceRoute 单点引用。
+  @Environment(\.openWindow) private var openWindow
   @StateObject private var errors = ErrorAlertPresenter()
 
   var body: some View {
@@ -112,9 +113,12 @@ struct ProxyStatusMenu: View {
 
     Divider()
 
-    // ⑦ 打开主窗口
+    // ⑦ 重开主窗口：启动已由 defaultLaunchBehavior(.presented) 呈现，本项
+    // 服务关窗后的重开。accessory 形态下 SwiftUI 开窗不会自行抢焦点，先
+    // 激活本 app 让窗口压过当前前台应用。
     Button("打开主窗口…") {
-      route.handle(.reopen, using: windowOpening)
+      NSApp.activate(ignoringOtherApps: true)
+      openWindow(id: WorkspaceRoute.workspaceSceneID)
     }
 
     Divider()
