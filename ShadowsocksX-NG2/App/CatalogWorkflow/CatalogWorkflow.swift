@@ -130,7 +130,7 @@ final class CatalogWorkflow: ObservableObject {
 
   // MARK: - 手动服务器/分组命令
 
-  /// ss:// 批量导入（剪贴板、导入 URL、二维码识别三入口的共同落点，story 20/21）。
+  /// ss:// 批量导入（URL 表单和二维码识别入口的共同落点，story 20/21）。
   /// 逐行解码，可解析行全部添加（每次新建身份，不按内容去重）；每条失败行以
   /// 行号 + 类型化原因点名，已成功记录不被局部失败回滚。
   func createServers(fromURIs text: String, into parent: NodeID?) async throws

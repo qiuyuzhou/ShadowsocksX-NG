@@ -196,13 +196,12 @@ extension ServersView {
     }
   }
 
-  // MARK: - 工具栏（添加三入口 + 新建分组）
+  // MARK: - 工具栏（添加与新建分组）
 
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
     ToolbarItem(placement: .primaryAction) {
       Menu {
-        Button("从剪贴板导入 ss://") { importFromClipboard() }
         Button("通过 URL 导入…") { showImportURLSheet = true }
         Button("从二维码图片导入…") { showQRImportSheet = true }
         if workflow.legacyImportState.snapshotFound {
@@ -220,28 +219,6 @@ extension ServersView {
         }
       } label: {
         Label("添加", systemImage: "plus")
-      }
-    }
-  }
-
-  /// 剪贴板入口：整段剪贴板文本按行解析导入当前落点。
-  private func importFromClipboard() {
-    let text = clipboard.read() ?? ""
-    performImport(text)
-  }
-
-  private func performImport(_ text: String) {
-    Task {
-      do {
-        let parent = workflow.importTargetParent(for: selection)
-        let outcome = try await workflow.createServers(fromURIs: text, into: parent)
-        if outcome.addedCount == 0 && outcome.failures.isEmpty {
-          errors.present(text: "剪贴板没有可导入的文本")
-        } else if let message = ImportOutcomePresentation.failureMessage(outcome) {
-          errors.present(text: message)
-        }
-      } catch {
-        errors.present(error)
       }
     }
   }

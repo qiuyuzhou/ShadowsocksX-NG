@@ -1,8 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 「通过 URL 导入」表单（issue #32 添加入口之二）：粘贴 ss:// 链接（每行一条），
-/// 与剪贴板入口共用工作流的批量落点；逐行结构化结果在呈现层格式化。
+/// 「通过 URL 导入」表单：输入或粘贴 ss:// 链接（每行一条）后由用户确认导入；
+/// 逐行结构化结果在呈现层格式化。
 struct ImportURLSheet: View {
   let workflow: CatalogWorkflow
   let errors: ErrorAlertPresenter
