@@ -247,8 +247,8 @@ extension MainWindowView {
       }
     }
     .listStyle(.sidebar)
-    .safeAreaInset(edge: .top, spacing: 0) { identityHeader }
-    .safeAreaInset(edge: .bottom, spacing: 0) { statusCard }
+    .safeAreaInset(edge: .top, spacing: 4) { identityHeader }
+    .safeAreaInset(edge: .bottom, spacing: 4) { statusCard }
   }
 
   private var identityHeader: some View {
