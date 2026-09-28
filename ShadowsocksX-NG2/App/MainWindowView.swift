@@ -46,13 +46,12 @@ struct MainWindowView: View {
   var body: some View {
     NavigationSplitView {
       sidebar
-        .navigationSplitViewColumnWidth(min: 200, ideal: 236, max: 300)
+        .navigationSplitViewColumnWidth(min: 210, ideal: 236, max: 300)
         .toolbar {
           ToolbarItem(placement: .automatic) {
             addMenu
           }
         }
-        .toolbar(removing: .sidebarToggle)
     } detail: {
       destinationView
     }
