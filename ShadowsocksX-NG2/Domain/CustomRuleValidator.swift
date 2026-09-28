@@ -141,7 +141,7 @@ enum RuleCoverage {
   /// 代理动作的 IP 规则是否与固定本地 IP 范围冲突。
   static func ipConflictsWithFixedLocal(_ match: RuleMatch) -> Bool {
     for range in FixedLocalProxyRanges.ipRanges {
-      if let fixed = try? parseFixedLocalCIDR(range), ipIntersects(match, fixed) {
+      if let fixed = parseFixedLocalCIDR(range), ipIntersects(match, fixed) {
         return true
       }
     }

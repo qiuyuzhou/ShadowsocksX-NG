@@ -87,9 +87,10 @@ extension ConfigurationCatalog {
 }
 
 /// `XCTAssertThrowsError` 的 async 版本（表达式在 await 之后才能检查）。
+@MainActor
 func expectThrowsAsync(
-  _ expression: () async throws -> Void,
-  onThrow errorHandler: (Error) -> Void = { _ in },
+  _ expression: @MainActor () async throws -> Void,
+  onThrow errorHandler: @MainActor (Error) -> Void = { _ in },
   file: StaticString = #filePath,
   line: UInt = #line
 ) async {

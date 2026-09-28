@@ -2,6 +2,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
+@MainActor
 extension CatalogWorkflowTests {
   // MARK: - 重命名与移动
 
@@ -24,7 +25,7 @@ extension CatalogWorkflowTests {
     let manualGroupID = try await workflow.createGroup(named: "手动组", into: nil)
 
     await expectThrowsAsync { try await workflow.move(fixture.serverIDs[0], to: manualGroupID) }
-    await expectThrowsAsync { try await workflow.remove(fixture.serverIDs[0]) }
+    await expectThrowsAsync { _ = try await workflow.remove(fixture.serverIDs[0]) }
     await expectThrowsAsync { try await workflow.renameGroup(fixture.groupID, to: "改名") }
     await expectThrowsAsync {
       try await workflow.updateServer(

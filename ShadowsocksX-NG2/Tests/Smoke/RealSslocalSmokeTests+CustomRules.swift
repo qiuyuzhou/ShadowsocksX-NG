@@ -60,21 +60,21 @@ extension RealSslocalSmokeTests {
     listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeDirect = fakeSS.connectionCount
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort, targetHost: "sub.direct.example", targetPort: 443)
     Thread.sleep(forTimeInterval: 0.5)
     XCTAssertEqual(
       fakeSS.connectionCount, beforeDirect,
       "自定义域名后缀直连规则不得触达 Shadowsocks 出口")
 
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort, targetHost: "exact.direct.example", targetPort: 443)
     Thread.sleep(forTimeInterval: 0.5)
     XCTAssertEqual(
       fakeSS.connectionCount, beforeDirect,
       "自定义完整域名直连规则不得触达 Shadowsocks 出口")
 
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort,
       request: socksIPv4ConnectRequest([203, 0, 113, 10], port: 443))
     Thread.sleep(forTimeInterval: 0.5)
@@ -88,7 +88,7 @@ extension RealSslocalSmokeTests {
     listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeHit = fakeSS.connectionCount
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort, targetHost: "unmatched.example.org", targetPort: 443)
     XCTAssertTrue(
       try waitForCondition(timeout: 5) { fakeSS.connectionCount > beforeHit },
@@ -157,14 +157,14 @@ extension RealSslocalSmokeTests {
     listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeHit = fakeSS.connectionCount
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort, targetHost: "sub.blocked.example", targetPort: 443)
     XCTAssertTrue(
       try waitForCondition(timeout: 5) { fakeSS.connectionCount > beforeHit },
       "自定义代理候选应连接 Shadowsocks 出口")
 
     let afterHit = fakeSS.connectionCount
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort, targetHost: "unmatched.example.org", targetPort: 443)
     Thread.sleep(forTimeInterval: 0.5)
     XCTAssertEqual(

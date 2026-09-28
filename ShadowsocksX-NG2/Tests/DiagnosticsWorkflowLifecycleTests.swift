@@ -47,7 +47,7 @@ final class DiagnosticsWorkflowLifecycleTests: DiagnosticsWorkflowTestCase {
     try Data("{\"servers\":1}".utf8).write(to: fileURL)
     try FileManager.default.setAttributes(
       [.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
-    let fileFacts: () -> [DiagnosticFileFacts] = {
+    let fileFacts: @MainActor @Sendable () -> [DiagnosticFileFacts] = {
       [DiagnosticFileCollector.collect(label: "catalog.json", url: fileURL)]
     }
     let beforeFacts = fileFacts()

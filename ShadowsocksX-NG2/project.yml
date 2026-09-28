@@ -7,7 +7,7 @@ options:
 settings:
   base:
     ARCHS: arm64
-    SWIFT_VERSION: "5.0"
+    SWIFT_VERSION: "6.0"
     CODE_SIGN_STYLE: Manual
     DEVELOPMENT_TEAM: S878RH3PA8
     ENABLE_HARDENED_RUNTIME: YES
@@ -164,7 +164,7 @@ schemes:
   ShadowsocksX-NG2Smoke:
     build:
       targets:
-        ShadowsocksX-NG2: [build]
+        ShadowsocksX-NG2: [run, test]
         ShadowsocksX-NG2SmokeTests: [test]
     test:
       targets:

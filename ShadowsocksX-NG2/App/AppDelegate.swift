@@ -3,6 +3,7 @@ import AppKit
 /// 混合应用形态的 AppKit 生命周期家：LSUIElement 让进程默认纯后台
 /// （accessory），这里负责前台形态的进入与退出——任意路径使主窗口可见
 /// 时切成普通应用（regular），最后一个窗口关闭后切回纯后台。
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
   /// 混合形态的硬性要求：关窗不退进程，代理 GUI 仍驻留菜单栏。
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

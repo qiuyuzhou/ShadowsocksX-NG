@@ -129,7 +129,7 @@ extension RealSslocalSmokeTests {
     listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeDomain = fakeSS.connectionCount
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort, targetHost: "sub.example.com", targetPort: 443)
     XCTAssertTrue(
       try waitForCondition(timeout: 5) { fakeSS.connectionCount > beforeDomain },
@@ -142,7 +142,7 @@ extension RealSslocalSmokeTests {
     listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeIP = fakeSS.connectionCount
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort,
       request: socksIPv4ConnectRequest([8, 8, 8, 8], port: 53))
     Thread.sleep(forTimeInterval: 0.5)
@@ -150,7 +150,7 @@ extension RealSslocalSmokeTests {
       fakeSS.connectionCount, beforeIP,
       "IP 优先级：bypass_list 应优先于 proxy_list")
 
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort,
       request: socksIPv4ConnectRequest([8, 8, 8, 1], port: 53))
     XCTAssertTrue(
@@ -164,28 +164,28 @@ extension RealSslocalSmokeTests {
     listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeHit = fakeSS.connectionCount
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort, targetHost: "blocked.example", targetPort: 443)
     XCTAssertTrue(
       try waitForCondition(timeout: 5) { fakeSS.connectionCount > beforeHit },
       "GFWList 代理候选应连接 Shadowsocks 出口")
 
     let afterHit = fakeSS.connectionCount
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort, targetHost: "cdn.blocked.example", targetPort: 443)
     XCTAssertTrue(
       try waitForCondition(timeout: 5) { fakeSS.connectionCount > afterHit },
       "GFWList 子域代理候选应连接 Shadowsocks 出口")
 
     let afterMatched = fakeSS.connectionCount
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort, targetHost: "unmatched.example.org", targetPort: 443)
     Thread.sleep(forTimeInterval: 0.5)
     XCTAssertEqual(
       fakeSS.connectionCount, afterMatched,
       "未匹配域名在 bypass_all 下应直连，不得触达 Shadowsocks 出口")
 
-    performSocksConnectReply(
+    _ = performSocksConnectReply(
       socksPort: listen.socksPort,
       request: socksIPv4ConnectRequest([1, 1, 1, 1], port: 443))
     Thread.sleep(forTimeInterval: 0.5)

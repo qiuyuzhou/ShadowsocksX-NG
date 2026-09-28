@@ -13,8 +13,8 @@ final class UnreadableListenSettingsTests: XCTestCase {
   private var agent: ProxyRuntimeFixture.FakeLaunchAgent!
   private var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
 
-  override func setUpWithError() throws {
-    try super.setUpWithError()
+  override func setUp() async throws {
+    try await super.setUp()
     runtime = ProxyRuntimeFixture.makeTemporaryRuntime()
     catalogFileURL = runtime.directory.appendingPathComponent("catalog.json")
     activationFileURL = runtime.directory.appendingPathComponent("activation.json")
@@ -23,9 +23,9 @@ final class UnreadableListenSettingsTests: XCTestCase {
     systemProxy = ProxyRuntimeFixture.FakeSystemProxy()
   }
 
-  override func tearDownWithError() throws {
+  override func tearDown() async throws {
     try? FileManager.default.removeItem(at: runtime.directory)
-    try super.tearDownWithError()
+    try await super.tearDown()
   }
 
   private func makeController(

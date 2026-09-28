@@ -198,13 +198,15 @@ extension RealSslocalSmokeTests {
     listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeHit = fakeSS.connectionCount
-    performSocksConnectReply(socksPort: listen.socksPort, targetHost: "8.8.8.8", targetPort: 53)
+    _ = performSocksConnectReply(
+      socksPort: listen.socksPort, targetHost: "8.8.8.8", targetPort: 53)
     Thread.sleep(forTimeInterval: 0.5)
     XCTAssertEqual(
       fakeSS.connectionCount, beforeHit,
       "命中中国 IPv4 CIDR 的目标应直连，不得触达 Shadowsocks 出口")
 
-    performSocksConnectReply(socksPort: listen.socksPort, targetHost: "1.1.1.1", targetPort: 443)
+    _ = performSocksConnectReply(
+      socksPort: listen.socksPort, targetHost: "1.1.1.1", targetPort: 443)
     XCTAssertTrue(
       try waitForCondition(timeout: 5) { fakeSS.connectionCount > beforeHit },
       "未命中 CIDR 的公网目标应连接 Shadowsocks 出口")
@@ -242,7 +244,8 @@ extension RealSslocalSmokeTests {
   ) throws {
     // .cn 域名候选直连：SOCKS CONNECT example.cn 不应触达 SS 出口。
     let beforeCN = fakeSS.connectionCount
-    performSocksConnectReply(socksPort: listen.socksPort, targetHost: "example.cn", targetPort: 443)
+    _ = performSocksConnectReply(
+      socksPort: listen.socksPort, targetHost: "example.cn", targetPort: 443)
     Thread.sleep(forTimeInterval: 0.5)
     XCTAssertEqual(
       fakeSS.connectionCount, beforeCN,

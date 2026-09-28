@@ -3,6 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
+@MainActor
 extension CatalogWorkflowSubscriptionTests {
   // MARK: 失败保留语义
 
@@ -88,6 +89,7 @@ extension CatalogWorkflowSubscriptionTests {
   }
 }
 
+@MainActor
 extension CatalogWorkflowSubscriptionTests {
   // MARK: Typed failure projection
 

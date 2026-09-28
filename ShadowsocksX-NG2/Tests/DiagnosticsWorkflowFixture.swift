@@ -26,8 +26,8 @@ class DiagnosticsWorkflowTestCase: XCTestCase {
   var facts: FakeRuntimeFacts!
   var events: RuntimeEventStore!
 
-  override func setUp() {
-    super.setUp()
+  override func setUp() async throws {
+    try await super.setUp()
     workDir = FileManager.default.temporaryDirectory
       .appendingPathComponent("ssxng-diagwf-\(UUID().uuidString)", isDirectory: true)
     try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
@@ -37,18 +37,18 @@ class DiagnosticsWorkflowTestCase: XCTestCase {
     RuntimeLog.setSink(events)
   }
 
-  override func tearDownWithError() throws {
+  override func tearDown() async throws {
     RuntimeLog.setSink(RuntimeEventStore.shared)
     try? FileManager.default.removeItem(at: workDir)
-    try super.tearDownWithError()
+    try await super.tearDown()
   }
 
   /// 标准 workflow：事实源注入替身、固定时钟（报告生成时间可精确断言）。
   func makeWorkflow(
     catalog: @escaping @MainActor () -> DiagnosticCatalogFacts? = { nil },
     agentLog: @escaping () -> String? = { nil },
-    fileFacts: @escaping () -> [DiagnosticFileFacts] = { [] },
-    managedPlugins: @escaping () -> [DiagnosticPluginFacts] = { [] },
+    fileFacts: @escaping @MainActor () -> [DiagnosticFileFacts] = { [] },
+    managedPlugins: @escaping @MainActor () -> [DiagnosticPluginFacts] = { [] },
     homePath: @escaping () -> String? = { nil },
     render: @escaping (DiagnosticSnapshot) -> String? = {
       DiagnosticReportBuilder.markdown(from: $0)

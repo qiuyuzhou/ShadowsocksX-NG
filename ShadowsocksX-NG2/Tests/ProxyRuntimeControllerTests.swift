@@ -50,8 +50,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     }
   }
 
-  override func setUpWithError() throws {
-    try super.setUpWithError()
+  override func setUp() async throws {
+    try await super.setUp()
     runtime = ProxyRuntimeFixture.makeTemporaryRuntime()
     catalogFileURL = runtime.directory.appendingPathComponent("catalog.json")
     activationFileURL = runtime.directory.appendingPathComponent("activation.json")
@@ -61,9 +61,9 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     signals = SignalRecorder()
   }
 
-  override func tearDownWithError() throws {
+  override func tearDown() async throws {
     try? FileManager.default.removeItem(at: runtime.directory)
-    try super.tearDownWithError()
+    try await super.tearDown()
   }
 
   /// 建一个含单台服务器的目录并落盘（服务器密码进内存凭据存储）。
@@ -293,7 +293,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
 
     // 协调器生产适配入口（issue #40）：以刚提交的内存快照重展开。
     let committed = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
-    await controller.catalogDidCommit(snapshot: committed)
+    _ = await controller.catalogDidCommit(snapshot: committed)
 
     XCTAssertEqual(controller.state, .running)
     let expectedRemark = "新加坡 01"

@@ -173,7 +173,9 @@ enum RuleMatch: Equatable, Hashable, Codable, Sendable {
     guard inet_ntop(AF_INET, &networkAddress, &buffer, socklen_t(INET_ADDRSTRLEN)) != nil else {
       throw RuleMatchError.invalidCIDR(raw)
     }
-    let dotted = String(cString: buffer)
+    guard let dotted = Self.string(from: buffer) else {
+      throw RuleMatchError.invalidCIDR(raw)
+    }
     return "\(dotted)/\(prefixLength)"
   }
 
@@ -220,7 +222,15 @@ enum RuleMatch: Equatable, Hashable, Codable, Sendable {
     guard inet_ntop(AF_INET6, &networkAddress, &buffer, socklen_t(INET6_ADDRSTRLEN)) != nil else {
       throw RuleMatchError.invalidCIDR(raw)
     }
-    return "\(String(cString: buffer))/\(prefixLength)"
+    guard let address = Self.string(from: buffer) else {
+      throw RuleMatchError.invalidCIDR(raw)
+    }
+    return "\(address)/\(prefixLength)"
+  }
+
+  private static func string(from buffer: [CChar]) -> String? {
+    let bytes = buffer.prefix(while: { $0 != 0 }).map { UInt8(bitPattern: $0) }
+    return String(bytes: bytes, encoding: .utf8)
   }
 }
 

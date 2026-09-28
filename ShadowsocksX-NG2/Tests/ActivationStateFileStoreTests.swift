@@ -84,7 +84,7 @@ final class ActivationStateFileStoreTests: XCTestCase {
     let credentials = InMemoryCredentialStore()
     let leaf = try ActivationFixture.addPlainServer("a", in: &catalog, credentials: credentials)
     var machine = ActivationStateMachine()
-    try ActivationFixture.activate(&machine, leaf, in: catalog, credentials: credentials)
+    _ = try ActivationFixture.activate(&machine, leaf, in: catalog, credentials: credentials)
     try store.save(activeTargetID: machine.activeTargetID)
 
     // 下次启动：从文件恢复目标，载入目录后立即重校验（D5「重新校验同步」）。

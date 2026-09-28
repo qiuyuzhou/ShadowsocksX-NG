@@ -218,7 +218,7 @@ struct GFWListConverter {
       )
     }
 
-    var rules = RuleSet(rules: shadowing.keptProxy + shadowing.keptExceptions).rules
+    let rules = RuleSet(rules: shadowing.keptProxy + shadowing.keptExceptions).rules
     report.convertedCount = rules.count
     report.absorbedCount = shadowing.shadowed.count
     try validateRuleCount(rules.count, previousRuleCount: previousRuleCount)

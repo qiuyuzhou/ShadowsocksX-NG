@@ -9,8 +9,8 @@ final class SettingsWorkflowInterfaceTests: XCTestCase {
   var committing: FakeSettingsCommitter!
   var probe: FakeOccupancyProbe!
 
-  override func setUpWithError() throws {
-    try super.setUpWithError()
+  override func setUp() async throws {
+    try await super.setUp()
     committing = FakeSettingsCommitter()
     probe = FakeOccupancyProbe()
   }

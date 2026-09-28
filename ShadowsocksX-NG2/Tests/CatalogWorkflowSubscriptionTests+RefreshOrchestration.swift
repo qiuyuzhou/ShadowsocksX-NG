@@ -4,6 +4,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
+@MainActor
 extension CatalogWorkflowSubscriptionTests {
   // MARK: 批量刷新与持久化
 
@@ -46,27 +47,28 @@ extension CatalogWorkflowSubscriptionTests {
     let record = try await seedSuccessfulSubscription()
     // 用门控获取器重建工作流：刷新停在 fetch 内部，验证并发守卫。
     let gated = GatedFetcher()
-    workflow = makeWorkflow(fetcher: gated)
+    let refreshWorkflow = makeWorkflow(fetcher: gated)
+    workflow = refreshWorkflow
 
-    async let first: Void = workflow.refreshSubscription(record.id)
+    async let first: Void = refreshWorkflow.refreshSubscription(record.id)
     // 轮询而非阻塞等待：主线程阻塞会饿死继承 MainActor 的 async let 子任务。
     while !gated.didEnterFetch {
       try await Task.sleep(nanoseconds: 10_000_000)
     }
-    await workflow.refreshSubscription(record.id)
+    await refreshWorkflow.refreshSubscription(record.id)
 
     XCTAssertEqual(gated.requestCount, 1, "同一订阅刷新进行中不重入")
     gated.releaseAll()
     await first
-    XCTAssertTrue(workflow.refreshingSubscriptionIDs.isEmpty, "完成后守卫释放")
+    XCTAssertTrue(refreshWorkflow.refreshingSubscriptionIDs.isEmpty, "完成后守卫释放")
   }
 }
 
-/// 可门控获取缝：让第一次刷新停在 fetch 内部，验证并发守卫。fetch 在协作
-/// 线程池上阻塞等待放行信号，不占用 MainActor。
+/// 可门控获取缝：让第一次刷新停在 fetch 内部，验证并发守卫。fetch 挂起等待
+/// 异步门闩，不阻塞 MainActor 或协作线程池。
 final class GatedFetcher: SubscriptionFetching, @unchecked Sendable {
   private let lock = NSLock()
-  private let release = DispatchSemaphore(value: 0)
+  private let release = AsyncGate()
   private var count = 0
   private var entered = false
 
@@ -83,15 +85,15 @@ final class GatedFetcher: SubscriptionFetching, @unchecked Sendable {
   }
 
   func fetch(_ url: URL) async throws -> Data {
-    lock.lock()
-    count += 1
-    entered = true
-    lock.unlock()
-    _ = release.wait(timeout: .now() + 5)
+    lock.withLock {
+      count += 1
+      entered = true
+    }
+    await release.wait()
     return SubscriptionDocs.flat(serverCount: 0)
   }
 
   func releaseAll() {
-    release.signal()
+    release.release()
   }
 }

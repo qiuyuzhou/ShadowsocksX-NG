@@ -212,7 +212,7 @@ extension ProxyRuntimeControllerTests {
     try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
 
     let committed = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
-    await controller.catalogDidCommit(snapshot: committed)
+    _ = await controller.catalogDidCommit(snapshot: committed)
 
     XCTAssertNil(controller.activeTargetID)
     XCTAssertNotNil(controller.lastActivationFailure, "点名原因独立呈现")

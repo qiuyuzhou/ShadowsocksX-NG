@@ -178,7 +178,7 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
     await waitUntilRuntimeSettles(runtime.convergeCount == 1)
     try coordinator.commit { catalog, _ in try catalog.renameGroup(groupID, to: "改名") }
     await waitUntilRuntimeSettles(runtime.convergeCount == 2)
-    try coordinator.commit { catalog, _ in try catalog.remove(serverID) }
+    _ = try coordinator.commit { catalog, _ in try catalog.remove(serverID) }
     await waitUntilRuntimeSettles(runtime.convergeCount == 3)
 
     XCTAssertEqual(runtime.convergeCount, 3, "移动、改名、删除各触发一次同步")
@@ -196,7 +196,7 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
     runtime.hasActiveTarget = true
     runtime.enqueueOutcomes([.clearedAndStopped(.targetNotFound(targetID))])
 
-    try coordinator.commit { catalog, _ in try catalog.remove(targetID) }
+    _ = try coordinator.commit { catalog, _ in try catalog.remove(targetID) }
 
     await waitUntilRuntimeSettles(coordinator.syncStatus != .syncing(generation: 1))
     XCTAssertEqual(runtime.convergeCount, 1)
@@ -230,8 +230,8 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
   func testSupersededSyncBeforeStartNeverCallsRuntime() async throws {
     runtime.hasActiveTarget = true
 
-    try coordinator.commit { catalog, _ in try catalog.addTestServer("第一台") }
-    try coordinator.commit { catalog, _ in try catalog.addTestServer("第二台") }
+    _ = try coordinator.commit { catalog, _ in try catalog.addTestServer("第一台") }
+    _ = try coordinator.commit { catalog, _ in try catalog.addTestServer("第二台") }
     // 同一 MainActor 回合内的两次提交：旧代次同步尚未启动即被取代。
     await waitUntilRuntimeSettles(runtime.convergeCount == 1)
 
@@ -251,10 +251,10 @@ final class CatalogCommitCoordinatorTests: XCTestCase {
     ])
     runtime.armGate()
 
-    try coordinator.commit { catalog, _ in try catalog.addTestServer("第一台") }
+    _ = try coordinator.commit { catalog, _ in try catalog.addTestServer("第一台") }
     await waitUntilRuntimeSettles(runtime.convergeCount == 1)
 
-    try coordinator.commit { catalog, _ in try catalog.addTestServer("第二台") }
+    _ = try coordinator.commit { catalog, _ in try catalog.addTestServer("第二台") }
     runtime.openGate()
     await waitUntilRuntimeSettles(runtime.convergeCount == 2)
     await waitUntilRuntimeSettles(coordinator.syncStatus != .syncing(generation: 2))

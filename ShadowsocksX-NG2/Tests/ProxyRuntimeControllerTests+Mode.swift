@@ -124,7 +124,7 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(controller.proxyMode, .rule, "新实例未验证时恢复旧模式")
     XCTAssertEqual(controller.settings.preferredMode, .rule)
     XCTAssertEqual(settingsStore.saved?.preferredMode, .rule)
-    XCTAssertEqual(try runtimeStore.loadDocument(), previousDocument)
+    XCTAssertEqual(runtimeStore.loadDocument(), previousDocument)
     XCTAssertEqual(controller.state, .running, "旧运行时恢复后重新呈现健康")
     XCTAssertEqual(controller.systemProxyState, .applied)
     XCTAssertEqual(systemProxy.applied.count, previousApplicationCount)

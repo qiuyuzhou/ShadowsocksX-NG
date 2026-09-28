@@ -169,10 +169,10 @@ final class FakeSubscriptionFetcher: SubscriptionFetching, @unchecked Sendable {
   }
 
   func fetch(_ url: URL) async throws -> Data {
-    lock.lock()
-    requests.append(url)
-    let behavior = self.behavior
-    lock.unlock()
+    let behavior = lock.withLock {
+      requests.append(url)
+      return self.behavior
+    }
     switch behavior {
     case .success(let data):
       return data

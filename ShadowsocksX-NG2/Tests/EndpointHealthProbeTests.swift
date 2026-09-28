@@ -8,7 +8,7 @@ final class EndpointHealthProbeTests: XCTestCase {
   /// 绑定回环临时端口；调用方负责 close 返回的描述符。
   private func bindLoopbackListener() throws -> (descriptor: Int32, port: Int) {
     let socketFD = socket(AF_INET, SOCK_STREAM, 0)
-    try XCTUnwrap(socketFD >= 0 ? socketFD : nil, "创建探测用 socket 失败")
+    _ = try XCTUnwrap(socketFD >= 0 ? socketFD : nil, "创建探测用 socket 失败")
 
     var address = sockaddr_in()
     address.sin_family = sa_family_t(AF_INET)

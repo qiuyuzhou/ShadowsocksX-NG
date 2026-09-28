@@ -76,7 +76,7 @@ final class RuntimeFileStoreTests: XCTestCase {
     XCTAssertEqual(
       try permissions(of: store.aclVariantFileURL(summary: "direct")), 0o600,
       "变体文件 0600；链接权限由文件系统决定，不作断言")
-    XCTAssertEqual(try store.loadDocument(), document)
+    XCTAssertEqual(store.loadDocument(), document)
   }
 
   /// ADR-0011：变体落在 `acl-<summary>.ini`，契约路径是稳定的 `acl-active.ini`
@@ -162,7 +162,7 @@ final class RuntimeFileStoreTests: XCTestCase {
       failingStore.aclVariantFileURL(summary: "direct").lastPathComponent,
       "契约写失败后链接回到此前指向")
     XCTAssertEqual(
-      try failingStore.loadDocument(), previous,
+      failingStore.loadDocument(), previous,
       "契约未写成功，读取侧仍看到此前文档")
   }
 
@@ -201,19 +201,19 @@ final class RuntimeFileStoreTests: XCTestCase {
     let document = ProxyRuntimeFixture.makeDocument()
     try store.write(document)
 
-    XCTAssertEqual(try store.loadDocument(), document)
-    XCTAssertEqual(try store.readData(), try document.jsonData())
+    XCTAssertEqual(store.loadDocument(), document)
+    XCTAssertEqual(store.readData(), try document.jsonData())
   }
 
   func testLoadDocumentReturnsNilForMissingFile() throws {
-    XCTAssertNil(try store.loadDocument())
-    XCTAssertNil(try store.readData())
+    XCTAssertNil(store.loadDocument())
+    XCTAssertNil(store.readData())
   }
 
   func testLoadDocumentReturnsNilForCorruptJSON() throws {
     try Data("not json {".utf8).write(to: runtime.contract)
 
-    XCTAssertNil(try store.loadDocument())
+    XCTAssertNil(store.loadDocument())
   }
 
   func testLoadDocumentReturnsNilForStructurallyInvalidDocument() throws {
@@ -221,7 +221,7 @@ final class RuntimeFileStoreTests: XCTestCase {
       SslocalRuntimeDocument(
         servers: [], listen: SslocalListenSettings(socksPort: 0)))
 
-    XCTAssertNil(try store.loadDocument(), "本地端口无效属结构性无效（读取侧防御）")
+    XCTAssertNil(store.loadDocument(), "本地端口无效属结构性无效（读取侧防御）")
   }
 
   // MARK: 显式停止清理

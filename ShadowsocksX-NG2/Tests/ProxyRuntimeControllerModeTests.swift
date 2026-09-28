@@ -33,8 +33,8 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
   private var agent: ProxyRuntimeFixture.FakeLaunchAgent!
   private var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
 
-  override func setUpWithError() throws {
-    try super.setUpWithError()
+  override func setUp() async throws {
+    try await super.setUp()
     runtime = ProxyRuntimeFixture.makeTemporaryRuntime()
     catalogFileURL = runtime.directory.appendingPathComponent("catalog.json")
     activationFileURL = runtime.directory.appendingPathComponent("activation.json")
@@ -43,9 +43,9 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
     systemProxy = ProxyRuntimeFixture.FakeSystemProxy()
   }
 
-  override func tearDownWithError() throws {
+  override func tearDown() async throws {
     try? FileManager.default.removeItem(at: runtime.directory)
-    try super.tearDownWithError()
+    try await super.tearDown()
   }
 
   func testCommitWithoutActiveTargetFeedsLaterActivationThroughSharedSnapshot() async throws {
@@ -85,7 +85,7 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
       runtime: ProxyRuntimeSyncAdapter(controller: controller),
       bootstrap: bootstrap)
 
-    try coordinator.commit { catalog, _ in try catalog.remove(server) }
+    _ = try coordinator.commit { catalog, _ in try catalog.remove(server) }
 
     await waitUntilRuntimeSettles(
       {

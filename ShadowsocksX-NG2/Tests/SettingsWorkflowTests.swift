@@ -13,8 +13,8 @@ final class SettingsWorkflowTests: XCTestCase {
   private var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
   private var settingsStore: InMemorySettingsStore!
 
-  override func setUpWithError() throws {
-    try super.setUpWithError()
+  override func setUp() async throws {
+    try await super.setUp()
     runtime = ProxyRuntimeFixture.makeTemporaryRuntime()
     catalogFileURL = runtime.directory.appendingPathComponent("catalog.json")
     activationFileURL = runtime.directory.appendingPathComponent("activation.json")
@@ -24,9 +24,9 @@ final class SettingsWorkflowTests: XCTestCase {
     settingsStore = InMemorySettingsStore()
   }
 
-  override func tearDownWithError() throws {
+  override func tearDown() async throws {
     try? FileManager.default.removeItem(at: runtime.directory)
-    try super.tearDownWithError()
+    try await super.tearDown()
   }
 
   func testListenerModeSavePersistsWithoutStartingAnOffAgent() async throws {

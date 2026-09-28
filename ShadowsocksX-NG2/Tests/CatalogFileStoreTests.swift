@@ -45,7 +45,7 @@ final class CatalogFileStoreTests: XCTestCase {
     try store.save(CatalogDocument(catalog: catalog))
 
     try catalog.remove(first)
-    let second = try catalog.addTestServer("second")
+    _ = try catalog.addTestServer("second")
     try store.save(CatalogDocument(catalog: catalog))
 
     XCTAssertEqual(try store.load().catalog, catalog)

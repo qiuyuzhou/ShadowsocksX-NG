@@ -220,7 +220,7 @@ final class CatalogWorkflowTests: XCTestCase {
   func testRemoveServerCleansCredentials() async throws {
     // 已知凭据引用直建目录（模块投影不含引用；身份经文件夹具固定）。
     var catalog = ConfigurationCatalog()
-    var fields = ServerFields(
+    let fields = ServerFields(
       address: "203.0.113.7", port: 8388, encryptionMethod: "aes-256-gcm",
       passwordRef: CredentialReference(rawValue: "ref-pw"), remark: "删除我",
       pluginProgram: "v2ray-plugin",

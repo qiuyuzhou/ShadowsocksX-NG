@@ -4,6 +4,7 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 /// 轮询等待异步投影落定（设置工作流测试共享）。
+@MainActor
 func waitUntil(
   _ condition: @autoclosure () -> Bool,
   timeout: TimeInterval = 2,

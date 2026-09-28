@@ -40,14 +40,25 @@ enum GeolocationParser {
   }
 
   /// typed 前缀 → 条目构造的对照表；裸域名（无前缀）按 bareDomain 处理。
-  private static let typedPrefixes:
-    [(prefix: String, make: (String, [String]) -> GeolocationEntry)] = [
-      ("include:", { .include(name: $0, attributes: $1) }),
-      ("domain:", { .domain($0, attributes: $1) }),
-      ("full:", { .full($0, attributes: $1) }),
-      ("keyword:", { .keyword($0, attributes: $1) }),
-      ("regexp:", { .regexp($0, attributes: $1) }),
-    ]
+  private enum TypedPrefix: String, CaseIterable, Sendable {
+    case include = "include:"
+    case domain = "domain:"
+    case full = "full:"
+    case keyword = "keyword:"
+    case regexp = "regexp:"
+
+    func make(value: String, attributes: [String]) -> GeolocationEntry {
+      switch self {
+      case .include: .include(name: value, attributes: attributes)
+      case .domain: .domain(value, attributes: attributes)
+      case .full: .full(value, attributes: attributes)
+      case .keyword: .keyword(value, attributes: attributes)
+      case .regexp: .regexp(value, attributes: attributes)
+      }
+    }
+  }
+
+  private static let typedPrefixes = TypedPrefix.allCases
 
   /// 去掉整行 `#` 注释与行内 ` #` 注释并修剪空白；空行返回 nil。
   private static func codeLine(from rawLine: String) -> String? {
@@ -81,11 +92,11 @@ enum GeolocationParser {
     let (content, attributes) = extractingAttributes(from: line)
     guard !content.isEmpty else { return nil }
     for typed in Self.typedPrefixes {
-      guard content.hasPrefix(typed.prefix) else { continue }
-      let value = String(content.dropFirst(typed.prefix.count))
+      guard content.hasPrefix(typed.rawValue) else { continue }
+      let value = String(content.dropFirst(typed.rawValue.count))
         .trimmingCharacters(in: .whitespacesAndNewlines)
       guard !value.isEmpty else { return nil }
-      return typed.make(value, attributes)
+      return typed.make(value: value, attributes: attributes)
     }
     return .bareDomain(content, attributes: attributes)
   }

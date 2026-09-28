@@ -15,8 +15,8 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
   var agent: ProxyRuntimeFixture.FakeLaunchAgent!
   var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
 
-  override func setUpWithError() throws {
-    try super.setUpWithError()
+  override func setUp() async throws {
+    try await super.setUp()
     runtime = ProxyRuntimeFixture.makeTemporaryRuntime()
     catalogFileURL = runtime.directory.appendingPathComponent("catalog.json")
     activationFileURL = runtime.directory.appendingPathComponent("activation.json")
@@ -25,9 +25,9 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     systemProxy = ProxyRuntimeFixture.FakeSystemProxy()
   }
 
-  override func tearDownWithError() throws {
+  override func tearDown() async throws {
     try? FileManager.default.removeItem(at: runtime.directory)
-    try super.tearDownWithError()
+    try await super.tearDown()
   }
 
   /// 控制器、目录工作流与代理控制工作流的生产组合（同一控制器经两条缝）。

@@ -128,8 +128,8 @@ final class DiagnosticsWorkflow: ObservableObject {
   private let events: RuntimeEventStore
   private let catalogFacts: @MainActor () -> DiagnosticCatalogFacts?
   private let agentLogTail: () -> String?
-  private let fileFacts: () -> [DiagnosticFileFacts]
-  private let managedPlugins: () -> [DiagnosticPluginFacts]
+  private let fileFacts: @MainActor () -> [DiagnosticFileFacts]
+  private let managedPlugins: @MainActor () -> [DiagnosticPluginFacts]
   private let homePath: () -> String?
   private let clock: () -> Date
   private let reportRendering: (DiagnosticSnapshot) -> String?
@@ -145,8 +145,9 @@ final class DiagnosticsWorkflow: ObservableObject {
     agentLogTail: @escaping () -> String? = {
       AgentLogTail.readLastLines(of: RuntimePaths.agentLogURL())
     },
-    fileFacts: @escaping () -> [DiagnosticFileFacts] = DiagnosticsWorkflow.productionFileFacts,
-    managedPlugins: @escaping () -> [DiagnosticPluginFacts] =
+    fileFacts: @escaping @MainActor () -> [DiagnosticFileFacts] =
+      DiagnosticsWorkflow.productionFileFacts,
+    managedPlugins: @escaping @MainActor () -> [DiagnosticPluginFacts] =
       DiagnosticsWorkflow.productionManagedPlugins,
     homePath: @escaping () -> String? = { NSHomeDirectory() },
     clock: @escaping () -> Date = { Date() },

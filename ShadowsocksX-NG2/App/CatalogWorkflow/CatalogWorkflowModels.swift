@@ -185,6 +185,7 @@ enum ActivationCommandOutcome: Equatable, Sendable {
 
 /// 激活缝（issue #41）：目录命令面经此发出激活意图。生产 adapter 为
 /// `ProxyRuntimeController`；测试注入假 adapter 观察目标传递。
+@MainActor
 protocol Activating: AnyObject {
   func activate(_ target: NodeID) async throws -> ActivationCommandOutcome
 }

@@ -81,8 +81,8 @@ final class ProxyControlWorkflowTests: XCTestCase {
   private var targetFacts: FakeTargetFacts!
   private var workflow: ProxyControlWorkflow!
 
-  override func setUp() {
-    super.setUp()
+  override func setUp() async throws {
+    try await super.setUp()
     runtime = FakeProxyRuntime()
     targetFacts = FakeTargetFacts()
     workflow = ProxyControlWorkflow(runtime: runtime, targetFacts: targetFacts)
