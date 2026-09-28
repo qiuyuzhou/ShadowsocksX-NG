@@ -47,19 +47,21 @@ struct MainWindowView: View {
     NavigationSplitView {
       sidebar
         .navigationSplitViewColumnWidth(min: 200, ideal: 236, max: 300)
+        .toolbar {
+          ToolbarItem(placement: .navigation) {
+            addMenu
+          }
+        }
+        .toolbar(removing: .sidebarToggle)
     } detail: {
       destinationView
     }
     .frame(minWidth: 920, minHeight: 580)
     .toolbar {
-      ToolbarItem(placement: .navigation) {
-        addMenu
-      }
       ToolbarItemGroup(placement: .primaryAction) {
         destinationActions
       }
     }
-    .toolbar(removing: .sidebarToggle)
     .sheet(item: $presentedWorkspaceSheet) { sheet in
       switch sheet {
       case .importURL:
