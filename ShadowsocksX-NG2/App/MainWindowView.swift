@@ -37,6 +37,7 @@ struct MainWindowView: View {
   @ObservedObject var silentLaunch: SilentLaunchController
   let clipboard: any TextClipboard
   let diagnosticReportExporter: any DiagnosticReportExporter
+  let configurationGroupFileExporter: any ConfigurationGroupFileExporter
 
   @State private var selection: NodeID?
   /// 全局添加菜单打开的表单，以及诊断导出由窗口壳持有。
@@ -189,7 +190,8 @@ struct MainWindowView: View {
         workflow: workflow,
         proxyController: proxyController,
         selection: $selection,
-        clipboard: clipboard)
+        clipboard: clipboard,
+        configurationGroupFileExporter: configurationGroupFileExporter)
     case .subscriptions:
       WorkspaceSubscriptionsView(
         workflow: workflow,

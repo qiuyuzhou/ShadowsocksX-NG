@@ -69,6 +69,10 @@ extension AppPresentation {
       return diagnosticReport(error)
     case let error as DiagnosticReportExportFailure:
       return diagnosticReportExport(error)
+    case let error as ConfigurationGroupExportFailure:
+      return configurationGroupExport(error)
+    case is ConfigurationGroupFileExportFailure:
+      return "SIP-008 文件写入失败"
     default:
       return unknownError
     }
@@ -344,6 +348,34 @@ extension AppPresentation {
   private static func diagnosticReportExport(_ error: DiagnosticReportExportFailure) -> String {
     switch error {
     case .writeFailed: return "诊断报告写入失败，请选择其他位置或重试"
+    }
+  }
+
+  private static func configurationGroupExport(_ error: ConfigurationGroupExportFailure) -> String {
+    switch error {
+    case .groupNotFound: return "分组不存在（可能已被删除）"
+    case .targetIsNotGroup: return "所选节点不是分组"
+    case .noServers: return "分组中没有服务器配置"
+    case .invalidServer(_, let problem): return invalidServerExport(problem)
+    case .credentialUnavailable(_, let credential):
+      return credential == .password
+        ? "服务器密码无法读取，无法导出 SIP-008 文件"
+        : "插件参数无法读取，无法导出 SIP-008 文件"
+    case .pluginOptionsWithoutProgram:
+      return "服务器配置了插件参数但没有插件名称，无法导出 SIP-008 文件"
+    case .documentEncodingFailed:
+      return "SIP-008 文档生成失败"
+    }
+  }
+
+  private static func invalidServerExport(_ problem: ConfigurationGroupExportFailure.RecordProblem)
+    -> String
+  {
+    switch problem {
+    case .invalidAddress: return "服务器地址为空，无法导出 SIP-008 文件"
+    case .invalidPort: return "服务器端口无效，无法导出 SIP-008 文件"
+    case .missingEncryptionMethod: return "服务器缺少加密方式，无法导出 SIP-008 文件"
+    case .missingPassword: return "服务器密码为空，无法导出 SIP-008 文件"
     }
   }
 

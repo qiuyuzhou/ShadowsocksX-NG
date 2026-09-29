@@ -12,6 +12,7 @@ struct ServersView: View {
   @ObservedObject var proxyController: ProxyRuntimeController
   @Binding var selection: NodeID?
   let clipboard: any TextClipboard
+  let configurationGroupFileExporter: any ConfigurationGroupFileExporter
 
   /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
   @StateObject private var errors = ErrorAlertPresenter()
@@ -109,7 +110,8 @@ struct ServersView: View {
             presentNewGroup(in: parent)
           },
           onMove: { moveTarget = $0 },
-          onDelete: { deleteTarget = $0 }
+          onDelete: { deleteTarget = $0 },
+          onExport: exportConfigurationGroup
         )
         .onDrag {
           guard let payload = workflow.dragPayload(for: node.id) else {
@@ -163,6 +165,19 @@ struct ServersView: View {
       }
     }
     return true
+  }
+
+  private func exportConfigurationGroup(_ id: NodeID) {
+    switch ConfigurationGroupExportAction(
+      workflow: workflow, exporter: configurationGroupFileExporter
+    ).perform(for: id) {
+    case .preparationFailed(let failure):
+      errors.present(failure)
+    case .cancelled, .saved:
+      break
+    case .exportFailed(let failure):
+      errors.present(failure)
+    }
   }
 }
 

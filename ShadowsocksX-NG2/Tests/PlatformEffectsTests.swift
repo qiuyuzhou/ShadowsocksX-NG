@@ -93,7 +93,7 @@ final class DiagnosticReportExportActionTests: DiagnosticsWorkflowTestCase {
 }
 
 final class PlatformEffectsArchitectureTests: XCTestCase {
-  func testClipboardAndDiagnosticExportAppKitSymbolsStayInFocusedAdapters() throws {
+  func testClipboardAndFileExportAppKitSymbolsStayInFocusedAdapters() throws {
     let appDirectory = Self.testTargetRoot.appendingPathComponent("App")
     let sourceFiles = try Self.swiftSourceFiles(in: appDirectory)
 
@@ -104,13 +104,15 @@ final class PlatformEffectsArchitectureTests: XCTestCase {
 
     let savePanelUsers = try Self.files(containing: "NSSavePanel", in: sourceFiles)
     XCTAssertEqual(
-      savePanelUsers.map(\.lastPathComponent), ["AppKitDiagnosticReportExporter.swift"],
-      "保存面板访问必须集中在 AppKitDiagnosticReportExporter adapter")
+      Set(savePanelUsers.map(\.lastPathComponent)),
+      Set(["AppKitDiagnosticReportExporter.swift", "ConfigurationGroupFileExporter.swift"]),
+      "保存面板访问必须集中在对应的 AppKit exporter adapter")
 
     let reportWriterUsers = try Self.files(containing: ".data.write(to:", in: sourceFiles)
     XCTAssertEqual(
-      reportWriterUsers.map(\.lastPathComponent), ["AppKitDiagnosticReportExporter.swift"],
-      "诊断报告文件写入必须集中在 AppKitDiagnosticReportExporter adapter")
+      Set(reportWriterUsers.map(\.lastPathComponent)),
+      Set(["AppKitDiagnosticReportExporter.swift", "ConfigurationGroupFileExporter.swift"]),
+      "文件写入必须集中在对应的 AppKit exporter adapter")
   }
 
   private static let testTargetRoot = URL(fileURLWithPath: #filePath)

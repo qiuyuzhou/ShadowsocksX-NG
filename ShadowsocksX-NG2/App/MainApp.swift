@@ -12,7 +12,6 @@ struct ShadowsocksXNG2App: App {
   @StateObject private var workspaceRoute: WorkspaceRoute
   @StateObject private var silentLaunch: SilentLaunchController
   private let textClipboard: any TextClipboard
-  private let diagnosticReportExporter: any DiagnosticReportExporter
   private let workspaceContent: MainWindowView
   /// 启动呈现行为在进程内一次性定格（ADR 0017）：静默启动偏好关闭（默认）
   /// 时 presented，开启时 suppressed。切换偏好当次会话无影响，下次启动生效。
@@ -29,7 +28,6 @@ struct ShadowsocksXNG2App: App {
     _workspaceRoute = StateObject(wrappedValue: composition.workspaceRoute)
     _silentLaunch = StateObject(wrappedValue: composition.silentLaunch)
     textClipboard = composition.textClipboard
-    diagnosticReportExporter = composition.diagnosticReportExporter
     workspaceContent = composition.workspaceContent
     launchPresentation = composition.silentLaunch.isEnabled ? .suppressed : .presented
     // GUI 事件接入内存环形缓冲（spec #21 D5，issue #34）：主窗口日志查看器与
@@ -108,13 +106,11 @@ private struct AppComposition {
   let workspaceRoute: WorkspaceRoute
   let silentLaunch: SilentLaunchController
   let textClipboard: any TextClipboard
-  let diagnosticReportExporter: any DiagnosticReportExporter
   let workspaceContent: MainWindowView
 
   static func make() -> AppComposition {
     let dependencies = ApplicationDependencies.make()
     let textClipboard = dependencies.textClipboard
-    let diagnosticReportExporter = dependencies.diagnosticReportExporter
     // The catalog document is read exactly once at startup. The coordinator
     // publishes later committed snapshots; the controller receives read-only
     // access to this same in-process source.
@@ -138,8 +134,7 @@ private struct AppComposition {
     // seam，组合根接线一次。生产 runtime adapter 包装既有控制器（不复制运行
     // 时语义）；目录目标事实经窄缝从目录工作流读取。
     let proxyControl = ProxyControlWorkflow(
-      runtime: ControllerProxyRuntimeAdapter(controller: controller),
-      targetFacts: catalogWorkflow)
+      runtime: ControllerProxyRuntimeAdapter(controller: controller), targetFacts: catalogWorkflow)
     // 设置工作流 module（Candidate 02）：设置窗口的唯一 seam，组合根接线一次；
     // 写入侧经窄缝 SettingsCommitting（issue #44），运行时控制器薄扩展即生产实现。
     let settingsWorkflow = SettingsWorkflow(committing: controller)
@@ -160,7 +155,8 @@ private struct AppComposition {
       loginController: loginController,
       silentLaunch: silentLaunch,
       clipboard: textClipboard,
-      diagnosticReportExporter: diagnosticReportExporter)
+      diagnosticReportExporter: dependencies.diagnosticReportExporter,
+      configurationGroupFileExporter: dependencies.configurationGroupFileExporter)
     return AppComposition(
       controller: controller,
       catalogWorkflow: catalogWorkflow,
@@ -171,7 +167,6 @@ private struct AppComposition {
       workspaceRoute: workspaceRoute,
       silentLaunch: silentLaunch,
       textClipboard: textClipboard,
-      diagnosticReportExporter: diagnosticReportExporter,
       workspaceContent: workspaceContent)
   }
 
@@ -219,6 +214,7 @@ private struct ApplicationDependencies {
   let silentLaunchStore: SilentLaunchStore
   let textClipboard: any TextClipboard
   let diagnosticReportExporter: any DiagnosticReportExporter
+  let configurationGroupFileExporter: any ConfigurationGroupFileExporter
 
   static var isUnitTesting: Bool {
     let environment = ProcessInfo.processInfo.environment
@@ -256,7 +252,8 @@ private struct ApplicationDependencies {
       loginService: SMAppLaunchAtLoginService(),
       silentLaunchStore: SilentLaunchStore(),
       textClipboard: AppKitTextClipboard(),
-      diagnosticReportExporter: AppKitDiagnosticReportExporter())
+      diagnosticReportExporter: AppKitDiagnosticReportExporter(),
+      configurationGroupFileExporter: AppKitConfigurationGroupFileExporter())
   }
 
   private static func makeTesting() -> ApplicationDependencies {
@@ -300,7 +297,8 @@ private struct ApplicationDependencies {
       loginService: NoopLaunchAtLoginService(),
       silentLaunchStore: silentLaunchStore,
       textClipboard: InMemoryTextClipboard(),
-      diagnosticReportExporter: InMemoryDiagnosticReportExporter())
+      diagnosticReportExporter: InMemoryDiagnosticReportExporter(),
+      configurationGroupFileExporter: InMemoryConfigurationGroupFileExporter())
   }
 }
 

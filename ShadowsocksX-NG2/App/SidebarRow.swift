@@ -13,6 +13,7 @@ struct SidebarRow: View {
   let onNewGroup: (NodeID?) -> Void
   let onMove: (NodeID) -> Void
   let onDelete: (NodeID) -> Void
+  let onExport: (NodeID) -> Void
 
   private var isSubscription: Bool { node.source == .subscription }
 
@@ -67,6 +68,11 @@ struct SidebarRow: View {
           errors.present(error)
         }
       }
+    }
+    if node.isGroup {
+      Divider()
+      Button("导出为 SIP-008 JSON…") { onExport(node.id) }
+        .disabled(!node.containsServerConfiguration)
     }
     if !isSubscription {
       Divider()

@@ -30,6 +30,12 @@ struct CatalogTreeNode: Identifiable, Equatable {
   var isManual: Bool { source == .manual }
   /// 子树快照；服务器叶子为空（与 `children` 的 nil 区分叶子语义并存）。
   var childNodes: [CatalogTreeNode] { children ?? [] }
+
+  /// 是否包含服务器配置（含当前节点本身）；激活资格与结构性可导出性分离。
+  var containsServerConfiguration: Bool {
+    if !isGroup { return true }
+    return childNodes.contains(where: \.containsServerConfiguration)
+  }
 }
 
 extension CatalogTreeNode {
