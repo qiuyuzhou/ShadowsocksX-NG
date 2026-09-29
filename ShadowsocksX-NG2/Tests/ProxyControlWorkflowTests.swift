@@ -21,6 +21,8 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
   var httpExportCapability = HTTPExportCapability(
     copyableLine:
       "export http_proxy=http://127.0.0.1:11087;export https_proxy=http://127.0.0.1:11087;")
+  var terminalProxyEnvironmentCommands = TerminalProxyEnvironmentCommands(
+    listen: SslocalListenSettings())
 
   private let changeSubject = PassthroughSubject<Void, Never>()
   var changes: AnyPublisher<Void, Never> { changeSubject.eraseToAnyPublisher() }
@@ -126,7 +128,8 @@ final class ProxyControlWorkflowTests: XCTestCase {
         activeTarget: ProxyActiveTargetFacts(id: Self.serverID, pathSummary: "组A / 香港 01"),
         skippedInvalidServerCount: 3,
         httpExport: HTTPExportCapability(
-          copyableLine: "export http_proxy=http://127.0.0.1:11087;")))
+          copyableLine: "export http_proxy=http://127.0.0.1:11087;"),
+        terminalProxyEnvironmentCommands: runtime.terminalProxyEnvironmentCommands))
     XCTAssertEqual(
       workflow.snapshot.availableModes, ProxyMode.availableModes,
       "可用模式是 issue #46 Domain 单点策略的投影")

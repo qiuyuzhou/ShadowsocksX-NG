@@ -205,12 +205,104 @@ struct TargetServerRow: View {
   }
 }
 
-/// 「快速操作」卡：更新全部订阅、复制终端 HTTP 代理导出行。
-struct QuickActionCard: View {
-  @ObservedObject var workflow: CatalogWorkflow
+/// 「复制代理环境变量设置命令」卡：按所选 shell 格式复制 HTTP 与 SOCKS 环境变量。
+struct TerminalProxyEnvironmentCard: View {
   @ObservedObject var control: ProxyControlWorkflow
   let clipboard: any TextClipboard
   let errors: ErrorAlertPresenter
+
+  @State private var copiedShell: TerminalCommandShell?
+  @State private var feedbackTask: Task<Void, Never>?
+
+  var body: some View {
+    HomeCard(
+      title: "复制代理环境变量设置命令",
+      subtitle: nil,
+      trailing: { EmptyView() },
+      content: {
+        VStack(spacing: 10) {
+          commandButton(for: .zshBash)
+          commandButton(for: .fish)
+        }
+        .padding(.top, 6)
+      }
+    )
+    .onDisappear {
+      feedbackTask?.cancel()
+      feedbackTask = nil
+      copiedShell = nil
+    }
+  }
+
+  private func commandButton(for shell: TerminalCommandShell) -> some View {
+    let isCopied = copiedShell == shell
+    return Button {
+      copy(shell)
+    } label: {
+      HStack(spacing: 10) {
+        Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+          .foregroundStyle(isCopied ? Color.green : Color.accentColor)
+        Text(isCopied ? "已复制" : shell.title)
+          .font(.callout.weight(.medium))
+          .foregroundStyle(.primary)
+          .lineLimit(1)
+        Spacer(minLength: 0)
+      }
+      .padding(.horizontal, 12)
+      .padding(.vertical, 10)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .background(
+      .quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+    )
+    .help(isCopied ? "已复制" : "复制 \(shell.title) 代理环境变量命令")
+  }
+
+  private func copy(_ shell: TerminalCommandShell) {
+    let commands = control.snapshot.terminalProxyEnvironmentCommands
+    do {
+      try clipboard.write(shell.command(from: commands))
+      feedbackTask?.cancel()
+      copiedShell = shell
+      feedbackTask = Task { @MainActor in
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        guard !Task.isCancelled, copiedShell == shell else { return }
+        copiedShell = nil
+        feedbackTask = nil
+      }
+    } catch {
+      feedbackTask?.cancel()
+      feedbackTask = nil
+      copiedShell = nil
+      errors.present(error)
+    }
+  }
+}
+
+private enum TerminalCommandShell: Equatable {
+  case zshBash
+  case fish
+
+  var title: String {
+    switch self {
+    case .zshBash: "zsh / bash"
+    case .fish: "fish"
+    }
+  }
+
+  func command(from commands: TerminalProxyEnvironmentCommands) -> String {
+    switch self {
+    case .zshBash: commands.zshBash
+    case .fish: commands.fish
+    }
+  }
+}
+
+/// 「快速操作」卡：更新全部订阅。
+struct QuickActionCard: View {
+  @ObservedObject var workflow: CatalogWorkflow
 
   @State private var isRefreshingAll = false
 
@@ -228,12 +320,6 @@ struct QuickActionCard: View {
             action: refreshAll
           )
           .disabled(workflow.subscriptions.isEmpty || isRefreshingAll)
-          QuickActionButton(
-            icon: "doc.on.doc",
-            title: "复制终端 HTTP 代理指令",
-            help: copyHelp,
-            action: copyHTTPExport
-          )
           if isRefreshingAll {
             ProgressView()
               .controlSize(.small)
@@ -244,10 +330,6 @@ struct QuickActionCard: View {
       })
   }
 
-  private var copyHelp: String? {
-    "复制可在 shell 中 source 的 http/https 代理导出行"
-  }
-
   private func refreshAll() {
     isRefreshingAll = true
     Task {
@@ -256,14 +338,6 @@ struct QuickActionCard: View {
     }
   }
 
-  private func copyHTTPExport() {
-    let line = control.snapshot.httpExport.copyableLine
-    do {
-      try clipboard.write(line)
-    } catch {
-      errors.present(error)
-    }
-  }
 }
 
 /// 目标分组的呈现模型（票 #54）：名称、来源说明与直属服务器叶子。

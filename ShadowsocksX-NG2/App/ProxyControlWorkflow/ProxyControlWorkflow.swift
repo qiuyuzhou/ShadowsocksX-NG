@@ -11,6 +11,13 @@ struct HTTPExportCapability: Equatable, Sendable {
   let copyableLine: String
 }
 
+/// 首页可复制的 shell 环境变量设置命令。不同 shell 的语法由 workflow 一次投影，
+/// 呈现层只选择格式并执行剪贴板副作用。
+struct TerminalProxyEnvironmentCommands: Equatable, Sendable {
+  let zshBash: String
+  let fish: String
+}
+
 /// 活动目标安全事实（issue #47）：存在性 + 可展示路径摘要。身份是不透明
 /// `NodeID`（级联勾选用）；不含凭据、原始配置 URL 或目录树结构。路径摘要
 /// 是目录 projection 的显示名（无备注的服务器叶子以地址为显示名，与目录树
@@ -50,6 +57,8 @@ struct ProxyControlSnapshot: Equatable, Sendable {
   let skippedInvalidServerCount: Int
   /// HTTP 导出能力。
   let httpExport: HTTPExportCapability
+  /// 首页终端代理环境变量命令，分别适用于 zsh/bash 与 fish。
+  let terminalProxyEnvironmentCommands: TerminalProxyEnvironmentCommands
 }
 
 // MARK: - 适配缝
@@ -80,6 +89,8 @@ protocol ProxyRuntimeAdapting: AnyObject {
   var activeTargetID: NodeID? { get }
   /// 可安全复制的 HTTP 导出能力。
   var httpExportCapability: HTTPExportCapability { get }
+  /// 可复制的 zsh/bash 与 fish 代理环境变量命令。
+  var terminalProxyEnvironmentCommands: TerminalProxyEnvironmentCommands { get }
   /// 运行时事实变化通知：目录驱动、设置变更或运行时收敛导致事实变化后
   /// 发值。生产实现带主队列 hop（willChange 语义 → didChange 读取）；
   /// fake 同步发值。workflow 以此触发整体重观察。
@@ -193,6 +204,7 @@ final class ProxyControlWorkflow: ObservableObject {
       availableModes: ProxyMode.availableModes,
       activeTarget: targetFacts.activeTargetFacts(for: runtime.activeTargetID),
       skippedInvalidServerCount: runtime.skippedInvalidServerCount,
-      httpExport: runtime.httpExportCapability)
+      httpExport: runtime.httpExportCapability,
+      terminalProxyEnvironmentCommands: runtime.terminalProxyEnvironmentCommands)
   }
 }

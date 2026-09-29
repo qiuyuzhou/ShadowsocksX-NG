@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// 首页分区（地图 #52，票 #54）：代理模式切换、运行控制、当前服务器目标树
-/// 与快速操作。模式与两个开关（agent/系统代理，issue #60）走代理控制工作流
-/// 的整体 snapshot；目标树与激活走目录工作流 projection 与 `activate`；复制
-/// HTTP 导出是 UI 副作用。三种模式（规则/全局/直连）与规则子选项共用同一快照。
+/// 与终端代理环境变量命令。模式与两个开关（agent/系统代理，issue #60）走代理
+/// 控制工作流的整体 snapshot；目标树与激活走目录工作流 projection 与 `activate`；
+/// 命令复制是 UI 副作用。三种模式（规则/全局/直连）与规则子选项共用同一快照。
 struct HomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
@@ -25,8 +25,8 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         VStack(spacing: 20) {
           RuntimeControlCard(control: control)
-          QuickActionCard(
-            workflow: workflow, control: control, clipboard: clipboard, errors: errors)
+          TerminalProxyEnvironmentCard(control: control, clipboard: clipboard, errors: errors)
+          QuickActionCard(workflow: workflow)
         }
         .frame(width: 300)
       }

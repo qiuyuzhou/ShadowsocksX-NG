@@ -75,7 +75,9 @@ final class StatusMenuModelTests: XCTestCase {
       skippedInvalidServerCount: 0,
       httpExport: HTTPExportCapability(
         copyableLine:
-          "export http_proxy=http://127.0.0.1:11087;export https_proxy=http://127.0.0.1:11087;"))
+          "export http_proxy=http://127.0.0.1:11087;export https_proxy=http://127.0.0.1:11087;"),
+      terminalProxyEnvironmentCommands: TerminalProxyEnvironmentCommands(
+        listen: SslocalListenSettings()))
   }
 
   // MARK: - 头部状态摘要

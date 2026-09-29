@@ -41,6 +41,10 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
     HTTPExportCapability(listen: controller.listenSettings)
   }
 
+  var terminalProxyEnvironmentCommands: TerminalProxyEnvironmentCommands {
+    TerminalProxyEnvironmentCommands(listen: controller.listenSettings)
+  }
+
   /// 控制器的 `objectWillChange` 是 willChange 语义；主队列 hop 落地时被
   /// 发布的新值已可读，workflow 重观察不会读到半程状态。
   var changes: AnyPublisher<Void, Never> {
@@ -75,10 +79,39 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
 /// 环境变量始终指向回环地址，避免将命令误用于其他设备。
 extension HTTPExportCapability {
   init(listen: SslocalListenSettings) {
-    let host = listen.listenerMode.proxyLoopbackAddress
-    let urlHost = host.contains(":") ? "[\(host)]" : host
+    let urlHost = listen.proxyLoopbackURLHost
     let endpoint = "http://\(urlHost):\(listen.httpPort)"
     self.init(copyableLine: "export http_proxy=\(endpoint);export https_proxy=\(endpoint);")
+  }
+}
+
+extension TerminalProxyEnvironmentCommands {
+  init(listen: SslocalListenSettings) {
+    let host = listen.proxyLoopbackURLHost
+    let httpEndpoint = "'http://\(host):\(listen.httpPort)'"
+    let socksEndpoint = "'socks5://\(host):\(listen.socksPort)'"
+    let zshBash =
+      [
+        "export http_proxy=\(httpEndpoint)",
+        "export https_proxy=\(httpEndpoint)",
+        "export all_proxy=\(socksEndpoint)",
+      ].joined(separator: "; ") + ";"
+    let fish =
+      [
+        "set -gx http_proxy \(httpEndpoint)",
+        "set -gx https_proxy \(httpEndpoint)",
+        "set -gx all_proxy \(socksEndpoint)",
+      ].joined(separator: "; ") + ";"
+    self.init(
+      zshBash: zshBash,
+      fish: fish)
+  }
+}
+
+extension SslocalListenSettings {
+  fileprivate var proxyLoopbackURLHost: String {
+    let host = listenerMode.proxyLoopbackAddress
+    return host.contains(":") ? "[\(host)]" : host
   }
 }
 
