@@ -24,8 +24,8 @@ private enum WorkspaceSheet: String, Identifiable {
 /// 窗口原生呈现）；订阅/诊断的页级动作经 .toolbar 桥接进窗口工具栏右端
 /// （票 #56/#58 的槽位仅呈现位置变化），设置的表单级提交动作在其视图内容
 /// 顶部（见 SettingsView）。路由状态仍由 WorkspaceRoute 持有；代理状态卡的
-/// 开关、模式与摘要只来自代理控制工作流的整体 snapshot（issue #47），与状态
-/// 菜单同一口径。
+/// 状态与摘要只来自代理控制工作流的整体 snapshot（issue #47），与状态菜单
+/// 使用同一口径。
 struct MainWindowView: View {
   @ObservedObject var route: WorkspaceRoute
   @ObservedObject var workflow: CatalogWorkflow
@@ -322,51 +322,41 @@ extension MainWindowView {
 
   // MARK: - 底部代理状态卡
 
-  /// 底部状态卡（issue #60）：agent 与系统代理两个开关并排呈现，各自绑定
-  /// 持久化意图；运行状态、系统代理实际应用与点名原因来自同一 snapshot。
+  /// 底部状态卡（issue #60）：分别呈现 agent 运行状态、系统代理实际应用、
+  /// 活动目标与模式；所有状态均来自同一 snapshot。
   private var statusCard: some View {
     let summary = StatusMenuModel.summary(from: control.snapshot)
+    let targetDisplay = targetPresentation(for: summary)
     return VStack(alignment: .leading, spacing: 7) {
-      HStack(spacing: 8) {
-        Toggle("后台代理", isOn: agentToggleBinding)
-          .toggleStyle(.switch)
-          .controlSize(.mini)
-          .labelsHidden()
-          .help("控制后台代理 agent：提供本地 SOCKS/HTTP 监听，关闭选择会保留")
-        Toggle("系统代理", isOn: systemProxyToggleBinding)
-          .toggleStyle(.switch)
-          .controlSize(.mini)
-          .labelsHidden()
-          .help("让 macOS 系统代理指向本地入口；关闭只恢复 NG2 持有的系统设置")
-        Text(summary.status)
-          .font(.footnote.weight(.semibold))
-          .foregroundStyle(statusColor(summary))
-          .lineLimit(1)
+      statusRow("后台代理", value: summary.status, color: runtimeStatusColor)
+      if let detail = summary.detail {
+        statusDetail(detail, color: runtimeDetailColor)
       }
-      Text(summary.targetPath ?? "未激活")
+      statusRow(
+        "系统代理设置", value: summary.systemProxyStateLabel, color: systemProxyStatusColor)
+      if let systemProxyDetail = summary.systemProxyDetail {
+        statusDetail(systemProxyDetail, color: .red)
+      }
+
+      Text(targetDisplay.text)
         .font(.footnote.weight(.medium))
         .lineLimit(1)
         .truncationMode(.middle)
-        .help(
-          summary.targetPath.map { "活动目标：\($0)" }
-            ?? "未设置活动目标；在首页或服务器目录中激活")
-      Text("模式：\(summary.modeLabel) · \(summary.systemProxyStatus)")
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      if let detail = summary.detail {
-        Text(detail)
-          .font(.caption)
-          .foregroundStyle(.orange)
-          .lineLimit(2)
-          .help(detail)
+        .help(targetDisplay.help)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("活动目标：\(targetDisplay.text)")
+
+      HStack(spacing: 0) {
+        Text("模式：")
+          .foregroundStyle(.secondary)
+        Text(control.snapshot.proxyMode.label)
+        if control.snapshot.proxyMode == .rule {
+          Text("·")
+          Text(control.snapshot.ruleDefaultAction.label)
+        }
       }
-      if let systemProxyDetail = summary.systemProxyDetail {
-        Text(systemProxyDetail)
-          .font(.caption)
-          .foregroundStyle(.orange)
-          .lineLimit(2)
-          .help(systemProxyDetail)
-      }
+      .font(.caption)
+      .accessibilityElement(children: .combine)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(12)
@@ -380,23 +370,41 @@ extension MainWindowView {
     .padding(.bottom, 12)
   }
 
-  private var agentToggleBinding: Binding<Bool> {
-    Binding(
-      get: { control.snapshot.agentIntentEnabled },
-      set: { enabled in
-        Task { await control.setAgentEnabled(enabled) }
-      })
+  private func statusRow(_ label: String, value: String, color: Color) -> some View {
+    HStack(spacing: 4) {
+      Text("\(label)：")
+        .foregroundStyle(.secondary)
+      Text(value)
+        .fontWeight(.semibold)
+        .foregroundStyle(color)
+    }
+    .font(.footnote)
+    .lineLimit(1)
+    .accessibilityElement(children: .combine)
   }
 
-  private var systemProxyToggleBinding: Binding<Bool> {
-    Binding(
-      get: { control.snapshot.systemProxyIntentEnabled },
-      set: { enabled in
-        Task { await control.setSystemProxyEnabled(enabled) }
-      })
+  private func statusDetail(_ detail: String, color: Color) -> some View {
+    Text(detail)
+      .font(.caption)
+      .foregroundStyle(color)
+      .lineLimit(2)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .help(detail)
   }
 
-  private func statusColor(_ summary: StatusMenuModel.Summary) -> Color {
+  private func targetPresentation(for summary: StatusMenuModel.Summary) -> (
+    text: String, help: String
+  ) {
+    if let targetPath = summary.targetPath {
+      return (targetPath, "活动目标：\(targetPath)")
+    }
+    if control.snapshot.proxyMode == .direct {
+      return ("直连模式（无需服务器）", "直连模式无需选择活动目标")
+    }
+    return ("未激活", "未设置活动目标；在首页或服务器目录中激活")
+  }
+
+  private var runtimeStatusColor: Color {
     switch control.snapshot.runtime.status {
     case .running:
       .green
@@ -407,6 +415,26 @@ extension MainWindowView {
     case .firewallBlocked, .requiresApproval:
       .orange
     case .launchFailed, .serviceFailed:
+      .red
+    }
+  }
+
+  private var runtimeDetailColor: Color {
+    if control.snapshot.runtime.failure != nil {
+      return runtimeStatusColor
+    }
+    return control.snapshot.activationFailure == nil ? .secondary : .red
+  }
+
+  private var systemProxyStatusColor: Color {
+    switch control.snapshot.systemProxyApplication {
+    case .idle:
+      .secondary
+    case .pending:
+      .orange
+    case .applied:
+      .green
+    case .failed:
       .red
     }
   }
