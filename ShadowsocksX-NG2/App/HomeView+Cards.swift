@@ -257,7 +257,7 @@ struct TerminalProxyEnvironmentCard: View {
     .background(
       .quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous)
     )
-    .help(isCopied ? "已复制" : "复制 \(shell.title) 代理环境变量命令")
+    .help(shell.command(from: control.snapshot.terminalProxyEnvironmentCommands))
   }
 
   private func copy(_ shell: TerminalCommandShell) {
