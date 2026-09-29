@@ -90,17 +90,20 @@ extension TerminalProxyEnvironmentCommands {
     let host = listen.proxyLoopbackURLHost
     let httpEndpoint = "'http://\(host):\(listen.httpPort)'"
     let socksEndpoint = "'socks5://\(host):\(listen.socksPort)'"
+    let noProxy = "'localhost,127.0.0.1,::1,.local'"
     let zshBash =
       [
         "export http_proxy=\(httpEndpoint)",
         "export https_proxy=\(httpEndpoint)",
         "export all_proxy=\(socksEndpoint)",
+        "export no_proxy=\(noProxy)",
       ].joined(separator: "; ") + ";"
     let fish =
       [
         "set -gx http_proxy \(httpEndpoint)",
         "set -gx https_proxy \(httpEndpoint)",
         "set -gx all_proxy \(socksEndpoint)",
+        "set -gx no_proxy \(noProxy)",
       ].joined(separator: "; ") + ";"
     self.init(
       zshBash: zshBash,
