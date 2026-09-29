@@ -15,3 +15,5 @@ triage 标签使用五个默认角色名作为标签字符串(needs-triage / nee
 ### Domain docs
 
 single-context:根目录一个 `CONTEXT.md` + `docs/adr/`,按需惰性创建。见 `docs/agents/domain.md`。
+
+`docs/research/` 收录研究报告:各文档记录写作时点调研的上游能力、候选方案与结论,不描述项目现状,也不代表已采纳的设计。现状与已定设计以代码、`CONTEXT.md` 和 `docs/adr/` 为准;把研究报告当实现依据前,先在代码里核实。
