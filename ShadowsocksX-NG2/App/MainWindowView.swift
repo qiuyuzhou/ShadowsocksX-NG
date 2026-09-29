@@ -34,6 +34,7 @@ struct MainWindowView: View {
   @ObservedObject var diagnostics: DiagnosticsWorkflow
   @ObservedObject var settingsWorkflow: SettingsWorkflow
   @ObservedObject var loginController: LaunchAtLoginController
+  @ObservedObject var silentLaunch: SilentLaunchController
   let clipboard: any TextClipboard
   let diagnosticReportExporter: any DiagnosticReportExporter
 
@@ -194,8 +195,11 @@ struct MainWindowView: View {
         workflow: workflow,
         onNodesRemoved: clearSelectionIfInvalidated)
     case .settings:
-      SettingsView(workflow: settingsWorkflow, loginController: loginController)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      SettingsView(
+        workflow: settingsWorkflow, loginController: loginController,
+        silentLaunch: silentLaunch
+      )
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
     case .diagnostics:
       WorkspaceDiagnosticsView(
         diagnostics: diagnostics,

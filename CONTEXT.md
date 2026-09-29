@@ -43,8 +43,9 @@
 - **Window-local default action shortcut**: A keyboard action bound to the focused app window or form context, such as confirming a dialog; it is distinct from a system-level shortcut.
 - **Workspace destination**: A top-level location in the single 2.0 GUI workspace, such as home, servers, subscriptions, settings, or diagnostics. It is navigation state only; it does not contain a node selection, sheet, alert, or feature draft.
 - **Workspace route**: The in-process navigation choice and intent used to move between workspace destinations from the workspace or another app entry point. It does not persist user configuration or own feature-local state.
-- **Workspace window**: The single main window hosting the workspace. It is presented at every launch and, once closed, can be reopened only from the status menu; opening, closing, or hiding it does not change the app's presentation.
-- **Menu bar form**: The app's one constant presentation: a menu-bar-only app with the status menu always available and never a Dock icon or app-switcher presence, whether or not the workspace window is open.
+- **Workspace window**: The single main window hosting the workspace. It is presented at every launch unless silent launch is on; while it is open the app presents in its regular form, and once it is closed the status menu is the only way to reopen it.
+- **Adaptive app form**: The app's presentation, which follows the workspace window: a menu-bar-only accessory app with the status menu always available and no Dock icon or app-switcher presence while the workspace window is closed, and a regular app with a Dock icon while it is open. _Avoid_: menu bar form (the presentation is no longer constant).
+- **Silent launch**: The user preference that a launch present no workspace window, starting in the menu-bar baseline instead. It defaults to off, takes effect on the next launch, and changes nothing about proxy runtime restoration or the login item.
 
 ## Relationships and invariants
 
@@ -91,5 +92,5 @@
 - Preferences have no single restore-all-factory-defaults action. Where a reset exists, it is scoped to one configuration item, never to the whole preference set at once.
 - The proxy mode selector's choice and the rule default action persist with the settings snapshot and survive GUI restarts; a persistence failure keeps the previous mode and sub-option in force and names the reason. Rule, global, and direct mode are always available.
 - The GUI is the user-facing manager; the Shadowsocks tunnel service is an external runtime boundary rather than part of the GUI's domain model.
-- The app presents only in the menu bar form: it never gains a Dock icon or app-switcher presence, and its presentation does not change when the workspace window opens, closes, or hides; the GUI process keeps running with the status menu available regardless of the workspace window.
-- Every launch of the GUI presents the workspace window; after it is closed, the status menu is the only way to reopen it.
+- The app presents in the adaptive app form: menu-bar-only while the workspace window is closed, and with a Dock icon and app-switcher presence while it is open; hiding the app is not closing it and does not change the form; the GUI process keeps running with the status menu available regardless of the workspace window.
+- At launch the GUI presents the workspace window unless silent launch is on; after the workspace window is closed, the status menu is the only way to reopen it. Silent launch changes only window presentation: proxy runtime restoration happens at every launch regardless of it.

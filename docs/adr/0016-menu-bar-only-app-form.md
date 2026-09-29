@@ -4,7 +4,7 @@ The GUI is a menu-bar-only app at all times: `LSUIElement` stays in effect and t
 
 ## Status
 
-Accepted (2026-09-28). Supersedes the earlier hybrid form (2026-09-24): `LSUIElement` plus runtime accessory⇄regular activation-policy switching, launch-time auto-presentation implemented through an AppKit-owned `NSWindow`, and the window-opening intents built around it.
+Accepted (2026-09-28). Superseded by ADR-0017 (2026-09-29), which replaces the constant menu-bar-only form with the adaptive app form (window-following activation policy plus an opt-out silent launch); the scene model, launch presentation, and status-menu reopening below carry over unchanged. Supersedes the earlier hybrid form (2026-09-24): `LSUIElement` plus runtime accessory⇄regular activation-policy switching, launch-time auto-presentation implemented through an AppKit-owned `NSWindow`, and the window-opening intents built around it.
 
 ## Considered options
 

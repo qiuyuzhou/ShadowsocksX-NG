@@ -2,10 +2,11 @@ import SwiftUI
 
 /// 设置分区（issue #33/#44，地图 #52 票 #57）：常规、后台代理客户端和系统代理三张
 /// 分组卡，行式呈现（主文案 + 次说明 + 行尾控件）。设置项由各自编辑器独立保存；
-/// 登录项开关绑定独立控制器。
+/// 登录项与静默启动开关绑定独立控制器。
 struct SettingsView: View {
   @ObservedObject var workflow: SettingsWorkflow
   @ObservedObject var loginController: LaunchAtLoginController
+  @ObservedObject var silentLaunch: SilentLaunchController
   @State private var presentedEditor: SettingsEditorSheet?
 
   var body: some View {
@@ -49,6 +50,22 @@ struct SettingsView: View {
         }
         if let loginError = loginController.errorMessage {
           Text(loginError)
+            .font(.caption)
+            .foregroundStyle(.red)
+        }
+      }
+      .padding(.vertical, 4)
+      VStack(alignment: .leading, spacing: 4) {
+        Toggle(
+          isOn: Binding(
+            get: { silentLaunch.isEnabled },
+            set: { silentLaunch.setEnabled($0) })
+        ) {
+          settingCopy("静默启动", note: "启动时后台运行，不显示主窗口；下次启动生效")
+        }
+        .toggleStyle(.switch)
+        if let silentLaunchError = silentLaunch.errorMessage {
+          Text(silentLaunchError)
             .font(.caption)
             .foregroundStyle(.red)
         }

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -9,9 +10,13 @@ struct ShadowsocksXNG2App: App {
   @StateObject private var settingsWorkflow: SettingsWorkflow
   @StateObject private var diagnosticsWorkflow: DiagnosticsWorkflow
   @StateObject private var workspaceRoute: WorkspaceRoute
+  @StateObject private var silentLaunch: SilentLaunchController
   private let textClipboard: any TextClipboard
   private let diagnosticReportExporter: any DiagnosticReportExporter
   private let workspaceContent: MainWindowView
+  /// 启动呈现行为在进程内一次性定格（ADR 0017）：静默启动偏好关闭（默认）
+  /// 时 presented，开启时 suppressed。切换偏好当次会话无影响，下次启动生效。
+  private let launchPresentation: SceneLaunchBehavior
 
   init() {
     let composition = AppComposition.make()
@@ -22,9 +27,11 @@ struct ShadowsocksXNG2App: App {
     _settingsWorkflow = StateObject(wrappedValue: composition.settingsWorkflow)
     _diagnosticsWorkflow = StateObject(wrappedValue: composition.diagnosticsWorkflow)
     _workspaceRoute = StateObject(wrappedValue: composition.workspaceRoute)
+    _silentLaunch = StateObject(wrappedValue: composition.silentLaunch)
     textClipboard = composition.textClipboard
     diagnosticReportExporter = composition.diagnosticReportExporter
     workspaceContent = composition.workspaceContent
+    launchPresentation = composition.silentLaunch.isEnabled ? .suppressed : .presented
     // GUI 事件接入内存环形缓冲（spec #21 D5，issue #34）：主窗口日志查看器与
     // 诊断导出的来源；wrapper 侧不注册，仍走 stderr → agent.log 收敛。
     RuntimeLog.setSink(RuntimeEventStore.shared)
@@ -41,16 +48,29 @@ struct ShadowsocksXNG2App: App {
     }
     .menuBarExtraStyle(.menu)
 
-    // 主 workspace 窗口（ADR 0016）：SwiftUI `Window` scene。启动由
-    // defaultLaunchBehavior(.presented) 自动呈现主窗口（scene 方式的启动
-    // 开窗，LSUIElement 下实测生效）；关窗后由状态菜单 ⑦ 经 openWindow 重开。
-    // app 始终保持 accessory 形态，没有激活策略切换；关窗不退进程
-    // （MenuBarExtra 持有进程）。
+    // 主 workspace 窗口（ADR 0016/0017）：SwiftUI `Window` scene。启动呈现由
+    // defaultLaunchBehavior 决定：静默启动关闭（默认）时 presented 启动即呈现
+    // （scene 方式启动开窗，LSUIElement 下实测生效），开启时 suppressed 直接
+    // 进菜单栏形态。窗口开着期间 app 为 regular（Dock 图标/Cmd-Tab/默认菜单
+    // 栏），关窗回 accessory 菜单栏形态——随窗激活策略由窗口 NSWindow 生命
+    // 周期通知驱动（WindowActivationPolicy，scenePhase 在 macOS 跟随应用而非
+    // 窗口、关窗无事件，实测不可用）；关窗后由状态菜单 ⑦ 经 openWindow 重开。
+    // 关窗不退进程（MenuBarExtra 持进程）。
     Window("ShadowsocksX-NG2", id: WorkspaceRoute.workspaceSceneID) {
       workspaceContent
+        .modifier(WindowActivationPolicy(applying: NSAppWindowActivationApplier()))
     }
-    .defaultLaunchBehavior(.presented)
+    .defaultLaunchBehavior(launchPresentation)
     .defaultSize(width: 960, height: 640)
+  }
+}
+
+/// 随窗激活策略的真实 NSApp 落点（hermetic：单测 host 不触碰激活策略）。
+@MainActor
+private final class NSAppWindowActivationApplier: WindowActivationPolicyApplying {
+  func apply(_ policy: NSApplication.ActivationPolicy) {
+    guard !ApplicationDependencies.isUnitTesting else { return }
+    NSApp.setActivationPolicy(policy)
   }
 }
 
@@ -86,6 +106,7 @@ private struct AppComposition {
   let settingsWorkflow: SettingsWorkflow
   let diagnosticsWorkflow: DiagnosticsWorkflow
   let workspaceRoute: WorkspaceRoute
+  let silentLaunch: SilentLaunchController
   let textClipboard: any TextClipboard
   let diagnosticReportExporter: any DiagnosticReportExporter
   let workspaceContent: MainWindowView
@@ -128,6 +149,7 @@ private struct AppComposition {
       runtimeFacts: controller,
       catalogFacts: { catalogWorkflow.diagnosticCatalogFacts })
     let workspaceRoute = WorkspaceRoute()
+    let silentLaunch = SilentLaunchController(store: dependencies.silentLaunchStore)
     let workspaceContent = MainWindowView(
       route: workspaceRoute,
       workflow: catalogWorkflow,
@@ -136,6 +158,7 @@ private struct AppComposition {
       diagnostics: diagnosticsWorkflow,
       settingsWorkflow: settingsWorkflow,
       loginController: loginController,
+      silentLaunch: silentLaunch,
       clipboard: textClipboard,
       diagnosticReportExporter: diagnosticReportExporter)
     return AppComposition(
@@ -146,6 +169,7 @@ private struct AppComposition {
       settingsWorkflow: settingsWorkflow,
       diagnosticsWorkflow: diagnosticsWorkflow,
       workspaceRoute: workspaceRoute,
+      silentLaunch: silentLaunch,
       textClipboard: textClipboard,
       diagnosticReportExporter: diagnosticReportExporter,
       workspaceContent: workspaceContent)
@@ -192,6 +216,7 @@ private struct ApplicationDependencies {
   let legacyImportService: LegacyImportService
   let launchAgent: LaunchAgentControlling
   let loginService: LaunchAtLoginControlling
+  let silentLaunchStore: SilentLaunchStore
   let textClipboard: any TextClipboard
   let diagnosticReportExporter: any DiagnosticReportExporter
 
@@ -225,6 +250,7 @@ private struct ApplicationDependencies {
         catalogStore: catalogFileStore, credentials: credentials),
       launchAgent: SMAppLaunchAgentService(),
       loginService: SMAppLaunchAtLoginService(),
+      silentLaunchStore: SilentLaunchStore(),
       textClipboard: AppKitTextClipboard(),
       diagnosticReportExporter: AppKitDiagnosticReportExporter())
   }
@@ -262,6 +288,8 @@ private struct ApplicationDependencies {
       legacyImportService: legacyImportService,
       launchAgent: NoopLaunchAgentService(),
       loginService: NoopLaunchAtLoginService(),
+      silentLaunchStore: SilentLaunchStore(
+        fileURL: directory.appendingPathComponent("silent-launch.json")),
       textClipboard: InMemoryTextClipboard(),
       diagnosticReportExporter: InMemoryDiagnosticReportExporter())
   }
