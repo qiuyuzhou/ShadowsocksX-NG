@@ -30,7 +30,6 @@ final class ActivationStateMachineTests: XCTestCase {
     XCTAssertEqual(configuration.document.servers.count, 1)
     let entry = configuration.document.servers[0]
     XCTAssertEqual(entry.id, server.rawValue)
-    XCTAssertEqual(entry.remarks, "香港 01")
     XCTAssertEqual(entry.server, "203.0.113.7")
     XCTAssertEqual(entry.serverPort, 8388)
     XCTAssertEqual(entry.method, "aes-256-gcm")

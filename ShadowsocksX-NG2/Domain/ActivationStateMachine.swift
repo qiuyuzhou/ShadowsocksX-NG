@@ -221,7 +221,6 @@ struct ActivationStateMachine: Equatable, Sendable {
     return .success(
       SslocalServerDocument(
         id: leafID.rawValue,
-        remarks: fields.remark,
         server: fields.address.trimmingCharacters(in: .whitespacesAndNewlines),
         serverPort: fields.port,
         password: password,

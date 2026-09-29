@@ -276,7 +276,7 @@ final class RuntimeFileStoreTests: XCTestCase {
       method: String = "aes-256-gcm"
     ) -> SslocalServerDocument {
       SslocalServerDocument(
-        id: id, remarks: "", server: address, serverPort: port, password: "pw",
+        id: id, server: address, serverPort: port, password: "pw",
         method: method, plugin: nil, pluginOpts: nil)
     }
 

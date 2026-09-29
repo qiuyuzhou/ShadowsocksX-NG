@@ -19,7 +19,6 @@ final class RuntimeDocumentTests: XCTestCase {
       servers: [
         SslocalServerDocument(
           id: "server-1",
-          remarks: "香港 01",
           server: "203.0.113.7",
           serverPort: 8388,
           password: "resolved-password",
@@ -56,7 +55,8 @@ final class RuntimeDocumentTests: XCTestCase {
     XCTAssertEqual(servers.count, 1)
     let server = servers[0]
     XCTAssertEqual(server["id"] as? String, "server-1", "叶子身份进入文档，供诊断与稳定标识")
-    XCTAssertEqual(server["remarks"] as? String, "香港 01")
+    XCTAssertFalse(
+      server.keys.contains("remarks"), "显示名是目录元数据，不进契约（只承载连接有效值）")
     XCTAssertEqual(server["server"] as? String, "203.0.113.7")
     XCTAssertEqual(server["server_port"] as? Int, 8388)
     XCTAssertEqual(server["password"] as? String, "resolved-password")
@@ -92,7 +92,7 @@ final class RuntimeDocumentTests: XCTestCase {
     let document = SslocalRuntimeDocument(
       servers: [
         SslocalServerDocument(
-          id: "server-1", remarks: "test", server: "example.com", serverPort: 8388,
+          id: "server-1", server: "example.com", serverPort: 8388,
           password: "pw", method: "aes-256-gcm", plugin: nil, pluginOpts: nil)
       ],
       listen: SslocalListenSettings())

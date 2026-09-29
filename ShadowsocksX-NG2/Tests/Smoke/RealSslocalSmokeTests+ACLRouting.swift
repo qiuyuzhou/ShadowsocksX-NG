@@ -12,7 +12,7 @@ extension RealSslocalSmokeTests {
     let document = SslocalRuntimeDocument(
       servers: [],
       listen: listen,
-      acl: .direct(at: workDir.appendingPathComponent("sslocal-active.acl")))
+      acl: .direct(at: aclFileURL))
     XCTAssertTrue(document.isWellFormed)
     let wrapper = try launchWrapper(document)
     defer {
@@ -60,7 +60,6 @@ extension RealSslocalSmokeTests {
       servers: [
         SslocalServerDocument(
           id: "global-smoke-server",
-          remarks: "global-smoke",
           server: "127.0.0.1",
           serverPort: fakeSSServer.port,
           password: "smoke-password",
@@ -69,7 +68,7 @@ extension RealSslocalSmokeTests {
           pluginOpts: nil)
       ],
       listen: listen,
-      acl: .global(at: workDir.appendingPathComponent("sslocal-active.acl")))
+      acl: .global(at: aclFileURL))
     XCTAssertTrue(document.isWellFormed)
     let wrapper = try launchWrapper(document)
     defer {
@@ -108,7 +107,6 @@ extension RealSslocalSmokeTests {
       servers: [
         SslocalServerDocument(
           id: "rule-smoke-server",
-          remarks: "rule-smoke",
           server: "127.0.0.1",
           serverPort: fakeSSServer.port,
           password: "smoke-password",
@@ -118,7 +116,7 @@ extension RealSslocalSmokeTests {
       ],
       listen: listen,
       acl: .rule(
-        at: workDir.appendingPathComponent("sslocal-active.acl"),
+        at: aclFileURL,
         defaultAction: .proxyWhenUnmatched,
         rules: chinaRules))
     XCTAssertTrue(document.isWellFormed)
@@ -150,7 +148,6 @@ extension RealSslocalSmokeTests {
       servers: [
         SslocalServerDocument(
           id: "cidr-smoke-server",
-          remarks: "cidr-smoke",
           server: "127.0.0.1",
           serverPort: fakeSSServer.port,
           password: "smoke-password",
@@ -160,7 +157,7 @@ extension RealSslocalSmokeTests {
       ],
       listen: listen,
       acl: .rule(
-        at: workDir.appendingPathComponent("sslocal-active.acl"),
+        at: aclFileURL,
         defaultAction: .proxyWhenUnmatched,
         rules: try chinaCIDRSmokeRules()))
     XCTAssertTrue(document.isWellFormed)

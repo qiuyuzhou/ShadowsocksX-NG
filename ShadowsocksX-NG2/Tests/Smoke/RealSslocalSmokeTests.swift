@@ -24,6 +24,12 @@ final class RealSslocalSmokeTests: XCTestCase {
     try super.tearDownWithError()
   }
 
+  /// `RuntimeFileStore.write` 校验的 ACL sidecar 路径：ACL 文档的 `path` 必须
+  /// 严格等于它，否则契约写入即抛「ACL sidecar path or digest is invalid」。
+  var aclFileURL: URL {
+    RuntimeFileStore(fileURL: contractURL).aclFileURL
+  }
+
   private var sslocalURL: URL {
     get throws {
       let url = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/sslocal")
@@ -144,7 +150,6 @@ final class RealSslocalSmokeTests: XCTestCase {
       servers: [
         SslocalServerDocument(
           id: "smoke-server",
-          remarks: "smoke",
           server: "127.0.0.1",
           serverPort: 1,  // 远端必然拒绝：只验证本地握手与 SSLOCAL 配置格式
           password: "smoke-password",

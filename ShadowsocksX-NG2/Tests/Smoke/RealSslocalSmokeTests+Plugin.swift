@@ -27,7 +27,6 @@ extension RealSslocalSmokeTests {
       servers: [
         SslocalServerDocument(
           id: "smoke-plugin-server",
-          remarks: "smoke-plugin",
           server: "127.0.0.1",
           serverPort: 1,  // 远端必然拒绝：只验证本地链路与插件进程边界
           password: "smoke-password",

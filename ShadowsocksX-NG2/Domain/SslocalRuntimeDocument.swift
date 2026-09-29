@@ -164,11 +164,11 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
   }()
 }
 
-/// 上游 `servers[]` 条目。id/remarks 携带叶子身份与显示名，供上游稳定标识；
+/// 上游 `servers[]` 条目。id 携带叶子身份，供上游稳定标识；显示名是目录
+/// 元数据，不进契约（CONTEXT.md「Runtime configuration file」）。
 /// 插件字段在无插件时整体省略（D10）。
 struct SslocalServerDocument: Codable, Equatable, Sendable {
   let id: String
-  let remarks: String
   let server: String
   let serverPort: Int
   let password: String
@@ -177,7 +177,7 @@ struct SslocalServerDocument: Codable, Equatable, Sendable {
   let pluginOpts: String?
 
   enum CodingKeys: String, CodingKey {
-    case id, remarks, server
+    case id, server
     case serverPort = "server_port"
     case password, method, plugin
     case pluginOpts = "plugin_opts"

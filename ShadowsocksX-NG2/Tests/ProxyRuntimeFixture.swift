@@ -117,7 +117,6 @@ enum ProxyRuntimeFixture {
       servers: [
         SslocalServerDocument(
           id: "server-1",
-          remarks: "香港 01",
           server: serverAddress,
           serverPort: 8388,
           password: password,

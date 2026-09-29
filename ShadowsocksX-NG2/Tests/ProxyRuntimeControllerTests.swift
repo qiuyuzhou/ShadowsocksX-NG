@@ -11,7 +11,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
   var runtime: ProxyRuntimeFixture.TemporaryRuntime!
   var catalogFileURL: URL!
   var activationFileURL: URL!
-  private var credentials: InMemoryCredentialStore!
+  var credentials: InMemoryCredentialStore!
   var agent: ProxyRuntimeFixture.FakeLaunchAgent!
   var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
   var signals: SignalRecorder!
@@ -267,40 +267,4 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.pidFile.path))
   }
 
-  // MARK: 目录重展开消费（D3/D5）
-
-  func testCatalogEditOfActiveTargetRewritesAndSignalsRunningWrapper() async throws {
-    let seeded = try makeSeededCatalog()
-    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
-    try await controller.activate(seeded.server)
-    await controller.setAgentEnabled(true)
-    // 模拟 wrapper 在跑：pid 指向本测试进程（kill(pid, 0) 判活通过）。
-    try Data("\(ProcessInfo.processInfo.processIdentifier)".utf8).write(to: runtime.pidFile)
-
-    // 修改服务器备注（文档内容随之变化），提交目录变更。
-    var catalog = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
-    var fields = try ActivationFixture.serverFields(of: seeded.server, in: catalog)
-    fields = ServerFields(
-      address: fields.address,
-      port: fields.port,
-      encryptionMethod: fields.encryptionMethod,
-      passwordRef: fields.passwordRef,
-      remark: "新加坡 01",
-      pluginProgram: fields.pluginProgram,
-      pluginOptionsRef: fields.pluginOptionsRef)
-    try catalog.updateServer(seeded.server, with: fields)
-    try CatalogFileStore(fileURL: catalogFileURL).save(CatalogDocument(catalog: catalog))
-
-    // 协调器生产适配入口（issue #40）：以刚提交的内存快照重展开。
-    let committed = try CatalogFileStore(fileURL: catalogFileURL).load().catalog
-    _ = await controller.catalogDidCommit(snapshot: committed)
-
-    XCTAssertEqual(controller.state, .running)
-    let expectedRemark = "新加坡 01"
-    let onDisk = try XCTUnwrap(RuntimeFileStore(fileURL: runtime.contract).loadDocument())
-    XCTAssertEqual(onDisk.servers.first?.remarks, expectedRemark, "运行时文档已原子更新")
-    let signalsSent = signals.signalsSent.filter { $0.signal != 0 }
-    XCTAssertEqual(signalsSent.count, 1, "代理运行中：重写后应发一次 SIGUSR1")
-    XCTAssertEqual(signalsSent.first?.signal, SIGUSR1)
-  }
 }

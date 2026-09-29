@@ -26,7 +26,6 @@ extension RealSslocalSmokeTests {
       servers: [
         SslocalServerDocument(
           id: "gfw-smoke-server",
-          remarks: "gfw-smoke",
           server: "127.0.0.1",
           serverPort: fakeSSServer.port,
           password: "smoke-password",
@@ -36,7 +35,7 @@ extension RealSslocalSmokeTests {
       ],
       listen: listen,
       acl: .rule(
-        at: workDir.appendingPathComponent("sslocal-active.acl"),
+        at: aclFileURL,
         defaultAction: .directWhenUnmatched,
         rules: gfwRules))
     XCTAssertTrue(document.isWellFormed)
@@ -65,7 +64,6 @@ extension RealSslocalSmokeTests {
       servers: [
         SslocalServerDocument(
           id: "priority-smoke-server",
-          remarks: "priority-smoke",
           server: "127.0.0.1",
           serverPort: fakeSSServer.port,
           password: "smoke-password",
@@ -117,7 +115,7 @@ extension RealSslocalSmokeTests {
       8.8.8.0/24
       """
     let acl = ProxyACLDocument(
-      path: workDir.appendingPathComponent("sslocal-active.acl").standardizedFileURL.path,
+      path: aclFileURL.standardizedFileURL.path,
       summary: "priority-probe",
       content: aclContent)
     XCTAssertTrue(acl.isWellFormed)

@@ -13,6 +13,12 @@ extension ProxyRuntimeController {
       guard settings.agentEnabled else {
         return .revalidated
       }
+      if runtimeAlreadyConverged(with: configuration.document) {
+        RuntimeLog.emit(.contractUnchanged)
+        return Self.syncOutcome(
+          agentState: state, systemProxyState: systemProxyState,
+          skippedServers: configuration.skippedServers)
+      }
       await deploy(configuration.document)
       return Self.syncOutcome(
         agentState: state, systemProxyState: systemProxyState,
@@ -34,6 +40,35 @@ extension ProxyRuntimeController {
       return Self.syncOutcome(
         agentState: state, systemProxyState: systemProxyState, skippedServers: [])
     }
+  }
+
+  /// 目录提交去抖（CONTEXT.md「有效值未变的提交不做运行时收敛」）：派生文档
+  /// （含模式/ACL 合并）与磁盘契约逐字节相等、agent 已注册且 wrapper 存活、
+  /// 控制器处于健康运行态时，本次提交对运行时无事可做——不写契约、不发信号、
+  /// 不闪 starting、不重走健康门与系统代理收敛。判定复用计划层语义
+  /// （`ProxyRuntimePlan.actions` 返回空 = 幂等跳过）：磁盘漂移或 wrapper 失踪
+  /// 时动作序列自然非空，走完整 deploy 自愈。目录重校验（跳过名单、目标失效
+  /// 清除）已在 `reexpand` 完成，不受此门影响。
+  private func runtimeAlreadyConverged(with sourceDocument: SslocalRuntimeDocument) -> Bool {
+    switch state {
+    case .running, .firewallBlocked:
+      break
+    case .off, .starting, .launchFailed, .requiresApproval, .serviceFailed:
+      return false
+    }
+    let document: SslocalRuntimeDocument
+    do {
+      document = try runtimeDocument(sourceDocument, for: proxyMode)
+    } catch {
+      // 规则快照缺失/损坏：交完整 deploy 如实呈现，不静默当作已收敛。
+      return false
+    }
+    let actions = ProxyRuntimePlan.actions(
+      intent: .run(document),
+      agentStatus: agent.status,
+      wrapper: wrapperState(),
+      contractOnDisk: runtimeFileStore.readData())
+    return actions.isEmpty
   }
 
   /// 部署后的控制器状态 → 结构化收敛结果：健康通过（含防火墙受阻的运行态）

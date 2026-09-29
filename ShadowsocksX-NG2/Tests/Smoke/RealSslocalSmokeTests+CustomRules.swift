@@ -29,7 +29,6 @@ extension RealSslocalSmokeTests {
       servers: [
         SslocalServerDocument(
           id: "custom-smoke-server",
-          remarks: "custom-smoke",
           server: "127.0.0.1",
           serverPort: fakeSSServer.port,
           password: "smoke-password",
@@ -39,7 +38,7 @@ extension RealSslocalSmokeTests {
       ],
       listen: listen,
       acl: .rule(
-        at: workDir.appendingPathComponent("sslocal-active.acl"),
+        at: aclFileURL,
         defaultAction: .proxyWhenUnmatched,
         rules: customRules))
     XCTAssertTrue(document.isWellFormed)
@@ -127,7 +126,6 @@ extension RealSslocalSmokeTests {
       servers: [
         SslocalServerDocument(
           id: "custom-direct-smoke-server",
-          remarks: "custom-direct-smoke",
           server: "127.0.0.1",
           serverPort: fakeSSServer.port,
           password: "smoke-password",
@@ -137,7 +135,7 @@ extension RealSslocalSmokeTests {
       ],
       listen: listen,
       acl: .rule(
-        at: workDir.appendingPathComponent("sslocal-active.acl"),
+        at: aclFileURL,
         defaultAction: .directWhenUnmatched,
         rules: customRules))
     XCTAssertTrue(document.isWellFormed)
