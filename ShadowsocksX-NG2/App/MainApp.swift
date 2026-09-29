@@ -232,6 +232,10 @@ private struct ApplicationDependencies {
   }
 
   private static func makeProduction() -> ApplicationDependencies {
+    // ADR 0017 初版文件形态的迁移（发布链从未包含，仅存量开发机）：文件不存在
+    // 即空操作，随每次启动调用无害。
+    SilentLaunchStore.migrateLegacyFileIfPresent(
+      at: SilentLaunchStore.legacyFileURL, into: .standard)
     let credentials = KeychainCredentialStore()
     let catalogFileStore = CatalogFileStore(fileURL: CatalogFileStore.defaultFileURL())
     let settingsStore = ProxySettingsFileStore()
@@ -259,6 +263,12 @@ private struct ApplicationDependencies {
     let directory = FileManager.default.temporaryDirectory
       .appendingPathComponent("ShadowsocksX-NG2-test-host-\(UUID().uuidString)", isDirectory: true)
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+    // 测试宿主不得触碰生产 defaults 域：走独立套件并在装配时清空（封闭性公约）。
+    let silentLaunchSuite = "ShadowsocksX-NG2-test-host-silent-launch"
+    UserDefaults.standard.removePersistentDomain(forName: silentLaunchSuite)
+    let silentLaunchStore = SilentLaunchStore(
+      defaults: UserDefaults(suiteName: silentLaunchSuite)!)
 
     let credentials = EphemeralCredentialStore()
     let catalogFileStore = CatalogFileStore(
@@ -288,8 +298,7 @@ private struct ApplicationDependencies {
       legacyImportService: legacyImportService,
       launchAgent: NoopLaunchAgentService(),
       loginService: NoopLaunchAtLoginService(),
-      silentLaunchStore: SilentLaunchStore(
-        fileURL: directory.appendingPathComponent("silent-launch.json")),
+      silentLaunchStore: silentLaunchStore,
       textClipboard: InMemoryTextClipboard(),
       diagnosticReportExporter: InMemoryDiagnosticReportExporter())
   }

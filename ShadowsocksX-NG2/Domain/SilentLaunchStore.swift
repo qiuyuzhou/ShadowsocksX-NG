@@ -1,68 +1,54 @@
 import Foundation
 
-/// 静默启动偏好持久化（ADR 0017）：落盘 `~/Library/Application Support/
-/// ShadowsocksX-NG2/silent-launch.json`。GUI 呈现层独占的偏好文件，与
-/// settings.json 有意分离——代理控制器按内存快照整写 settings.json，任何
-/// 旁路字段都会被下一次整写覆盖。文件缺失、损坏或版本未知一律按安全侧
-/// 默认「不静默」（启动照常呈现主窗口）。
+/// 静默启动偏好持久化（ADR 0017）：存于应用标准 defaults 域（键
+/// `silentLaunch`）的 GUI 呈现层独占偏好，与 settings.json 有意分离——代理
+/// 控制器按内存快照整写 settings.json，任何旁路字段都会被下一次整写覆盖。
+/// 键缺失或外部错误类型按安全侧默认「不静默」（启动照常呈现主窗口）。
+/// ADR 0017 初版为独立 JSON 文件，发布链从未包含该形态，仅存量开发机文件
+/// 需一次性迁移（`migrateLegacyFileIfPresent`）。
 struct SilentLaunchStore {
-  enum PersistenceError: Error, Equatable {
-    /// 读取或写入时的文件系统错误。
-    case ioFailure(detail: String)
-  }
-
-  private static let currentVersion = 1
-  private static let jsonEncoder: JSONEncoder = {
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    return encoder
-  }()
-
-  let fileURL: URL
-
-  /// 默认位置：`~/Library/Application Support/ShadowsocksX-NG2/silent-launch.json`。
-  static func defaultFileURL() -> URL {
+  private static let key = "silentLaunch"
+  /// ADR 0017 初版（文件形态）的落盘位置，仅迁移路径使用。
+  static let legacyFileURL: URL = {
     let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
       0]
     return support.appendingPathComponent("ShadowsocksX-NG2/silent-launch.json")
+  }()
+
+  private static let currentVersion = 1
+
+  let defaults: UserDefaults
+
+  init(defaults: UserDefaults = .standard) {
+    self.defaults = defaults
   }
 
-  init(fileURL: URL = SilentLaunchStore.defaultFileURL()) {
-    self.fileURL = fileURL
-  }
-
-  /// 缺失/损坏/版本未知 → `false`（安全侧：不静默）。
+  /// 键缺失或外部错误类型（无法按 Bool 桥接）→ `false`（安全侧：不静默），
+  /// 严格性与初版文件形态的 decode 一致，无需 register(defaults:)。
   func loadSilentLaunchEnabled() -> Bool {
-    guard FileManager.default.fileExists(atPath: fileURL.path) else { return false }
-    let data: Data
-    do {
-      data = try Data(contentsOf: fileURL)
-    } catch {
-      return false
-    }
-    let payload = try? JSONDecoder().decode(SilentLaunchPayload.self, from: data)
-    guard let payload, payload.version == Self.currentVersion else { return false }
-    return payload.silentLaunchEnabled
+    defaults.object(forKey: Self.key) as? Bool ?? false
   }
 
-  /// 整体重写并原子替换；失败时保留原文件。
-  func save(silentLaunchEnabled: Bool) throws {
-    let data: Data
-    do {
-      data = try Self.jsonEncoder.encode(
-        SilentLaunchPayload(version: Self.currentVersion, silentLaunchEnabled: silentLaunchEnabled))
-    } catch {
-      throw PersistenceError.ioFailure(detail: String(describing: error))
+  /// UserDefaults 无失败信号：极端落盘失败表现为下次启动回退默认（尽力而为，
+  /// ADR 0017 修正后放弃文件版的失败点名路径）。
+  func save(silentLaunchEnabled: Bool) {
+    defaults.set(silentLaunchEnabled, forKey: Self.key)
+  }
+
+  /// 一次性迁移（初版文件形态 → defaults）：文件存在则读取 v1 值写入 defaults
+  /// 后删除文件；损坏或版本未知不写入（安全侧默认），文件仍删除。
+  static func migrateLegacyFileIfPresent(at fileURL: URL, into defaults: UserDefaults) {
+    guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+    let payload = try? JSONDecoder().decode(
+      SilentLaunchPayload.self, from: Data(contentsOf: fileURL))
+    if let payload, payload.version == currentVersion {
+      defaults.set(payload.silentLaunchEnabled, forKey: key)
     }
-    do {
-      try AtomicFileWriter.write(data, to: fileURL)
-    } catch {
-      throw PersistenceError.ioFailure(detail: String(describing: error))
-    }
+    try? FileManager.default.removeItem(at: fileURL)
   }
 }
 
-/// 落盘文档形态：版本号 + 偏好布尔。
+/// 初版文件形态的落盘文档：版本号 + 偏好布尔（仅迁移读取）。
 private struct SilentLaunchPayload: Codable {
   var version: Int
   var silentLaunchEnabled: Bool

@@ -64,11 +64,6 @@ struct SettingsView: View {
           settingCopy("静默启动", note: "启动时后台运行，不显示主窗口；下次启动生效")
         }
         .toggleStyle(.switch)
-        if let silentLaunchError = silentLaunch.errorMessage {
-          Text(silentLaunchError)
-            .font(.caption)
-            .foregroundStyle(.red)
-        }
       }
       .padding(.vertical, 4)
     } header: {
