@@ -10,6 +10,8 @@ enum RuntimeLogEvent: Equatable, CustomStringConvertible, Sendable {
   case contractWritten(serverCount: Int)
   /// 契约内容与磁盘一致，跳过写入（幂等）。
   case contractUnchanged
+  /// 系统代理期望值与系统当前应用值语义等价，跳过写入（零授权，issue #70）。
+  case systemProxyUnchanged
   /// 运行时文件已清理。
   case runtimeFilesDeleted
   /// 激活状态等运行时元数据落盘失败（不含内容）。
@@ -47,6 +49,8 @@ enum RuntimeLogEvent: Equatable, CustomStringConvertible, Sendable {
       return "contract written (servers=\(serverCount))"
     case .contractUnchanged:
       return "contract unchanged, write skipped"
+    case .systemProxyUnchanged:
+      return "system proxy values unchanged, write skipped"
     case .runtimeFilesDeleted:
       return "runtime files deleted"
     case .runtimePersistFailed(let detail):

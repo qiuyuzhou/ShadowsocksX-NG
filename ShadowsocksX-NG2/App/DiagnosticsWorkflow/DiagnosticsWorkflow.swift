@@ -30,6 +30,8 @@ extension RuntimeLogEvent {
       return "contract written (servers=\(serverCount))"
     case .contractUnchanged:
       return "contract unchanged, write skipped"
+    case .systemProxyUnchanged:
+      return "system proxy values unchanged, write skipped"
     case .runtimeFilesDeleted:
       return "runtime files deleted"
     case .runtimePersistFailed:

@@ -4,35 +4,28 @@ import SystemConfiguration
 
 /// System proxy write seam. The controller calls it only after endpoint health
 /// succeeds; tests replace it without touching the user's network settings.
+/// `apply` 返回 written / unchanged：值语义等价时零写入零授权（issue #70）。
 protocol SystemProxyControlling {
-  func apply(_ configuration: SystemProxyConfiguration) throws
+  @discardableResult
+  func apply(_ configuration: SystemProxyConfiguration) throws -> SystemProxyWriteOutcome
   func restore() throws
-}
-
-enum SystemProxyError: Error, Equatable, Sendable {
-  case authorizationFailed(Int32)
-  case preferencesUnavailable
-  case preferencesBusy
-  case noCurrentNetworkSet
-  case noProxyServices
-  case unreadableService(String)
-  case ownershipConflict(String)
-  case invalidStoredConfiguration(String)
-  case cannotWriteService(String)
-  case commitFailed(String)
-  case applyFailed(String)
-  case ownershipStoreFailed(String)
 }
 
 /// Writes the Proxies entity of every service in the current network set.
 /// Before the first write it snapshots each complete dictionary. Later writes
 /// are allowed only while every previously applied dictionary is unchanged;
 /// this prevents 2.0 from restoring over a user's manual or MDM change.
+/// 期望值与当前值语义等价的 service 不写入；全部等价时不加锁、不提交，
+/// 授权弹窗只发生在存在真实值变更的提交上（issue #70）。
 final class SystemConfigurationProxyController: SystemProxyControlling {
   private struct ServiceSnapshot {
     let id: String
     let proxyProtocol: SCNetworkProtocol
     let configuration: Data?
+
+    var plannerState: SystemProxyServiceState {
+      SystemProxyServiceState(serviceID: id, configuration: configuration)
+    }
   }
 
   private let ownershipStore: SystemProxyOwnershipStoring
@@ -43,23 +36,32 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
     self.ownershipStore = ownershipStore
   }
 
-  func apply(_ configuration: SystemProxyConfiguration) throws {
+  func apply(_ configuration: SystemProxyConfiguration) throws -> SystemProxyWriteOutcome {
     try withPreferences { preferences in
       let services = try serviceSnapshots(in: preferences)
       guard !services.isEmpty else { throw SystemProxyError.noProxyServices }
 
       let existing = try loadOwnership()
-      let plan = try makePlan(
-        services: services, existing: existing, configuration: configuration)
+      let plan = try SystemProxyPlanner.makePlan(
+        services: services.map(\.plannerState),
+        existing: existing,
+        configuration: configuration)
+      guard !plan.writes.isEmpty else {
+        // 期望值与系统当前值语义等价：零写入、零授权。adopt 发生时仍需刷新
+        // ownership record（本地文件写入，无需授权）。
+        if plan.ownershipChanged { try saveOwnership(plan.ownership) }
+        return .unchanged
+      }
 
+      let servicesByID = Dictionary(uniqueKeysWithValues: services.map { ($0.id, $0) })
       try SCPreferencesLockOrThrow(preferences)
       defer { SCPreferencesUnlock(preferences) }
       try saveOwnership(plan.ownership)
       do {
-        for (service, entry) in zip(services, plan.entries) {
-          guard setConfiguration(entry.appliedConfiguration, on: service.proxyProtocol) else {
-            throw SystemProxyError.cannotWriteService(service.id)
-          }
+        for entry in plan.writes {
+          guard let service = servicesByID[entry.serviceID],
+            setConfiguration(entry.appliedConfiguration, on: service.proxyProtocol)
+          else { throw SystemProxyError.cannotWriteService(entry.serviceID) }
         }
         try commitAndApply(preferences)
       } catch {
@@ -70,51 +72,8 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
         }
         throw error
       }
+      return .written
     }
-  }
-
-  private func makePlan(
-    services: [ServiceSnapshot],
-    existing: SystemProxyOwnershipRecord?,
-    configuration: SystemProxyConfiguration
-  ) throws -> (
-    entries: [SystemProxyOwnershipRecord.Entry],
-    ownership: SystemProxyOwnershipRecord
-  ) {
-    let existingByID = Dictionary(
-      uniqueKeysWithValues: existing?.entries.map { ($0.serviceID, $0) } ?? [])
-    var entries: [SystemProxyOwnershipRecord.Entry] = []
-
-    for service in services {
-      if let owned = existingByID[service.id] {
-        guard
-          !hasOwnershipConflict(
-            current: service.configuration, applied: owned.appliedConfiguration
-          )
-        else {
-          throw SystemProxyError.ownershipConflict(service.id)
-        }
-      }
-      let original = existingByID[service.id]?.originalConfiguration ?? service.configuration
-      let applied = try managedConfiguration(
-        basedOn: original, configuration: configuration, serviceID: service.id)
-      entries.append(
-        SystemProxyOwnershipRecord.Entry(
-          serviceID: service.id,
-          originalConfiguration: original,
-          appliedConfiguration: applied))
-    }
-
-    var allEntries = Dictionary(
-      uniqueKeysWithValues: existing?.entries.map { ($0.serviceID, $0) } ?? [])
-    for entry in entries {
-      allEntries[entry.serviceID] = entry
-    }
-    return (
-      entries: entries,
-      ownership: SystemProxyOwnershipRecord(
-        entries: allEntries.values.sorted { $0.serviceID < $1.serviceID })
-    )
   }
 
   func restore() throws {
@@ -126,9 +85,11 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
 
       for entry in ownership.entries {
         guard let service = servicesByID[entry.serviceID] else { continue }
-        if equivalent(service.configuration, entry.appliedConfiguration) {
+        if SystemProxyPlanner.equivalent(service.configuration, entry.appliedConfiguration) {
           servicesToRestore.append((service, entry))
-        } else if equivalent(service.configuration, entry.originalConfiguration) {
+        } else if SystemProxyPlanner.equivalent(
+          service.configuration, entry.originalConfiguration)
+        {
           continue
         } else {
           throw SystemProxyError.ownershipConflict(entry.serviceID)
@@ -211,26 +172,9 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
       return ServiceSnapshot(
         id: serviceID,
         proxyProtocol: proxyProtocol,
-        configuration: try propertyListData(from: SCNetworkProtocolGetConfiguration(proxyProtocol)))
+        configuration: try propertyListData(
+          from: SCNetworkProtocolGetConfiguration(proxyProtocol)))
     }
-  }
-
-  private func managedConfiguration(
-    basedOn original: Data?, configuration: SystemProxyConfiguration, serviceID: String
-  ) throws -> Data {
-    let originalDictionary = try dictionary(from: original, serviceID: serviceID)
-    let dictionary = SystemProxyPropertyList.applying(configuration, to: originalDictionary)
-    return try propertyListData(from: dictionary, serviceID: serviceID)
-  }
-
-  private func dictionary(from data: Data?, serviceID: String) throws -> [String: Any] {
-    guard let data else { return [:] }
-    guard
-      let propertyList = try? PropertyListSerialization.propertyList(
-        from: data, options: [], format: nil),
-      let dictionary = propertyList as? [String: Any]
-    else { throw SystemProxyError.invalidStoredConfiguration(serviceID) }
-    return dictionary
   }
 
   private func propertyListData(
@@ -240,16 +184,7 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
     guard let dictionary = value as? [String: Any] else {
       throw SystemProxyError.unreadableService(serviceID)
     }
-    return try propertyListData(from: dictionary, serviceID: serviceID)
-  }
-
-  private func propertyListData(from dictionary: [String: Any], serviceID: String) throws -> Data {
-    do {
-      return try PropertyListSerialization.data(
-        fromPropertyList: dictionary, format: .binary, options: 0)
-    } catch {
-      throw SystemProxyError.unreadableService(serviceID)
-    }
+    return try SystemProxyPlanner.propertyListData(from: dictionary, serviceID: serviceID)
   }
 
   private func setConfiguration(_ data: Data?, on proxyProtocol: SCNetworkProtocol) -> Bool {
@@ -262,21 +197,6 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
     return SCNetworkProtocolSetConfiguration(proxyProtocol, dictionary as CFDictionary)
   }
 
-  private func equivalent(_ lhs: Data?, _ rhs: Data?) -> Bool {
-    guard let lhs, let rhs else { return lhs == nil && rhs == nil }
-    guard
-      let left = try? PropertyListSerialization.propertyList(from: lhs, options: [], format: nil)
-        as? NSDictionary,
-      let right = try? PropertyListSerialization.propertyList(from: rhs, options: [], format: nil)
-        as? NSDictionary
-    else { return lhs == rhs }
-    return left.isEqual(right)
-  }
-
-  private func hasOwnershipConflict(current: Data?, applied: Data?) -> Bool {
-    !equivalent(current, applied)
-  }
-
   private func commitAndApply(_ preferences: SCPreferences) throws {
     guard SCPreferencesCommitChanges(preferences) else {
       throw SystemProxyError.commitFailed(systemConfigurationError())
@@ -286,7 +206,7 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
     }
   }
 
-  private func withPreferences(_ body: (SCPreferences) throws -> Void) throws {
+  private func withPreferences<T>(_ body: (SCPreferences) throws -> T) throws -> T {
     var authorization: AuthorizationRef?
     let flags: AuthorizationFlags = [.interactionAllowed, .extendRights, .preAuthorize]
     let authorizationStatus = AuthorizationCreate(nil, nil, flags, &authorization)
@@ -299,7 +219,7 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
       let preferences = SCPreferencesCreateWithAuthorization(
         nil, "ShadowsocksX-NG2" as CFString, nil, authorization)
     else { throw SystemProxyError.preferencesUnavailable }
-    try body(preferences)
+    return try body(preferences)
   }
 
   private func systemConfigurationError() -> String {

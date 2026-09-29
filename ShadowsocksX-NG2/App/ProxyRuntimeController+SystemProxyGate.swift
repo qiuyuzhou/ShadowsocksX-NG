@@ -133,7 +133,11 @@ extension ProxyRuntimeController {
     do {
       let configuration = try proxyMode.systemProxyConfiguration(
         for: document, exceptions: settings.proxyExceptionList)
-      try systemProxy.apply(configuration)
+      let outcome = try systemProxy.apply(configuration)
+      if outcome == .unchanged {
+        // 值语义等价的零写入路径：事件行供排障回答「这次为何没有授权弹窗」。
+        RuntimeLog.emit(.systemProxyUnchanged)
+      }
       systemProxyState = .applied
     } catch {
       systemProxyState = .failed(systemProxyFacts(for: error))

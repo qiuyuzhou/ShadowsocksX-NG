@@ -223,13 +223,16 @@ enum ProxyRuntimeFixture {
     private(set) var restoreCount = 0
     var applyError: Error?
     var restoreError: Error?
+    /// 注入返回值：模拟系统值已与期望等价的免授权跳过路径（issue #70）。
+    var applyOutcome: SystemProxyWriteOutcome = .written
     /// 可选共享事件日志（次序断言用）。
     weak var eventLog: ProxyRuntimeEventLog?
 
-    func apply(_ configuration: SystemProxyConfiguration) throws {
+    func apply(_ configuration: SystemProxyConfiguration) throws -> SystemProxyWriteOutcome {
       eventLog?.record("apply")
       if let applyError { throw applyError }
       applied.append(configuration)
+      return applyOutcome
     }
 
     func restore() throws {

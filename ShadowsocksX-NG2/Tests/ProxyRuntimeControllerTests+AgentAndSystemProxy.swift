@@ -264,4 +264,45 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(controller.state, .running, "意图已开启时开启命令重走收敛")
     XCTAssertEqual(controller.systemProxyState, .idle)
   }
+
+  /// 等值零写入路径（issue #70）：seam 返回 unchanged 时仍呈现 applied，并
+  /// 发一条 GUI 事件行供诊断日志回答「这次为何没有授权弹窗」。
+  func testUnchangedSystemProxyValuesStayAppliedAndEmitEventLine() async throws {
+    let seeded = try makeSeededCatalog()
+    systemProxy.applyOutcome = .unchanged
+    let recorder = RuntimeLogRecorder()
+    RuntimeLog.setSink(recorder)
+    defer { RuntimeLog.setSink(nil) }
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, agentEnabled: true, systemProxyEnabled: true))
+    try await controller.activate(seeded.server)
+    await controller.setAgentEnabled(true)
+
+    XCTAssertEqual(controller.systemProxyState, .applied, "unchanged 仍视为已应用")
+    XCTAssertGreaterThanOrEqual(
+      systemProxy.applied.count, 1, "收敛调用照常发生，跳过发生在 seam 内")
+    XCTAssertTrue(
+      recorder.recorded.contains(.systemProxyUnchanged),
+      "跳过路径发事件行，实际 \(recorder.recorded)")
+  }
+}
+
+/// 测试专用事件接收缝（issue #70 事件行断言用）。
+private final class RuntimeLogRecorder: RuntimeEventSink, @unchecked Sendable {
+  private let lock = NSLock()
+  private var events: [RuntimeLogEvent] = []
+
+  var recorded: [RuntimeLogEvent] {
+    lock.lock()
+    defer { lock.unlock() }
+    return events
+  }
+
+  func append(event: RuntimeLogEvent, timestamp: Date) {
+    lock.lock()
+    events.append(event)
+    lock.unlock()
+  }
 }
