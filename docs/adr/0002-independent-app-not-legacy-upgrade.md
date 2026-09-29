@@ -4,7 +4,7 @@
 
 ## Status
 
-Accepted.
+Accepted; the system-proxy ownership and conflict clauses are superseded by ADR-0019.
 
 ## Considered options
 
@@ -15,5 +15,5 @@ Accepted.
 ## Consequences
 
 - Removes the #37 deliverable and voids decision D12 of spec #21; the live-fire research doc `docs/research/legacy-handoff-bootout-live-fire.md` is retained as history.
-- 2.0 never cleans Legacy launchd residues or system proxy values; when both apps run, the existing system-proxy ownership-conflict reporting surfaces the clash and the user resolves it manually.
+- This ADR originally kept 2.0 from cleaning Legacy launchd residues or system proxy values and relied on ownership-conflict reporting; ADR-0019 supersedes only the system-proxy part. The decision not to clean Legacy launchd residues remains.
 - No releases exist yet, so the port-default change burdens only development machines; their already-persisted port settings remain in force unchanged.

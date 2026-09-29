@@ -65,12 +65,13 @@ extension ProxyRuntimeController {
     settings = next
     if enabled {
       await convergeAgent()
+      if settings.systemProxyEnabled { startEnabledSystemProxyObservation() }
     } else {
       await stopAgent()
     }
   }
 
-  /// 系统代理开关（issue #60）：只写写/恢复 NG2 持有的系统设置；不注销
+  /// 系统代理开关：开启应用本地端点，关闭清除匹配端点的配置；不注销
   /// agent、不停止本地 SOCKS/HTTP 监听。
   func setSystemProxyEnabled(_ enabled: Bool) async {
     guard enabled != settings.systemProxyEnabled else { return }
@@ -86,14 +87,15 @@ extension ProxyRuntimeController {
     settings = next
     if enabled {
       await convergeSystemProxy()
+      startEnabledSystemProxyObservation()
     } else {
-      systemProxyState = restoreSystemProxyOutcome()
+      systemProxyState = await clearAndStopSystemProxyObservation()
     }
   }
 
   /// GUI 启动重同步（D5「GUI 下次启动重新校验同步」；issue #60）：agent 意图
   /// 来自持久化设置——开启则自动注册/收敛 LaunchAgent 并部署（无活动目标时
-  /// 以空服务器列表提供监听）；关闭则恢复系统代理后按停止协议收敛。GUI 崩溃
+  /// 以空服务器列表提供监听）；关闭则清理系统代理后按停止协议收敛。GUI 崩溃
   /// 期间 agent 与 wrapper 均不受影响。
   func resyncOnLaunch() async {
     guard settings.agentEnabled else {
@@ -108,6 +110,12 @@ extension ProxyRuntimeController {
       await handleCleared(failure)
     case nil:
       await deployListeningWithoutTarget()
+    }
+    if settings.systemProxyEnabled {
+      // Startup reconciliation completes before the long-lived observer starts.
+      startEnabledSystemProxyObservation()
+    } else {
+      systemProxyState = await clearAndStopSystemProxyObservation()
     }
   }
 
@@ -127,16 +135,21 @@ extension ProxyRuntimeController {
     }
   }
 
-  /// Agent 意图关闭的收敛（issue #60 验收次序）：先按 ownership 规则恢复
-  /// NG2 持有的系统设置，再注销 agent 停止本地监听并清理运行时文件。
+  /// Agent 意图关闭的收敛：先清理可识别的系统代理设置，再注销 agent。
   func stopAgent() async {
-    let restoreError = restoreSystemProxyError()
+    let proxyCleanup = await clearAndStopSystemProxyObservation()
     _ = await execute(.stop, document: nil)
     state = .off
     lastDocument = nil
     skippedServers = []
     lastActivationFailure = nil
-    systemProxyState = restoreError.map { .failed(systemProxyFacts(for: $0)) } ?? .idle
+    if case .failed = proxyCleanup {
+      systemProxyState = proxyCleanup
+      if settings.systemProxyEnabled { startEnabledSystemProxyObservation() }
+    } else {
+      systemProxyState = settings.systemProxyEnabled ? .pending : .idle
+      if settings.systemProxyEnabled { startEnabledSystemProxyObservation() }
+    }
   }
 
   /// 无活动目标时 agent 仍提供本地监听（issue #60）：空服务器列表文档，
@@ -183,7 +196,7 @@ extension ProxyRuntimeController {
   }
 
   /// 活动目标失效（issue #60）：清除并持久化 nil，点名原因独立呈现；agent
-  /// 继续以空服务器列表监听；系统代理安全撤回（意图保留，条件恢复后自动
+  /// 继续以空服务器列表监听；系统代理清理后保留意图，条件恢复后自动
   /// 收敛），不悄悄选择其他服务器。
   func handleCleared(_ failure: ActivationFailure) async {
     RuntimeLog.emit(.activationFailed(reason: String(describing: failure)))

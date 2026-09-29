@@ -4,12 +4,12 @@ import Foundation
 /// 的产出接到「GUI → LaunchAgent → wrapper → sslocal」链路。launchd/契约动作
 /// 序列在纯域 `ProxyRuntimePlan`，本类按序执行、负责健康呈现与系统代理门禁
 /// 收敛（issue #60：意图持久化先行，门禁与待应用策略是应用层决策）；GUI 退出
-/// 不影响任何一侧（agent 由 launchd 持有，构造上成立）。
+/// 不会停止 launchd 持有的 agent，网络变化观察则随 GUI 退出。
 ///
 /// 两个用户意图相互独立（issue #60）：agent 意图（`settings.agentEnabled`，
 /// 默认开启）驱动 LaunchAgent 注册与本地监听；系统代理意图
 /// （`settings.systemProxyEnabled`，默认关闭）只在「agent 健康 + 模式具备
-/// 可用出口」时写入系统设置，关闭只恢复 NG2 持有的系统设置。两个状态面
+/// 可用出口」时应用系统设置，关闭清理匹配端点的配置。两个状态面
 /// （`state` 与 `systemProxyState`）分开呈现，互不代替。
 ///
 /// 命令面、设置/目录同步、防火墙与系统代理门禁、只读事实投影分别在
@@ -36,15 +36,21 @@ final class ProxyRuntimeController: ObservableObject {
   /// 系统代理实际作用状态（issue #60）：意图持久化在
   /// `ProxySettings.systemProxyEnabled`，这里是 NG2 对系统设置的真实作用。
   enum SystemProxyControlState: Equatable {
-    /// 意图关闭：NG2 不持有系统设置。
+    /// 意图关闭：系统代理清理完成。
     case idle
     /// 意图开启，但 agent 未健康或模式缺少可用出口；条件恢复后随下次
     /// 收敛自动应用。
     case pending
-    /// 已写入系统设置且持续持有。
+    /// 已应用系统代理配置。
     case applied
-    /// 写入或恢复失败（typed；ownership 冲突报告而不强制覆盖）。
+    /// 写入或清理失败（typed）。
     case failed(SystemProxyFailureFacts)
+  }
+
+  enum SystemProxyObservationMode: Equatable {
+    case stopped
+    case enabled
+    case cleanup
   }
 
   @Published var state: AgentRunState = .off
@@ -77,6 +83,7 @@ final class ProxyRuntimeController: ObservableObject {
   let agent: LaunchAgentControlling
   let probe: EndpointProbing
   let systemProxy: SystemProxyControlling
+  let systemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitoring
   let firewallChecker: FirewallStatusChecking
   let firewallExecutableURLs: [URL]
   let firewallPollIntervalNanoseconds: UInt64
@@ -89,6 +96,10 @@ final class ProxyRuntimeController: ObservableObject {
   var modeChangeGeneration = 0
   var lastDocument: SslocalRuntimeDocument?
   var firewallObservationTask: Task<Void, Never>?
+  var systemProxyObservationMode = SystemProxyObservationMode.stopped
+  var systemProxyCleanupRescanRequested = false
+  var systemProxyCleanupTask: Task<SystemProxyControlState, Never>?
+  var systemProxyConvergenceScheduled = false
 
   @Published var proxyMode: ProxyMode
 
@@ -109,6 +120,8 @@ final class ProxyRuntimeController: ObservableObject {
     agent: LaunchAgentControlling = SMAppLaunchAgentService(),
     probe: EndpointProbing = SystemEndpointProbe(),
     systemProxy: SystemProxyControlling = SystemConfigurationProxyController(),
+    systemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitoring =
+      NoopSystemProxyNetworkChangeMonitor(),
     proxyMode: ProxyMode? = nil,
     firewallChecker: FirewallStatusChecking = SocketFilterFirewallChecker(),
     firewallExecutableURLs: [URL]? = nil,
@@ -138,6 +151,7 @@ final class ProxyRuntimeController: ObservableObject {
     self.agent = agent
     self.probe = probe
     self.systemProxy = systemProxy
+    self.systemProxyNetworkChangeMonitor = systemProxyNetworkChangeMonitor
     self.firewallChecker = firewallChecker
     self.firewallExecutableURLs = firewallExecutableURLs ?? Self.defaultFirewallExecutableURLs
     self.firewallPollIntervalNanoseconds = firewallPollIntervalNanoseconds

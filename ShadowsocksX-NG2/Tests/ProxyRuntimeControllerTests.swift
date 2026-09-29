@@ -14,6 +14,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
   var credentials: InMemoryCredentialStore!
   var agent: ProxyRuntimeFixture.FakeLaunchAgent!
   var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
+  var systemProxyNetworkChangeMonitor: ProxyRuntimeFixture.FakeSystemProxyNetworkChangeMonitor!
   var signals: SignalRecorder!
 
   /// SIGUSR1 投递记录缝。
@@ -58,6 +59,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     credentials = InMemoryCredentialStore()
     agent = ProxyRuntimeFixture.FakeLaunchAgent()
     systemProxy = ProxyRuntimeFixture.FakeSystemProxy()
+    systemProxyNetworkChangeMonitor = ProxyRuntimeFixture.FakeSystemProxyNetworkChangeMonitor()
     signals = SignalRecorder()
   }
 
@@ -84,6 +86,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     settingsRestore: RestoredProxySettings? = nil,
     proxyMode: ProxyMode? = .rule,
     systemProxy: SystemProxyControlling? = nil,
+    networkChangeMonitor: SystemProxyNetworkChangeMonitoring? = nil,
     firewallChecker: FirewallStatusChecking = ProxyRuntimeFixture.FakeFirewallChecker(),
     firewallExecutableURLs: [URL] = [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
     firewallPollIntervalNanoseconds: UInt64 = 1_000_000,
@@ -123,6 +126,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       agent: agent,
       probe: probe,
       systemProxy: systemProxy ?? self.systemProxy,
+      systemProxyNetworkChangeMonitor: networkChangeMonitor ?? systemProxyNetworkChangeMonitor,
       proxyMode: proxyMode,
       firewallChecker: firewallChecker,
       firewallExecutableURLs: firewallExecutableURLs,
@@ -232,7 +236,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
 
     await controller.setAgentEnabled(false)
     XCTAssertEqual(controller.state, .off)
-    XCTAssertEqual(systemProxy.restoreCount, 1, "关闭 agent 撤除 2.0 写入的系统代理")
+    XCTAssertEqual(systemProxy.clearCount, 1, "关闭 agent 清除已应用的系统代理")
   }
 
   func testEnableWhenProbeNeverSucceedsPresentsFailureNamingEndpointAndPort() async throws {

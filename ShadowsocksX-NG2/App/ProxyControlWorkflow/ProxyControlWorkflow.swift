@@ -65,7 +65,7 @@ struct ProxyControlSnapshot: Equatable, Sendable {
 
 /// 生产运行时适配缝（issue #47/#60）：包装现有 `ProxyRuntimeController` 的
 /// 能力与观察。不复制状态机、generation 与健康门禁；意图持久化先行、失败
-/// 恢复与系统代理 ownership 语义全部留在控制器。测试注入确定性 fake
+/// 清理与系统代理生命周期语义全部留在控制器。测试注入确定性 fake
 /// （story 31）。
 @MainActor
 protocol ProxyRuntimeAdapting: AnyObject {

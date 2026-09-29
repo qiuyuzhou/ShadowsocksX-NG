@@ -50,7 +50,7 @@ extension ProxyControlWorkflowIntegrationTests {
     XCTAssertEqual(snapshot.runtime, ProxyRuntimeFacts(status: .running, isOn: true))
   }
 
-  /// 关闭系统代理：恢复 NG2 持有的系统设置；本地监听不停止（issue #60）。
+  /// 关闭系统代理：清理匹配端点的设置；本地监听不停止。
   func testSystemProxyOffKeepsAgentRunningAndReflectsIdleInSnapshot() async throws {
     let server = try makeSeededCatalog()
     let composition = makeProxies(probe: ProxyRuntimeFixture.FakeProbe.reachable())
@@ -63,7 +63,7 @@ extension ProxyControlWorkflowIntegrationTests {
     XCTAssertFalse(snapshot.systemProxyIntentEnabled)
     XCTAssertEqual(snapshot.systemProxyApplication, .idle)
     XCTAssertEqual(snapshot.runtime, ProxyRuntimeFacts(status: .running, isOn: true))
-    XCTAssertEqual(systemProxy.restoreCount, 1)
+    XCTAssertEqual(systemProxy.clearCount, 1)
     XCTAssertEqual(agent.unregisterCount, 0, "不注销 agent")
   }
 

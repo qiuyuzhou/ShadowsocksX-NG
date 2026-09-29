@@ -17,7 +17,7 @@ struct ProxySettings: Equatable, Sendable {
   /// 配置，默认启动没有意义；用户显式打开的选择持久化，且偏好重置不改变它。
   var agentEnabled: Bool
   /// 系统代理意图（issue #60）：默认关闭；与 agent 意图相互独立，开关关闭
-  /// 只恢复 NG2 持有的系统设置，不影响本地监听。
+  /// 关闭时清理匹配 NG2 端点的系统代理配置，不影响本地监听。
   var systemProxyEnabled: Bool
 
   init(

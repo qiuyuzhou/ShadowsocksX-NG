@@ -39,9 +39,14 @@ enum RuntimePaths {
     runtimeDirectory().appendingPathComponent("agent.log")
   }
 
-  /// Original network-service proxy dictionaries captured before 2.0 writes
-  /// system proxy settings. It is protected like the other runtime files.
-  static func systemProxyOwnershipURL() -> URL {
+  /// Last endpoint signature attempted by NG2, used only to identify settings to clear.
+  static func systemProxyEndpointSignatureURL() -> URL {
+    runtimeDirectory().appendingPathComponent("system-proxy-endpoint-signature.json")
+  }
+
+  /// Legacy snapshot file from the ownership-based lifecycle. It is read once only
+  /// to extract a single unambiguous applied endpoint signature, then deleted.
+  static func legacySystemProxyOwnershipURL() -> URL {
     runtimeDirectory().appendingPathComponent("system-proxy-ownership.json")
   }
 }

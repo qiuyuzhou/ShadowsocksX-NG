@@ -67,7 +67,7 @@ struct ProxyStatusMenu: View {
     Divider()
 
     // ② 两个开关（issue #60）：agent 与系统代理意图互不代替，各绑定持久化
-    // 意图；agent 关闭会保留选择，系统代理关闭只恢复 NG2 持有的系统设置。
+    // 意图；agent 关闭会保留选择，系统代理关闭会清理匹配 NG2 端点的设置。
     Toggle("后台代理", isOn: agentToggleBinding)
     Toggle("设置系统代理", isOn: systemProxyToggleBinding)
 

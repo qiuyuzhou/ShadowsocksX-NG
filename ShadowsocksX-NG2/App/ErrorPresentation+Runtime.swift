@@ -31,7 +31,7 @@ extension AppPresentation {
 
   static func message(for application: SystemProxyApplicationFacts) -> String {
     switch application {
-    case .idle: return "系统代理未接管"
+    case .idle: return "系统代理未应用"
     case .pending: return "系统代理待应用：等待代理就绪或可用出口"
     case .applied: return "系统代理已应用"
     case .failed(let facts): return systemProxyFailure(facts)
@@ -61,7 +61,6 @@ extension AppPresentation {
     switch facts {
     case .operation(let failure): return systemProxy(failure)
     case .mode(let error): return proxyMode(error)
-    case .ownershipConflict: return "系统代理配置已被其他设置改动，未覆盖"
     case .unknown: return "系统代理未能应用"
     }
   }
@@ -73,13 +72,14 @@ extension AppPresentation {
     case .preferencesUnavailable: return "系统网络配置不可用"
     case .preferencesBusy: return "系统网络配置正被其他设置操作占用"
     case .noCurrentNetworkSet: return "没有当前网络位置"
+    case .noNetworkLocations: return "没有可检查的网络位置"
     case .noProxyServices: return "当前网络位置没有可写入的网络服务"
     case .unreadableService: return "无法读取网络服务的代理配置"
     case .invalidStoredConfiguration: return "保存的系统代理配置无效"
     case .cannotWriteService: return "无法写入网络服务的代理配置"
     case .commitFailed: return "系统代理提交失败"
     case .applyFailed: return "系统代理应用失败"
-    case .ownershipStoreFailed: return "系统代理所有权记录失败"
+    case .endpointSignatureStoreFailed: return "系统代理端点记录失败"
     }
   }
 

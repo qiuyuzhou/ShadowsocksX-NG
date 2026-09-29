@@ -3,7 +3,7 @@ import Foundation
 
 /// 生产运行时 adapter（issue #47）：现有 `ProxyRuntimeController` 的唯一
 /// 包装，由应用组合根接线。只把控制器既有能力与观察投影到 workflow 缝上，
-/// 不复制状态机、generation、健康门禁与系统代理 ownership 语义。
+/// 不复制状态机、generation、健康门禁与系统代理生命周期语义。
 @MainActor
 final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
   private let controller: ProxyRuntimeController

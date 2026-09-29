@@ -124,7 +124,8 @@ private struct AppComposition {
       listenRestore: dependencies.listenRestore,
       settingsStore: dependencies.settingsStore,
       settingsRestore: dependencies.settingsRestore,
-      agent: dependencies.launchAgent)
+      agent: dependencies.launchAgent,
+      systemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitor())
     let loginController = LaunchAtLoginController(service: dependencies.loginService)
     let catalogWorkflow = makeCatalogWorkflow(
       dependencies: dependencies,

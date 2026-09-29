@@ -123,6 +123,6 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(controller.state, .running, "旧运行时恢复后重新呈现健康")
     XCTAssertEqual(controller.systemProxyState, .applied)
     XCTAssertEqual(systemProxy.applied.count, previousApplicationCount)
-    XCTAssertEqual(systemProxy.restoreCount, 0, "切换失败期间保持原系统代理应用")
+    XCTAssertEqual(systemProxy.clearCount, 0, "切换失败期间保持系统代理应用")
   }
 }

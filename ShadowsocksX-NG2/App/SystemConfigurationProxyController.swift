@@ -2,183 +2,161 @@ import Foundation
 import Security
 import SystemConfiguration
 
-/// System proxy write seam. The controller calls it only after endpoint health
-/// succeeds; tests replace it without touching the user's network settings.
-/// `apply` 返回 written / unchanged：值语义等价时零写入零授权（issue #70）。
+/// System proxy write seam. The runtime health gate calls `apply` only while local
+/// endpoints are usable. Clearing is declarative and never restores a prior snapshot.
+@MainActor
 protocol SystemProxyControlling {
   @discardableResult
   func apply(_ configuration: SystemProxyConfiguration) throws -> SystemProxyWriteOutcome
-  func restore() throws
+  func clearRecognizedSettings() throws
 }
 
-/// Writes the Proxies entity of every service in the current network set.
-/// Before the first write it snapshots each complete dictionary. Later writes
-/// are allowed only while every previously applied dictionary is unchanged;
-/// this prevents 2.0 from restoring over a user's manual or MDM change.
-/// 期望值与当前值语义等价的 service 不写入；全部等价时不加锁、不提交，
-/// 授权弹窗只发生在存在真实值变更的提交上（issue #70）。
+/// Writes NG2's proxy configuration to every service in the active network location.
+/// Cleanup scans every location and clears the full Proxies entity for services that
+/// match the last endpoint signature attempted by NG2.
+@MainActor
 final class SystemConfigurationProxyController: SystemProxyControlling {
   private struct ServiceSnapshot {
-    let id: String
-    let proxyProtocol: SCNetworkProtocol
+    let identifier: SystemProxyServiceIdentifier
+    let networkService: SCNetworkService
+    let proxyProtocol: SCNetworkProtocol?
     let configuration: Data?
 
     var plannerState: SystemProxyServiceState {
-      SystemProxyServiceState(serviceID: id, configuration: configuration)
+      SystemProxyServiceState(identifier: identifier, configuration: configuration)
     }
   }
 
-  private let ownershipStore: SystemProxyOwnershipStoring
+  private let signatureStore: SystemProxyEndpointSignatureStoring
 
   init(
-    ownershipStore: SystemProxyOwnershipStoring = FileSystemSystemProxyOwnershipStore()
+    signatureStore: SystemProxyEndpointSignatureStoring =
+      FileSystemProxyEndpointSignatureStore()
   ) {
-    self.ownershipStore = ownershipStore
+    self.signatureStore = signatureStore
   }
 
   func apply(_ configuration: SystemProxyConfiguration) throws -> SystemProxyWriteOutcome {
     try withPreferences { preferences in
-      let services = try serviceSnapshots(in: preferences)
-      guard !services.isEmpty else { throw SystemProxyError.noProxyServices }
-
-      let existing = try loadOwnership()
-      let plan = try SystemProxyPlanner.makePlan(
-        services: services.map(\.plannerState),
-        existing: existing,
-        configuration: configuration)
-      guard !plan.writes.isEmpty else {
-        // 期望值与系统当前值语义等价：零写入、零授权。adopt 发生时仍需刷新
-        // ownership record（本地文件写入，无需授权）。
-        if plan.ownershipChanged { try saveOwnership(plan.ownership) }
-        return .unchanged
-      }
-
-      let servicesByID = Dictionary(uniqueKeysWithValues: services.map { ($0.id, $0) })
-      try SCPreferencesLockOrThrow(preferences)
+      try lockPreferencesOrThrow(preferences)
       defer { SCPreferencesUnlock(preferences) }
-      try saveOwnership(plan.ownership)
-      do {
-        for entry in plan.writes {
-          guard let service = servicesByID[entry.serviceID],
-            setConfiguration(entry.appliedConfiguration, on: service.proxyProtocol)
-          else { throw SystemProxyError.cannotWriteService(entry.serviceID) }
+
+      _ = try loadEndpointSignature()
+      let services = try activeServiceSnapshots(in: preferences)
+      guard !services.isEmpty else { throw SystemProxyError.noProxyServices }
+      let plan = try SystemProxyPlanner.makeApplyPlan(
+        services: services.map(\.plannerState), configuration: configuration)
+
+      // Persist before the first SC write. A partial/failed apply is then recognizable
+      // by a later OFF cleanup or by a retry after the health gate recovers.
+      try saveEndpointSignature(SystemProxyEndpointSignature(configuration: configuration))
+
+      guard !plan.writes.isEmpty else { return .unchanged }
+      let servicesByID = Dictionary(uniqueKeysWithValues: services.map { ($0.identifier, $0) })
+      for write in plan.writes {
+        guard let service = servicesByID[write.identifier] else {
+          throw SystemProxyError.cannotWriteService(write.identifier.serviceID)
         }
-        try commitAndApply(preferences)
-      } catch {
-        let rollbackSucceeded = rollback(services, in: preferences)
-        try restoreOwnership(existing)
-        if !rollbackSucceeded {
-          throw SystemProxyError.applyFailed("系统代理变更回滚失败：\(systemConfigurationError())")
+        if service.proxyProtocol == nil {
+          _ = SCNetworkServiceAddProtocolType(service.networkService, kSCNetworkProtocolTypeProxies)
         }
-        throw error
+        guard
+          let proxyProtocol = service.proxyProtocol
+            ?? SCNetworkServiceCopyProtocol(service.networkService, kSCNetworkProtocolTypeProxies),
+          setConfiguration(write.configuration, on: proxyProtocol)
+        else { throw SystemProxyError.cannotWriteService(write.identifier.serviceID) }
       }
+      try commitAndApply(preferences)
       return .written
     }
   }
 
-  func restore() throws {
-    guard let ownership = try loadOwnership() else { return }
+  func clearRecognizedSettings() throws {
+    guard let signature = try loadEndpointSignature() else { return }
     try withPreferences { preferences in
-      let services = try serviceSnapshots(in: preferences)
-      let servicesByID = Dictionary(uniqueKeysWithValues: services.map { ($0.id, $0) })
-      var servicesToRestore: [(ServiceSnapshot, SystemProxyOwnershipRecord.Entry)] = []
-
-      for entry in ownership.entries {
-        guard let service = servicesByID[entry.serviceID] else { continue }
-        if SystemProxyPlanner.equivalent(service.configuration, entry.appliedConfiguration) {
-          servicesToRestore.append((service, entry))
-        } else if SystemProxyPlanner.equivalent(
-          service.configuration, entry.originalConfiguration)
-        {
-          continue
-        } else {
-          throw SystemProxyError.ownershipConflict(entry.serviceID)
-        }
-      }
-
-      if servicesToRestore.isEmpty {
-        try clearOwnership()
-        return
-      }
-
-      try SCPreferencesLockOrThrow(preferences)
+      try lockPreferencesOrThrow(preferences)
       defer { SCPreferencesUnlock(preferences) }
-      for (service, entry) in servicesToRestore {
-        guard setConfiguration(entry.originalConfiguration, on: service.proxyProtocol) else {
-          throw SystemProxyError.cannotWriteService(entry.serviceID)
-        }
+
+      let services = try allServiceSnapshots(in: preferences)
+      let plan = try SystemProxyPlanner.makeClearPlan(
+        services: services.map(\.plannerState), signature: signature)
+      guard !plan.writes.isEmpty else { return }
+
+      let servicesByID = Dictionary(uniqueKeysWithValues: services.map { ($0.identifier, $0) })
+      for write in plan.writes {
+        guard let service = servicesByID[write.identifier],
+          let proxyProtocol = service.proxyProtocol,
+          setConfiguration(nil, on: proxyProtocol)
+        else { throw SystemProxyError.cannotWriteService(write.identifier.serviceID) }
       }
       try commitAndApply(preferences)
-      try clearOwnership()
     }
   }
 
-  private func saveOwnership(_ record: SystemProxyOwnershipRecord) throws {
+  private func loadEndpointSignature() throws -> SystemProxyEndpointSignature? {
     do {
-      try ownershipStore.save(record)
+      return try signatureStore.load()
     } catch {
-      throw SystemProxyError.ownershipStoreFailed(String(describing: error))
+      throw SystemProxyError.endpointSignatureStoreFailed(String(describing: error))
     }
   }
 
-  private func clearOwnership() throws {
+  private func saveEndpointSignature(_ signature: SystemProxyEndpointSignature) throws {
     do {
-      try ownershipStore.clear()
+      try signatureStore.save(signature)
     } catch {
-      throw SystemProxyError.ownershipStoreFailed(String(describing: error))
+      throw SystemProxyError.endpointSignatureStoreFailed(String(describing: error))
     }
   }
 
-  private func restoreOwnership(_ record: SystemProxyOwnershipRecord?) throws {
-    if let record {
-      try saveOwnership(record)
-    } else {
-      try clearOwnership()
-    }
-  }
-
-  private func rollback(
-    _ services: [ServiceSnapshot], in preferences: SCPreferences
-  ) -> Bool {
-    for service in services {
-      guard setConfiguration(service.configuration, on: service.proxyProtocol) else {
-        return false
-      }
-    }
-    return SCPreferencesCommitChanges(preferences) && SCPreferencesApplyChanges(preferences)
-  }
-
-  private func loadOwnership() throws -> SystemProxyOwnershipRecord? {
-    do {
-      return try ownershipStore.load()
-    } catch {
-      throw SystemProxyError.ownershipStoreFailed(String(describing: error))
-    }
-  }
-
-  private func serviceSnapshots(in preferences: SCPreferences) throws -> [ServiceSnapshot] {
+  private func activeServiceSnapshots(in preferences: SCPreferences) throws -> [ServiceSnapshot] {
     guard let set = SCNetworkSetCopyCurrent(preferences) else {
       throw SystemProxyError.noCurrentNetworkSet
     }
-    guard let services = SCNetworkSetCopyServices(set) as? [SCNetworkService] else {
-      throw SystemProxyError.noProxyServices
+    guard let locationID = SCNetworkSetGetSetID(set) as String? else {
+      throw SystemProxyError.noCurrentNetworkSet
     }
+    return try serviceSnapshots(in: set, locationID: locationID)
+  }
 
+  private func allServiceSnapshots(in preferences: SCPreferences) throws -> [ServiceSnapshot] {
+    guard let sets = SCNetworkSetCopyAll(preferences) as? [SCNetworkSet], !sets.isEmpty else {
+      throw SystemProxyError.noNetworkLocations
+    }
+    return try sets.flatMap { set -> [ServiceSnapshot] in
+      guard let locationID = SCNetworkSetGetSetID(set) as String? else {
+        return [ServiceSnapshot]()
+      }
+      return try serviceSnapshots(in: set, locationID: locationID)
+    }
+  }
+
+  private func serviceSnapshots(
+    in set: SCNetworkSet, locationID: String
+  ) throws -> [ServiceSnapshot] {
+    guard let services = SCNetworkSetCopyServices(set) as? [SCNetworkService] else {
+      return []
+    }
     return try services.compactMap { service in
-      guard
-        let serviceID = SCNetworkServiceGetServiceID(service) as String?,
-        let proxyProtocol = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeProxies)
-      else { return nil }
+      guard let serviceID = SCNetworkServiceGetServiceID(service) as String? else { return nil }
+      let proxyProtocol = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeProxies)
+      let configurationValue: CFPropertyList?
+      if let proxyProtocol {
+        configurationValue = SCNetworkProtocolGetConfiguration(proxyProtocol)
+      } else {
+        configurationValue = nil
+      }
       return ServiceSnapshot(
-        id: serviceID,
+        identifier: SystemProxyServiceIdentifier(
+          locationID: locationID, serviceID: serviceID),
+        networkService: service,
         proxyProtocol: proxyProtocol,
-        configuration: try propertyListData(
-          from: SCNetworkProtocolGetConfiguration(proxyProtocol)))
+        configuration: try propertyListData(from: configurationValue, serviceID: serviceID))
     }
   }
 
   private func propertyListData(
-    from value: CFPropertyList?, serviceID: String = ""
+    from value: CFPropertyList?, serviceID: String
   ) throws -> Data? {
     guard let value else { return nil }
     guard let dictionary = value as? [String: Any] else {
@@ -227,7 +205,7 @@ final class SystemConfigurationProxyController: SystemProxyControlling {
   }
 }
 
-private func SCPreferencesLockOrThrow(_ preferences: SCPreferences) throws {
+private func lockPreferencesOrThrow(_ preferences: SCPreferences) throws {
   guard SCPreferencesLock(preferences, true) else {
     throw SystemProxyError.preferencesBusy
   }

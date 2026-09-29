@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - 防火墙呈现、wrapper 观测与系统代理门禁（issue #60）
+// MARK: - 防火墙呈现、wrapper 观测与系统代理门禁
 
 extension ProxyRuntimeController {
   func presentFirewallStatus(for document: SslocalRuntimeDocument) async {
@@ -113,20 +113,17 @@ extension ProxyRuntimeController {
 
   // MARK: - 系统代理门禁（issue #60）
 
-  /// 系统代理收敛：意图开启 + agent 健康 + 所选模式具备可用出口（活动目标
-  /// 通过本地预检）才写入；否则保持待应用，条件恢复后随下次收敛自动应用。
-  /// 意图关闭时不做任何事（呈现面保持 idle/既有失败态）。
-  func convergeSystemProxy() async {
+  /// 系统代理收敛：意图开启 + agent 健康 + 所选模式具备可用出口才应用；
+  /// 条件关闭时清除匹配的端点配置并保持待应用，条件恢复后自动重写。
+  func convergeSystemProxy(forceCleanup: Bool = false) async {
     guard settings.systemProxyEnabled else { return }
     guard systemProxyExitAvailable, let document = lastDocument else {
-      if case .pending = systemProxyState { return }
-      switch restoreSystemProxyOutcome() {
-      case .idle:
+      if !forceCleanup, case .pending = systemProxyState { return }
+      switch clearRecognizedSystemProxyOutcome() {
+      case .idle, .pending, .applied:
         systemProxyState = .pending
       case .failed(let failure):
         systemProxyState = .failed(failure)
-      case .pending, .applied:
-        systemProxyState = .pending
       }
       return
     }
@@ -155,31 +152,98 @@ extension ProxyRuntimeController {
     }
   }
 
-  /// agent 入站不可用（启动失败、目标清除、监听设置不可读）时的安全撤回：
-  /// 尽力恢复 NG2 持有的系统设置；意图保留为待应用，条件恢复后自动收敛。
-  /// 恢复失败以 typed 呈现——系统设置仍被 NG2 持有时用户必须知道。
+  /// agent 入站不可用时清除可识别的端点设置；意图保留为待应用。
   func withdrawSystemProxyAfterEntryLoss() async {
-    if let error = restoreSystemProxyError() {
-      systemProxyState = .failed(systemProxyFacts(for: error))
+    guard settings.systemProxyEnabled else {
+      systemProxyState = .idle
       return
     }
-    systemProxyState = settings.systemProxyEnabled ? .pending : .idle
+    switch clearRecognizedSystemProxyOutcome() {
+    case .idle, .pending, .applied:
+      systemProxyState = .pending
+    case .failed(let failure):
+      systemProxyState = .failed(failure)
+    }
   }
 
-  /// 恢复 NG2 持有的系统设置；成功 → `.idle`，失败 → typed 失败。
-  func restoreSystemProxyOutcome() -> SystemProxyControlState {
-    if let error = restoreSystemProxyError() {
+  /// 清除与最近一次尝试端点签名匹配的系统代理配置。
+  func clearRecognizedSystemProxyOutcome() -> SystemProxyControlState {
+    do {
+      try systemProxy.clearRecognizedSettings()
+      return .idle
+    } catch {
       return .failed(systemProxyFacts(for: error))
     }
-    return .idle
   }
 
-  func restoreSystemProxyError() -> Error? {
-    do {
-      try systemProxy.restore()
-      return nil
-    } catch {
-      return error
+  func startEnabledSystemProxyObservation() {
+    guard systemProxyObservationMode != .enabled else { return }
+    systemProxyObservationMode = .enabled
+    systemProxyNetworkChangeMonitor.start { [weak self] change in
+      self?.handleSystemProxyNetworkChange(change)
+    }
+  }
+
+  func clearAndStopSystemProxyObservation() async -> SystemProxyControlState {
+    if let systemProxyCleanupTask { return await systemProxyCleanupTask.value }
+    let task = Task { @MainActor [weak self] in
+      guard let self else { return SystemProxyControlState.idle }
+      return await performSystemProxyCleanupUntilQuiet()
+    }
+    systemProxyCleanupTask = task
+    let result = await task.value
+    systemProxyCleanupTask = nil
+    return result
+  }
+
+  private func performSystemProxyCleanupUntilQuiet() async -> SystemProxyControlState {
+    if systemProxyObservationMode != .enabled {
+      systemProxyObservationMode = .cleanup
+      systemProxyNetworkChangeMonitor.start { [weak self] change in
+        self?.handleSystemProxyNetworkChange(change)
+      }
+    } else {
+      systemProxyObservationMode = .cleanup
+    }
+
+    var outcome: SystemProxyControlState = .idle
+    repeat {
+      systemProxyCleanupRescanRequested = false
+      outcome = clearRecognizedSystemProxyOutcome()
+      // Let queued SystemConfiguration notifications reach the main actor. Any
+      // location/service/proxy change during this cleanup starts another full scan.
+      try? await Task.sleep(nanoseconds: 100_000_000)
+      await Task.yield()
+    } while systemProxyCleanupRescanRequested
+
+    systemProxyNetworkChangeMonitor.stop()
+    systemProxyObservationMode = .stopped
+    return outcome
+  }
+
+  private func handleSystemProxyNetworkChange(_ change: SystemProxyNetworkChange) {
+    switch systemProxyObservationMode {
+    case .stopped:
+      return
+    case .cleanup:
+      if !change.isDisjoint(with: [.networkConfiguration, .proxyConfiguration]) {
+        systemProxyCleanupRescanRequested = true
+      }
+    case .enabled:
+      guard settings.systemProxyEnabled else { return }
+      // Proxy-only changes are deliberately ignored while enabled: competing proxy
+      // software must not create a write loop. Location/service/path changes reapply.
+      guard !change.isDisjoint(with: [.networkConfiguration, .networkPath]) else {
+        return
+      }
+      guard !systemProxyConvergenceScheduled else { return }
+      systemProxyConvergenceScheduled = true
+      Task { @MainActor [weak self] in
+        await Task.yield()
+        guard let self else { return }
+        self.systemProxyConvergenceScheduled = false
+        await self.convergeSystemProxy(forceCleanup: true)
+      }
     }
   }
 
@@ -205,12 +269,12 @@ extension ProxyRuntimeController {
     case .noCurrentNetworkSet: return .operation(.noCurrentNetworkSet)
     case .noProxyServices: return .operation(.noProxyServices)
     case .unreadableService: return .operation(.unreadableService)
-    case .ownershipConflict: return .ownershipConflict
     case .invalidStoredConfiguration: return .operation(.invalidStoredConfiguration)
     case .cannotWriteService: return .operation(.cannotWriteService)
     case .commitFailed: return .operation(.commitFailed)
     case .applyFailed: return .operation(.applyFailed)
-    case .ownershipStoreFailed: return .operation(.ownershipStoreFailed)
+    case .noNetworkLocations: return .operation(.noNetworkLocations)
+    case .endpointSignatureStoreFailed: return .operation(.endpointSignatureStoreFailed)
     }
   }
 }

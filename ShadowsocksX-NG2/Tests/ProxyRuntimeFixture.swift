@@ -5,7 +5,7 @@ import XCTest
 
 /// 代理运行时测试共享夹具（票 #27）：临时运行时目录、契约文档构造、LaunchAgent
 /// 与探测替身。
-/// 跨替身共享的有序事件记录：断言「先恢复系统代理、再停止监听」等次序。
+/// 跨替身共享的有序事件记录：断言「先清理系统代理、再停止监听」等次序。
 final class ProxyRuntimeEventLog: @unchecked Sendable {
   private let lock = NSLock()
   private var items: [String] = []
@@ -217,11 +217,13 @@ enum ProxyRuntimeFixture {
     }
   }
 
+  @MainActor
   final class FakeSystemProxy: SystemProxyControlling {
     private(set) var applied: [SystemProxyConfiguration] = []
-    private(set) var restoreCount = 0
+    private(set) var clearCount = 0
     var applyError: Error?
-    var restoreError: Error?
+    var clearError: Error?
+    var onClear: (@MainActor () -> Void)?
     /// 注入返回值：模拟系统值已与期望等价的免授权跳过路径（issue #70）。
     var applyOutcome: SystemProxyWriteOutcome = .written
     /// 可选共享事件日志（次序断言用）。
@@ -234,10 +236,37 @@ enum ProxyRuntimeFixture {
       return applyOutcome
     }
 
-    func restore() throws {
-      restoreCount += 1
-      eventLog?.record("restore")
-      if let restoreError { throw restoreError }
+    func clearRecognizedSettings() throws {
+      clearCount += 1
+      eventLog?.record("clear")
+      onClear?()
+      if let clearError { throw clearError }
+    }
+  }
+
+  @MainActor
+  final class FakeSystemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitoring {
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    private(set) var isObserving = false
+    private var handler: (@MainActor @Sendable (SystemProxyNetworkChange) -> Void)?
+
+    func start(
+      handler: @escaping @MainActor @Sendable (SystemProxyNetworkChange) -> Void
+    ) {
+      startCount += 1
+      isObserving = true
+      self.handler = handler
+    }
+
+    func stop() {
+      stopCount += 1
+      isObserving = false
+      handler = nil
+    }
+
+    func emit(_ change: SystemProxyNetworkChange) {
+      handler?(change)
     }
   }
 

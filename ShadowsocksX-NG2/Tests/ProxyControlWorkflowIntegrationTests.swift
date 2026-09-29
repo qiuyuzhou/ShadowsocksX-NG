@@ -195,9 +195,8 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertEqual(snapshot.availableModes, [.rule, .global, .direct], "停用后可用操作不消失")
   }
 
-  /// 关闭 agent 且系统代理恢复失败：agent 停止，恢复失败以系统代理 typed fact
-  /// 呈现（issue #60：失败归系统代理面）。
-  func testAgentOffWithSystemProxyRestoreFailureSurfacesTypedFact() async throws {
+  /// 关闭 agent 且系统代理清理失败：agent 停止，清理失败以系统代理 typed fact 呈现。
+  func testAgentOffWithSystemProxyClearFailureSurfacesTypedFact() async throws {
     let server = try makeSeededCatalog()
     let composition = makeProxies(
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
@@ -206,14 +205,14 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     _ = try await composition.catalog.activate(server)
     _ = await composition.control.setAgentEnabled(true)
     XCTAssertEqual(composition.control.snapshot.systemProxyApplication, .applied)
-    systemProxy.restoreError = SystemProxyError.commitFailed("busy")
+    systemProxy.clearError = SystemProxyError.commitFailed("busy")
 
     let snapshot = await composition.control.setAgentEnabled(false)
 
     XCTAssertEqual(snapshot.runtime, ProxyRuntimeFacts(status: .off, isOn: false))
     XCTAssertEqual(
       snapshot.systemProxyApplication, .failed(.operation(.commitFailed)),
-      "恢复失败以 typed fact 呈现，不静默视为已恢复")
+      "清理失败以 typed fact 呈现，不静默视为已清理")
   }
 
   // MARK: - 模式命令矩阵
@@ -232,7 +231,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertEqual(snapshot.runtime, ProxyRuntimeFacts(status: .off, isOn: false))
     XCTAssertEqual(settingsStore.saved?.preferredMode, .global, "模式先持久化")
     XCTAssertTrue(systemProxy.applied.isEmpty, "agent 未运行时不触碰系统代理")
-    XCTAssertEqual(systemProxy.restoreCount, 0)
+    XCTAssertEqual(systemProxy.clearCount, 0)
   }
 
   func testModePersistenceFailureKeepsOldModeAndSurfacesServiceFact() async throws {
@@ -266,7 +265,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertEqual(after, before, "同模式命令无副作用，snapshot 不动")
     XCTAssertNil(settingsStore.saved)
     XCTAssertTrue(systemProxy.applied.isEmpty)
-    XCTAssertEqual(systemProxy.restoreCount, 0)
+    XCTAssertEqual(systemProxy.clearCount, 0)
   }
 
   // MARK: - 集成级 model test（deletion 验证，story 38/39）

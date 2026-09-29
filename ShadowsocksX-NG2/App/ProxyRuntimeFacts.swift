@@ -34,11 +34,11 @@ struct ProxyRuntimeFacts: Equatable, Sendable {
 /// 系统代理实际作用的固定类别（issue #60）：意图持久化为开关事实，这里
 /// 呈现 NG2 对系统设置的真实作用，与 agent 运行状态互不代替。
 enum SystemProxyApplicationFacts: Equatable, Sendable {
-  /// 意图关闭：NG2 不持有系统设置。
+  /// 意图关闭：系统代理清理完成。
   case idle
   /// 意图开启，等待 agent 健康或可用出口；条件恢复后自动收敛。
   case pending
-  /// 已写入系统设置且持续持有。
+  /// 已应用系统代理配置。
   case applied
   /// 写入或恢复失败（typed）。
   case failed(SystemProxyFailureFacts)
@@ -76,19 +76,19 @@ enum SystemProxyOperationFailure: Equatable, Sendable {
   case preferencesUnavailable
   case preferencesBusy
   case noCurrentNetworkSet
+  case noNetworkLocations
   case noProxyServices
   case unreadableService
   case invalidStoredConfiguration
   case cannotWriteService
   case commitFailed
   case applyFailed
-  case ownershipStoreFailed
+  case endpointSignatureStoreFailed
 }
 
 enum SystemProxyFailureFacts: Equatable, Sendable {
   case operation(SystemProxyOperationFailure)
   case mode(ProxyModeError)
-  case ownershipConflict
   case unknown
 }
 

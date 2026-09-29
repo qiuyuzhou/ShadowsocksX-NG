@@ -50,7 +50,7 @@ extension ProxyRuntimeControllerTests {
 
     await controller.resyncOnLaunch()
     XCTAssertEqual(controller.state, .running)
-    XCTAssertTrue(systemProxy.applied.isEmpty, "规则模式没有活动目标时不得接管")
+    XCTAssertTrue(systemProxy.applied.isEmpty, "规则模式没有活动目标时不应用系统代理")
     let unregisterCount = agent.unregisterCount
 
     await controller.setProxyMode(.direct)
@@ -128,7 +128,7 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(controller.state, .running, "旧运行时恢复后重新呈现健康")
     XCTAssertEqual(controller.systemProxyState, .applied)
     XCTAssertEqual(systemProxy.applied.count, previousApplicationCount)
-    XCTAssertEqual(systemProxy.restoreCount, 0, "切换失败期间保持原系统代理应用")
+    XCTAssertEqual(systemProxy.clearCount, 0, "切换失败期间保持系统代理应用")
   }
 
   /// Agent 开关持久化失败（issue #60）：保留现状并点名，不静默偏离持久化
@@ -178,7 +178,7 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(runtimeStore.loadDocument(), previousDocument)
     XCTAssertEqual(controller.systemProxyState, .applied)
     XCTAssertEqual(systemProxy.applied.count, appliedCount, "旧系统代理保持应用")
-    XCTAssertEqual(systemProxy.restoreCount, 0)
+    XCTAssertEqual(systemProxy.clearCount, 0)
   }
 
   private enum FakeSettingsSaveError: Error, CustomStringConvertible {

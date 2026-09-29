@@ -140,7 +140,7 @@ extension ProxyRuntimeControllerTests {
       "回滚后活动变体不含新规则")
     XCTAssertEqual(controller.state, .running, "旧运行时恢复后重新呈现健康")
     XCTAssertEqual(systemProxy.applied.count, previousApplicationCount)
-    XCTAssertEqual(systemProxy.restoreCount, 0, "切换失败期间保持原系统代理应用")
+    XCTAssertEqual(systemProxy.clearCount, 0, "切换失败期间保持系统代理应用")
   }
 
   /// 全局模式不加载自定义规则：保存成功但 ACL 不变、不触发重启。

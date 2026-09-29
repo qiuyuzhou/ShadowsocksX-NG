@@ -137,7 +137,7 @@ final class StatusMenuModelTests: XCTestCase {
         systemProxyIntent: false,
         systemProxyApplication: .idle))
     XCTAssertFalse(idle.systemProxyIntentEnabled)
-    XCTAssertEqual(idle.systemProxyStatus, "系统代理：未接管")
+    XCTAssertEqual(idle.systemProxyStatus, "系统代理：未应用")
     XCTAssertNil(idle.systemProxyDetail)
 
     let pending = StatusMenuModel.summary(
@@ -160,11 +160,12 @@ final class StatusMenuModelTests: XCTestCase {
       from: makeSnapshot(
         facts: ProxyRuntimeFacts(status: .running, isOn: true),
         systemProxyIntent: true,
-        systemProxyApplication: .failed(.ownershipConflict)))
+        systemProxyApplication: .failed(.operation(.applyFailed))))
     XCTAssertEqual(failed.systemProxyStatus, "系统代理：应用失败")
     XCTAssertEqual(
       failed.systemProxyDetail,
-      AppPresentation.message(for: RuntimeFailureFacts.systemProxy(.ownershipConflict)))
+      AppPresentation.message(
+        for: RuntimeFailureFacts.systemProxy(.operation(.applyFailed))))
   }
 
   func testSummaryCarriesModeLabelAndTargetPathFromSnapshot() {

@@ -40,7 +40,7 @@ struct HomeView: View {
 
 /// 「运行控制」卡（issue #60）：agent 与系统代理两个开关并排，绑定同一
 /// snapshot 的持久化意图；各自呈现运行状态/实际应用与点名原因。两个开关
-/// 互不代替：关闭系统代理不影响本地监听，关闭 agent 先恢复系统设置。
+/// 互不代替：关闭系统代理不影响本地监听，关闭 agent 会清理匹配端点的系统设置。
 private struct RuntimeControlCard: View {
   @ObservedObject var control: ProxyControlWorkflow
 
@@ -117,9 +117,9 @@ private struct RuntimeControlCard: View {
     case .idle:
       "开启后让 macOS 系统代理指向本地入口；\(exitRequirement)"
     case .pending:
-      "已请求接管，等待本地入口就绪；\(exitRequirement)"
+      "已请求应用系统代理，等待本地入口就绪；\(exitRequirement)"
     case .applied:
-      "系统代理已指向本地入口；关闭只恢复 NG2 持有的系统设置"
+      "系统代理已指向本地入口；关闭时清理匹配端点的配置"
     case .failed:
       "应用失败，原因见下方"
     }
@@ -133,7 +133,7 @@ private struct ModeCard: View {
   var body: some View {
     HomeCard(
       title: "代理模式",
-      subtitle: "选择系统代理接管方式",
+      subtitle: "选择系统代理应用方式",
       trailing: { ModeBadge(label: modeBadgeLabel) },
       content: {
         VStack(alignment: .leading, spacing: 14) {

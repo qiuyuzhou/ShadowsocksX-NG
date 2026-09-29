@@ -22,7 +22,7 @@ enum StatusMenuModel {
     let systemProxyStatus: String
     /// 同上但不带「系统代理：」前缀（首页等已有上下文的呈现面用）。
     let systemProxyStateLabel: String
-    /// 系统代理写入/恢复失败的点名原因；非失败态为 nil。
+    /// 系统代理写入/清理失败的点名原因；非失败态为 nil。
     let systemProxyDetail: String?
     let modeLabel: String
     /// 活动目标从根到节点的显示名路径；未激活为 nil。
@@ -82,7 +82,7 @@ enum StatusMenuModel {
   ) -> (label: String, detail: String?) {
     switch application {
     case .idle:
-      return ("未接管", nil)
+      return ("未应用", nil)
     case .pending:
       return ("待应用", nil)
     case .applied:

@@ -261,7 +261,7 @@ private struct ProxyExceptionsEditorSheet: View {
             Text(FixedLocalProxyRanges.systemProxyExceptions.joined(separator: "\n"))
               .font(.system(.caption, design: .monospaced))
               .textSelection(.enabled)
-            Text("应用接管系统代理时，还会固定开启“不包括简单主机名（Exclude simple hostnames）”。")
+            Text("应用系统代理配置时，还会固定开启“不包括简单主机名（Exclude simple hostnames）”。")
               .font(.caption)
               .foregroundStyle(.secondary)
           }

@@ -1,120 +1,142 @@
 import Foundation
 
-/// 系统代理写入操作的封闭错误族；planner 与 SC 写入层共用。
+/// System proxy write failures shared by the pure planner and SystemConfiguration adapter.
 enum SystemProxyError: Error, Equatable, Sendable {
   case authorizationFailed(Int32)
   case preferencesUnavailable
   case preferencesBusy
   case noCurrentNetworkSet
+  case noNetworkLocations
   case noProxyServices
   case unreadableService(String)
-  case ownershipConflict(String)
   case invalidStoredConfiguration(String)
   case cannotWriteService(String)
   case commitFailed(String)
   case applyFailed(String)
-  case ownershipStoreFailed(String)
+  case endpointSignatureStoreFailed(String)
 }
 
-/// 一次系统代理应用决策的逐 service 输入快照（纯值，不含 SystemConfiguration
-/// 句柄）：planner 只看字典数据，写入句柄由 App 层持有。
-struct SystemProxyServiceState: Equatable, Sendable {
+/// A service identity includes its network location because service IDs can appear in
+/// different locations during cleanup-all-locations scans.
+struct SystemProxyServiceIdentifier: Equatable, Hashable, Sendable {
+  let locationID: String
   let serviceID: String
-  /// 当前完整的 Proxies 字典；nil 表示该 service 尚无代理配置。
+}
+
+/// One service's complete Proxies dictionary as a pure value.
+struct SystemProxyServiceState: Equatable, Sendable {
+  let identifier: SystemProxyServiceIdentifier
+  /// `nil` means that the service has no Proxies entity configuration.
   let configuration: Data?
 }
 
-/// 系统代理应用结果：written = 至少写入一个 service（需要一次授权）；
-/// unchanged = 期望字典与系统当前值语义等价，零写入、零授权（issue #70）。
+/// One planned Proxies-entity write. `nil` clears the complete entity.
+struct SystemProxyPlannedWrite: Equatable, Sendable {
+  let identifier: SystemProxyServiceIdentifier
+  let configuration: Data?
+}
+
+/// Result of an apply plan. `unchanged` avoids an unnecessary SCPreferences commit.
 enum SystemProxyWriteOutcome: Equatable, Sendable {
   case written
   case unchanged
 }
 
-/// 纯决策核心（issue #70）：逐 service 比较期望的 per-service Proxies 字典与
-/// 系统当前字典，语义等价的服务零写入。全等时调用方不得加锁、不得提交，
-/// 从根上避免无意义的授权弹窗。外部改动恰好等于期望值时按 adopt 语义刷新
-/// ownership（original 保留），不报 ownershipConflict。
+/// Persisted cleanup selector. This records the last endpoint signature NG2 attempted,
+/// not a snapshot and not proof that NG2 exclusively owns matching values.
+struct SystemProxyEndpointSignature: Codable, Equatable, Sendable {
+  struct Endpoint: Codable, Equatable, Hashable, Sendable {
+    let host: String
+    let port: Int
+  }
+
+  let socks: Endpoint
+  let http: Endpoint
+
+  init(configuration: SystemProxyConfiguration) {
+    socks = Endpoint(host: configuration.socks.host, port: configuration.socks.port)
+    http = Endpoint(host: configuration.http.host, port: configuration.http.port)
+  }
+
+  init(socks: Endpoint, http: Endpoint) {
+    self.socks = socks
+    self.http = http
+  }
+
+  var isValid: Bool {
+    !socks.host.isEmpty && !http.host.isEmpty
+      && (1...65_535).contains(socks.port)
+      && (1...65_535).contains(http.port)
+  }
+
+  /// Cleanup requires the enabled SOCKS, HTTP, and HTTPS endpoints to match exactly.
+  func matches(_ dictionary: [String: Any]) -> Bool {
+    Self.enabled(dictionary[SystemProxyPropertyList.socksEnabled])
+      && Self.enabled(dictionary[SystemProxyPropertyList.httpEnabled])
+      && Self.enabled(dictionary[SystemProxyPropertyList.httpsEnabled])
+      && dictionary[SystemProxyPropertyList.socksProxy] as? String == socks.host
+      && Self.port(dictionary[SystemProxyPropertyList.socksPort]) == socks.port
+      && dictionary[SystemProxyPropertyList.httpProxy] as? String == http.host
+      && Self.port(dictionary[SystemProxyPropertyList.httpPort]) == http.port
+      && dictionary[SystemProxyPropertyList.httpsProxy] as? String == http.host
+      && Self.port(dictionary[SystemProxyPropertyList.httpsPort]) == http.port
+  }
+
+  private static func enabled(_ value: Any?) -> Bool {
+    port(value) == 1
+  }
+
+  private static func port(_ value: Any?) -> Int? {
+    if let value = value as? Int { return value }
+    return (value as? NSNumber)?.intValue
+  }
+}
+
+/// Pure configuration planning. Apply rewrites every differing service in the active
+/// location. Cleanup matches endpoint signatures across locations and clears the entire
+/// matching Proxies dictionary.
 enum SystemProxyPlanner {
-  struct Plan: Equatable, Sendable {
-    /// 需要写入的 service 条目；空 = 零写入。
-    let writes: [SystemProxyOwnershipRecord.Entry]
-    /// 应用后的完整 ownership record（含 adopt 刷新与新增接管）。
-    let ownership: SystemProxyOwnershipRecord
-    /// record 相对输入是否变化（adopt 或新增接管时为 true）。
-    let ownershipChanged: Bool
+  struct ApplyPlan: Equatable, Sendable {
+    let writes: [SystemProxyPlannedWrite]
 
     var outcome: SystemProxyWriteOutcome {
       writes.isEmpty ? .unchanged : .written
     }
   }
 
-  static func makePlan(
-    services: [SystemProxyServiceState],
-    existing: SystemProxyOwnershipRecord?,
-    configuration: SystemProxyConfiguration
-  ) throws -> Plan {
-    let existingByID = Dictionary(
-      uniqueKeysWithValues: (existing?.entries ?? []).map { ($0.serviceID, $0) })
-    var writes: [SystemProxyOwnershipRecord.Entry] = []
-    var recordByID = existingByID
-
-    for service in services {
-      let owned = existingByID[service.serviceID]
-      // 已接管服务严格保留记录中的 original（nil = 接管前无代理配置，二次
-      // 变更后 restore 才能清回无配置态）；未接管服务记当前值快照。
-      let original: Data?
-      if let owned {
-        original = owned.originalConfiguration
-      } else {
-        original = service.configuration
-      }
-      let desired = try propertyListData(
-        from: managedDictionary(
-          basedOn: original, configuration: configuration, serviceID: service.serviceID),
-        serviceID: service.serviceID)
-      if let owned {
-        if !equivalent(service.configuration, owned.appliedConfiguration) {
-          // 外部改动：恰好等于期望值 → adopt；否则冲突（绝不覆盖）。
-          guard equivalent(service.configuration, desired) else {
-            throw SystemProxyError.ownershipConflict(service.serviceID)
-          }
-          recordByID[service.serviceID] = SystemProxyOwnershipRecord.Entry(
-            serviceID: service.serviceID,
-            originalConfiguration: owned.originalConfiguration,
-            appliedConfiguration: desired)
-          continue
-        }
-        if equivalent(service.configuration, desired) {
-          continue
-        }
-      } else if equivalent(service.configuration, desired) {
-        // 未接管但系统值已等于期望（如用户手动配过相同端点）：adopt 免授权。
-        recordByID[service.serviceID] = SystemProxyOwnershipRecord.Entry(
-          serviceID: service.serviceID,
-          originalConfiguration: service.configuration,
-          appliedConfiguration: desired)
-        continue
-      }
-      let entry = SystemProxyOwnershipRecord.Entry(
-        serviceID: service.serviceID,
-        originalConfiguration: original,
-        appliedConfiguration: desired)
-      recordByID[service.serviceID] = entry
-      writes.append(entry)
-    }
-
-    let ownership = SystemProxyOwnershipRecord(
-      entries: recordByID.values.sorted { $0.serviceID < $1.serviceID })
-    return Plan(
-      writes: writes,
-      ownership: ownership,
-      ownershipChanged: ownership != existing)
+  struct ClearPlan: Equatable, Sendable {
+    let writes: [SystemProxyPlannedWrite]
   }
 
-  // MARK: - 语义比较与字典投影（SC 写入层共用）
+  static func makeApplyPlan(
+    services: [SystemProxyServiceState], configuration: SystemProxyConfiguration
+  ) throws -> ApplyPlan {
+    var writes: [SystemProxyPlannedWrite] = []
+    for service in services {
+      let original = try dictionary(
+        from: service.configuration, serviceID: service.identifier.serviceID)
+      let desired = try propertyListData(
+        from: SystemProxyPropertyList.applying(configuration, to: original),
+        serviceID: service.identifier.serviceID)
+      guard !equivalent(service.configuration, desired) else { continue }
+      writes.append(SystemProxyPlannedWrite(identifier: service.identifier, configuration: desired))
+    }
+    return ApplyPlan(writes: writes)
+  }
 
-  /// 属性列表语义等价（键序无关），nil 仅与 nil 等价。
+  static func makeClearPlan(
+    services: [SystemProxyServiceState], signature: SystemProxyEndpointSignature
+  ) throws -> ClearPlan {
+    let writes = try services.compactMap { service -> SystemProxyPlannedWrite? in
+      let dictionary = try dictionary(
+        from: service.configuration, serviceID: service.identifier.serviceID)
+      guard signature.matches(dictionary) else { return nil }
+      return SystemProxyPlannedWrite(identifier: service.identifier, configuration: nil)
+    }
+    return ClearPlan(writes: writes)
+  }
+
+  /// Property-list semantic equality; dictionary key order does not matter.
   static func equivalent(_ lhs: Data?, _ rhs: Data?) -> Bool {
     guard let lhs, let rhs else { return lhs == nil && rhs == nil }
     guard
@@ -124,14 +146,6 @@ enum SystemProxyPlanner {
         as? NSDictionary
     else { return lhs == rhs }
     return left.isEqual(right)
-  }
-
-  /// 期望字典 = 托管投影应用到 original（保留原字典中的未知附加键）。
-  static func managedDictionary(
-    basedOn original: Data?, configuration: SystemProxyConfiguration, serviceID: String
-  ) throws -> [String: Any] {
-    let originalDictionary = try dictionary(from: original, serviceID: serviceID)
-    return SystemProxyPropertyList.applying(configuration, to: originalDictionary)
   }
 
   static func dictionary(from data: Data?, serviceID: String) throws -> [String: Any] {

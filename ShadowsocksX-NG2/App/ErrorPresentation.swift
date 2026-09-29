@@ -61,8 +61,8 @@ extension AppPresentation {
       return legacyImport(error)
     case let error as SystemProxyError:
       return systemProxy(error)
-    case let error as SystemProxyOwnershipStoreError:
-      return ownershipStore(error)
+    case let error as SystemProxyEndpointSignatureStoreError:
+      return endpointSignatureStore(error)
     case let error as TextClipboardFailure:
       return textClipboard(error)
     case let error as DiagnosticReportFailure:
@@ -314,22 +314,23 @@ extension AppPresentation {
     case .preferencesUnavailable: return "系统网络配置不可用"
     case .preferencesBusy: return "系统网络配置正被其他设置操作占用"
     case .noCurrentNetworkSet: return "没有当前网络位置"
+    case .noNetworkLocations: return "没有可检查的网络位置"
     case .noProxyServices: return "当前网络位置没有可写入的网络服务"
     case .unreadableService: return "无法读取网络服务的代理配置"
-    case .ownershipConflict: return "系统代理配置已被其他设置改动，未覆盖"
     case .invalidStoredConfiguration: return "保存的系统代理配置无效"
     case .cannotWriteService: return "无法写入网络服务的代理配置"
     case .commitFailed: return "系统代理提交失败"
     case .applyFailed: return "系统代理应用失败"
-    case .ownershipStoreFailed: return "系统代理所有权记录失败"
+    case .endpointSignatureStoreFailed: return "系统代理端点记录失败"
     }
   }
 
-  private static func ownershipStore(_ error: SystemProxyOwnershipStoreError) -> String {
+  private static func endpointSignatureStore(
+    _ error: SystemProxyEndpointSignatureStoreError
+  ) -> String {
     switch error {
-    case .readFailed: return "系统代理所有权记录读取失败"
-    case .writeFailed: return "系统代理所有权记录写入失败"
-    case .invalidRecord: return "系统代理所有权记录无效"
+    case .readFailed: return "系统代理端点记录读取失败"
+    case .writeFailed: return "系统代理端点记录写入失败"
     }
   }
 

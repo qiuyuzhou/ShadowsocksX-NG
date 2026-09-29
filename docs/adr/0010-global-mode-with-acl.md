@@ -1,6 +1,6 @@
 # Implement global mode with a minimal ACL
 
-**Status**: accepted
+**Status**: accepted; system-proxy rollback clause superseded by ADR-0019. Runtime and mode rollback remain.
 
 ## Context
 
@@ -11,7 +11,7 @@ Global mode previously projected only the system SOCKS endpoint and relied on ss
 - Global mode deploys an `sslocal` ACL with `[proxy_all]` and a `[bypass_list]` containing only the fixed local safety rules: IPv4 loopback, RFC 1918, link-local; IPv6 loopback, link-local, and ULA; `localhost`, `*.local`, and no-dot hostnames. No China list, GFWList, or custom rules enter this ACL. CGNAT is excluded.
 - The same ACL is the routing policy for the local SOCKS inbound, the local HTTP inbound, and LAN-sharing clients that connect to those listeners directly. It is not a substitute for the system proxy exception list; both use the same fixed local scope, but the ACL is the verified bypass for requests that already entered `sslocal`.
 - IPv6 CIDR strings in the macOS SystemConfiguration exceptions list are not a verified bypass guarantee (only exact IPv6 addresses were observed to match). The ACL's IPv6 rules are the routing guarantee; this limitation is recorded rather than papered over by the exception list.
-- ACL path, content, digest, and summary are runtime identity, exactly as in ADR-0009. Switching into or out of global mode changes the ACL and therefore requires a full `sslocal` restart through the wrapper — never a bare SIGUSR1 server-list reload. On verification failure the controller restores the previous mode, runtime document, and applied system proxy.
+- ACL path, content, digest, and summary are runtime identity, exactly as in ADR-0009. Switching into or out of global mode changes the ACL and therefore requires a full `sslocal` restart through the wrapper — never a bare SIGUSR1 server-list reload. On verification failure it restores the previous mode and runtime document; the former system-proxy restoration behavior is superseded by ADR-0019.
 - Without a valid active target the agent still listens with an empty server list under the global ACL; local targets remain reachable, public targets have no exit. System proxy intent stays pending and converges automatically once an active target is valid and the local endpoints are healthy.
 
 ## Consequences

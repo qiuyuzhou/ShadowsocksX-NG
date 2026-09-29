@@ -61,7 +61,7 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(controller.state, .off)
     XCTAssertEqual(controller.settings, importedSettings)
     XCTAssertEqual(controller.activeTargetID, seeded.server)
-    XCTAssertEqual(systemProxy.restoreCount, 0, "Legacy 导入不能写入或恢复系统代理")
+    XCTAssertEqual(systemProxy.clearCount, 0, "Legacy 导入不能写入或清理系统代理")
     XCTAssertTrue(systemProxy.applied.isEmpty, "导入边界不应重新应用系统代理")
   }
 

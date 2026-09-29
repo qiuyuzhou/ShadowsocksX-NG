@@ -80,7 +80,7 @@ final class AppPresentationTests: XCTestCase {
       .applied,
       .failed(.operation(.applyFailed)),
       .failed(.mode(.invalidSOCKSPort(0))),
-      .failed(.ownershipConflict),
+      .failed(.operation(.endpointSignatureStoreFailed)),
       .failed(.unknown),
     ]
     for application in systemProxyApplications {
