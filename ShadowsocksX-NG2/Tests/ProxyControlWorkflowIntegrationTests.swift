@@ -69,6 +69,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
       listenRestore: RestoredListenSettings(
         settings: ActivationFixture.listen, unreadableError: nil),
       settingsStore: settingsStore ?? InMemoryProxySettingsStore(),
+      appBundle: AppArtifact.bundle,
       settingsRestore: RestoredProxySettings(
         settings: settings ?? ProxySettings(listen: ActivationFixture.listen),
         unreadableError: nil),

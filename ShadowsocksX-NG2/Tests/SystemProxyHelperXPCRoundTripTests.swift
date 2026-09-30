@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import XCTest
 
 @testable import ShadowsocksX_NG2
@@ -6,8 +7,9 @@ import XCTest
 /// 真实 XPC 装配层的契约 round-trip（issue #71）：匿名监听器挂真实 listener
 /// delegate（注入假特权写入器，不触真实系统设置）+ listenerEndpoint 连接，覆盖
 /// fakes 与纯逻辑单测覆盖不到的层：NSXPCInterface 方法签名、客户端签名
-/// identifier 校验、Data payload 传输与 XPC 内部队列应答路径。测试宿主是
-/// app bundle，客户端 identifier 与 delegate 期望一致，无需 launchd。
+/// identifier 校验、Data payload 传输与 XPC 内部队列应答路径。去宿主化
+/// （ADR 0021）后连接方是 xctest runner 本进程，delegate 期望身份按本进程
+/// 实际签名 identifier 注入，无需 launchd。
 /// 注意：NSXPCListener.delegate 是弱引用，delegate 必须由测试强持有。
 final class SystemProxyHelperXPCRoundTripTests: XCTestCase {
   func testTypedApplyAndClearRoundTripThroughRealXPCConnection() async throws {
@@ -17,7 +19,9 @@ final class SystemProxyHelperXPCRoundTripTests: XCTestCase {
       case .clear: return .cleared
       }
     })
-    let delegate = SystemProxyHelperListenerDelegate(engine: engine)
+    let delegate = SystemProxyHelperListenerDelegate(
+      engine: engine,
+      expectedClientIdentifier: try XCTUnwrap(Self.currentProcessSigningIdentifier()))
     let listener = NSXPCListener.anonymous()
     listener.delegate = delegate
     listener.resume()
@@ -35,8 +39,7 @@ final class SystemProxyHelperXPCRoundTripTests: XCTestCase {
 
     let configuration = SystemProxyConfiguration(
       socks: .init(host: "127.0.0.1", port: 1086),
-      http: .init(host: "127.0.0.1", port: 1087),
-      https: .init(host: "127.0.0.1", port: 1087),
+      http: .init(host: "127.0.0.1", port: 1087), https: .init(host: "127.0.0.1", port: 1087),
       exceptions: ["localhost"])
     let payload = try SystemProxyHelperWire.encodeConfiguration(configuration)
 
@@ -65,5 +68,20 @@ final class SystemProxyHelperXPCRoundTripTests: XCTestCase {
     }
     await fulfillment(of: [clearReplied], timeout: 10)
     XCTAssertEqual(clearedResponse, .cleared)
+  }
+
+  /// 本进程的代码签名 identifier（与生产 SystemProxyClientValidator 同一
+  /// SecCode 查询路径，对自身用 SecCodeCopySelf 取 code）。
+  private static func currentProcessSigningIdentifier() -> String? {
+    var code: SecCode?
+    guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
+    var staticCode: SecStaticCode?
+    guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode
+    else { return nil }
+    var information: CFDictionary?
+    guard SecCodeCopySigningInformation(staticCode, SecCSFlags(), &information) == errSecSuccess,
+      let information
+    else { return nil }
+    return (information as NSDictionary)[kSecCodeInfoIdentifier] as? String
   }
 }

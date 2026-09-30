@@ -45,6 +45,7 @@ final class UnreadableListenSettingsTests: XCTestCase {
       plugins: ActivationFixture.plugins,
       listenRestore: RestoredListenSettings(
         settings: SslocalListenSettings(), unreadableError: listenUnreadable),
+      appBundle: AppArtifact.bundle,
       settingsRestore: settingsRestore,
       agent: agent,
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),

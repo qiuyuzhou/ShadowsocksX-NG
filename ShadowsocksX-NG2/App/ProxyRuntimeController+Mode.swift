@@ -133,15 +133,16 @@ extension ProxyRuntimeController {
   /// （issue #63/#64）。快照缺失/损坏/版本不匹配时抛错，调用方必须失败
   /// 并保留旧 ACL，不得静默退化成全局（issue #63 AC4）。
   func chinaDirectRules() throws -> [ProxyRule] {
-    let geolocation = try BuiltinRuleCatalog.loadGeolocationCN()
-    let chinaIPv4 = try BuiltinRuleCatalog.loadChinaIPv4()
+    let geolocation = try BuiltinRuleCatalog.loadGeolocationCN(from: appBundle)
+    let chinaIPv4 = try BuiltinRuleCatalog.loadChinaIPv4(from: appBundle)
     return BuiltinRuleCatalog.chinaDirectRules(from: [geolocation, chinaIPv4])
   }
 
   /// GFWList 候选（issue #65）：可准确表达且未被更宽代理规则遮蔽的规则
   /// （含未遮蔽例外），参与 `bypass_all` ACL 编译。
   func gfwlistRules() throws -> [ProxyRule] {
-    BuiltinRuleCatalog.gfwlistRules(from: try BuiltinRuleCatalog.loadGFWList())
+    BuiltinRuleCatalog.gfwlistRules(
+      from: try BuiltinRuleCatalog.loadGFWList(from: appBundle))
   }
 
   private func deployModeTransition(

@@ -20,9 +20,11 @@ enum SystemProxyHelperIdentity {
 
   /// App bundle 内 LaunchDaemon 清单内容（注册漂移指纹的基准）。helper 进程
   /// 内没有 bundle，返回 nil，调用方按「无基准不动作」处理。Contents/Library
-  /// 不是资源目录，Bundle 资源 API 搜不到，按固定路径直读。
-  static var launchDaemonPlistData: Data? {
-    let url = Bundle.main.bundleURL
+  /// 不是资源目录，Bundle 资源 API 搜不到，按固定路径直读。bundle 参数生产
+  /// 默认 Bundle.main；去宿主化（ADR 0021）后单测经控制器的 appBundle 缝注入
+  /// 构建产物 bundle。
+  static func launchDaemonPlistData(in bundle: Bundle = .main) -> Data? {
+    let url = bundle.bundleURL
       .appendingPathComponent("Contents/Library/LaunchDaemons")
       .appendingPathComponent(plistName)
     return try? Data(contentsOf: url)

@@ -59,6 +59,7 @@ final class SettingsWorkflowTests: XCTestCase {
       listenRestore: RestoredListenSettings(
         settings: ActivationFixture.listen, unreadableError: nil),
       settingsStore: settingsStore,
+      appBundle: AppArtifact.bundle,
       agent: agent,
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       systemProxy: systemProxy,

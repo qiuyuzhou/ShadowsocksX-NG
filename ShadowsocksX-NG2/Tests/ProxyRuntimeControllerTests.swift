@@ -126,6 +126,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       settingsStore: settingsStore ?? InMemoryProxySettingsStore(),
       customRuleStore: customRuleStore
         ?? CustomRuleStore(fileURL: runtime.directory.appendingPathComponent("custom-rules.json")),
+      appBundle: AppArtifact.bundle,
       settingsRestore: restored,
       agent: agent,
       probe: probe,

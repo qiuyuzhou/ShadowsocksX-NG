@@ -85,6 +85,10 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2
         PRODUCT_NAME: ShadowsocksX-NG2
+        # 模块名让位给 Core 镜像库（ShadowsocksX_NG2）：两者 swiftmodule 都落
+        # 共享 Products 目录，重名会互相覆盖；app 可执行自身不 import 任何
+        # 消费方，改名零影响。
+        PRODUCT_MODULE_NAME: ShadowsocksX_NG2App
         CODE_SIGN_IDENTITY: "Developer ID Application"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "2.0.0"
@@ -118,6 +122,29 @@ targets:
         copy:
           destination: wrapper
           subpath: Contents/MacOS
+  ShadowsocksX-NG2Core:
+    type: library.static
+    platform: macOS
+    # 测试专用 app 源码镜像（去宿主化，ADR 0021）：与 app target 同源编译
+    # （除 @main 组合根 MainApp.swift），模块名沿用 ShadowsocksX_NG2，全部
+    # 测试的 @testable import 零改动。测试 bundle 改链本库后不再生成
+    # TEST_HOST：xcodebuild test 只构建 app、不再启动 app 进程，与安装版
+    # 运行实例零接触。同源双编译沿用 Agent/Helper 共享 Domain 文件的既定
+    # 模式；Core 只被测试 target 依赖，发布链与普通构建不编译它。
+    sources:
+      - path: App
+        excludes:
+          - "MainApp.swift"
+          - "Info.plist"
+          - "ShadowsocksX-NG2.entitlements"
+          - "Assets.xcassets"
+      - path: Domain
+    settings:
+      base:
+        PRODUCT_NAME: ShadowsocksX-NG2Core
+        PRODUCT_MODULE_NAME: ShadowsocksX_NG2
+        # 静态库产物不签名（app 的 DevID 身份不适用）。
+        CODE_SIGNING_ALLOWED: NO
   ShadowsocksX-NG2Agent:
     type: tool
     platform: macOS
@@ -177,7 +204,9 @@ targets:
       path: Tests/Info.plist
       properties: {}
     dependencies:
-      - target: ShadowsocksX-NG2
+      # 去宿主化（ADR 0021）：单测链 Core 静态库镜像而非 app 可执行，测试在
+      # 独立 xctest runner 中运行，宿主 app 不再被启动。
+      - target: ShadowsocksX-NG2Core
   ShadowsocksX-NG2SmokeTests:
     type: bundle.unit-test
     platform: macOS
@@ -194,7 +223,9 @@ targets:
       path: Tests/Smoke/Info.plist
       properties: {}
     dependencies:
-      - target: ShadowsocksX-NG2
+      # 去宿主化（ADR 0021）：smoke 同样链 Core 镜像库；真实 sslocal/agent 从
+      # scheme 构建的 app 产物取（AppArtifact），宿主 app 不再被启动。
+      - target: ShadowsocksX-NG2Core
 schemes:
   # 真实进程冒烟独立 scheme（task test:smoke）：拉起真实 sslocal，按需执行；
   # 发布门槛要求与 packaging-gate 一起全绿。

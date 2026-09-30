@@ -149,7 +149,7 @@ extension ProxyRuntimeController {
   private func ensureHelperAvailableForApply() async -> Bool {
     switch systemProxyHelper.status {
     case .approved:
-      if Self.helperRegistrationDrifted() {
+      if helperRegistrationDrifted() {
         do {
           try systemProxyHelper.unregister()
           // launchd 对节流中（spawn scheduled）job 的移除是异步的：立即重注
@@ -157,7 +157,7 @@ extension ProxyRuntimeController {
           // runtime（10s）节流窗再重注；间隔内收敛以旧定义失败呈超时。
           try? await Task.sleep(nanoseconds: helperRefreshDelayNanoseconds)
           try systemProxyHelper.register()
-          Self.storeHelperRegistrationStamp()
+          storeHelperRegistrationStamp()
         } catch {
           // 刷新失败不记指纹，下次启动重试；状态退回后由下方分支接手。
           RuntimeLog.emit(.systemProxyHelperRegisterFailed(detail: describe(error)))
@@ -170,7 +170,7 @@ extension ProxyRuntimeController {
     case .notRegistered:
       do {
         try systemProxyHelper.register()
-        Self.storeHelperRegistrationStamp()
+        storeHelperRegistrationStamp()
       } catch {
         RuntimeLog.emit(.systemProxyHelperRegisterFailed(detail: describe(error)))
       }
@@ -185,14 +185,16 @@ extension ProxyRuntimeController {
     return false
   }
 
-  private static func helperRegistrationDrifted(defaults: UserDefaults = .standard) -> Bool {
+  private func helperRegistrationDrifted(defaults: UserDefaults = .standard) -> Bool {
     SystemProxyHelperRegistrationStamp.drifted(
-      plistData: SystemProxyHelperIdentity.launchDaemonPlistData,
+      plistData: SystemProxyHelperIdentity.launchDaemonPlistData(in: appBundle),
       storedStamp: defaults.string(forKey: SystemProxyHelperRegistrationStamp.defaultsKey))
   }
 
-  private static func storeHelperRegistrationStamp(defaults: UserDefaults = .standard) {
-    guard let plistData = SystemProxyHelperIdentity.launchDaemonPlistData else { return }
+  private func storeHelperRegistrationStamp(defaults: UserDefaults = .standard) {
+    guard let plistData = SystemProxyHelperIdentity.launchDaemonPlistData(in: appBundle) else {
+      return
+    }
     defaults.set(
       SystemProxyHelperRegistrationStamp.stamp(plistData),
       forKey: SystemProxyHelperRegistrationStamp.defaultsKey)

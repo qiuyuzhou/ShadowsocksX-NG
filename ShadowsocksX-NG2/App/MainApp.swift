@@ -63,11 +63,10 @@ struct ShadowsocksXNG2App: App {
   }
 }
 
-/// 随窗激活策略的真实 NSApp 落点（hermetic：单测 host 不触碰激活策略）。
+/// 随窗激活策略的真实 NSApp 落点。
 @MainActor
 private final class NSAppWindowActivationApplier: WindowActivationPolicyApplying {
   func apply(_ policy: NSApplication.ActivationPolicy) {
-    guard !ApplicationDependencies.isUnitTesting else { return }
     NSApp.setActivationPolicy(policy)
   }
 }
@@ -83,7 +82,6 @@ private struct StatusMenuLabel: View {
     Image(systemName: "network")
       .accessibilityLabel("ShadowsocksX-NG2")
       .task {
-        guard !ApplicationDependencies.isUnitTesting else { return }
         await control.resyncOnLaunch()
       }
   }
@@ -196,10 +194,8 @@ private struct AppComposition {
   }
 }
 
-/// The test host still loads the app executable because this target is a macOS
-/// SwiftUI application. Its bootstrap must nevertheless be hermetic: starting
-/// XCTest must not read the user's catalog, settings, activation state, Legacy
-/// defaults, login-item registration, runtime files, or production Keychain.
+/// 组合根依赖集（仅生产形态）：单测不再以本 app 为宿主（去宿主化，ADR 0021），
+/// 装配永远面向真实存储、系统服务与用户默认域。
 @MainActor
 private struct ApplicationDependencies {
   let credentials: CredentialStoring
@@ -217,18 +213,7 @@ private struct ApplicationDependencies {
   let diagnosticReportExporter: any DiagnosticReportExporter
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
 
-  static var isUnitTesting: Bool {
-    let environment = ProcessInfo.processInfo.environment
-    return environment["XCTestConfigurationFilePath"] != nil
-      || environment["XCTestSessionIdentifier"] != nil
-  }
-
   static func make() -> ApplicationDependencies {
-    guard isUnitTesting else { return makeProduction() }
-    return makeTesting()
-  }
-
-  private static func makeProduction() -> ApplicationDependencies {
     // ADR 0017 初版文件形态的迁移（发布链从未包含，仅存量开发机）：文件不存在
     // 即空操作，随每次启动调用无害。
     SilentLaunchStore.migrateLegacyFileIfPresent(
@@ -257,97 +242,4 @@ private struct ApplicationDependencies {
       configurationGroupFileExporter: AppKitConfigurationGroupFileExporter())
   }
 
-  private static func makeTesting() -> ApplicationDependencies {
-    let directory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("ShadowsocksX-NG2-test-host-\(UUID().uuidString)", isDirectory: true)
-    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
-    // 测试宿主不得触碰生产 defaults 域：走独立套件并在装配时清空（封闭性公约）。
-    let silentLaunchSuite = "ShadowsocksX-NG2-test-host-silent-launch"
-    UserDefaults.standard.removePersistentDomain(forName: silentLaunchSuite)
-    let silentLaunchStore = SilentLaunchStore(
-      defaults: UserDefaults(suiteName: silentLaunchSuite)!)
-
-    let credentials = EphemeralCredentialStore()
-    let catalogFileStore = CatalogFileStore(
-      fileURL: directory.appendingPathComponent("catalog.json"))
-    let settingsStore = ProxySettingsFileStore(
-      fileURL: directory.appendingPathComponent("settings.json"),
-      legacyListenFileURL: directory.appendingPathComponent("listen-settings.json"))
-    let restoredSettings = ProxySettingsFileStore.restored(store: settingsStore)
-    let marker = EphemeralLegacyImportMarkerStore()
-    let legacyImportService = LegacyImportService(
-      source: EmptyLegacySnapshotProvider(),
-      catalogStore: catalogFileStore,
-      credentials: credentials,
-      marker: marker)
-
-    return ApplicationDependencies(
-      credentials: credentials,
-      catalogFileStore: catalogFileStore,
-      activationFileStore: ActivationStateFileStore(
-        fileURL: directory.appendingPathComponent("activation.json")),
-      runtimeFileStore: RuntimeFileStore(
-        fileURL: directory.appendingPathComponent("sslocal-active.json")),
-      settingsStore: settingsStore,
-      settingsRestore: restoredSettings,
-      listenRestore: RestoredListenSettings(
-        settings: restoredSettings.settings.listen, unreadableError: nil),
-      legacyImportService: legacyImportService,
-      launchAgent: NoopLaunchAgentService(),
-      loginService: NoopLaunchAtLoginService(),
-      silentLaunchStore: silentLaunchStore,
-      textClipboard: InMemoryTextClipboard(),
-      diagnosticReportExporter: InMemoryDiagnosticReportExporter(),
-      configurationGroupFileExporter: InMemoryConfigurationGroupFileExporter())
-  }
-}
-
-private final class EphemeralCredentialStore: CredentialStoring {
-  private var values: [CredentialReference: String] = [:]
-  private let lock = NSLock()
-
-  func save(_ secret: String, for reference: CredentialReference) throws {
-    lock.lock()
-    defer { lock.unlock() }
-    values[reference] = secret
-  }
-
-  func secret(for reference: CredentialReference) throws -> String? {
-    lock.lock()
-    defer { lock.unlock() }
-    return values[reference]
-  }
-
-  func delete(_ reference: CredentialReference) throws {
-    lock.lock()
-    defer { lock.unlock() }
-    values.removeValue(forKey: reference)
-  }
-}
-
-private struct EmptyLegacySnapshotProvider: LegacySnapshotProviding {
-  func readSnapshot() throws -> LegacySnapshot? { nil }
-}
-
-private final class EphemeralLegacyImportMarkerStore: LegacyImportMarkerStoring {
-  private var completed = false
-
-  func isCompleted() throws -> Bool { completed }
-
-  func setCompleted(_ completed: Bool) throws {
-    self.completed = completed
-  }
-}
-
-private struct NoopLaunchAgentService: LaunchAgentControlling {
-  var status: LaunchAgentStatus { .notRegistered }
-  func register() throws {}
-  func unregister() throws {}
-}
-
-private struct NoopLaunchAtLoginService: LaunchAtLoginControlling {
-  var status: LoginItemStatus { .notRegistered }
-  func register() throws {}
-  func unregister() throws {}
 }

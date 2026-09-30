@@ -94,6 +94,10 @@ final class ProxyRuntimeController: ObservableObject {
   let systemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitoring
   let firewallChecker: FirewallStatusChecking
   let firewallExecutableURLs: [URL]
+  /// 宿主 app bundle 缝（生产为 Bundle.main）：内置规则快照与 LaunchDaemon
+  /// 清单等打包资源的定位基准。去宿主化（ADR 0021）后单测运行于 xctest
+  /// runner，`Bundle.main` 不再是 app，经此缝注入构建产物 bundle。
+  let appBundle: Bundle
   let firewallPollIntervalNanoseconds: UInt64
   let launchHealthTimeoutSeconds: TimeInterval
   /// 注册清单漂移重注时，注销与重注的间隔（launchd 对节流中 job 的移除异步）。
@@ -126,6 +130,7 @@ final class ProxyRuntimeController: ObservableObject {
     listenRestore: RestoredListenSettings = ListenSettingsFileStore.restored(),
     settingsStore: ProxySettingsStoring = ProxySettingsFileStore(),
     customRuleStore: CustomRuleStore = CustomRuleStore(),
+    appBundle: Bundle = .main,
     settingsRestore: RestoredProxySettings? = nil,
     agent: LaunchAgentControlling = SMAppLaunchAgentService(),
     probe: EndpointProbing = SystemEndpointProbe(),
@@ -149,6 +154,7 @@ final class ProxyRuntimeController: ObservableObject {
     self.plugins = plugins
     self.settingsStore = settingsStore
     self.customRuleStore = customRuleStore
+    self.appBundle = appBundle
     let restoredSettings =
       settingsRestore
       ?? RestoredProxySettings(

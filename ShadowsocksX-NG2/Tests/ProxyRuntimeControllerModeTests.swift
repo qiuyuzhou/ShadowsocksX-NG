@@ -121,6 +121,7 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
       listenRestore: RestoredListenSettings(
         settings: ActivationFixture.listen, unreadableError: nil),
       settingsStore: InMemoryProxySettingsStore(),
+      appBundle: AppArtifact.bundle,
       settingsRestore: RestoredProxySettings(
         settings: settings ?? ProxySettings(listen: ActivationFixture.listen),
         unreadableError: nil),
