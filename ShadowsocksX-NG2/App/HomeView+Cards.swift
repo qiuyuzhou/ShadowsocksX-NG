@@ -79,7 +79,6 @@ struct TargetTreeCard: View {
             TargetGroupInfo(
               id: node.id,
               name: node.name,
-              sourceLabel: node.source == .subscription ? "订阅分组" : "手动分组",
               servers: servers))
         }
         walk(node.childNodes.filter { $0.isGroup })
@@ -113,14 +112,9 @@ struct TargetGroupSection: View {
             .rotationEffect(.degrees(isCollapsed ? 0 : 90))
           Image(systemName: "folder")
             .foregroundStyle(.secondary)
-          VStack(alignment: .leading, spacing: 1) {
-            Text(group.name)
-              .font(.callout.weight(.medium))
-              .foregroundStyle(.primary)
-            Text("\(group.sourceLabel) · \(group.servers.count) 台")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
+          Text(group.name)
+            .font(.body.weight(.medium))
+            .foregroundStyle(.primary)
           Spacer(minLength: 0)
         }
         .contentShape(Rectangle())
@@ -158,14 +152,9 @@ struct TargetServerRow: View {
             .font(.system(size: 12))
             .foregroundStyle(.tint)
         }
-      VStack(alignment: .leading, spacing: 1) {
-        Text(server.name)
-          .font(.callout.weight(isActive ? .semibold : .regular))
-          .foregroundStyle(server.isInvalid ? .secondary : .primary)
-        Text(server.source == .subscription ? "订阅节点" : "手动服务器")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
+      Text(server.name)
+        .font(.body.weight(isActive ? .semibold : .regular))
+        .foregroundStyle(server.isInvalid ? .secondary : .primary)
       Spacer(minLength: 0)
       if server.isInvalid {
         Image(systemName: "exclamationmark.triangle.fill")
@@ -327,10 +316,9 @@ struct QuickActionCard: View {
 
 }
 
-/// 目标分组的呈现模型（票 #54）：名称、来源说明与直属服务器叶子。
+/// 目标分组的呈现模型（票 #54）：名称与直属服务器叶子。
 struct TargetGroupInfo: Identifiable {
   let id: NodeID
   let name: String
-  let sourceLabel: String
   let servers: [CatalogTreeNode]
 }
