@@ -16,8 +16,6 @@ struct SettingsView: View {
       systemProxySection
     }
     .formStyle(.grouped)
-    .padding(.leading, 20)
-    .padding(.trailing, 24)
     .sheet(item: $presentedEditor) { editor in
       switch editor {
       case .ports(let session):
