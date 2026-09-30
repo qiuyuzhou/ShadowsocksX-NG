@@ -35,6 +35,9 @@ struct MainWindowView: View {
   @ObservedObject var settingsWorkflow: SettingsWorkflow
   @ObservedObject var loginController: LaunchAtLoginController
   @ObservedObject var silentLaunch: SilentLaunchController
+  /// 目录树折叠状态：组合根持有的长寿命对象，跨 destination 切换存续；服务器
+  /// 侧栏与首页目标树共用（见 CatalogExpansionState）。
+  @ObservedObject var expansion: CatalogExpansionState
   let clipboard: any TextClipboard
   let diagnosticReportExporter: any DiagnosticReportExporter
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
@@ -183,6 +186,7 @@ struct MainWindowView: View {
       WorkspaceHomeView(
         workflow: workflow,
         control: control,
+        expansion: expansion,
         clipboard: clipboard,
         onManageServers: { route.navigate(to: .servers) })
     case .servers:
@@ -190,6 +194,7 @@ struct MainWindowView: View {
         workflow: workflow,
         proxyController: proxyController,
         selection: $selection,
+        expansion: expansion,
         clipboard: clipboard,
         configurationGroupFileExporter: configurationGroupFileExporter)
     case .subscriptions:

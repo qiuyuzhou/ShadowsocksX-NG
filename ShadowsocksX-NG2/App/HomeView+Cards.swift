@@ -4,11 +4,10 @@ import SwiftUI
 struct TargetTreeCard: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
+  /// 分组折叠状态：组合根持有的共享对象，与服务器分区侧栏同源，跨分区切换存续。
+  @ObservedObject var expansion: CatalogExpansionState
   let onManageServers: () -> Void
   let errors: ErrorAlertPresenter
-
-  /// 收起状态的目标分组（默认全部展开）。
-  @State private var collapsedGroups: Set<NodeID> = []
 
   var body: some View {
     HomeCard(
@@ -45,8 +44,8 @@ struct TargetTreeCard: View {
           TargetGroupSection(
             group: group,
             activeTargetID: control.snapshot.activeTarget?.id,
-            isCollapsed: isCollapsed(group.id),
-            onToggle: { toggleCollapsed(group.id) },
+            isCollapsed: expansion.isCollapsed(group.id),
+            onToggle: { expansion.toggleCollapsed(group.id) },
             onActivate: activate)
         }
         ForEach(rootServers) { server in
@@ -67,18 +66,6 @@ struct TargetTreeCard: View {
         errors.present(error)
       }
     }
-  }
-
-  private func toggleCollapsed(_ id: NodeID) {
-    if isCollapsed(id) {
-      collapsedGroups.remove(id)
-    } else {
-      collapsedGroups.insert(id)
-    }
-  }
-
-  private func isCollapsed(_ id: NodeID) -> Bool {
-    collapsedGroups.contains(id)
   }
 
   /// 有服务器叶子的分组（递归收集；每组只呈现直属服务器叶子）。

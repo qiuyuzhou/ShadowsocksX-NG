@@ -104,6 +104,7 @@ private struct AppComposition {
   let diagnosticsWorkflow: DiagnosticsWorkflow
   let workspaceRoute: WorkspaceRoute
   let silentLaunch: SilentLaunchController
+  let expansion: CatalogExpansionState
   let textClipboard: any TextClipboard
   let workspaceContent: MainWindowView
 
@@ -115,16 +116,8 @@ private struct AppComposition {
     // access to this same in-process source.
     let catalogBootstrap = CatalogCommitCoordinator.bootstrap(
       fileStore: dependencies.catalogFileStore)
-    let controller = ProxyRuntimeController(
-      catalogSnapshotReader: catalogBootstrap.catalogSnapshotReader,
-      activationFileStore: dependencies.activationFileStore,
-      runtimeFileStore: dependencies.runtimeFileStore,
-      credentials: dependencies.credentials,
-      listenRestore: dependencies.listenRestore,
-      settingsStore: dependencies.settingsStore,
-      settingsRestore: dependencies.settingsRestore,
-      agent: dependencies.launchAgent,
-      systemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitor())
+    let controller = makeRuntimeController(
+      dependencies: dependencies, bootstrap: catalogBootstrap)
     let loginController = LaunchAtLoginController(service: dependencies.loginService)
     let catalogWorkflow = makeCatalogWorkflow(
       dependencies: dependencies,
@@ -145,6 +138,7 @@ private struct AppComposition {
       catalogFacts: { catalogWorkflow.diagnosticCatalogFacts })
     let workspaceRoute = WorkspaceRoute()
     let silentLaunch = SilentLaunchController(store: dependencies.silentLaunchStore)
+    let expansion = CatalogExpansionState()
     let workspaceContent = MainWindowView(
       route: workspaceRoute,
       workflow: catalogWorkflow,
@@ -154,6 +148,7 @@ private struct AppComposition {
       settingsWorkflow: settingsWorkflow,
       loginController: loginController,
       silentLaunch: silentLaunch,
+      expansion: expansion,
       clipboard: textClipboard,
       diagnosticReportExporter: dependencies.diagnosticReportExporter,
       configurationGroupFileExporter: dependencies.configurationGroupFileExporter)
@@ -166,8 +161,27 @@ private struct AppComposition {
       diagnosticsWorkflow: diagnosticsWorkflow,
       workspaceRoute: workspaceRoute,
       silentLaunch: silentLaunch,
+      expansion: expansion,
       textClipboard: textClipboard,
       workspaceContent: workspaceContent)
+  }
+
+  /// 运行时控制器接线：读侧接目录提交协调器快照，写侧接各持久化 seam 与
+  /// 系统服务适配器。
+  private static func makeRuntimeController(
+    dependencies: ApplicationDependencies,
+    bootstrap: CatalogCommitBootstrap
+  ) -> ProxyRuntimeController {
+    ProxyRuntimeController(
+      catalogSnapshotReader: bootstrap.catalogSnapshotReader,
+      activationFileStore: dependencies.activationFileStore,
+      runtimeFileStore: dependencies.runtimeFileStore,
+      credentials: dependencies.credentials,
+      listenRestore: dependencies.listenRestore,
+      settingsStore: dependencies.settingsStore,
+      settingsRestore: dependencies.settingsRestore,
+      agent: dependencies.launchAgent,
+      systemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitor())
   }
 
   /// 目录工作流接线（issue #40/#41/#49）：提交协调器与生产运行时适配器在此

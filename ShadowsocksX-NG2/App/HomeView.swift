@@ -7,6 +7,7 @@ import SwiftUI
 struct HomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
+  let expansion: CatalogExpansionState
   let clipboard: any TextClipboard
   let onManageServers: () -> Void
   let errors: ErrorAlertPresenter
@@ -19,6 +20,7 @@ struct HomeView: View {
           TargetTreeCard(
             workflow: workflow,
             control: control,
+            expansion: expansion,
             onManageServers: onManageServers,
             errors: errors)
         }

@@ -11,6 +11,9 @@ struct ServersView: View {
   /// 运行时事实来源：活动目标标记；激活命令经 `workflow.activate`。
   @ObservedObject var proxyController: ProxyRuntimeController
   @Binding var selection: NodeID?
+  /// 分组折叠状态：组合根持有的共享对象（与首页目标树同源），跨 destination
+  /// 切换存续；OutlineGroup 的内建展开态会随分区切换丢失，侧栏因此自管折叠。
+  @ObservedObject var expansion: CatalogExpansionState
   let clipboard: any TextClipboard
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
 
@@ -96,33 +99,8 @@ struct ServersView: View {
 
   private var serverSidebar: some View {
     List(selection: $selection) {
-      OutlineGroup(workflow.tree.roots, children: \.children) { node in
-        SidebarRow(
-          node: node,
-          workflow: workflow,
-          activeTargetID: proxyController.activeTargetID,
-          errors: errors,
-          onRename: { id in
-            renameTarget = id
-            renameText = workflow.displayName(for: id)
-          },
-          onNewGroup: { parent in
-            presentNewGroup(in: parent)
-          },
-          onMove: { moveTarget = $0 },
-          onDelete: { deleteTarget = $0 },
-          onExport: exportConfigurationGroup
-        )
-        .onDrag {
-          guard let payload = workflow.dragPayload(for: node.id) else {
-            return NSItemProvider()
-          }
-          return NSItemProvider(object: payload as NSString)
-        }
-        .dropDestination(for: String.self) { payload, _ in
-          handleDrop(payload, onto: node.id)
-        } isTargeted: { _ in
-        }
+      ForEach(visibleRows) { row in
+        treeRow(row)
       }
     }
     .listStyle(.sidebar)
@@ -141,6 +119,81 @@ struct ServersView: View {
       rootDropHovering = hovering
     }
     .toolbar { toolbarContent }
+  }
+
+  /// 折叠投影后的可见行（深度优先）：收起分组的子树不出现，其余保持目录序。
+  private var visibleRows: [CatalogTreeRow] {
+    var rows: [CatalogTreeRow] = []
+    func walk(_ nodes: [CatalogTreeNode], depth: Int) {
+      for node in nodes {
+        rows.append(CatalogTreeRow(node: node, depth: depth))
+        if node.isGroup, !expansion.isCollapsed(node.id) {
+          walk(node.childNodes, depth: depth + 1)
+        }
+      }
+    }
+    walk(workflow.tree.roots, depth: 0)
+    return rows
+  }
+
+  private func treeRow(_ row: CatalogTreeRow) -> some View {
+    let node = row.node
+    return HStack(spacing: 4) {
+      if node.isGroup {
+        if node.childNodes.isEmpty {
+          Color.clear.frame(width: 11, height: 11)
+        } else {
+          Button {
+            withAnimation { expansion.toggleCollapsed(node.id) }
+          } label: {
+            Image(systemName: "chevron.right")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(.secondary)
+              .rotationEffect(.degrees(expansion.isCollapsed(node.id) ? 0 : 90))
+          }
+          .buttonStyle(.plain)
+          .help(expansion.isCollapsed(node.id) ? "展开" : "收起")
+        }
+      }
+      SidebarRow(
+        node: node,
+        workflow: workflow,
+        activeTargetID: proxyController.activeTargetID,
+        errors: errors,
+        onRename: { id in
+          renameTarget = id
+          renameText = workflow.displayName(for: id)
+        },
+        onNewGroup: { parent in
+          presentNewGroup(in: parent)
+        },
+        onMove: { moveTarget = $0 },
+        onDelete: { deleteTarget = $0 },
+        onExport: exportConfigurationGroup
+      )
+    }
+    .padding(.leading, leadingInset(for: row))
+    .tag(node.id)
+    .onDrag {
+      guard let payload = workflow.dragPayload(for: node.id) else {
+        return NSItemProvider()
+      }
+      return NSItemProvider(object: payload as NSString)
+    }
+    .dropDestination(for: String.self) { payload, _ in
+      handleDrop(payload, onto: node.id)
+    } isTargeted: { _ in
+    }
+  }
+
+  /// 层级缩进：分组行按深度缩进；叶子行额外让出箭头槽位与分组文本对齐。
+  private func leadingInset(for row: CatalogTreeRow) -> CGFloat {
+    let depthStep: CGFloat = 14
+    let chevronSlot: CGFloat = 15
+    if row.node.isGroup {
+      return CGFloat(row.depth) * depthStep
+    }
+    return CGFloat(row.depth) * depthStep + chevronSlot
   }
 
   /// 删除结果 → selection invalidation（story 18）：仅清除失效选择，不自动
@@ -308,4 +361,12 @@ extension ServersView {
 private struct MoveContext: Identifiable {
   let nodeID: NodeID
   var id: NodeID { nodeID }
+}
+
+/// 侧栏树的可见行投影：节点 + 呈现深度；身份即节点身份（折叠只影响可见集合，
+/// 不影响行身份与选中）。
+private struct CatalogTreeRow: Identifiable {
+  let node: CatalogTreeNode
+  let depth: Int
+  var id: NodeID { node.id }
 }
