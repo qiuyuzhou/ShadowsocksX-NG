@@ -32,7 +32,7 @@ final class AgentLifecycleTests: XCTestCase {
 
   private var wrapperURL: URL {
     get throws {
-      let url = Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/ShadowsocksX-NG2Agent")
+      let url = AppArtifact.bundleURL.appendingPathComponent("Contents/MacOS/ShadowsocksX-NG2Agent")
       return try XCTUnwrap(
         FileManager.default.fileExists(atPath: url.path) ? url : nil,
         "wrapper 未嵌入 app bundle（Contents/MacOS/ShadowsocksX-NG2Agent）")

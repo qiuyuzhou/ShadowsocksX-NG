@@ -66,12 +66,14 @@ final class BundleManagedPluginProviderTests: XCTestCase {
     XCTAssertNil(provider.executablePath(forProgram: ""))
   }
 
-  /// 组合根事实：宿主 app bundle（Bundle.main，生产默认 provider 的取值来源）
-  /// 内受管插件在位——防止打包回归静默断开激活链路（编辑器显示提供而激活拒绝）。
+  /// 组合根事实：app bundle（生产默认 provider 的取值来源，经 AppArtifact 按
+  /// 构建产物定位、不依赖测试宿主）内受管插件在位——防止打包回归静默断开激
+  /// 活链路（编辑器显示提供而激活拒绝）。
   func testHostAppBundleProvidesManagedPlugin() throws {
     let path = try XCTUnwrap(
-      BundleManagedPluginProvider().executablePath(forProgram: pluginBinaryName),
-      "宿主 app bundle 未嵌入受管插件（先跑 fetch-external-binaries.sh）")
+      BundleManagedPluginProvider(bundleURL: AppArtifact.bundleURL)
+        .executablePath(forProgram: pluginBinaryName),
+      "app bundle 未嵌入受管插件（先跑 fetch-external-binaries.sh）")
     XCTAssertTrue(path.hasSuffix("Contents/Helpers/Plugins/\(pluginBinaryName)"))
   }
 

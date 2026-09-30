@@ -11,7 +11,7 @@ extension RealSslocalSmokeTests {
   /// 连带 sslocal 退出（D10 以 sslocal 信号为准）；真实服务器数据面验证属发布
   /// 门槛人工项（spec #21 Further Notes #6），在此以进程边界验证。
   func testRealSslocalLaunchesManagedV2rayPluginProcess() throws {
-    let pluginURL = Bundle.main.bundleURL.appendingPathComponent(
+    let pluginURL = AppArtifact.bundleURL.appendingPathComponent(
       "Contents/Helpers/Plugins/v2ray-plugin")
     _ = try XCTUnwrap(
       FileManager.default.isExecutableFile(atPath: pluginURL.path) ? pluginURL : nil,

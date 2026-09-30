@@ -183,6 +183,8 @@ targets:
     platform: macOS
     sources:
       - path: Tests/Smoke
+      # app 产物定位 helper（与单测 target 共享，见 Tests/AppArtifact.swift）。
+      - path: Tests/AppArtifact.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.SmokeTests

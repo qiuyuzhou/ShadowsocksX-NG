@@ -4,16 +4,18 @@ import XCTest
 
 @MainActor
 final class SkeletonTests: XCTestCase {
-  // 以下两个 Bundle.main 断言依赖测试包以 app 为 TEST_HOST 注入（target dependency）；
-  // 若移除该依赖，Bundle.main 不再是 app bundle，断言会失效。
+  // app bundle 断言按构建产物定位（AppArtifact），不依赖测试宿主进程；守住
+  // 的是打包面：bundle id 与旧版区分、菜单栏形态（LSUIElement）。
 
-  func testAppBundleIDIsDistinctFromLegacy() {
-    XCTAssertEqual(Bundle.main.bundleIdentifier, "com.qiuyuzhou.ShadowsocksX-NG2")
-    XCTAssertNotEqual(Bundle.main.bundleIdentifier, "com.qiuyuzhou.ShadowsocksX-NG")
+  func testAppBundleIDIsDistinctFromLegacy() throws {
+    let bundle = try XCTUnwrap(Bundle(url: AppArtifact.bundleURL))
+    XCTAssertEqual(bundle.bundleIdentifier, "com.qiuyuzhou.ShadowsocksX-NG2")
+    XCTAssertNotEqual(bundle.bundleIdentifier, "com.qiuyuzhou.ShadowsocksX-NG")
   }
 
-  func testAppIsMenuBarAgent() {
-    XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "LSUIElement") as? Bool, true)
+  func testAppIsMenuBarAgent() throws {
+    let bundle = try XCTUnwrap(Bundle(url: AppArtifact.bundleURL))
+    XCTAssertEqual(bundle.object(forInfoDictionaryKey: "LSUIElement") as? Bool, true)
   }
 }
 

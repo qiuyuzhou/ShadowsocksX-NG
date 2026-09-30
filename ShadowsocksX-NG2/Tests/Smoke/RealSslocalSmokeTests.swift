@@ -32,7 +32,7 @@ final class RealSslocalSmokeTests: XCTestCase {
 
   private var sslocalURL: URL {
     get throws {
-      let url = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/sslocal")
+      let url = AppArtifact.bundleURL.appendingPathComponent("Contents/Helpers/sslocal")
       return try XCTUnwrap(
         FileManager.default.fileExists(atPath: url.path) ? url : nil,
         "sslocal 未嵌入 app bundle（先跑 fetch-external-binaries.sh）")
@@ -72,7 +72,7 @@ final class RealSslocalSmokeTests: XCTestCase {
   func launchWrapper(_ document: SslocalRuntimeDocument) throws -> Process {
     try RuntimeFileStore(fileURL: contractURL).write(document)
 
-    let wrapperURL = Bundle.main.bundleURL.appendingPathComponent(
+    let wrapperURL = AppArtifact.bundleURL.appendingPathComponent(
       "Contents/MacOS/ShadowsocksX-NG2Agent")
     let process = Process()
     process.executableURL = wrapperURL
