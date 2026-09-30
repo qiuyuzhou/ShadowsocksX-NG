@@ -68,7 +68,6 @@ extension AppPresentation {
   // swiftlint:disable:next cyclomatic_complexity
   private static func systemProxy(_ failure: SystemProxyOperationFailure) -> String {
     switch failure {
-    case .authorizationFailed: return "没有获得修改系统代理所需的授权"
     case .preferencesUnavailable: return "系统网络配置不可用"
     case .preferencesBusy: return "系统网络配置正被其他设置操作占用"
     case .noCurrentNetworkSet: return "没有当前网络位置"
@@ -79,7 +78,8 @@ extension AppPresentation {
     case .cannotWriteService: return "无法写入网络服务的代理配置"
     case .commitFailed: return "系统代理提交失败"
     case .applyFailed: return "系统代理应用失败"
-    case .endpointSignatureStoreFailed: return "系统代理端点记录失败"
+    case .invalidRequest: return "系统代理助手收到了无效请求"
+    case .helperUnavailable: return "系统代理助手不可用；请确认已在登录项中允许"
     }
   }
 

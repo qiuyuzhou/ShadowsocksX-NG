@@ -62,6 +62,7 @@ final class SettingsWorkflowTests: XCTestCase {
       agent: agent,
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       systemProxy: systemProxy,
+      systemProxyHelper: ProxyRuntimeFixture.FakeSystemProxyHelperService(),
       firewallExecutableURLs: [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
       firewallPollIntervalNanoseconds: 1_000_000,
       launchHealthTimeoutSeconds: 0.05,

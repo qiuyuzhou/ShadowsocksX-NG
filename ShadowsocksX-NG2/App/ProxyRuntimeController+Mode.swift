@@ -204,7 +204,7 @@ extension ProxyRuntimeController {
       convergeProxyOnSuccess: false)
     guard generation == modeChangeGeneration else { return }
     guard restored else {
-      await withdrawSystemProxyAfterEntryLoss()
+      holdSystemProxyIntent()
       return
     }
 
@@ -248,7 +248,7 @@ extension ProxyRuntimeController {
           try runtimeFileStore.write(previousDocument)
         } catch {
           state = .serviceFailed(.runtimeFile)
-          await withdrawSystemProxyAfterEntryLoss()
+          holdSystemProxyIntent()
           return false
         }
       }
@@ -272,13 +272,13 @@ extension ProxyRuntimeController {
     case .running(let pid):
       guard sendSignal(pid, SIGUSR1) == 0 else {
         state = .serviceFailed(.agent)
-        await withdrawSystemProxyAfterEntryLoss()
+        holdSystemProxyIntent()
         return false
       }
     case .notRunning:
       guard await execute(.run(previousDocument), document: previousDocument) else {
         guard generation == modeChangeGeneration else { return false }
-        await withdrawSystemProxyAfterEntryLoss()
+        holdSystemProxyIntent()
         return false
       }
     }

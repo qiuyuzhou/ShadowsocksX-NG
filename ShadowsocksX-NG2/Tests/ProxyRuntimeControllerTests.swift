@@ -14,6 +14,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
   var credentials: InMemoryCredentialStore!
   var agent: ProxyRuntimeFixture.FakeLaunchAgent!
   var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
+  var systemProxyHelper: ProxyRuntimeFixture.FakeSystemProxyHelperService!
   var systemProxyNetworkChangeMonitor: ProxyRuntimeFixture.FakeSystemProxyNetworkChangeMonitor!
   var signals: SignalRecorder!
 
@@ -59,6 +60,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     credentials = InMemoryCredentialStore()
     agent = ProxyRuntimeFixture.FakeLaunchAgent()
     systemProxy = ProxyRuntimeFixture.FakeSystemProxy()
+    systemProxyHelper = ProxyRuntimeFixture.FakeSystemProxyHelperService()
     systemProxyNetworkChangeMonitor = ProxyRuntimeFixture.FakeSystemProxyNetworkChangeMonitor()
     signals = SignalRecorder()
   }
@@ -126,6 +128,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       agent: agent,
       probe: probe,
       systemProxy: systemProxy ?? self.systemProxy,
+      systemProxyHelper: systemProxyHelper ?? self.systemProxyHelper,
       systemProxyNetworkChangeMonitor: networkChangeMonitor ?? systemProxyNetworkChangeMonitor,
       proxyMode: proxyMode,
       firewallChecker: firewallChecker,
@@ -219,6 +222,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
         SystemProxyConfiguration(
           socks: .init(host: "127.0.0.1", port: 11086),
           http: .init(host: "127.0.0.1", port: 11087),
+          https: .init(host: "127.0.0.1", port: 11087),
           exceptions: FixedLocalProxyRanges.systemProxyExceptions(
             including: ProxySettings().proxyExceptionList))
       ])
@@ -231,6 +235,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       SystemProxyConfiguration(
         socks: .init(host: "127.0.0.1", port: 11086),
         http: .init(host: "127.0.0.1", port: 11087),
+        https: .init(host: "127.0.0.1", port: 11087),
         exceptions: FixedLocalProxyRanges.systemProxyExceptions(
           including: ProxySettings().proxyExceptionList)))
 

@@ -1,15 +1,18 @@
 import Foundation
 
-/// 代理运行时控制器（spec #21 D2/D5/D7/D9，issue #27/#28/#60）：把激活状态机
+/// 代理运行时控制器（spec #21 D2/D5/D7/D9，issue #27/#28/#60/#71）：把激活状态机
 /// 的产出接到「GUI → LaunchAgent → wrapper → sslocal」链路。launchd/契约动作
 /// 序列在纯域 `ProxyRuntimePlan`，本类按序执行、负责健康呈现与系统代理门禁
-/// 收敛（issue #60：意图持久化先行，门禁与待应用策略是应用层决策）；GUI 退出
-/// 不会停止 launchd 持有的 agent，网络变化观察则随 GUI 退出。
+/// 收敛（issue #60：意图持久化先行；issue #71：系统代理写入经特权 helper，
+/// 清理只随意图 on→off 迁移发生）；GUI 退出不会停止 launchd 持有的 agent，
+/// 网络变化观察则随 GUI 退出。
 ///
 /// 两个用户意图相互独立（issue #60）：agent 意图（`settings.agentEnabled`，
 /// 默认开启）驱动 LaunchAgent 注册与本地监听；系统代理意图
-/// （`settings.systemProxyEnabled`，默认关闭）只在「agent 健康 + 模式具备
-/// 可用出口」时应用系统设置，关闭清理匹配端点的配置。两个状态面
+/// （`settings.systemProxyEnabled`，默认关闭）只在「helper 可用 + agent 健康
+/// + 模式具备可用出口」时经 helper 应用系统设置。清理是意图 on→off 迁移的
+/// 副作用：开关直接关闭，或关闭 agent 时级联关闭仍开启的系统代理意图；
+/// 启动、健康门禁、目标失效与被动网络事件永不清理（issue #71）。两个状态面
 /// （`state` 与 `systemProxyState`）分开呈现，互不代替。
 ///
 /// 命令面、设置/目录同步、防火墙与系统代理门禁、只读事实投影分别在
@@ -35,15 +38,16 @@ final class ProxyRuntimeController: ObservableObject {
 
   /// 系统代理实际作用状态（issue #60）：意图持久化在
   /// `ProxySettings.systemProxyEnabled`，这里是 NG2 对系统设置的真实作用。
+  /// 清理失败（typed）也在此呈现；清理只由意图 on→off 迁移触发（issue #71）。
   enum SystemProxyControlState: Equatable {
     /// 意图关闭：系统代理清理完成。
     case idle
-    /// 意图开启，但 agent 未健康或模式缺少可用出口；条件恢复后随下次
-    /// 收敛自动应用。
+    /// 意图开启，但 helper 不可用/待批准、agent 未健康或模式缺少可用出口；
+    /// 条件恢复后随下次收敛自动应用，系统设置保持原样。
     case pending
     /// 已应用系统代理配置。
     case applied
-    /// 写入或清理失败（typed）。
+    /// 应用或清理失败（typed）。
     case failed(SystemProxyFailureFacts)
   }
 
@@ -55,6 +59,9 @@ final class ProxyRuntimeController: ObservableObject {
 
   @Published var state: AgentRunState = .off
   @Published var systemProxyState: SystemProxyControlState = .idle
+  /// 特权 helper 需要登录项批准（issue #71）：意图开启且 helper 不可用/待批准
+  /// 时置位，呈现批准路径；helper 达到可用或意图关闭后复位。
+  @Published var systemProxyApprovalRequired = false
   @Published var settings: ProxySettings
   /// 当前活动目标（菜单栏状态摘要与级联只读呈现用，issue #31）。machine 是
   /// 非发布值的普通结构体，代理关闭路径的激活动作不会触碰 state，菜单的
@@ -83,6 +90,7 @@ final class ProxyRuntimeController: ObservableObject {
   let agent: LaunchAgentControlling
   let probe: EndpointProbing
   let systemProxy: SystemProxyControlling
+  let systemProxyHelper: SystemProxyHelperServicing
   let systemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitoring
   let firewallChecker: FirewallStatusChecking
   let firewallExecutableURLs: [URL]
@@ -119,7 +127,8 @@ final class ProxyRuntimeController: ObservableObject {
     settingsRestore: RestoredProxySettings? = nil,
     agent: LaunchAgentControlling = SMAppLaunchAgentService(),
     probe: EndpointProbing = SystemEndpointProbe(),
-    systemProxy: SystemProxyControlling = SystemConfigurationProxyController(),
+    systemProxy: SystemProxyControlling = XPCSystemProxyController(),
+    systemProxyHelper: SystemProxyHelperServicing = SMAppServiceSystemProxyHelper(),
     systemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitoring =
       NoopSystemProxyNetworkChangeMonitor(),
     proxyMode: ProxyMode? = nil,
@@ -151,6 +160,7 @@ final class ProxyRuntimeController: ObservableObject {
     self.agent = agent
     self.probe = probe
     self.systemProxy = systemProxy
+    self.systemProxyHelper = systemProxyHelper
     self.systemProxyNetworkChangeMonitor = systemProxyNetworkChangeMonitor
     self.firewallChecker = firewallChecker
     self.firewallExecutableURLs = firewallExecutableURLs ?? Self.defaultFirewallExecutableURLs

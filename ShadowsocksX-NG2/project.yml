@@ -31,6 +31,15 @@ targets:
           copyFiles:
             destination: wrapper
             subpath: Contents/Library/LaunchAgents
+      # 特权系统代理 helper 的 LaunchDaemon 注册清单（issue #71）：
+      # SMAppService.daemon(plistName:) 从 bundle 内
+      # Contents/Library/LaunchDaemons/ 读取；ProgramArguments 用 bundle 相对
+      # 路径；MachServices 键支撑 on-demand 激活。
+      - path: LaunchDaemons/com.qiuyuzhou.ShadowsocksX-NG2.systemproxy.plist
+        buildPhase:
+          copyFiles:
+            destination: wrapper
+            subpath: Contents/Library/LaunchDaemons
       # 外部二进制（Vendor/<name>/manifest.json 固定 tag+URL+SHA-256）。必须先跑
       # Scripts/fetch-external-binaries.sh 再 xcodegen generate：文件在生成时必须已存在，
       # 否则 Copy Files 阶段会被静默丢弃。构建内的 preBuildScripts 只做增量复验，
@@ -102,6 +111,12 @@ targets:
         copy:
           destination: wrapper
           subpath: Contents/MacOS
+      # 特权系统代理 helper（issue #71）：独立可执行文件装入 Contents/MacOS，
+      # 由 LaunchDaemon plist 以 bundle 相对路径引用，SMAppService.daemon 注册。
+      - target: ShadowsocksX-NG2SystemProxyHelper
+        copy:
+          destination: wrapper
+          subpath: Contents/MacOS
   ShadowsocksX-NG2Agent:
     type: tool
     platform: macOS
@@ -123,6 +138,24 @@ targets:
       base:
         PRODUCT_NAME: ShadowsocksX-NG2Agent
         PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.agent
+        CODE_SIGN_IDENTITY: "Developer ID Application"
+  ShadowsocksX-NG2SystemProxyHelper:
+    type: tool
+    platform: macOS
+    sources:
+      - path: SystemProxyHelper
+      # helper 与 GUI 共享的 typed 契约与纯逻辑：closed typed 配置、property
+      # list 映射、计划器、XPC 协议与请求引擎（issue #71）。helper 不含产品
+      # 策略：不在这些文件之外做任何域判断。
+      - path: Domain/SystemProxyConfiguration.swift
+      - path: Domain/SystemProxyPlan.swift
+      - path: Domain/SystemProxyPropertyList.swift
+      - path: Domain/SystemProxyHelperContract.swift
+      - path: Domain/SystemProxyHelperEngine.swift
+    settings:
+      base:
+        PRODUCT_NAME: ShadowsocksX-NG2SystemProxyHelper
+        PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.systemproxy.helper
         CODE_SIGN_IDENTITY: "Developer ID Application"
   ShadowsocksX-NG2Tests:
     type: bundle.unit-test

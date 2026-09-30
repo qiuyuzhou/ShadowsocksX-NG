@@ -111,26 +111,25 @@ extension ProxyRuntimeController {
     String(describing: error)
   }
 
-  // MARK: - 系统代理门禁（issue #60）
+  // MARK: - 系统代理门禁（issue #60/#71）
 
-  /// 系统代理收敛：意图开启 + agent 健康 + 所选模式具备可用出口才应用；
-  /// 条件关闭时清除匹配的端点配置并保持待应用，条件恢复后自动重写。
-  func convergeSystemProxy(forceCleanup: Bool = false) async {
+  /// 系统代理收敛：helper 可用 + agent 健康 + 所选模式具备可用出口才经特权
+  /// helper 应用；任一条件关闭时意图保持待应用、系统设置保持原样，条件恢复
+  /// 后自动重写。收敛路径永不清理（issue #71）。
+  func convergeSystemProxy() async {
     guard settings.systemProxyEnabled else { return }
+    guard ensureHelperAvailableForApply() else {
+      systemProxyState = .pending
+      return
+    }
     guard systemProxyExitAvailable, let document = lastDocument else {
-      if !forceCleanup, case .pending = systemProxyState { return }
-      switch clearRecognizedSystemProxyOutcome() {
-      case .idle, .pending, .applied:
-        systemProxyState = .pending
-      case .failed(let failure):
-        systemProxyState = .failed(failure)
-      }
+      systemProxyState = .pending
       return
     }
     do {
       let configuration = try proxyMode.systemProxyConfiguration(
         for: document, exceptions: settings.proxyExceptionList)
-      let outcome = try systemProxy.apply(configuration)
+      let outcome = try await systemProxy.apply(configuration)
       if outcome == .unchanged {
         // 值语义等价的零写入路径：事件行供排障回答「这次为何没有授权弹窗」。
         RuntimeLog.emit(.systemProxyUnchanged)
@@ -139,6 +138,37 @@ extension ProxyRuntimeController {
     } catch {
       systemProxyState = .failed(systemProxyFacts(for: error))
     }
+  }
+
+  /// helper 可用性门禁（issue #71）：已批准即通过；未注册则尝试注册（注册
+  /// 本身不弹授权框）；待批准或注册失败时置位批准路径并保持待应用。
+  private func ensureHelperAvailableForApply() -> Bool {
+    switch systemProxyHelper.status {
+    case .approved:
+      systemProxyApprovalRequired = false
+      return true
+    case .notRegistered:
+      do {
+        try systemProxyHelper.register()
+      } catch {
+        RuntimeLog.emit(.systemProxyHelperRegisterFailed(detail: describe(error)))
+      }
+      if systemProxyHelper.status == .approved {
+        systemProxyApprovalRequired = false
+        return true
+      }
+    case .requiresApproval:
+      break
+    }
+    systemProxyApprovalRequired = true
+    return false
+  }
+
+  /// 登录项批准路径（issue #71）：打开系统设置的登录项面板并立即重试收敛；
+  /// 批准完成前意图保持待应用、系统设置不变。
+  func openSystemProxyHelperApproval() async {
+    systemProxyHelper.openApprovalPath()
+    await convergeSystemProxy()
   }
 
   /// 出口可用 = agent 入站健康（回环入口可用，含防火墙仅阻主机态的情形）
@@ -152,24 +182,17 @@ extension ProxyRuntimeController {
     }
   }
 
-  /// agent 入站不可用时清除可识别的端点设置；意图保留为待应用。
-  func withdrawSystemProxyAfterEntryLoss() async {
-    guard settings.systemProxyEnabled else {
-      systemProxyState = .idle
-      return
-    }
-    switch clearRecognizedSystemProxyOutcome() {
-    case .idle, .pending, .applied:
-      systemProxyState = .pending
-    case .failed(let failure):
-      systemProxyState = .failed(failure)
-    }
+  /// 门禁关闭（issue #71）：健康/出口/目标变化不撤回已写入的系统设置，
+  /// 意图保持待应用等恢复；意图关闭则为空闲。
+  func holdSystemProxyIntent() {
+    systemProxyApprovalRequired = false
+    systemProxyState = settings.systemProxyEnabled ? .pending : .idle
   }
 
-  /// 清除与最近一次尝试端点签名匹配的系统代理配置。
-  func clearRecognizedSystemProxyOutcome() -> SystemProxyControlState {
+  /// 无条件清除全部系统代理配置（issue #71）：typed 失败原样呈现，不重试。
+  func clearSystemProxyOutcome() async -> SystemProxyControlState {
     do {
-      try systemProxy.clearRecognizedSettings()
+      try await systemProxy.clear()
       return .idle
     } catch {
       return .failed(systemProxyFacts(for: error))
@@ -209,7 +232,7 @@ extension ProxyRuntimeController {
     var outcome: SystemProxyControlState = .idle
     repeat {
       systemProxyCleanupRescanRequested = false
-      outcome = clearRecognizedSystemProxyOutcome()
+      outcome = await clearSystemProxyOutcome()
       // Let queued SystemConfiguration notifications reach the main actor. Any
       // location/service/proxy change during this cleanup starts another full scan.
       try? await Task.sleep(nanoseconds: 100_000_000)
@@ -242,7 +265,7 @@ extension ProxyRuntimeController {
         await Task.yield()
         guard let self else { return }
         self.systemProxyConvergenceScheduled = false
-        await self.convergeSystemProxy(forceCleanup: true)
+        await self.convergeSystemProxy()
       }
     }
   }
@@ -263,7 +286,6 @@ extension ProxyRuntimeController {
     for error: SystemProxyError
   ) -> SystemProxyFailureFacts {
     switch error {
-    case .authorizationFailed: return .operation(.authorizationFailed)
     case .preferencesUnavailable: return .operation(.preferencesUnavailable)
     case .preferencesBusy: return .operation(.preferencesBusy)
     case .noCurrentNetworkSet: return .operation(.noCurrentNetworkSet)
@@ -274,7 +296,8 @@ extension ProxyRuntimeController {
     case .commitFailed: return .operation(.commitFailed)
     case .applyFailed: return .operation(.applyFailed)
     case .noNetworkLocations: return .operation(.noNetworkLocations)
-    case .endpointSignatureStoreFailed: return .operation(.endpointSignatureStoreFailed)
+    case .invalidRequest: return .operation(.invalidRequest)
+    case .helperUnavailable: return .operation(.helperUnavailable)
     }
   }
 }

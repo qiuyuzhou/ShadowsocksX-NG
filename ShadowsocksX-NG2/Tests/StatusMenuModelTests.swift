@@ -59,6 +59,7 @@ final class StatusMenuModelTests: XCTestCase {
     activationFailure: ActivationFailure? = nil,
     systemProxyIntent: Bool = false,
     systemProxyApplication: SystemProxyApplicationFacts = .idle,
+    systemProxyApprovalRequired: Bool = false,
     mode: ProxyMode = .rule,
     activeTarget: ProxyActiveTargetFacts? = nil
   ) -> ProxyControlSnapshot {
@@ -68,6 +69,7 @@ final class StatusMenuModelTests: XCTestCase {
       activationFailure: activationFailure,
       systemProxyIntentEnabled: systemProxyIntent,
       systemProxyApplication: systemProxyApplication,
+      systemProxyApprovalRequired: systemProxyApprovalRequired,
       proxyMode: mode,
       ruleDefaultAction: .proxyWhenUnmatched,
       availableModes: ProxyMode.availableModes,
@@ -148,6 +150,15 @@ final class StatusMenuModelTests: XCTestCase {
     XCTAssertTrue(pending.systemProxyIntentEnabled)
     XCTAssertEqual(pending.systemProxyStatus, "系统代理：待应用")
     XCTAssertNil(pending.systemProxyDetail)
+
+    let approvalPending = StatusMenuModel.summary(
+      from: makeSnapshot(
+        facts: ProxyRuntimeFacts(status: .running, isOn: true),
+        systemProxyIntent: true,
+        systemProxyApplication: .pending,
+        systemProxyApprovalRequired: true))
+    XCTAssertEqual(approvalPending.systemProxyStatus, "系统代理：待批准")
+    XCTAssertNil(approvalPending.systemProxyDetail)
 
     let applied = StatusMenuModel.summary(
       from: makeSnapshot(

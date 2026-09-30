@@ -39,16 +39,9 @@ enum RuntimePaths {
     runtimeDirectory().appendingPathComponent("agent.log")
   }
 
-  /// Last endpoint signature attempted by NG2, used only to identify settings to clear.
-  static func systemProxyEndpointSignatureURL() -> URL {
-    runtimeDirectory().appendingPathComponent("system-proxy-endpoint-signature.json")
-  }
-
-  /// Legacy snapshot file from the ownership-based lifecycle. It is read once only
-  /// to extract a single unambiguous applied endpoint signature, then deleted.
-  static func legacySystemProxyOwnershipURL() -> URL {
-    runtimeDirectory().appendingPathComponent("system-proxy-ownership.json")
-  }
+  // 旧版端点签名/所有权文件（system-proxy-endpoint-signature.json、
+  // system-proxy-ownership.json）按 issue #71 就地遗留：不读取、不迁移、
+  // 不删除。
 }
 
 /// ACL 活动链接的防逃逸校验（ADR-0011）：解析 symlink 后必须仍是运行目录

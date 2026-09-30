@@ -217,59 +217,6 @@ enum ProxyRuntimeFixture {
     }
   }
 
-  @MainActor
-  final class FakeSystemProxy: SystemProxyControlling {
-    private(set) var applied: [SystemProxyConfiguration] = []
-    private(set) var clearCount = 0
-    var applyError: Error?
-    var clearError: Error?
-    var onClear: (@MainActor () -> Void)?
-    /// 注入返回值：模拟系统值已与期望等价的免授权跳过路径（issue #70）。
-    var applyOutcome: SystemProxyWriteOutcome = .written
-    /// 可选共享事件日志（次序断言用）。
-    weak var eventLog: ProxyRuntimeEventLog?
-
-    func apply(_ configuration: SystemProxyConfiguration) throws -> SystemProxyWriteOutcome {
-      eventLog?.record("apply")
-      if let applyError { throw applyError }
-      applied.append(configuration)
-      return applyOutcome
-    }
-
-    func clearRecognizedSettings() throws {
-      clearCount += 1
-      eventLog?.record("clear")
-      onClear?()
-      if let clearError { throw clearError }
-    }
-  }
-
-  @MainActor
-  final class FakeSystemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitoring {
-    private(set) var startCount = 0
-    private(set) var stopCount = 0
-    private(set) var isObserving = false
-    private var handler: (@MainActor @Sendable (SystemProxyNetworkChange) -> Void)?
-
-    func start(
-      handler: @escaping @MainActor @Sendable (SystemProxyNetworkChange) -> Void
-    ) {
-      startCount += 1
-      isObserving = true
-      self.handler = handler
-    }
-
-    func stop() {
-      stopCount += 1
-      isObserving = false
-      handler = nil
-    }
-
-    func emit(_ change: SystemProxyNetworkChange) {
-      handler?(change)
-    }
-  }
-
   final class FakeFirewallChecker: FirewallStatusChecking, @unchecked Sendable {
     private let lock = NSLock()
     private var outcomes: [FirewallBlockStatus]

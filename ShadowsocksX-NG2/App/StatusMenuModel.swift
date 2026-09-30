@@ -35,7 +35,9 @@ enum StatusMenuModel {
     let agentDetail =
       snapshot.runtime.failure.map { AppPresentation.message(for: $0) }
       ?? snapshot.activationFailure.map { AppPresentation.message(for: $0) }
-    let systemProxy = systemProxyPresentation(for: snapshot.systemProxyApplication)
+    let systemProxy = systemProxyPresentation(
+      for: snapshot.systemProxyApplication,
+      approvalRequired: snapshot.systemProxyApprovalRequired)
     return Summary(
       agentIntentEnabled: snapshot.agentIntentEnabled,
       isOn: snapshot.runtime.isOn,
@@ -77,14 +79,17 @@ enum StatusMenuModel {
     }
   }
 
+  /// 系统代理应用状态 → 菜单文本（issue #71）：helper 待批准的待应用态以
+  /// 「待批准」呈现，提示用户走登录项批准路径。
   private static func systemProxyPresentation(
-    for application: SystemProxyApplicationFacts
+    for application: SystemProxyApplicationFacts,
+    approvalRequired: Bool
   ) -> (label: String, detail: String?) {
     switch application {
     case .idle:
       return ("未应用", nil)
     case .pending:
-      return ("待应用", nil)
+      return approvalRequired ? ("待批准", nil) : ("待应用", nil)
     case .applied:
       return ("已应用", nil)
     case .failed(let facts):

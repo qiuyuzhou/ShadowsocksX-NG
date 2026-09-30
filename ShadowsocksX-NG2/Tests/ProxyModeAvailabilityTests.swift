@@ -55,7 +55,7 @@ final class ProxyModeAvailabilityTests: XCTestCase {
       configuration.exceptions,
       FixedLocalProxyRanges.systemProxyExceptions)
     XCTAssertFalse(
-      configuration.exceptions?.contains("100.64.0.0/10") ?? true,
+      configuration.exceptions.contains("100.64.0.0/10"),
       "不加入 CGNAT")
   }
 }

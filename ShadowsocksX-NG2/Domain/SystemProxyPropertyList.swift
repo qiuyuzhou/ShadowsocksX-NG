@@ -1,10 +1,10 @@
 import Foundation
 
-/// Pure projection of one SystemConfiguration Proxies dictionary. Keeping the
-/// key mapping here makes the mutually exclusive enablement rules testable
-/// without opening a real SCPreferences session. PAC projection is gone
-/// (issue #67)；SOCKS 与 HTTP/HTTPS 同时指向本地入站（ADR 0012）。
-/// The app fixes simple-hostname exclusion on whenever it owns this dictionary.
+/// Pure projection of one SystemConfiguration Proxies dictionary. The key mapping is a
+/// mechanical translation of the closed typed configuration (issue #71): every field the
+/// GUI supplies is written, disabled protocols lose their endpoint keys, PAC/auto-
+/// discovery/simple-hostname exclusion follow their explicit flags, and the complete
+/// exceptions list is always written. Keys outside the typed field set are preserved.
 enum SystemProxyPropertyList {
   static let httpEnabled = "HTTPEnable"
   static let httpsEnabled = "HTTPSEnable"
@@ -22,34 +22,55 @@ enum SystemProxyPropertyList {
   static let exceptionsList = "ExceptionsList"
   static let excludeSimpleHostnames = "ExcludeSimpleHostnames"
 
+  /// 一个协议族的 Proxies 键组。
+  private struct ProtocolKeys {
+    let enable: String
+    let proxy: String
+    let port: String
+  }
+
   static func applying(
     _ configuration: SystemProxyConfiguration, to original: [String: Any]
   ) -> [String: Any] {
     var dictionary = original
-    dictionary[socksEnabled] = 0
-    dictionary[httpEnabled] = 0
-    dictionary[httpsEnabled] = 0
-    // 仍然清掉 PAC/自动发现，确保与本地入站目标互斥（D8）。
-    dictionary[pacEnabled] = 0
-    dictionary[autoDiscoveryEnabled] = 0
-    dictionary.removeValue(forKey: pacJavaScript)
-    dictionary.removeValue(forKey: pacURL)
+    applyProtocol(
+      enabled: configuration.socksEnabled, endpoint: configuration.socks,
+      keys: ProtocolKeys(enable: socksEnabled, proxy: socksProxy, port: socksPort),
+      into: &dictionary)
+    applyProtocol(
+      enabled: configuration.httpEnabled, endpoint: configuration.http,
+      keys: ProtocolKeys(enable: httpEnabled, proxy: httpProxy, port: httpPort),
+      into: &dictionary)
+    applyProtocol(
+      enabled: configuration.httpsEnabled, endpoint: configuration.https,
+      keys: ProtocolKeys(enable: httpsEnabled, proxy: httpsProxy, port: httpsPort),
+      into: &dictionary)
 
-    dictionary[socksEnabled] = 1
-    dictionary[socksProxy] = configuration.socks.host
-    dictionary[socksPort] = configuration.socks.port
-    dictionary[httpEnabled] = 1
-    dictionary[httpProxy] = configuration.http.host
-    dictionary[httpPort] = configuration.http.port
-    // HTTPS 系统代理 = HTTP 入站承接的 CONNECT 代理，端点与 HTTP 相同。
-    dictionary[httpsEnabled] = 1
-    dictionary[httpsProxy] = configuration.http.host
-    dictionary[httpsPort] = configuration.http.port
-    dictionary[excludeSimpleHostnames] = 1
-
-    if let exceptions = configuration.exceptions {
-      dictionary[exceptionsList] = exceptions
+    dictionary[pacEnabled] = configuration.pacEnabled ? 1 : 0
+    if !configuration.pacEnabled {
+      // 关闭的 PAC 不留残余：URL 与 JavaScript 值一并移除（issue #71 AC27）。
+      dictionary.removeValue(forKey: pacJavaScript)
+      dictionary.removeValue(forKey: pacURL)
     }
+    dictionary[autoDiscoveryEnabled] = configuration.autoDiscoveryEnabled ? 1 : 0
+    dictionary[excludeSimpleHostnames] = configuration.excludeSimpleHostnames ? 1 : 0
+    dictionary[exceptionsList] = configuration.exceptions
     return dictionary
+  }
+
+  /// 启用的协议族写入显式端点；关闭的协议族移除端点键，保持字典与配置一致。
+  private static func applyProtocol(
+    enabled: Bool, endpoint: SystemProxyConfiguration.Endpoint,
+    keys: ProtocolKeys,
+    into dictionary: inout [String: Any]
+  ) {
+    dictionary[keys.enable] = enabled ? 1 : 0
+    if enabled {
+      dictionary[keys.proxy] = endpoint.host
+      dictionary[keys.port] = endpoint.port
+    } else {
+      dictionary.removeValue(forKey: keys.proxy)
+      dictionary.removeValue(forKey: keys.port)
+    }
   }
 }

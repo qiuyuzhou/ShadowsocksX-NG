@@ -1,0 +1,168 @@
+import Foundation
+import ServiceManagement
+
+/// 系统代理写入缝（issue #71）：异步 typed apply 与无条件 clear 的边界，
+/// 形状为 XPC 就绪。GUI 域决策（意图、门禁、值、清理时机）全部在调用方；
+/// 本缝只执行。生产实现经特权 helper，测试注入 fake。
+@MainActor
+protocol SystemProxyControlling {
+  @discardableResult
+  func apply(_ configuration: SystemProxyConfiguration) async throws -> SystemProxyWriteOutcome
+  func clear() async throws
+}
+
+/// helper 注册/审批状态缝（issue #71）：注册走 SMAppService.daemon；审批缺失
+/// 时 GUI 据此呈现登录项批准路径，不提供直接授权回退。单测以 fake 替换
+/// （真实注册会改动系统登录项状态）。
+@MainActor
+protocol SystemProxyHelperServicing {
+  var status: SystemProxyHelperStatus { get }
+  func register() throws
+  func openApprovalPath()
+}
+
+enum SystemProxyHelperStatus: Equatable, Sendable {
+  case notRegistered
+  case requiresApproval
+  case approved
+}
+
+/// 生产实现：SMAppService.daemon 注册 bundle 内
+/// Contents/Library/LaunchDaemons/ 下的 LaunchDaemon 清单。
+struct SMAppServiceSystemProxyHelper: SystemProxyHelperServicing {
+  private let service = SMAppService.daemon(plistName: SystemProxyHelperIdentity.plistName)
+
+  var status: SystemProxyHelperStatus {
+    switch service.status {
+    case .requiresApproval:
+      return .requiresApproval
+    case .enabled:
+      return .approved
+    case .notRegistered, .notFound:
+      return .notRegistered
+    @unknown default:
+      return .notRegistered
+    }
+  }
+
+  func register() throws {
+    try service.register()
+  }
+
+  func openApprovalPath() {
+    SMAppService.openSystemSettingsLoginItems()
+  }
+}
+
+/// 经特权 helper 的系统代理写入器（issue #71）：每个请求一条按需连接，
+/// MachService 连接触发 launchd 激活已注册的 LaunchDaemon。应答在
+/// helper 不可达、连接失效、报错或超时时以 typed 错误呈现。
+@MainActor
+final class XPCSystemProxyController: SystemProxyControlling {
+  private let requestTimeoutNanoseconds: UInt64
+
+  init(requestTimeoutNanoseconds: UInt64 = 10_000_000_000) {
+    self.requestTimeoutNanoseconds = requestTimeoutNanoseconds
+  }
+
+  func apply(_ configuration: SystemProxyConfiguration) async throws -> SystemProxyWriteOutcome {
+    let payload = try SystemProxyHelperWire.encodeConfiguration(configuration)
+    let response = try await send { proxy, reply in proxy.apply(payload, withReply: reply) }
+    switch response {
+    case .applied(let outcome):
+      return outcome
+    case .failure(let error):
+      throw error
+    case .cleared:
+      throw SystemProxyError.helperUnavailable("apply 收到 clear 应答")
+    }
+  }
+
+  func clear() async throws {
+    let response = try await send { proxy, reply in proxy.clear(withReply: reply) }
+    switch response {
+    case .cleared:
+      return
+    case .failure(let error):
+      throw error
+    case .applied:
+      throw SystemProxyError.helperUnavailable("clear 收到 apply 应答")
+    }
+  }
+
+  // MARK: - XPC 请求
+
+  private func send(
+    _ call:
+      @escaping @Sendable (
+        _ proxy: SystemProxyHelperControlling, _ reply: @escaping @Sendable (Data) -> Void
+      ) -> Void
+  ) async throws -> SystemProxyHelperResponse {
+    let gate = SystemProxyReplyGate()
+    let connection = NSXPCConnection(machServiceName: SystemProxyHelperIdentity.machServiceName)
+    defer { connection.invalidate() }
+    connection.remoteObjectInterface = NSXPCInterface(with: SystemProxyHelperControlling.self)
+    connection.invalidationHandler = {
+      gate.finish(.failure(SystemProxyError.helperUnavailable("XPC 连接已失效")))
+    }
+    guard
+      let proxy = connection.remoteObjectProxyWithErrorHandler({ error in
+        gate.finish(.failure(SystemProxyError.helperUnavailable(String(describing: error))))
+      }) as? SystemProxyHelperControlling
+    else {
+      gate.finish(.failure(SystemProxyError.helperUnavailable("无法创建远程对象代理")))
+      return try await gate.wait()
+    }
+    call(proxy) { payload in
+      gate.finish(Result { try SystemProxyHelperWire.decode(payload) })
+    }
+    connection.resume()
+    // 超时兜底：已批准但卡死的 helper 不应让 UI 命令永久挂起。
+    let timeout = requestTimeoutNanoseconds
+    Task.detached(priority: .utility) {
+      try? await Task.sleep(nanoseconds: timeout)
+      gate.finish(.failure(SystemProxyError.helperUnavailable("helper 应答超时")))
+    }
+    return try await gate.wait()
+  }
+}
+
+/// 一次性应答闸门：XPC 回调与超时兜底来自任意队列，只有第一个 finish 生效；
+/// finish 先于 wait 到达时由闸门暂存结果。
+private final class SystemProxyReplyGate: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<SystemProxyHelperResponse, Error>?
+  private var result: Result<SystemProxyHelperResponse, Error>?
+
+  func finish(_ result: Result<SystemProxyHelperResponse, Error>) {
+    lock.lock()
+    if let continuation {
+      self.continuation = nil
+      lock.unlock()
+      continuation.resume(with: result)
+      return
+    }
+    if self.result == nil {
+      self.result = result
+    }
+    lock.unlock()
+  }
+
+  func wait() async throws -> SystemProxyHelperResponse {
+    try await withCheckedThrowingContinuation { continuation in
+      lock.lock()
+      if let result {
+        lock.unlock()
+        continuation.resume(with: result)
+        return
+      }
+      if self.continuation == nil {
+        self.continuation = continuation
+        lock.unlock()
+        return
+      }
+      lock.unlock()
+      continuation.resume(throwing: SystemProxyError.helperUnavailable("重复等待应答"))
+    }
+  }
+}

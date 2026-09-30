@@ -12,6 +12,8 @@ enum RuntimeLogEvent: Equatable, CustomStringConvertible, Sendable {
   case contractUnchanged
   /// 系统代理期望值与系统当前应用值语义等价，跳过写入（零授权，issue #70）。
   case systemProxyUnchanged
+  /// 特权系统代理 helper 的 SMAppService 注册失败（issue #71；不含内容）。
+  case systemProxyHelperRegisterFailed(detail: String)
   /// 运行时文件已清理。
   case runtimeFilesDeleted
   /// 激活状态等运行时元数据落盘失败（不含内容）。
@@ -51,6 +53,8 @@ enum RuntimeLogEvent: Equatable, CustomStringConvertible, Sendable {
       return "contract unchanged, write skipped"
     case .systemProxyUnchanged:
       return "system proxy values unchanged, write skipped"
+    case .systemProxyHelperRegisterFailed(let detail):
+      return "system proxy helper register failed: \(detail)"
     case .runtimeFilesDeleted:
       return "runtime files deleted"
     case .runtimePersistFailed(let detail):

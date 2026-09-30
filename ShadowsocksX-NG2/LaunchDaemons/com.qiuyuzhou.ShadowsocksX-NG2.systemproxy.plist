@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.qiuyuzhou.ShadowsocksX-NG2.systemproxy</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>Contents/MacOS/ShadowsocksX-NG2SystemProxyHelper</string>
+	</array>
+	<key>MachServices</key>
+	<dict>
+		<key>com.qiuyuzhou.ShadowsocksX-NG2.systemproxy</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

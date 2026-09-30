@@ -1,6 +1,6 @@
 # Make system-proxy application declarative and network-aware
 
-**Status**: accepted
+**Status**: accepted; the endpoint-signature cleanup, startup cleanup, and health-gate cleanup clauses are superseded by ADR-0020. Enabled-state network observation, reapplication, launch reconciliation, and finite cleanup-attempt observation remain.
 
 The system proxy switch manages the values 2.0 applies, not another application's prior configuration: enabling writes 2.0's SOCKS, HTTP, and HTTPS endpoints, PAC/auto-discovery suppression, and exception settings to every service in the active network location when the local runtime passes its existing health and exit gate; disabling scans every network location and clears the complete `Proxies` dictionary for each service whose enabled SOCKS and HTTP/HTTPS endpoints exactly match the most recent endpoint signature 2.0 tried to apply. If the health or exit gate closes while enabled, matching 2.0 endpoint settings are cleared until the gate recovers. Persist only that endpoint signature for cleanup, before attempting the write so partial failures remain identifiable—never the prior per-service dictionaries—and do not detect or report external edits. The signature is a cleanup selector, not proof of exclusive ownership.
 

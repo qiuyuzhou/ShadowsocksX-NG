@@ -1,8 +1,8 @@
 import Foundation
 
-/// System proxy write failures shared by the pure planner and SystemConfiguration adapter.
-enum SystemProxyError: Error, Equatable, Sendable {
-  case authorizationFailed(Int32)
+/// 系统代理写入失败（issue #71）：helper 内 SC 操作失败与 GUI 侧 XPC 失败共用
+/// 同一族，可直接作为 XPC 应答 payload 编解码（Codable）。
+enum SystemProxyError: Error, Equatable, Sendable, Codable {
   case preferencesUnavailable
   case preferencesBusy
   case noCurrentNetworkSet
@@ -13,7 +13,8 @@ enum SystemProxyError: Error, Equatable, Sendable {
   case cannotWriteService(String)
   case commitFailed(String)
   case applyFailed(String)
-  case endpointSignatureStoreFailed(String)
+  case invalidRequest(String)
+  case helperUnavailable(String)
 }
 
 /// A service identity includes its network location because service IDs can appear in
@@ -37,64 +38,15 @@ struct SystemProxyPlannedWrite: Equatable, Sendable {
 }
 
 /// Result of an apply plan. `unchanged` avoids an unnecessary SCPreferences commit.
-enum SystemProxyWriteOutcome: Equatable, Sendable {
+enum SystemProxyWriteOutcome: Equatable, Sendable, Codable {
   case written
   case unchanged
 }
 
-/// Persisted cleanup selector. This records the last endpoint signature NG2 attempted,
-/// not a snapshot and not proof that NG2 exclusively owns matching values.
-struct SystemProxyEndpointSignature: Codable, Equatable, Sendable {
-  struct Endpoint: Codable, Equatable, Hashable, Sendable {
-    let host: String
-    let port: Int
-  }
-
-  let socks: Endpoint
-  let http: Endpoint
-
-  init(configuration: SystemProxyConfiguration) {
-    socks = Endpoint(host: configuration.socks.host, port: configuration.socks.port)
-    http = Endpoint(host: configuration.http.host, port: configuration.http.port)
-  }
-
-  init(socks: Endpoint, http: Endpoint) {
-    self.socks = socks
-    self.http = http
-  }
-
-  var isValid: Bool {
-    !socks.host.isEmpty && !http.host.isEmpty
-      && (1...65_535).contains(socks.port)
-      && (1...65_535).contains(http.port)
-  }
-
-  /// Cleanup requires the enabled SOCKS, HTTP, and HTTPS endpoints to match exactly.
-  func matches(_ dictionary: [String: Any]) -> Bool {
-    Self.enabled(dictionary[SystemProxyPropertyList.socksEnabled])
-      && Self.enabled(dictionary[SystemProxyPropertyList.httpEnabled])
-      && Self.enabled(dictionary[SystemProxyPropertyList.httpsEnabled])
-      && dictionary[SystemProxyPropertyList.socksProxy] as? String == socks.host
-      && Self.port(dictionary[SystemProxyPropertyList.socksPort]) == socks.port
-      && dictionary[SystemProxyPropertyList.httpProxy] as? String == http.host
-      && Self.port(dictionary[SystemProxyPropertyList.httpPort]) == http.port
-      && dictionary[SystemProxyPropertyList.httpsProxy] as? String == http.host
-      && Self.port(dictionary[SystemProxyPropertyList.httpsPort]) == http.port
-  }
-
-  private static func enabled(_ value: Any?) -> Bool {
-    port(value) == 1
-  }
-
-  private static func port(_ value: Any?) -> Int? {
-    if let value = value as? Int { return value }
-    return (value as? NSNumber)?.intValue
-  }
-}
-
 /// Pure configuration planning. Apply rewrites every differing service in the active
-/// location. Cleanup matches endpoint signatures across locations and clears the entire
-/// matching Proxies dictionary.
+/// location, preserving unmodeled Proxies keys. Cleanup is unconditional: the complete
+/// Proxies dictionary goes for every service in every scanned location, regardless of
+/// which application or account wrote it (issue #71).
 enum SystemProxyPlanner {
   struct ApplyPlan: Equatable, Sendable {
     let writes: [SystemProxyPlannedWrite]
@@ -124,15 +76,13 @@ enum SystemProxyPlanner {
     return ApplyPlan(writes: writes)
   }
 
-  static func makeClearPlan(
-    services: [SystemProxyServiceState], signature: SystemProxyEndpointSignature
-  ) throws -> ClearPlan {
-    let writes = try services.compactMap { service -> SystemProxyPlannedWrite? in
-      let dictionary = try dictionary(
-        from: service.configuration, serviceID: service.identifier.serviceID)
-      guard signature.matches(dictionary) else { return nil }
-      return SystemProxyPlannedWrite(identifier: service.identifier, configuration: nil)
-    }
+  /// 无条件清理计划：凡持有 Proxies 实体的服务都整字典移除，不校验来源，
+  /// 也不保存或查询端点签名、所有权标记或历史快照（issue #71）。
+  static func makeClearPlan(services: [SystemProxyServiceState]) -> ClearPlan {
+    let writes =
+      services
+      .filter { $0.configuration != nil }
+      .map { SystemProxyPlannedWrite(identifier: $0.identifier, configuration: nil) }
     return ClearPlan(writes: writes)
   }
 

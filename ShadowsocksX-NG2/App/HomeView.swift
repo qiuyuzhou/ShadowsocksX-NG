@@ -38,9 +38,10 @@ struct HomeView: View {
   }
 }
 
-/// 「运行控制」卡（issue #60）：agent 与系统代理两个开关并排，绑定同一
+/// 「运行控制」卡（issue #60/#71）：agent 与系统代理两个开关并排，绑定同一
 /// snapshot 的持久化意图；各自呈现运行状态/实际应用与点名原因。两个开关
-/// 互不代替：关闭系统代理不影响本地监听，关闭 agent 会清理匹配端点的系统设置。
+/// 互不代替：关闭系统代理清除全部系统代理配置，关闭 agent 会级联关闭仍开启
+/// 的系统代理意图并先清理再停止监听；helper 待批准时呈现登录项批准路径。
 private struct RuntimeControlCard: View {
   @ObservedObject var control: ProxyControlWorkflow
 
@@ -84,6 +85,12 @@ private struct RuntimeControlCard: View {
               .font(.caption)
               .foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
+            if systemProxyApprovalNeeded {
+              Button("在登录项中批准…") {
+                Task { await control.openSystemProxyHelperApproval() }
+              }
+              .controlSize(.small)
+            }
             if let systemProxyDetail = summary.systemProxyDetail {
               Text(systemProxyDetail)
                 .font(.caption)
@@ -108,18 +115,25 @@ private struct RuntimeControlCard: View {
       set: { enabled in Task { await control.setSystemProxyEnabled(enabled) } })
   }
 
+  private var systemProxyApprovalNeeded: Bool {
+    control.snapshot.systemProxyIntentEnabled && control.snapshot.systemProxyApprovalRequired
+  }
+
   private var systemProxyHint: String {
     let exitRequirement =
       control.snapshot.proxyMode == .direct
       ? "直连模式不依赖活动服务器"
       : "其他模式需要可用的活动服务器"
+    if systemProxyApprovalNeeded {
+      return "系统代理助手等待批准：在系统设置 → 登录项与扩展中允许后重试"
+    }
     return switch control.snapshot.systemProxyApplication {
     case .idle:
       "开启后让 macOS 系统代理指向本地入口；\(exitRequirement)"
     case .pending:
       "已请求应用系统代理，等待本地入口就绪；\(exitRequirement)"
     case .applied:
-      "系统代理已指向本地入口；关闭时清理匹配端点的配置"
+      "系统代理已指向本地入口"
     case .failed:
       "应用失败，原因见下方"
     }

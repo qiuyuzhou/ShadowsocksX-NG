@@ -45,6 +45,9 @@ struct ProxyControlSnapshot: Equatable, Sendable {
   let systemProxyIntentEnabled: Bool
   /// 系统代理实际应用状态（与 agent 运行状态分开呈现）。
   let systemProxyApplication: SystemProxyApplicationFacts
+  /// 特权系统代理 helper 需要登录项批准（issue #71）：意图开启且 helper
+  /// 不可用/待批准时为 true，呈现批准路径。
+  let systemProxyApprovalRequired: Bool
   /// 当前已应用的代理模式（持久化成功的模式）。
   let proxyMode: ProxyMode
   /// 规则模式子选项（issue #63）：未匹配默认动作；仅规则模式呈现。
@@ -79,6 +82,8 @@ protocol ProxyRuntimeAdapting: AnyObject {
   var systemProxyIntentEnabled: Bool { get }
   /// 系统代理实际应用状态。
   var systemProxyApplication: SystemProxyApplicationFacts { get }
+  /// 特权 helper 是否等待登录项批准（issue #71）。
+  var systemProxyApprovalRequired: Bool { get }
   /// 当前已应用的代理模式。
   var proxyMode: ProxyMode { get }
   /// 规则模式子选项（issue #63）。
@@ -102,6 +107,8 @@ protocol ProxyRuntimeAdapting: AnyObject {
   func setAgentEnabled(_ enabled: Bool) async
   /// 系统代理开关命令。
   func setSystemProxyEnabled(_ enabled: Bool) async
+  /// 打开 helper 的登录项批准路径并重试收敛（issue #71）。
+  func openSystemProxyHelperApproval() async
   func setProxyMode(_ mode: ProxyMode) async
   /// 规则模式子选项命令（issue #63）。
   func setRuleDefaultAction(_ action: RuleDefaultAction) async
@@ -164,6 +171,13 @@ final class ProxyControlWorkflow: ObservableObject {
     return republish()
   }
 
+  /// 打开 helper 批准路径并重试收敛；完成后整体重发布（issue #71）。
+  @discardableResult
+  func openSystemProxyHelperApproval() async -> ProxyControlSnapshot {
+    await runtime.openSystemProxyHelperApproval()
+    return republish()
+  }
+
   /// 切换代理模式：可用性与 no-op 语义由控制器既有入口裁定（issue #46）；
   /// 完成后整体重发布。持久化失败保留旧模式，失败以 typed fact 呈现。
   @discardableResult
@@ -199,6 +213,7 @@ final class ProxyControlWorkflow: ObservableObject {
       activationFailure: runtime.activationFailure,
       systemProxyIntentEnabled: runtime.systemProxyIntentEnabled,
       systemProxyApplication: runtime.systemProxyApplication,
+      systemProxyApprovalRequired: runtime.systemProxyApprovalRequired,
       proxyMode: runtime.proxyMode,
       ruleDefaultAction: runtime.ruleDefaultAction,
       availableModes: ProxyMode.availableModes,

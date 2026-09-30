@@ -118,14 +118,14 @@ extension ProxyRuntimeController {
   private func reportAgentLost(preserveProxyOnFailure: Bool) async -> Bool {
     guard !preserveProxyOnFailure else { return false }
     state = .serviceFailed(.agent)
-    await withdrawSystemProxyAfterEntryLoss()
+    holdSystemProxyIntent()
     return false
   }
 
   private func reportRuntimeFileFailure(preserveProxyOnFailure: Bool) async -> Bool {
     guard !preserveProxyOnFailure else { return false }
     state = .serviceFailed(.runtimeFile)
-    await withdrawSystemProxyAfterEntryLoss()
+    holdSystemProxyIntent()
     return false
   }
 
@@ -143,7 +143,7 @@ extension ProxyRuntimeController {
       state = .launchFailed(
         .localEndpoint(endpoint: "SOCKS", host: "127.0.0.1", port: 0, cause: .unknown))
     }
-    await withdrawSystemProxyAfterEntryLoss()
+    holdSystemProxyIntent()
     return false
   }
 

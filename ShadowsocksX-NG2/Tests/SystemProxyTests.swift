@@ -4,6 +4,8 @@ import XCTest
 
 /// System proxy mode mapping and declarative planning are pure/testable seams;
 /// no test in this file writes the host's real SystemConfiguration state.
+/// issue #71：closed typed 配置、显式 HTTPS/PAC/自动发现/简单主机名/例外列表、
+/// 无条件清理计划与 helper XPC 契约（含序列化 last-writer）都在此验证。
 final class SystemProxyTests: XCTestCase {
   func testSupportedModesProjectTheSameLocalEndpoints() throws {
     let document = ProxyRuntimeFixture.makeDocument(
@@ -12,6 +14,7 @@ final class SystemProxyTests: XCTestCase {
     let expected = SystemProxyConfiguration(
       socks: .init(host: "127.0.0.1", port: 2086),
       http: .init(host: "127.0.0.1", port: SslocalListenSettings.defaultHTTPPort),
+      https: .init(host: "127.0.0.1", port: SslocalListenSettings.defaultHTTPPort),
       exceptions: FixedLocalProxyRanges.systemProxyExceptions)
     XCTAssertEqual(
       try ProxyMode.rule.systemProxyConfiguration(for: document),
@@ -30,6 +33,7 @@ final class SystemProxyTests: XCTestCase {
 
     XCTAssertEqual(configuration.socks.host, "::1")
     XCTAssertEqual(configuration.http.host, "::1")
+    XCTAssertEqual(configuration.https.host, "::1", "HTTPS 显式赋值，与 HTTP 同端点")
   }
 
   func testMissingHTTPInboundIsRejectedInsteadOfPointingAtAWildcardPort() throws {
@@ -48,6 +52,29 @@ final class SystemProxyTests: XCTestCase {
     }
   }
 
+  func testModeProjectionCarriesClosedTypedPolicyDefaults() throws {
+    let document = ProxyRuntimeFixture.makeDocument(localPort: 2086)
+
+    let configuration = try ProxyMode.rule.systemProxyConfiguration(
+      for: document, exceptions: ["example.com"])
+
+    XCTAssertTrue(configuration.pacEnabled == false, "PAC 显式关闭")
+    XCTAssertTrue(configuration.autoDiscoveryEnabled == false, "自动发现显式关闭")
+    XCTAssertTrue(configuration.excludeSimpleHostnames, "简单主机名排除由 GUI 拥有，默认开")
+    XCTAssertEqual(
+      configuration.exceptions,
+      FixedLocalProxyRanges.systemProxyExceptions(including: ["example.com"]),
+      "例外列表 = 固定本地范围 + 用户补充项，全量给出")
+  }
+
+  // MARK: - Property-list projection
+
+  private let configuration = SystemProxyConfiguration(
+    socks: .init(host: "127.0.0.1", port: 1086),
+    http: .init(host: "127.0.0.1", port: 1087),
+    https: .init(host: "127.0.0.1", port: 1087),
+    exceptions: ["localhost", "127.0.0.1"])
+
   func testSystemConfigurationProjectionEnablesSOCKSHTTPAndHTTPS() {
     let original: [String: Any] = [
       SystemProxyPropertyList.httpEnabled: 1,
@@ -55,16 +82,13 @@ final class SystemProxyTests: XCTestCase {
       SystemProxyPropertyList.socksEnabled: 1,
       SystemProxyPropertyList.pacEnabled: 1,
       SystemProxyPropertyList.pacURL: "http://127.0.0.1:1089/v1/proxy.pac",
-      "ExceptionsList": ["localhost"],
+      "ExceptionsList": ["stale.example"],
     ]
 
-    let applied = SystemProxyPropertyList.applying(
-      SystemProxyConfiguration(
-        socks: .init(host: "127.0.0.1", port: 1086),
-        http: .init(host: "127.0.0.1", port: 1087)),
-      to: original)
+    let applied = SystemProxyPropertyList.applying(configuration, to: original)
     XCTAssertEqual(applied[SystemProxyPropertyList.pacEnabled] as? Int, 0)
     XCTAssertNil(applied[SystemProxyPropertyList.pacURL])
+    XCTAssertNil(applied[SystemProxyPropertyList.pacJavaScript])
     XCTAssertEqual(applied[SystemProxyPropertyList.socksEnabled] as? Int, 1)
     XCTAssertEqual(applied[SystemProxyPropertyList.socksProxy] as? String, "127.0.0.1")
     XCTAssertEqual(applied[SystemProxyPropertyList.socksPort] as? Int, 1086)
@@ -74,103 +98,59 @@ final class SystemProxyTests: XCTestCase {
     XCTAssertEqual(applied[SystemProxyPropertyList.httpsEnabled] as? Int, 1)
     XCTAssertEqual(applied[SystemProxyPropertyList.httpsProxy] as? String, "127.0.0.1")
     XCTAssertEqual(applied[SystemProxyPropertyList.httpsPort] as? Int, 1087)
-
-    let ownedExceptions = SystemProxyPropertyList.applying(
-      SystemProxyConfiguration(
-        socks: .init(host: "127.0.0.1", port: 1086),
-        http: .init(host: "127.0.0.1", port: 1087),
-        exceptions: ["localhost", "127.0.0.1"]),
-      to: original)
+    XCTAssertEqual(applied[SystemProxyPropertyList.excludeSimpleHostnames] as? Int, 1)
+    XCTAssertEqual(applied[SystemProxyPropertyList.autoDiscoveryEnabled] as? Int, 0)
     XCTAssertEqual(
-      ownedExceptions[SystemProxyPropertyList.exceptionsList] as? [String],
-      ["localhost", "127.0.0.1"])
+      applied[SystemProxyPropertyList.exceptionsList] as? [String],
+      ["localhost", "127.0.0.1"],
+      "例外列表全量覆盖，不保留旧值")
   }
 
-  func testEndpointSignatureStoreRoundTripsAndUsesProtectedAtomicFile() throws {
-    let directory = FileManager.default.temporaryDirectory
-      .appendingPathComponent("ssxng-system-proxy-\(UUID().uuidString)", isDirectory: true)
-    let fileURL = directory.appendingPathComponent("signature.json")
-    defer { try? FileManager.default.removeItem(at: directory) }
+  /// 显式简单主机名排除值：GUI 拥有该策略（当前恒开），helper 只翻译。
+  func testSimpleHostnameExclusionFollowsExplicitFlag() {
+    let withFlagOn = SystemProxyPropertyList.applying(configuration, to: [:])
+    XCTAssertEqual(withFlagOn[SystemProxyPropertyList.excludeSimpleHostnames] as? Int, 1)
 
-    let store = FileSystemProxyEndpointSignatureStore(fileURL: fileURL)
-    let signature = SystemProxyEndpointSignature(configuration: configuration)
-
-    try store.save(signature)
-
-    XCTAssertEqual(try store.load(), signature)
-    let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-    XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    var flagOff = configuration
+    flagOff.excludeSimpleHostnames = false
+    let withFlagOff = SystemProxyPropertyList.applying(
+      flagOff, to: [SystemProxyPropertyList.excludeSimpleHostnames: 1])
+    XCTAssertEqual(withFlagOff[SystemProxyPropertyList.excludeSimpleHostnames] as? Int, 0)
   }
 
-  func testLegacyOwnershipMigrationKeepsOnlyOneEndpointSignatureAndDeletesSnapshots() throws {
-    let directory = FileManager.default.temporaryDirectory
-      .appendingPathComponent(
-        "ssxng-system-proxy-migration-\(UUID().uuidString)", isDirectory: true)
-    let signatureURL = directory.appendingPathComponent("signature.json")
-    let legacyURL = directory.appendingPathComponent("system-proxy-ownership.json")
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
+  /// 空例外列表也是显式值：写入空数组而非保留旧列表（issue #71 AC29）。
+  func testEmptyExceptionListIsWrittenExplicitly() {
+    var withoutExceptions = configuration
+    withoutExceptions.exceptions = []
+    let applied = SystemProxyPropertyList.applying(
+      withoutExceptions, to: ["ExceptionsList": ["stale.example"]])
+    XCTAssertEqual(applied[SystemProxyPropertyList.exceptionsList] as? [String], [])
+  }
 
-    let applied = try serialized(SystemProxyPropertyList.applying(configuration, to: [:]))
-    let legacyRecord: [String: Any] = [
-      "entries": [
-        [
-          "serviceID": "service-1",
-          "originalConfiguration": Data("private prior config".utf8).base64EncodedString(),
-          "appliedConfiguration": applied.base64EncodedString(),
-        ]
-      ]
+  /// 未建模键保留（issue #71 AC30）：typed 字段集之外的 Proxies 键不被擦除。
+  func testUnmodeledKeysArePreservedOnApply() {
+    let original: [String: Any] = [
+      "ThirdPartyKey": "third-party value",
+      SystemProxyPropertyList.socksEnabled: 0,
     ]
-    try JSONSerialization.data(withJSONObject: legacyRecord).write(to: legacyURL)
-    let store = FileSystemProxyEndpointSignatureStore(
-      fileURL: signatureURL, legacyOwnershipFileURL: legacyURL)
-
-    XCTAssertEqual(try store.load(), SystemProxyEndpointSignature(configuration: configuration))
-    XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
-    XCTAssertTrue(FileManager.default.fileExists(atPath: signatureURL.path))
-    let persistedSignature = try XCTUnwrap(
-      String(data: try Data(contentsOf: signatureURL), encoding: .utf8))
-    XCTAssertFalse(
-      persistedSignature.contains("private prior config"),
-      "迁移后只留下端点签名，不保留应用前配置")
+    let applied = SystemProxyPropertyList.applying(configuration, to: original)
+    XCTAssertEqual(applied["ThirdPartyKey"] as? String, "third-party value")
   }
 
-  func testLegacyMigrationDiscardsAmbiguousEndpointSignatures() throws {
-    let directory = FileManager.default.temporaryDirectory
-      .appendingPathComponent(
-        "ssxng-system-proxy-migration-\(UUID().uuidString)", isDirectory: true)
-    let signatureURL = directory.appendingPathComponent("signature.json")
-    let legacyURL = directory.appendingPathComponent("system-proxy-ownership.json")
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-
-    let otherConfiguration = SystemProxyConfiguration(
-      socks: .init(host: "127.0.0.1", port: 2086),
-      http: .init(host: "127.0.0.1", port: 2087))
-    let appliedConfigurations = try [configuration, otherConfiguration].map { item in
-      try serialized(SystemProxyPropertyList.applying(item, to: [:]))
-    }
-    let entries: [[String: Any]] = appliedConfigurations.enumerated().map { index, applied in
-      [
-        "serviceID": "service-\(index)",
-        "originalConfiguration": NSNull(),
-        "appliedConfiguration": applied.base64EncodedString(),
-      ]
-    }
-    try JSONSerialization.data(withJSONObject: ["entries": entries]).write(to: legacyURL)
-    let store = FileSystemProxyEndpointSignatureStore(
-      fileURL: signatureURL, legacyOwnershipFileURL: legacyURL)
-
-    XCTAssertNil(try store.load(), "不同服务的旧端点不确定哪个是最近一次意图")
-    XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
-    XCTAssertFalse(FileManager.default.fileExists(atPath: signatureURL.path))
+  /// PAC 显式关闭时移除 URL 与 JavaScript 残值（issue #71 AC27）。
+  func testDisabledPACRemovesURLAndJavaScriptValues() {
+    let original: [String: Any] = [
+      SystemProxyPropertyList.pacEnabled: 1,
+      SystemProxyPropertyList.pacURL: "http://proxy.example/proxy.pac",
+      SystemProxyPropertyList.pacJavaScript: "function FindProxyForURL() {}",
+    ]
+    let applied = SystemProxyPropertyList.applying(configuration, to: original)
+    XCTAssertEqual(applied[SystemProxyPropertyList.pacEnabled] as? Int, 0)
+    XCTAssertNil(applied[SystemProxyPropertyList.pacURL])
+    XCTAssertNil(applied[SystemProxyPropertyList.pacJavaScript])
   }
 
   // MARK: - Declarative planner
-
-  private let configuration = SystemProxyConfiguration(
-    socks: .init(host: "127.0.0.1", port: 1086),
-    http: .init(host: "127.0.0.1", port: 1087))
 
   private func serialized(_ dictionary: [String: Any]) throws -> Data {
     try PropertyListSerialization.data(fromPropertyList: dictionary, format: .binary, options: 0)
@@ -200,54 +180,38 @@ final class SystemProxyTests: XCTestCase {
     XCTAssertTrue(SystemProxyPlanner.equivalent(projected, applied))
   }
 
-  func testCleanupPlannerClearsWholeDictionaryOnlyForMatchingEndpointSignature() throws {
-    let signature = SystemProxyEndpointSignature(configuration: configuration)
-    let matching = try serialized([
-      "HTTPEnable": 1,
-      "HTTPProxy": configuration.http.host,
-      "HTTPPort": configuration.http.port,
-      "HTTPSEnable": 1,
-      "HTTPSProxy": configuration.http.host,
-      "HTTPSPort": configuration.http.port,
-      "SOCKSEnable": 1,
-      "SOCKSProxy": configuration.socks.host,
-      "SOCKSPort": configuration.socks.port,
-      "ThirdPartyKey": "also removed",
-    ])
-    let wrongEndpoint = try serialized([
-      "HTTPEnable": 1,
-      "HTTPProxy": configuration.http.host,
-      "HTTPPort": 9090,
-      "HTTPSEnable": 1,
-      "HTTPSProxy": configuration.http.host,
-      "HTTPSPort": 9090,
-      "SOCKSEnable": 1,
-      "SOCKSProxy": configuration.socks.host,
-      "SOCKSPort": configuration.socks.port,
-    ])
-    let services = [
-      service("same-id", location: "location-a", configuration: matching),
-      service("same-id", location: "location-b", configuration: wrongEndpoint),
-    ]
+  func testApplyPlannerIsIdempotentWhenAllServicesMatch() throws {
+    let applied = try serialized(SystemProxyPropertyList.applying(configuration, to: [:]))
 
-    let plan = try SystemProxyPlanner.makeClearPlan(services: services, signature: signature)
+    let plan = try SystemProxyPlanner.makeApplyPlan(
+      services: [service("service-1", configuration: applied)], configuration: configuration)
 
-    XCTAssertEqual(plan.writes.map(\.identifier), [services[0].identifier])
-    XCTAssertNil(plan.writes.first?.configuration, "匹配后清除完整 Proxies 字典")
+    XCTAssertTrue(plan.writes.isEmpty)
+    XCTAssertEqual(plan.outcome, .unchanged, "重试不产生无谓的 SC 写入（issue #71 AC31）")
   }
 
-  func testSignatureRequiresEnabledSOCKSHTTPAndHTTPSAtExactEndpoints() {
-    let signature = SystemProxyEndpointSignature(configuration: configuration)
-    let dictionary = SystemProxyPropertyList.applying(configuration, to: [:])
+  /// 清理计划无条件：凡持有 Proxies 实体的服务（跨位置、不校验端点或来源）
+  /// 都整字典移除（issue #71 AC6）。
+  func testCleanupPlannerClearsWholeDictionaryEverywhereUnconditionally() throws {
+    let ng2Values = try serialized(SystemProxyPropertyList.applying(configuration, to: [:]))
+    let foreignValues = try serialized([
+      "HTTPEnable": 1, "HTTPProxy": "proxy.example", "HTTPPort": 9090,
+    ])
+    let services = [
+      service("same-id", location: "location-a", configuration: ng2Values),
+      service("same-id", location: "location-b", configuration: foreignValues),
+      service("bare-service", location: "location-b", configuration: nil),
+    ]
 
-    XCTAssertTrue(signature.matches(dictionary))
+    let plan = SystemProxyPlanner.makeClearPlan(services: services)
 
-    var disabledHTTPS = dictionary
-    disabledHTTPS[SystemProxyPropertyList.httpsEnabled] = 0
-    XCTAssertFalse(signature.matches(disabledHTTPS))
-
-    var differentSOCKS = dictionary
-    differentSOCKS[SystemProxyPropertyList.socksPort] = configuration.socks.port + 1
-    XCTAssertFalse(signature.matches(differentSOCKS))
+    XCTAssertEqual(
+      Set(plan.writes.map(\.identifier)),
+      [services[0].identifier, services[1].identifier],
+      "不校验来源：NG2 与其他应用写入的服务都被清空")
+    XCTAssertTrue(plan.writes.allSatisfy { $0.configuration == nil }, "清除完整 Proxies 字典")
+    XCTAssertFalse(
+      plan.writes.contains { $0.identifier == services[2].identifier },
+      "没有 Proxies 实体的服务无需写入")
   }
 }

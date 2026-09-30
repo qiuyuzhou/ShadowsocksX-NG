@@ -127,6 +127,7 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
       agent: agent,
       probe: probe,
       systemProxy: systemProxy,
+      systemProxyHelper: ProxyRuntimeFixture.FakeSystemProxyHelperService(),
       firewallExecutableURLs: [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
       firewallPollIntervalNanoseconds: 1_000_000,
       launchHealthTimeoutSeconds: 0.05,

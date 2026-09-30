@@ -72,7 +72,6 @@ enum ServiceFailureFacts: Equatable, Sendable {
 }
 
 enum SystemProxyOperationFailure: Equatable, Sendable {
-  case authorizationFailed
   case preferencesUnavailable
   case preferencesBusy
   case noCurrentNetworkSet
@@ -83,7 +82,8 @@ enum SystemProxyOperationFailure: Equatable, Sendable {
   case cannotWriteService
   case commitFailed
   case applyFailed
-  case endpointSignatureStoreFailed
+  case invalidRequest
+  case helperUnavailable
 }
 
 enum SystemProxyFailureFacts: Equatable, Sendable {

@@ -14,6 +14,7 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
   var activationFailure: ActivationFailure?
   var systemProxyIntentEnabled: Bool
   var systemProxyApplication: SystemProxyApplicationFacts
+  var systemProxyApprovalRequired = false
   var proxyMode: ProxyMode
   var ruleDefaultAction: RuleDefaultAction = .proxyWhenUnmatched
   var skippedInvalidServerCount = 0
@@ -30,6 +31,7 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
   private(set) var resyncCount = 0
   private(set) var agentCommands: [Bool] = []
   private(set) var systemProxyCommands: [Bool] = []
+  private(set) var approvalCommandCount = 0
   private(set) var modeCommands: [ProxyMode] = []
   private(set) var ruleDefaultActionCommands: [RuleDefaultAction] = []
 
@@ -54,6 +56,8 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
   func setAgentEnabled(_ enabled: Bool) async { agentCommands.append(enabled) }
 
   func setSystemProxyEnabled(_ enabled: Bool) async { systemProxyCommands.append(enabled) }
+
+  func openSystemProxyHelperApproval() async { approvalCommandCount += 1 }
 
   func setProxyMode(_ mode: ProxyMode) async { modeCommands.append(mode) }
 
@@ -122,6 +126,7 @@ final class ProxyControlWorkflowTests: XCTestCase {
         activationFailure: .noActiveTarget,
         systemProxyIntentEnabled: true,
         systemProxyApplication: .pending,
+        systemProxyApprovalRequired: false,
         proxyMode: .global,
         ruleDefaultAction: .proxyWhenUnmatched,
         availableModes: ProxyMode.availableModes,

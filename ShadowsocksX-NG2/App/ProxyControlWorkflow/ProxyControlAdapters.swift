@@ -29,6 +29,8 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
     }
   }
 
+  var systemProxyApprovalRequired: Bool { controller.systemProxyApprovalRequired }
+
   var proxyMode: ProxyMode { controller.proxyMode }
 
   var ruleDefaultAction: RuleDefaultAction { controller.ruleDefaultAction }
@@ -64,6 +66,10 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
 
   func setSystemProxyEnabled(_ enabled: Bool) async {
     await controller.setSystemProxyEnabled(enabled)
+  }
+
+  func openSystemProxyHelperApproval() async {
+    await controller.openSystemProxyHelperApproval()
   }
 
   func setProxyMode(_ mode: ProxyMode) async {

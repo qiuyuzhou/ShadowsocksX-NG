@@ -14,6 +14,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
   private var credentials: InMemoryCredentialStore!
   var agent: ProxyRuntimeFixture.FakeLaunchAgent!
   var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
+  var systemProxyHelper: ProxyRuntimeFixture.FakeSystemProxyHelperService!
 
   override func setUp() async throws {
     try await super.setUp()
@@ -23,6 +24,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     credentials = InMemoryCredentialStore()
     agent = ProxyRuntimeFixture.FakeLaunchAgent()
     systemProxy = ProxyRuntimeFixture.FakeSystemProxy()
+    systemProxyHelper = ProxyRuntimeFixture.FakeSystemProxyHelperService()
   }
 
   override func tearDown() async throws {
@@ -73,6 +75,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
       agent: agent,
       probe: probe,
       systemProxy: systemProxy,
+      systemProxyHelper: systemProxyHelper,
       proxyMode: .rule,
       firewallChecker: ProxyRuntimeFixture.FakeFirewallChecker(),
       firewallExecutableURLs: [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],

@@ -75,9 +75,11 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
   /// Derives the only system-proxy state that this mode is allowed to own.
   /// All three modes are projected as the local SOCKS and HTTP inbounds
   /// (issue #59/#67)：SOCKS 之外，系统 HTTP/HTTPS 代理指向恒开启的 HTTP 入站。
+  /// 投影即 closed typed 配置（issue #71）：HTTPS 显式赋值、PAC/自动发现显式
+  /// 关闭、简单主机名排除显式开启、例外列表全量给出。
   func systemProxyConfiguration(
     for document: SslocalRuntimeDocument,
-    exceptions: [String]? = nil
+    exceptions: [String] = []
   ) throws -> SystemProxyConfiguration {
     guard ProxyPortRange.valid.contains(document.socksPort) else {
       throw ProxyModeError.invalidSOCKSPort(document.socksPort)
@@ -85,35 +87,13 @@ enum ProxyMode: Codable, Equatable, Hashable, Sendable {
     guard ProxyPortRange.valid.contains(document.httpPort) else {
       throw ProxyModeError.invalidHTTPPort(document.httpPort)
     }
+    let loopback = document.listen.listenerMode.proxyLoopbackAddress
     return SystemProxyConfiguration(
-      socks: .init(
-        host: document.listen.listenerMode.proxyLoopbackAddress, port: document.socksPort),
-      http: .init(host: document.listen.listenerMode.proxyLoopbackAddress, port: document.httpPort),
+      socks: .init(host: loopback, port: document.socksPort),
+      http: .init(host: loopback, port: document.httpPort),
+      https: .init(host: loopback, port: document.httpPort),
+      excludeSimpleHostnames: true,
       exceptions: FixedLocalProxyRanges.systemProxyExceptions(including: exceptions))
-  }
-}
-
-/// The part of the system proxy dictionary that 2.0 intentionally controls.
-/// SOCKS 与 HTTP/HTTPS 两个协议族同时写入，各指向 sslocal 的对应本地入站；
-/// HTTPS 走 HTTP 入站的 CONNECT 代理，与 SOCKS 共用同一实例。
-struct SystemProxyConfiguration: Equatable, Sendable {
-  /// 一个系统代理协议族指向的本地端点。
-  struct Endpoint: Equatable, Sendable {
-    let host: String
-    let port: Int
-  }
-
-  let socks: Endpoint
-  /// 系统 HTTP 与 HTTPS 代理共同指向的 HTTP 入站端点。
-  let http: Endpoint
-  /// `nil` preserves the user's original ExceptionsList. A non-nil value is
-  /// explicitly owned by the app and is projected on every activation.
-  let exceptions: [String]?
-
-  init(socks: Endpoint, http: Endpoint, exceptions: [String]? = nil) {
-    self.socks = socks
-    self.http = http
-    self.exceptions = exceptions
   }
 }
 

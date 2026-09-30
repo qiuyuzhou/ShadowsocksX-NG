@@ -64,7 +64,7 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
     "ProxyRuntimeController+SettingsSync.swift",
     "ProxyRuntimeController+SystemProxyGate.swift",
     "ProxyRuntimeController+Facts.swift",
-    "SystemConfigurationProxyController.swift",
+    "SystemProxyHelperService.swift",
     "LaunchAgentService.swift",
     "LoginAtLoginService.swift",
     "FirewallStatusChecker.swift",

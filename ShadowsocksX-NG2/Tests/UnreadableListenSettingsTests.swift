@@ -49,6 +49,7 @@ final class UnreadableListenSettingsTests: XCTestCase {
       agent: agent,
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       systemProxy: systemProxy,
+      systemProxyHelper: ProxyRuntimeFixture.FakeSystemProxyHelperService(),
       launchHealthTimeoutSeconds: 0.05,
       sendSignal: { _, _ in 0 })
   }
