@@ -99,30 +99,42 @@ final class XPCSystemProxyController: SystemProxyControlling {
       ) -> Void
   ) async throws -> SystemProxyHelperResponse {
     let gate = SystemProxyReplyGate()
-    let connection = NSXPCConnection(machServiceName: SystemProxyHelperIdentity.machServiceName)
+    // 系统域 LaunchDaemon 的 MachService 注册在系统 launchd 命名空间；不带
+    // .privileged 的连接只在 per-user 域查找，永远失败。
+    let connection = NSXPCConnection(
+      machServiceName: SystemProxyHelperIdentity.machServiceName, options: .privileged)
     defer { connection.invalidate() }
     connection.remoteObjectInterface = NSXPCInterface(with: SystemProxyHelperControlling.self)
-    connection.invalidationHandler = {
+    // 回调闭包必须显式 @Sendable（nonisolated）：它们在 @MainActor 方法里形成，
+    // 传给非 @Sendable 的 Foundation 参数会被推断为主 actor 隔离，而 Foundation
+    // 在 XPC 内部队列上调起它们，Swift 6 动态隔离检查会让跨线程调用直接 trap。
+    // 闭包只捕获 Sendable 闸门，无需回主 actor。
+    connection.invalidationHandler = { @Sendable in
       gate.finish(.failure(SystemProxyError.helperUnavailable("XPC 连接已失效")))
     }
     guard
-      let proxy = connection.remoteObjectProxyWithErrorHandler({ error in
+      let proxy = connection.remoteObjectProxyWithErrorHandler({ @Sendable (error: Error) in
         gate.finish(.failure(SystemProxyError.helperUnavailable(String(describing: error))))
       }) as? SystemProxyHelperControlling
     else {
       gate.finish(.failure(SystemProxyError.helperUnavailable("无法创建远程对象代理")))
       return try await gate.wait()
     }
+    connection.resume()
     call(proxy) { payload in
       gate.finish(Result { try SystemProxyHelperWire.decode(payload) })
     }
-    connection.resume()
-    // 超时兜底：已批准但卡死的 helper 不应让 UI 命令永久挂起。
+    // 超时兜底：已批准但卡死的 helper 不应让 UI 命令永久挂起；应答先到时取消。
     let timeout = requestTimeoutNanoseconds
-    Task.detached(priority: .utility) {
-      try? await Task.sleep(nanoseconds: timeout)
+    let timeoutTask = Task.detached(priority: .utility) {
+      do {
+        try await Task.sleep(nanoseconds: timeout)
+      } catch {
+        return
+      }
       gate.finish(.failure(SystemProxyError.helperUnavailable("helper 应答超时")))
     }
+    defer { timeoutTask.cancel() }
     return try await gate.wait()
   }
 }

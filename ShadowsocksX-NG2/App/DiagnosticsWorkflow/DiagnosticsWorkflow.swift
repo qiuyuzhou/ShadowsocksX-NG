@@ -34,6 +34,8 @@ extension RuntimeLogEvent {
       return "system proxy values unchanged, write skipped"
     case .systemProxyHelperRegisterFailed:
       return "system proxy helper register failed"
+    case .systemProxyWriteFailed:
+      return "system proxy write failed"
     case .runtimeFilesDeleted:
       return "runtime files deleted"
     case .runtimePersistFailed:

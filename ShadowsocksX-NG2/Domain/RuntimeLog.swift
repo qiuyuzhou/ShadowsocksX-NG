@@ -14,6 +14,8 @@ enum RuntimeLogEvent: Equatable, CustomStringConvertible, Sendable {
   case systemProxyUnchanged
   /// 特权系统代理 helper 的 SMAppService 注册失败（issue #71；不含内容）。
   case systemProxyHelperRegisterFailed(detail: String)
+  /// 系统代理写入/清除请求失败（issue #71；detail 为 XPC 或 helper 错误文本）。
+  case systemProxyWriteFailed(detail: String)
   /// 运行时文件已清理。
   case runtimeFilesDeleted
   /// 激活状态等运行时元数据落盘失败（不含内容）。
@@ -55,6 +57,8 @@ enum RuntimeLogEvent: Equatable, CustomStringConvertible, Sendable {
       return "system proxy values unchanged, write skipped"
     case .systemProxyHelperRegisterFailed(let detail):
       return "system proxy helper register failed: \(detail)"
+    case .systemProxyWriteFailed(let detail):
+      return "system proxy write failed: \(detail)"
     case .runtimeFilesDeleted:
       return "runtime files deleted"
     case .runtimePersistFailed(let detail):

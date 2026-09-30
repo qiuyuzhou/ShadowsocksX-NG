@@ -136,6 +136,8 @@ extension ProxyRuntimeController {
       }
       systemProxyState = .applied
     } catch {
+      // 错误细节进日志：状态呈现走 facts，XPC/ helper 层失败原因只有这里可查。
+      RuntimeLog.emit(.systemProxyWriteFailed(detail: describe(error)))
       systemProxyState = .failed(systemProxyFacts(for: error))
     }
   }

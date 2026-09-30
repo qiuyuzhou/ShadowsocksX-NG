@@ -152,6 +152,7 @@ targets:
       - path: Domain/SystemProxyPropertyList.swift
       - path: Domain/SystemProxyHelperContract.swift
       - path: Domain/SystemProxyHelperEngine.swift
+      - path: Domain/SystemProxyHelperListenerDelegate.swift
     settings:
       base:
         PRODUCT_NAME: ShadowsocksX-NG2SystemProxyHelper

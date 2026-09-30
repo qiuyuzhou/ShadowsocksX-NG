@@ -7,10 +7,9 @@ import Security
 final class SystemProxyHelperListenerDelegate: NSObject, NSXPCListenerDelegate {
   private let engine: SystemProxyHelperEngine
 
-  init(
-    engine: SystemProxyHelperEngine = SystemProxyHelperEngine(
-      perform: SystemProxyWriter.perform)
-  ) {
+  /// 引擎由进程入口显式注入：特权写入器 SystemProxyWriter 属 helper 专属
+  /// （不进共享编译单元），测试注入假写入器。
+  init(engine: SystemProxyHelperEngine) {
     self.engine = engine
     super.init()
   }
