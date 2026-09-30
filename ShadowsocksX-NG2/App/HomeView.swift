@@ -142,7 +142,7 @@ private struct RuntimeControlCard: View {
   }
 }
 
-/// 「代理模式」卡：可用模式切换（Domain 单点策略投影）+ 规则子选项 + 模式说明 + 当前徽标。
+/// 「代理模式」卡：可用模式切换（Domain 单点策略投影）+ 规则子选项 + 模式说明。
 private struct ModeCard: View {
   @ObservedObject var control: ProxyControlWorkflow
 
@@ -150,7 +150,7 @@ private struct ModeCard: View {
     HomeCard(
       title: "代理模式",
       subtitle: "选择系统代理应用方式",
-      trailing: { ModeBadge(label: modeBadgeLabel) },
+      trailing: { EmptyView() },
       content: {
         VStack(alignment: .leading, spacing: 14) {
           Picker("代理模式", selection: modeBinding) {
@@ -178,14 +178,6 @@ private struct ModeCard: View {
         }
         .padding(.top, 6)
       })
-  }
-
-  private var modeBadgeLabel: String {
-    let mode = control.snapshot.proxyMode
-    if mode == .rule {
-      return "\(mode.label) · \(control.snapshot.ruleDefaultAction.label)"
-    }
-    return mode.label
   }
 
   private var modeBinding: Binding<ProxyMode> {

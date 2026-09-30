@@ -38,20 +38,6 @@ struct HomeCard<Trailing: View, Content: View>: View {
   }
 }
 
-/// 当前模式徽标（票 #54）。
-struct ModeBadge: View {
-  let label: String
-
-  var body: some View {
-    Text(label)
-      .font(.caption.weight(.semibold))
-      .foregroundStyle(.tint)
-      .padding(.horizontal, 8)
-      .padding(.vertical, 3)
-      .background(Color.accentColor.opacity(0.12), in: Capsule())
-  }
-}
-
 /// 快速操作行按钮（票 #54）。
 struct QuickActionButton: View {
   let icon: String

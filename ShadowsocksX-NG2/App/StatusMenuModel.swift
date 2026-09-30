@@ -51,7 +51,7 @@ enum StatusMenuModel {
       targetPath: snapshot.activeTarget?.pathSummary)
   }
 
-  /// 模式标签与首页徽标同口径（issue #67 AC2）：规则模式带上子选项。
+  /// 模式标签（issue #67 AC2）：规则模式带上子选项。
   private static func modeLabel(for snapshot: ProxyControlSnapshot) -> String {
     let mode = snapshot.proxyMode
     if mode == .rule {
