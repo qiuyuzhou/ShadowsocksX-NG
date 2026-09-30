@@ -96,6 +96,8 @@ final class ProxyRuntimeController: ObservableObject {
   let firewallExecutableURLs: [URL]
   let firewallPollIntervalNanoseconds: UInt64
   let launchHealthTimeoutSeconds: TimeInterval
+  /// 注册清单漂移重注时，注销与重注的间隔（launchd 对节流中 job 的移除异步）。
+  let helperRefreshDelayNanoseconds: UInt64
   /// 信号发送缝（默认 kill），单测观测 SIGUSR1 投递。
   let sendSignal: @Sendable (Int32, Int32) -> Int32
   let processIsAlive: @Sendable (Int32) -> Bool
@@ -136,6 +138,7 @@ final class ProxyRuntimeController: ObservableObject {
     firewallExecutableURLs: [URL]? = nil,
     firewallPollIntervalNanoseconds: UInt64 = 2_000_000_000,
     launchHealthTimeoutSeconds: TimeInterval = 15,
+    helperRefreshDelayNanoseconds: UInt64 = 15_000_000_000,
     sendSignal: @escaping @Sendable (Int32, Int32) -> Int32 = { kill($0, $1) },
     processIsAlive: @escaping @Sendable (Int32) -> Bool = { $0 > 0 && kill($0, 0) == 0 }
   ) {
@@ -166,6 +169,7 @@ final class ProxyRuntimeController: ObservableObject {
     self.firewallExecutableURLs = firewallExecutableURLs ?? Self.defaultFirewallExecutableURLs
     self.firewallPollIntervalNanoseconds = firewallPollIntervalNanoseconds
     self.launchHealthTimeoutSeconds = launchHealthTimeoutSeconds
+    self.helperRefreshDelayNanoseconds = helperRefreshDelayNanoseconds
     self.sendSignal = sendSignal
     self.processIsAlive = processIsAlive
     let persistedTarget = try? activationFileStore.loadActiveTargetID()

@@ -118,7 +118,7 @@ extension ProxyRuntimeController {
   /// 后自动重写。收敛路径永不清理（issue #71）。
   func convergeSystemProxy() async {
     guard settings.systemProxyEnabled else { return }
-    guard ensureHelperAvailableForApply() else {
+    guard await ensureHelperAvailableForApply() else {
       systemProxyState = .pending
       return
     }
@@ -146,12 +146,16 @@ extension ProxyRuntimeController {
   /// 与上次注册时的指纹漂移（app 更新改过清单）才注销重注刷新 launchd 的
   /// job 定义；未注册则尝试注册（注册本身不弹授权框，成功即记指纹）；待批准
   /// 或注册失败时置位批准路径并保持待应用。
-  private func ensureHelperAvailableForApply() -> Bool {
+  private func ensureHelperAvailableForApply() async -> Bool {
     switch systemProxyHelper.status {
     case .approved:
       if Self.helperRegistrationDrifted() {
         do {
           try systemProxyHelper.unregister()
+          // launchd 对节流中（spawn scheduled）job 的移除是异步的：立即重注
+          // 会命中尚未移除的旧定义（实测注销重注后定义不变）。等过 minimum
+          // runtime（10s）节流窗再重注；间隔内收敛以旧定义失败呈超时。
+          try? await Task.sleep(nanoseconds: helperRefreshDelayNanoseconds)
           try systemProxyHelper.register()
           Self.storeHelperRegistrationStamp()
         } catch {

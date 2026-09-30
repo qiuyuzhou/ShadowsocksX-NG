@@ -94,6 +94,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     firewallPollIntervalNanoseconds: UInt64 = 1_000_000,
     // 生产默认 15 秒健康窗；FakeProbe 结果确定，短窗口走同一超时呈现路径。
     launchHealthTimeoutSeconds: TimeInterval = 0.05,
+    // 漂移重注的注销-重注间隔与用例无关，缩短保持套件快速。
+    helperRefreshDelayNanoseconds: UInt64 = 10_000_000,
     processIsAlive: @escaping @Sendable (Int32) -> Bool = { $0 == 42 },
     customRuleStore: CustomRuleStore? = nil
   ) -> ProxyRuntimeController {
@@ -135,6 +137,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       firewallExecutableURLs: firewallExecutableURLs,
       firewallPollIntervalNanoseconds: firewallPollIntervalNanoseconds,
       launchHealthTimeoutSeconds: launchHealthTimeoutSeconds,
+      helperRefreshDelayNanoseconds: helperRefreshDelayNanoseconds,
       sendSignal: { [signals] pid, number in signals!.send(pid, number) },
       processIsAlive: processIsAlive)
   }
