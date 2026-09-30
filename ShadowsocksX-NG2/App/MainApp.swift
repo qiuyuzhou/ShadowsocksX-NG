@@ -79,7 +79,8 @@ private struct StatusMenuLabel: View {
   @ObservedObject var control: ProxyControlWorkflow
 
   var body: some View {
-    Image(systemName: "network")
+    Image("MenuBarIcon")
+      .renderingMode(.template)
       .accessibilityLabel("ShadowsocksX-NG2")
       .task {
         await control.resyncOnLaunch()
