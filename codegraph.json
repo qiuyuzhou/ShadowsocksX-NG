@@ -1,0 +1,4 @@
+{
+  "exclude": ["Legacy/"],
+  "deprioritize": ["ShadowsocksX-NG2/Scripts/"]
+}
