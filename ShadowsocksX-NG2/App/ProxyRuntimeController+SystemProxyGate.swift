@@ -142,16 +142,31 @@ extension ProxyRuntimeController {
     }
   }
 
-  /// helper 可用性门禁（issue #71）：已批准即通过；未注册则尝试注册（注册
-  /// 本身不弹授权框）；待批准或注册失败时置位批准路径并保持待应用。
+  /// helper 可用性门禁（issue #71）：已批准即通过——仅当 LaunchDaemon 清单
+  /// 与上次注册时的指纹漂移（app 更新改过清单）才注销重注刷新 launchd 的
+  /// job 定义；未注册则尝试注册（注册本身不弹授权框，成功即记指纹）；待批准
+  /// 或注册失败时置位批准路径并保持待应用。
   private func ensureHelperAvailableForApply() -> Bool {
     switch systemProxyHelper.status {
     case .approved:
-      systemProxyApprovalRequired = false
-      return true
+      if Self.helperRegistrationDrifted() {
+        do {
+          try systemProxyHelper.unregister()
+          try systemProxyHelper.register()
+          Self.storeHelperRegistrationStamp()
+        } catch {
+          // 刷新失败不记指纹，下次启动重试；状态退回后由下方分支接手。
+          RuntimeLog.emit(.systemProxyHelperRegisterFailed(detail: describe(error)))
+        }
+      }
+      if systemProxyHelper.status == .approved {
+        systemProxyApprovalRequired = false
+        return true
+      }
     case .notRegistered:
       do {
         try systemProxyHelper.register()
+        Self.storeHelperRegistrationStamp()
       } catch {
         RuntimeLog.emit(.systemProxyHelperRegisterFailed(detail: describe(error)))
       }
@@ -164,6 +179,19 @@ extension ProxyRuntimeController {
     }
     systemProxyApprovalRequired = true
     return false
+  }
+
+  private static func helperRegistrationDrifted(defaults: UserDefaults = .standard) -> Bool {
+    SystemProxyHelperRegistrationStamp.drifted(
+      plistData: SystemProxyHelperIdentity.launchDaemonPlistData,
+      storedStamp: defaults.string(forKey: SystemProxyHelperRegistrationStamp.defaultsKey))
+  }
+
+  private static func storeHelperRegistrationStamp(defaults: UserDefaults = .standard) {
+    guard let plistData = SystemProxyHelperIdentity.launchDaemonPlistData else { return }
+    defaults.set(
+      SystemProxyHelperRegistrationStamp.stamp(plistData),
+      forKey: SystemProxyHelperRegistrationStamp.defaultsKey)
   }
 
   /// 登录项批准路径（issue #71）：打开系统设置的登录项面板并立即重试收敛；

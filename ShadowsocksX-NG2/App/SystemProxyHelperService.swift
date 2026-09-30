@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import ServiceManagement
 
@@ -12,12 +13,13 @@ protocol SystemProxyControlling {
 }
 
 /// helper 注册/审批状态缝（issue #71）：注册走 SMAppService.daemon；审批缺失
-/// 时 GUI 据此呈现登录项批准路径，不提供直接授权回退。单测以 fake 替换
-/// （真实注册会改动系统登录项状态）。
+/// 时 GUI 据此呈现登录项批准路径，不提供直接授权回退。unregister 供注册清单
+/// 漂移后的定义刷新使用。单测以 fake 替换（真实注册会改动系统登录项状态）。
 @MainActor
 protocol SystemProxyHelperServicing {
   var status: SystemProxyHelperStatus { get }
   func register() throws
+  func unregister() throws
   func openApprovalPath()
 }
 
@@ -49,8 +51,30 @@ struct SMAppServiceSystemProxyHelper: SystemProxyHelperServicing {
     try service.register()
   }
 
+  func unregister() throws {
+    try service.unregister()
+  }
+
   func openApprovalPath() {
     SMAppService.openSystemSettingsLoginItems()
+  }
+}
+
+/// 注册清单漂移指纹（issue #71 后续）：launchd 对 SMAppService 提交的 job
+/// 沿用注册时的定义快照，app 更新改动 LaunchDaemon 清单不会自动生效（旧定义
+/// spawn 失败时 launchd 以 EX_CONFIG 节流循环）。以清单内容 SHA-256 检测漂移，
+/// 漂移才注销重注；审批与 bundle 签名绑定，重注不重新弹授权。
+enum SystemProxyHelperRegistrationStamp {
+  static let defaultsKey = "systemProxyHelperRegistrationStamp"
+
+  /// 清单不可读时不判漂移（无基准；未注册场景由注册路径自身兜底）。
+  static func drifted(plistData: Data?, storedStamp: String?) -> Bool {
+    guard let plistData else { return false }
+    return stamp(plistData) != storedStamp
+  }
+
+  static func stamp(_ data: Data) -> String {
+    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
   }
 }
 

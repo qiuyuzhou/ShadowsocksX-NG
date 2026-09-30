@@ -214,4 +214,29 @@ final class SystemProxyTests: XCTestCase {
       plan.writes.contains { $0.identifier == services[2].identifier },
       "没有 Proxies 实体的服务无需写入")
   }
+
+  // MARK: - 注册清单漂移指纹（issue #71 后续）
+
+  /// launchd 沿用注册提交时的 job 定义快照，清单变更须注销重注才生效；
+  /// 指纹检测决定是否重注。
+  func testRegistrationStampDriftDetection() {
+    let data = Data("plist-content".utf8)
+    XCTAssertTrue(
+      SystemProxyHelperRegistrationStamp.drifted(plistData: data, storedStamp: nil),
+      "无指纹（首次带检测代码启动）视为漂移")
+    XCTAssertTrue(
+      SystemProxyHelperRegistrationStamp.drifted(plistData: data, storedStamp: "outdated"),
+      "清单内容变更视为漂移")
+    XCTAssertFalse(
+      SystemProxyHelperRegistrationStamp.drifted(
+        plistData: data, storedStamp: SystemProxyHelperRegistrationStamp.stamp(data)),
+      "指纹一致不漂移")
+    XCTAssertFalse(
+      SystemProxyHelperRegistrationStamp.drifted(plistData: nil, storedStamp: nil),
+      "清单不可读无基准，不判漂移")
+    XCTAssertNotEqual(
+      SystemProxyHelperRegistrationStamp.stamp(Data("a".utf8)),
+      SystemProxyHelperRegistrationStamp.stamp(Data("b".utf8)),
+      "不同清单内容指纹不同")
+  }
 }

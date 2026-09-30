@@ -17,6 +17,16 @@ enum SystemProxyHelperIdentity {
   static let plistName = "com.qiuyuzhou.ShadowsocksX-NG2.systemproxy.plist"
   static let launchdLabel = "com.qiuyuzhou.ShadowsocksX-NG2.systemproxy"
   static let clientCodeSigningIdentifier = "com.qiuyuzhou.ShadowsocksX-NG2"
+
+  /// App bundle 内 LaunchDaemon 清单内容（注册漂移指纹的基准）。helper 进程
+  /// 内没有 bundle，返回 nil，调用方按「无基准不动作」处理。Contents/Library
+  /// 不是资源目录，Bundle 资源 API 搜不到，按固定路径直读。
+  static var launchDaemonPlistData: Data? {
+    let url = Bundle.main.bundleURL
+      .appendingPathComponent("Contents/Library/LaunchDaemons")
+      .appendingPathComponent(plistName)
+    return try? Data(contentsOf: url)
+  }
 }
 
 /// helper XPC 应答：成功携带 typed 结果，失败携带 typed 错误族。

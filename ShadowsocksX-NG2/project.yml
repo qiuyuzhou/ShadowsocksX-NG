@@ -33,8 +33,9 @@ targets:
             subpath: Contents/Library/LaunchAgents
       # 特权系统代理 helper 的 LaunchDaemon 注册清单（issue #71）：
       # SMAppService.daemon(plistName:) 从 bundle 内
-      # Contents/Library/LaunchDaemons/ 读取；ProgramArguments 用 bundle 相对
-      # 路径；MachServices 键支撑 on-demand 激活。
+      # Contents/Library/LaunchDaemons/ 读取；可执行路径用 BundleProgram 键
+      # （bundle 相对；ProgramArguments 的相对路径按 PATH 解析会 spawn 失败）；
+      # MachServices 键支撑 on-demand 激活。
       - path: LaunchDaemons/com.qiuyuzhou.ShadowsocksX-NG2.systemproxy.plist
         buildPhase:
           copyFiles:

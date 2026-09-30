@@ -491,6 +491,43 @@ extension ProxyRuntimeControllerTests {
       recorder.recorded.contains(.systemProxyUnchanged),
       "跳过路径发事件行，实际 \(recorder.recorded)")
   }
+
+  /// LaunchDaemon 清单漂移（issue #71 后续）：launchd 沿用注册提交时的 job
+  /// 定义快照，app 更新改了清单后须注销重注才生效。已批准注册仅在清单指纹
+  /// 与注册时不一致时重注（审批与签名绑定，不重弹授权）；首次注册成功即记录
+  /// 指纹，指纹一致不动作。
+  func testHelperRegistrationRefreshesOnlyOnPlistDrift() async throws {
+    let defaults = UserDefaults.standard
+    let stampKey = SystemProxyHelperRegistrationStamp.defaultsKey
+    defer { defaults.removeObject(forKey: stampKey) }
+    defaults.removeObject(forKey: stampKey)
+
+    let seeded = try makeSeededCatalog()
+    systemProxyHelper.setStatus(.notRegistered)
+    let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
+    try await controller.activate(seeded.server)
+    await controller.setAgentEnabled(true)
+    await controller.setSystemProxyEnabled(true)
+
+    let stampAfterRegister = try XCTUnwrap(
+      defaults.string(forKey: stampKey), "注册成功应记录 LaunchDaemon 清单指纹")
+    let registerCountAfterEnable = systemProxyHelper.registerCount
+    let unregisterCountAfterEnable = systemProxyHelper.unregisterCount
+
+    // 指纹一致：后续收敛不注销重注。
+    await controller.convergeSystemProxy()
+    XCTAssertEqual(systemProxyHelper.registerCount, registerCountAfterEnable, "指纹一致不重注")
+    XCTAssertEqual(systemProxyHelper.unregisterCount, unregisterCountAfterEnable)
+    XCTAssertEqual(controller.systemProxyState, .applied)
+
+    // 指纹漂移（模拟 app 更新改了清单）：注销重注一次并更新指纹。
+    defaults.set("drifted-stamp", forKey: stampKey)
+    await controller.convergeSystemProxy()
+    XCTAssertEqual(systemProxyHelper.unregisterCount, unregisterCountAfterEnable + 1, "漂移触发重注")
+    XCTAssertEqual(systemProxyHelper.registerCount, registerCountAfterEnable + 1)
+    XCTAssertEqual(defaults.string(forKey: stampKey), stampAfterRegister, "重注后记录当前清单指纹")
+    XCTAssertEqual(controller.systemProxyState, .applied, "重注后照常收敛应用")
+  }
 }
 
 /// 测试专用事件接收缝（issue #70 事件行断言用）。

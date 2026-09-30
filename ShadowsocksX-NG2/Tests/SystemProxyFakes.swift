@@ -37,7 +37,9 @@ extension ProxyRuntimeFixture {
   final class FakeSystemProxyHelperService: SystemProxyHelperServicing {
     private(set) var currentStatus: SystemProxyHelperStatus
     private(set) var registerCount = 0
+    private(set) var unregisterCount = 0
     private(set) var registerError: Error?
+    private(set) var unregisterError: Error?
     private(set) var openApprovalPathCount = 0
     /// register() 成功后迁移到的状态（模拟 BTM 批准立即达成）。
     var statusAfterRegister: SystemProxyHelperStatus = .approved
@@ -56,10 +58,20 @@ extension ProxyRuntimeFixture {
       registerError = error
     }
 
+    func setUnregisterError(_ error: Error?) {
+      unregisterError = error
+    }
+
     func register() throws {
       registerCount += 1
       if let registerError { throw registerError }
       currentStatus = statusAfterRegister
+    }
+
+    func unregister() throws {
+      unregisterCount += 1
+      if let unregisterError { throw unregisterError }
+      currentStatus = .notRegistered
     }
 
     func openApprovalPath() {
