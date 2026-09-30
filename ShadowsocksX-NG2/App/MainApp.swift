@@ -39,8 +39,7 @@ struct ShadowsocksXNG2App: App {
     MenuBarExtra {
       ProxyStatusMenu(
         control: proxyControl,
-        catalogWorkflow: catalogWorkflow,
-        clipboard: textClipboard)
+        catalogWorkflow: catalogWorkflow)
     } label: {
       StatusMenuLabel(control: proxyControl)
     }
@@ -52,7 +51,8 @@ struct ShadowsocksXNG2App: App {
     // 进菜单栏形态。窗口开着期间 app 为 regular（Dock 图标/Cmd-Tab/默认菜单
     // 栏），关窗回 accessory 菜单栏形态——随窗激活策略由窗口 NSWindow 生命
     // 周期通知驱动（WindowActivationPolicy，scenePhase 在 macOS 跟随应用而非
-    // 窗口、关窗无事件，实测不可用）；关窗后由状态菜单 ⑦ 经 openWindow 重开。
+    // 窗口、关窗无事件，实测不可用）；关窗后由状态菜单首项（打开主窗口）经
+    // openWindow 重开。
     // 关窗不退进程（MenuBarExtra 持进程）。
     Window("ShadowsocksX-NG2", id: WorkspaceRoute.workspaceSceneID) {
       workspaceContent

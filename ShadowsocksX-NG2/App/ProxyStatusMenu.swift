@@ -1,48 +1,39 @@
 import AppKit
 import SwiftUI
 
-/// 状态菜单（spec #21 D11 八项白名单，issue #31/#41/#47/#60）：①头部状态
-/// 摘要（agent 运行状态、当前模式、活动目标、系统代理实际应用）②两个开关
-/// （后台代理 agent 与系统代理，互不代替）③模式选择（勾选态）④活动目标
-/// 级联选择器（组树子菜单、只读）⑤立即更新全部订阅 ⑥复制 HTTP 导出行
-/// ⑦打开主窗口 ⑧退出（明示代理仍在后台运行）。白名单外操作一律不进菜单
-/// 栏；编辑类操作只在主 workspace。运行时事实、开关、模式与导出能力全部
-/// 来自代理控制工作流的整体 snapshot（issue #47/#60），菜单不直接读控制器
-/// 字段；目录树、激活与订阅动作仍走目录工作流，剪贴板写入等 AppKit 副作用
-/// 留在呈现边界。
+/// 状态菜单（spec #21 D11 白名单收敛为六项，issue #31/#41/#47/#60）：
+/// ①打开主窗口（置顶单独区域）②头部状态摘要（agent 运行状态、当前模式、
+/// 活动目标、系统代理实际应用）③两个开关（后台代理 agent 与系统代理，互不
+/// 代替）④模式选择（勾选态）⑤活动目标级联选择器（组树子菜单、只读）
+/// ⑥退出（明示代理仍在后台运行）。白名单外操作一律不进菜单栏；编辑类操作
+/// 只在主 workspace。运行时事实、开关与模式全部来自代理控制工作流的整体
+/// snapshot（issue #47/#60），菜单不直接读控制器字段；目录树与激活动作仍走
+/// 目录工作流。
 struct ProxyStatusMenu: View {
   /// 代理控制唯一 seam（issue #47）：状态摘要与代理命令的唯一来源。
   @ObservedObject var control: ProxyControlWorkflow
   @ObservedObject var catalogWorkflow: CatalogWorkflow
-  let clipboard: any TextClipboard
   /// 主窗口是 SwiftUI `Window` scene（见 MainApp）：启动呈现由场景的
   /// defaultLaunchBehavior 负责，状态菜单是关窗后的重开入口（ADR 0016）；
   /// scene id 经 WorkspaceRoute 单点引用。
   @Environment(\.openWindow) private var openWindow
-  @StateObject private var errors = ErrorAlertPresenter()
 
   var body: some View {
-    menuContent
-      .alert(
-        "操作失败",
-        isPresented: Binding(
-          get: { errors.isPresented },
-          set: { if !$0 { errors.dismiss() } })
-      ) {
-        Button("好", role: .cancel) {}
-      } message: {
-        Text(errors.message ?? "")
-      }
-  }
-
-  @ViewBuilder
-  private var menuContent: some View {
     let snapshot = control.snapshot
     let summary = StatusMenuModel.summary(from: snapshot)
     let targetTree = catalogWorkflow.tree.roots
-    let exportLine = snapshot.httpExport.copyableLine
 
-    // ① 头部状态摘要（agent 运行状态与系统代理实际应用分开呈现，issue #60）
+    // ① 重开主窗口（置顶单独区域）：启动已由 defaultLaunchBehavior(.presented)
+    // 呈现，本项服务关窗后的重开。accessory 形态下 SwiftUI 开窗不会自行抢
+    // 焦点，先激活本 app 让窗口压过当前前台应用。
+    Button("打开主窗口…") {
+      NSApp.activate(ignoringOtherApps: true)
+      openWindow(id: WorkspaceRoute.workspaceSceneID)
+    }
+
+    Divider()
+
+    // ② 头部状态摘要（agent 运行状态与系统代理实际应用分开呈现，issue #60）
     Text(summary.status)
     Text("模式：\(summary.modeLabel)")
     Text(summary.targetPath.map { "目标：\($0)" } ?? "目标：未激活")
@@ -66,12 +57,12 @@ struct ProxyStatusMenu: View {
 
     Divider()
 
-    // ② 两个开关（issue #60）：agent 与系统代理意图互不代替，各绑定持久化
+    // ③ 两个开关（issue #60）：agent 与系统代理意图互不代替，各绑定持久化
     // 意图；agent 关闭会保留选择，系统代理关闭会清理匹配 NG2 端点的设置。
     Toggle("后台代理", isOn: agentToggleBinding)
     Toggle("设置系统代理", isOn: systemProxyToggleBinding)
 
-    // ③ 模式选择（勾选态）：可选性与顺序来自 snapshot 的 Domain 单点策略。
+    // ④ 模式选择（勾选态）：可选性与顺序来自 snapshot 的 Domain 单点策略。
     Picker("模式", selection: modeBinding) {
       ForEach(snapshot.availableModes, id: \.self) { mode in
         Text(mode.label).tag(mode)
@@ -89,7 +80,7 @@ struct ProxyStatusMenu: View {
       .pickerStyle(.inline)
     }
 
-    // ④ 活动目标级联（只读）
+    // ⑤ 活动目标级联（只读）
     Menu("活动目标") {
       if targetTree.isEmpty {
         Text("目录为空")
@@ -100,40 +91,9 @@ struct ProxyStatusMenu: View {
 
     Divider()
 
-    // ⑤ 立即更新全部订阅（实际刷新语义 #35）
-    Button("立即更新全部订阅") {
-      Task { await catalogWorkflow.refreshAllSubscriptions() }
-    }
-    .disabled(catalogWorkflow.subscriptions.isEmpty)
-
-    // ⑥ 复制 HTTP 导出行：workflow 只提供安全能力，复制是 UI 副作用。
-    Button("复制 HTTP 导出行") {
-      copyHTTPExportLine(exportLine)
-    }
-
-    Divider()
-
-    // ⑦ 重开主窗口：启动已由 defaultLaunchBehavior(.presented) 呈现，本项
-    // 服务关窗后的重开。accessory 形态下 SwiftUI 开窗不会自行抢焦点，先
-    // 激活本 app 让窗口压过当前前台应用。
-    Button("打开主窗口…") {
-      NSApp.activate(ignoringOtherApps: true)
-      openWindow(id: WorkspaceRoute.workspaceSceneID)
-    }
-
-    Divider()
-
-    // ⑧ 退出：仅退 GUI；agent 由 launchd 持有，代理不受影响（构造上成立）。
+    // ⑥ 退出：仅退 GUI；agent 由 launchd 持有，代理不受影响（构造上成立）。
     Button("退出 ShadowsocksX-NG2（代理仍在后台运行）") {
       NSApp.terminate(nil)
-    }
-  }
-
-  private func copyHTTPExportLine(_ line: String) {
-    do {
-      try clipboard.write(line)
-    } catch {
-      errors.present(error)
     }
   }
 
