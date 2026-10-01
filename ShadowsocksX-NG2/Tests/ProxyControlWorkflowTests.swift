@@ -4,11 +4,12 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 // MARK: - 确定性替身（snapshot 与命令 contract；不触真实运行时）
+// 供本文件与 ProxyCommandAddressWorkflowTests 共用（测试 target 内部）。
 
 /// 可编程 runtime 替身（issue #47/#60，story 31）：事实可编程、命令全记录；
 /// changes 为手动 subject，同步发值保证观察测试确定性。
 @MainActor
-private final class FakeProxyRuntime: ProxyRuntimeAdapting {
+final class FakeProxyRuntime: ProxyRuntimeAdapting {
   var runtimeFacts: ProxyRuntimeFacts
   var agentIntentEnabled: Bool
   var activationFailure: ActivationFailure?
@@ -22,8 +23,7 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
   var httpExportCapability = HTTPExportCapability(
     copyableLine:
       "export http_proxy=http://127.0.0.1:11087;export https_proxy=http://127.0.0.1:11087;")
-  var terminalProxyEnvironmentCommands = TerminalProxyEnvironmentCommands(
-    listen: SslocalListenSettings())
+  var listenFacts = RuntimeListenFacts(listen: SslocalListenSettings())
 
   private let changeSubject = PassthroughSubject<Void, Never>()
   var changes: AnyPublisher<Void, Never> { changeSubject.eraseToAnyPublisher() }
@@ -68,7 +68,7 @@ private final class FakeProxyRuntime: ProxyRuntimeAdapting {
 
 /// 可编程目标事实替身（story 32）：路径摘要可编程、查询全记录。
 @MainActor
-private final class FakeTargetFacts: ProxyTargetFactsReading {
+final class FakeTargetFacts: ProxyTargetFactsReading {
   var pathByTarget: [NodeID: String] = [:]
   private(set) var queriedTargetIDs: [NodeID?] = []
 
@@ -85,16 +85,32 @@ private final class FakeTargetFacts: ProxyTargetFactsReading {
 final class ProxyControlWorkflowTests: XCTestCase {
   private var runtime: FakeProxyRuntime!
   private var targetFacts: FakeTargetFacts!
+  private var interfaceFacts: FakeLocalInterfaceFacts!
   private var workflow: ProxyControlWorkflow!
 
   override func setUp() async throws {
     try await super.setUp()
     runtime = FakeProxyRuntime()
     targetFacts = FakeTargetFacts()
-    workflow = ProxyControlWorkflow(runtime: runtime, targetFacts: targetFacts)
+    interfaceFacts = FakeLocalInterfaceFacts()
+    workflow = ProxyControlWorkflow(
+      runtime: runtime, targetFacts: targetFacts, interfaceFacts: interfaceFacts)
   }
 
   private static let serverID = NodeID(rawValue: "manual:server-1")
+
+  /// 默认监听设置下的预期完整命令（字面量组装，独立于生产派生路径）。
+  private static let defaultLoopbackCommands = TerminalProxyEnvironmentCommands(
+    zshBash:
+      "export http_proxy='http://127.0.0.1:11087'; "
+      + "export https_proxy='http://127.0.0.1:11087'; "
+      + "export all_proxy='socks5://127.0.0.1:11086'; "
+      + "export no_proxy='localhost,127.0.0.1,::1,.local';",
+    fish:
+      "set -gx http_proxy 'http://127.0.0.1:11087'; "
+      + "set -gx https_proxy 'http://127.0.0.1:11087'; "
+      + "set -gx all_proxy 'socks5://127.0.0.1:11086'; "
+      + "set -gx no_proxy 'localhost,127.0.0.1,::1,.local';")
 
   // MARK: - 整体 snapshot
 
@@ -115,6 +131,7 @@ final class ProxyControlWorkflowTests: XCTestCase {
     targetFacts.pathByTarget[Self.serverID] = "组A / 香港 01"
     runtime.emitChange()
 
+    let loopback = TerminalCommandAddress(bsdName: "lo0", address: "127.0.0.1", displayName: "lo0")
     XCTAssertEqual(
       workflow.snapshot,
       ProxyControlSnapshot(
@@ -134,7 +151,9 @@ final class ProxyControlWorkflowTests: XCTestCase {
         skippedInvalidServerCount: 3,
         httpExport: HTTPExportCapability(
           copyableLine: "export http_proxy=http://127.0.0.1:11087;"),
-        terminalProxyEnvironmentCommands: runtime.terminalProxyEnvironmentCommands))
+        commandAddressPicker: TerminalCommandAddressPicker(
+          isVisible: false, candidates: [loopback], selected: loopback),
+        terminalProxyEnvironmentCommands: Self.defaultLoopbackCommands))
     XCTAssertEqual(
       workflow.snapshot.availableModes, ProxyMode.availableModes,
       "可用模式是 issue #46 Domain 单点策略的投影")

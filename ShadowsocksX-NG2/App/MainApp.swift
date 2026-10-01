@@ -125,9 +125,12 @@ private struct AppComposition {
       bootstrap: catalogBootstrap)
     // 代理控制工作流 module（issue #47）：状态菜单等 UI 表面的唯一代理控制
     // seam，组合根接线一次。生产 runtime adapter 包装既有控制器（不复制运行
-    // 时语义）；目录目标事实经窄缝从目录工作流读取。
+    // 时语义）；目录目标事实经窄缝从目录工作流读取；本机接口事实经独立缝
+    // 提供（issue #72 命令地址候选）。
     let proxyControl = ProxyControlWorkflow(
-      runtime: ControllerProxyRuntimeAdapter(controller: controller), targetFacts: catalogWorkflow)
+      runtime: ControllerProxyRuntimeAdapter(controller: controller),
+      targetFacts: catalogWorkflow,
+      interfaceFacts: SystemInterfaceFactsProvider())
     // 设置工作流 module（Candidate 02）：设置窗口的唯一 seam，组合根接线一次；
     // 写入侧经窄缝 SettingsCommitting（issue #44），运行时控制器薄扩展即生产实现。
     let settingsWorkflow = SettingsWorkflow(committing: controller)

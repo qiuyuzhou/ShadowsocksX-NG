@@ -60,7 +60,10 @@ struct ProxyControlSnapshot: Equatable, Sendable {
   let skippedInvalidServerCount: Int
   /// HTTP 导出能力。
   let httpExport: HTTPExportCapability
-  /// 首页终端代理环境变量命令，分别适用于 zsh/bash 与 fish。
+  /// 首页命令地址选择器（issue #72）：可见性、候选与生效选择。
+  let commandAddressPicker: TerminalCommandAddressPicker
+  /// 首页终端代理环境变量命令，分别适用于 zsh/bash 与 fish；端点地址为生效
+  /// 命令地址选择（issue #72），端口取已保存监听事实。
   let terminalProxyEnvironmentCommands: TerminalProxyEnvironmentCommands
 }
 
@@ -94,8 +97,8 @@ protocol ProxyRuntimeAdapting: AnyObject {
   var activeTargetID: NodeID? { get }
   /// 可安全复制的 HTTP 导出能力。
   var httpExportCapability: HTTPExportCapability { get }
-  /// 可复制的 zsh/bash 与 fish 代理环境变量命令。
-  var terminalProxyEnvironmentCommands: TerminalProxyEnvironmentCommands { get }
+  /// 已保存监听事实（issue #72）：命令地址候选过滤与命令生成的数据来源。
+  var listenFacts: RuntimeListenFacts { get }
   /// 运行时事实变化通知：目录驱动、设置变更或运行时收敛导致事实变化后
   /// 发值。生产实现带主队列 hop（willChange 语义 → didChange 读取）；
   /// fake 同步发值。workflow 以此触发整体重观察。
@@ -138,13 +141,29 @@ final class ProxyControlWorkflow: ObservableObject {
 
   private let runtime: any ProxyRuntimeAdapting
   private let targetFacts: any ProxyTargetFactsReading
+  private let interfaceFacts: any LocalInterfaceFactsReading
+  /// 会话内命令地址选择（issue #72）：生命周期长于首页视图，不持久化；
+  /// 每次观察与最新候选对账，失效即回退默认回环。
+  private var commandAddressSelection: TerminalCommandAddressIdentity?
   private var cancellables: Set<AnyCancellable> = []
 
-  init(runtime: any ProxyRuntimeAdapting, targetFacts: any ProxyTargetFactsReading) {
+  init(
+    runtime: any ProxyRuntimeAdapting,
+    targetFacts: any ProxyTargetFactsReading,
+    interfaceFacts: any LocalInterfaceFactsReading
+  ) {
     self.runtime = runtime
     self.targetFacts = targetFacts
-    snapshot = Self.makeSnapshot(runtime: runtime, targetFacts: targetFacts)
+    self.interfaceFacts = interfaceFacts
+    let observation = Self.makeSnapshot(
+      runtime: runtime, targetFacts: targetFacts, interfaceFacts: interfaceFacts,
+      selection: nil)
+    commandAddressSelection = observation.selection
+    snapshot = observation.snapshot
     runtime.changes
+      .sink { [weak self] _ in self?.republish() }
+      .store(in: &cancellables)
+    interfaceFacts.changes
       .sink { [weak self] _ in self?.republish() }
       .store(in: &cancellables)
   }
@@ -193,33 +212,70 @@ final class ProxyControlWorkflow: ObservableObject {
     return republish()
   }
 
+  // MARK: - 首页命令地址（issue #72）
+
+  /// 下拉框选址：仅记录会话内选择并整体重发布；不触碰代理运行状态、监听
+  /// 设置与系统代理。
+  @discardableResult
+  func selectCommandAddress(_ address: TerminalCommandAddress) -> ProxyControlSnapshot {
+    commandAddressSelection = address.identity
+    return republish()
+  }
+
+  /// 刷新命令地址候选并整体重发布（进入首页与复制前调用；网络变化经接口
+  /// 事实变化通知自动刷新）。返回刷新后的两种 shell 命令供剪贴板副作用
+  /// 使用——失效选择已在本次观察中回退，提示投影与返回值一致。
+  @discardableResult
+  func refreshCommandAddresses() -> TerminalProxyEnvironmentCommands {
+    republish().terminalProxyEnvironmentCommands
+  }
+
   // MARK: - 整体观察（implementation，UI 不可见）
 
   /// 一次 observation 内整体拼装 snapshot；任何单一事实变化后整体替换，
-  /// 不暴露「新模式配旧状态」的混合结果。
+  /// 不暴露「新模式配旧状态」的混合结果。命令地址选择在观察内与最新候选
+  /// 对账，回退结果同步回会话状态（失效选择不随网络恢复复活）。
   @discardableResult
   private func republish() -> ProxyControlSnapshot {
-    snapshot = Self.makeSnapshot(runtime: runtime, targetFacts: targetFacts)
+    let observation = Self.makeSnapshot(
+      runtime: runtime, targetFacts: targetFacts, interfaceFacts: interfaceFacts,
+      selection: commandAddressSelection)
+    commandAddressSelection = observation.selection
+    snapshot = observation.snapshot
     return snapshot
   }
 
+  /// 一次 observation：整体拼装 snapshot 并对账命令地址选择，返回生效选择
+  /// （失效选择已回退到当前监听方式的默认回环地址）。
   private static func makeSnapshot(
     runtime: any ProxyRuntimeAdapting,
-    targetFacts: any ProxyTargetFactsReading
-  ) -> ProxyControlSnapshot {
-    ProxyControlSnapshot(
-      runtime: runtime.runtimeFacts,
-      agentIntentEnabled: runtime.agentIntentEnabled,
-      activationFailure: runtime.activationFailure,
-      systemProxyIntentEnabled: runtime.systemProxyIntentEnabled,
-      systemProxyApplication: runtime.systemProxyApplication,
-      systemProxyApprovalRequired: runtime.systemProxyApprovalRequired,
-      proxyMode: runtime.proxyMode,
-      ruleDefaultAction: runtime.ruleDefaultAction,
-      availableModes: ProxyMode.availableModes,
-      activeTarget: targetFacts.activeTargetFacts(for: runtime.activeTargetID),
-      skippedInvalidServerCount: runtime.skippedInvalidServerCount,
-      httpExport: runtime.httpExportCapability,
-      terminalProxyEnvironmentCommands: runtime.terminalProxyEnvironmentCommands)
+    targetFacts: any ProxyTargetFactsReading,
+    interfaceFacts: any LocalInterfaceFactsReading,
+    selection: TerminalCommandAddressIdentity?
+  ) -> (snapshot: ProxyControlSnapshot, selection: TerminalCommandAddressIdentity) {
+    let listenFacts = runtime.listenFacts
+    let picker = TerminalCommandAddressPolicy.picker(
+      mode: listenFacts.listenerMode,
+      interfaces: interfaceFacts.interfaces,
+      selection: selection)
+    return (
+      ProxyControlSnapshot(
+        runtime: runtime.runtimeFacts,
+        agentIntentEnabled: runtime.agentIntentEnabled,
+        activationFailure: runtime.activationFailure,
+        systemProxyIntentEnabled: runtime.systemProxyIntentEnabled,
+        systemProxyApplication: runtime.systemProxyApplication,
+        systemProxyApprovalRequired: runtime.systemProxyApprovalRequired,
+        proxyMode: runtime.proxyMode,
+        ruleDefaultAction: runtime.ruleDefaultAction,
+        availableModes: ProxyMode.availableModes,
+        activeTarget: targetFacts.activeTargetFacts(for: runtime.activeTargetID),
+        skippedInvalidServerCount: runtime.skippedInvalidServerCount,
+        httpExport: runtime.httpExportCapability,
+        commandAddressPicker: picker,
+        terminalProxyEnvironmentCommands: TerminalProxyEnvironmentCommands(
+          listen: listenFacts, commandAddress: picker.selected)),
+      picker.selected.identity
+    )
   }
 }

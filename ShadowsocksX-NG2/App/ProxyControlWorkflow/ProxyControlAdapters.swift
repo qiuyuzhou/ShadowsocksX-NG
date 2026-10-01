@@ -43,8 +43,8 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
     HTTPExportCapability(listen: controller.listenSettings)
   }
 
-  var terminalProxyEnvironmentCommands: TerminalProxyEnvironmentCommands {
-    TerminalProxyEnvironmentCommands(listen: controller.listenSettings)
+  var listenFacts: RuntimeListenFacts {
+    RuntimeListenFacts(listen: controller.listenSettings)
   }
 
   /// 控制器的 `objectWillChange` 是 willChange 语义；主队列 hop 落地时被
@@ -91,11 +91,16 @@ extension HTTPExportCapability {
   }
 }
 
+/// 终端代理环境变量命令的唯一派生点（issue #72）：已保存监听事实 + 生效
+/// 命令地址 → 两种 shell 的可复制命令。HTTP/HTTPS 用已保存 HTTP 端口，
+/// SOCKS 用已保存 SOCKS 端口；变量集合、小写变量名、单引号转义、socks5
+/// 协议与 no_proxy 内容保持不变；IPv6 URL 使用方括号。
 extension TerminalProxyEnvironmentCommands {
-  init(listen: SslocalListenSettings) {
-    let host = listen.proxyLoopbackURLHost
-    let httpEndpoint = "'http://\(host):\(listen.httpPort)'"
-    let socksEndpoint = "'socks5://\(host):\(listen.socksPort)'"
+  init(listen: RuntimeListenFacts, commandAddress: TerminalCommandAddress) {
+    let host = commandAddress.address
+    let urlHost = host.contains(":") ? "[\(host)]" : host
+    let httpEndpoint = "'http://\(urlHost):\(listen.httpPort)'"
+    let socksEndpoint = "'socks5://\(urlHost):\(listen.socksPort)'"
     let noProxy = "'localhost,127.0.0.1,::1,.local'"
     let zshBash =
       [

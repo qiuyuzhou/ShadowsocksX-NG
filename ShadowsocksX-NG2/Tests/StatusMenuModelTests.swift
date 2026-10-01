@@ -78,8 +78,16 @@ final class StatusMenuModelTests: XCTestCase {
       httpExport: HTTPExportCapability(
         copyableLine:
           "export http_proxy=http://127.0.0.1:11087;export https_proxy=http://127.0.0.1:11087;"),
+      commandAddressPicker: TerminalCommandAddressPicker(
+        isVisible: false,
+        candidates: [
+          TerminalCommandAddress(bsdName: "lo0", address: "127.0.0.1", displayName: "lo0")
+        ],
+        selected: TerminalCommandAddress(bsdName: "lo0", address: "127.0.0.1", displayName: "lo0")),
       terminalProxyEnvironmentCommands: TerminalProxyEnvironmentCommands(
-        listen: SslocalListenSettings()))
+        listen: RuntimeListenFacts(listen: SslocalListenSettings()),
+        commandAddress: TerminalCommandAddress(
+          bsdName: "lo0", address: "127.0.0.1", displayName: "lo0")))
   }
 
   // MARK: - 头部状态摘要

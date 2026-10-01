@@ -182,6 +182,8 @@ struct TargetServerRow: View {
 }
 
 /// 「复制代理环境变量设置命令」卡：按所选 shell 格式复制 HTTP 与 SOCKS 环境变量。
+/// 非「仅本机」监听方式下先以单选下拉框选择命令地址（issue #72），两种 shell
+/// 的全部代理端点共用该选择；仅本机方式隐藏下拉框并始终使用回环地址。
 struct TerminalProxyEnvironmentCard: View {
   @ObservedObject var control: ProxyControlWorkflow
   let clipboard: any TextClipboard
@@ -197,17 +199,37 @@ struct TerminalProxyEnvironmentCard: View {
       trailing: { EmptyView() },
       content: {
         VStack(spacing: 10) {
+          if control.snapshot.commandAddressPicker.isVisible {
+            Picker("命令地址", selection: commandAddressBinding) {
+              ForEach(
+                control.snapshot.commandAddressPicker.candidates, id: \.identity
+              ) { candidate in
+                Text(candidate.label).tag(candidate)
+              }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+          }
           commandButton(for: .zshBash)
           commandButton(for: .fish)
         }
         .padding(.top, 6)
       }
     )
+    .onAppear {
+      control.refreshCommandAddresses()
+    }
     .onDisappear {
       feedbackTask?.cancel()
       feedbackTask = nil
       copiedShell = nil
     }
+  }
+
+  private var commandAddressBinding: Binding<TerminalCommandAddress> {
+    Binding(
+      get: { control.snapshot.commandAddressPicker.selected },
+      set: { address in control.selectCommandAddress(address) })
   }
 
   private func commandButton(for shell: TerminalCommandShell) -> some View {
@@ -237,7 +259,9 @@ struct TerminalProxyEnvironmentCard: View {
   }
 
   private func copy(_ shell: TerminalCommandShell) {
-    let commands = control.snapshot.terminalProxyEnvironmentCommands
+    // 复制前刷新（issue #72）：失效选择回退后的命令即剪贴板内容，与按钮
+    // 提示保持同一选择。
+    let commands = control.refreshCommandAddresses()
     do {
       try clipboard.write(shell.command(from: commands))
       feedbackTask?.cancel()

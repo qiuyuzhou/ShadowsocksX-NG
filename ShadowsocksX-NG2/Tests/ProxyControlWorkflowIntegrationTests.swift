@@ -97,7 +97,8 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
       activator: controller)
     let control = ProxyControlWorkflow(
       runtime: ControllerProxyRuntimeAdapter(controller: controller),
-      targetFacts: catalogWorkflow)
+      targetFacts: catalogWorkflow,
+      interfaceFacts: FakeLocalInterfaceFacts())
     return Composition(
       catalog: catalogWorkflow, control: control, controller: controller)
   }
