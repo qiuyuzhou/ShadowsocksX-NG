@@ -161,14 +161,17 @@ private struct ModeCard: View {
           .labelsHidden()
           .frame(maxWidth: 480, alignment: .leading)
           if control.snapshot.proxyMode == .rule {
-            Picker("未匹配默认动作", selection: ruleDefaultActionBinding) {
-              ForEach(RuleDefaultAction.allCases, id: \.self) { action in
-                Text(action.label).tag(action)
+            HStack(spacing: 8) {
+              Text("未匹配规则时")
+              Picker("未匹配规则时", selection: ruleDefaultActionBinding) {
+                ForEach(RuleDefaultAction.allCases, id: \.self) { action in
+                  Text(action.label).tag(action)
+                }
               }
+              .pickerStyle(.segmented)
+              .labelsHidden()
+              .frame(maxWidth: 480, alignment: .leading)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 480, alignment: .leading)
           }
           Text(modeDescription(control.snapshot.proxyMode))
             .font(.callout)

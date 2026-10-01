@@ -72,7 +72,7 @@ struct ProxyStatusMenu: View {
 
     // 规则模式子选项（issue #63）：仅规则模式呈现。
     if snapshot.proxyMode == .rule {
-      Picker("未匹配默认动作", selection: ruleDefaultActionBinding) {
+      Picker("未匹配规则时", selection: ruleDefaultActionBinding) {
         ForEach(RuleDefaultAction.allCases, id: \.self) { action in
           Text(action.label).tag(action)
         }
