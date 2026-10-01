@@ -21,7 +21,17 @@ struct TargetTreeCard: View {
   var body: some View {
     HomeCard(
       title: "服务器列表", subtitle: nil,
-      trailing: { EmptyView() },
+      trailing: {
+        Button(action: onManageServers) {
+          HStack(spacing: 4) {
+            Text("管理服务器")
+            Image(systemName: "arrow.right")
+          }
+          .font(.callout.weight(.medium))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.tint)
+      },
       content: {
         ScrollViewReader { proxy in
           VStack(alignment: .leading, spacing: 12) {
