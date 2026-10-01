@@ -7,6 +7,17 @@ extension ProxyRuntimeFixture {
   final class FakeSystemProxy: SystemProxyControlling {
     private(set) var applied: [SystemProxyConfiguration] = []
     private(set) var clearCount = 0
+    var services: [SystemProxyServiceState] = [
+      SystemProxyServiceState(
+        identifier: SystemProxyServiceIdentifier(locationID: "home", serviceID: "wifi"),
+        configuration: nil, name: "Wi-Fi")
+    ]
+    var readError: Error?
+    var beforeRead: (@MainActor () async -> Void)?
+    private(set) var readCount = 0
+    private(set) var repairedServices: [SystemProxyServiceIdentifier] = []
+    var beforeRepair: (@MainActor () async -> Void)?
+    var preserveConfigurationOnApply = false
     var applyError: Error?
     var clearError: Error?
     var onClear: (@MainActor () -> Void)?
@@ -21,7 +32,34 @@ extension ProxyRuntimeFixture {
       eventLog?.record("apply")
       if let applyError { throw applyError }
       applied.append(configuration)
+      if !preserveConfigurationOnApply {
+        let plan = try SystemProxyPlanner.makeApplyPlan(
+          services: services, configuration: configuration)
+        for write in plan.writes {
+          if let index = services.firstIndex(where: { $0.identifier == write.identifier }) {
+            services[index] = SystemProxyServiceState(
+              identifier: write.identifier, configuration: write.configuration,
+              name: services[index].name)
+          }
+        }
+      }
       return applyOutcome
+    }
+
+    func readServices() async throws -> [SystemProxyServiceState] {
+      readCount += 1
+      if let readError { throw readError }
+      let snapshot = services
+      await beforeRead?()
+      return snapshot
+    }
+
+    func repair(_ configuration: SystemProxyConfiguration) async throws {
+      await beforeRepair?()
+      let plan = try SystemProxyPlanner.makeApplyPlan(
+        services: services, configuration: configuration)
+      repairedServices = plan.writes.map(\.identifier)
+      _ = try await apply(configuration)
     }
 
     func clear() async throws {
@@ -29,6 +67,9 @@ extension ProxyRuntimeFixture {
       eventLog?.record("clear")
       onClear?()
       if let clearError { throw clearError }
+      services = services.map {
+        SystemProxyServiceState(identifier: $0.identifier, configuration: nil, name: $0.name)
+      }
     }
   }
 

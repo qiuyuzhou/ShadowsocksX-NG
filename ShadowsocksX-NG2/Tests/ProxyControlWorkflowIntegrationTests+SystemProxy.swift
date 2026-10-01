@@ -3,6 +3,20 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 extension ProxyControlWorkflowIntegrationTests {
+  func testPassiveNetworkChangesNeverReapplySystemProxy() async throws {
+    let server = try makeSeededCatalog()
+    let composition = makeProxies(probe: ProxyRuntimeFixture.FakeProbe.reachable())
+    _ = try await composition.catalog.activate(server)
+    _ = await composition.control.setAgentEnabled(true)
+    _ = await composition.control.setSystemProxyEnabled(true)
+    let writes = systemProxy.applied.count
+    XCTAssertEqual(writes, 1)
+    networkMonitor.emit([.networkConfiguration, .proxyConfiguration, .networkPath])
+    try await Task.sleep(nanoseconds: 200_000_000)
+    XCTAssertEqual(systemProxy.applied.count, writes)
+    XCTAssertEqual(systemProxy.clearCount, 0)
+  }
+
   // MARK: - 系统代理开关（issue #60）
 
   func testSystemProxyIntentAppliesThroughSnapshot() async throws {
@@ -29,7 +43,7 @@ extension ProxyControlWorkflowIntegrationTests {
     let snapshot = await composition.control.setSystemProxyEnabled(true)
 
     XCTAssertTrue(snapshot.systemProxyIntentEnabled)
-    XCTAssertEqual(snapshot.systemProxyApplication, .pending, "待应用进入 snapshot")
+    XCTAssertEqual(snapshot.systemProxyApplication, .paused, "待应用进入 snapshot")
     XCTAssertEqual(snapshot.runtime.status, .launchFailed)
     XCTAssertTrue(systemProxy.applied.isEmpty, "健康门未过不写系统设置")
   }
@@ -78,7 +92,7 @@ extension ProxyControlWorkflowIntegrationTests {
     let snapshot = await composition.control.setSystemProxyEnabled(true)
 
     XCTAssertEqual(snapshot.runtime.status, .running, "agent 以空列表监听")
-    XCTAssertEqual(snapshot.systemProxyApplication, .pending, "无可用出口保持待应用")
+    XCTAssertEqual(snapshot.systemProxyApplication, .paused, "无可用出口保持待应用")
     XCTAssertTrue(systemProxy.applied.isEmpty)
     XCTAssertNil(snapshot.activeTarget)
   }
@@ -90,7 +104,7 @@ extension ProxyControlWorkflowIntegrationTests {
     let composition = makeProxies(probe: ProxyRuntimeFixture.FakeProbe.reachable())
     _ = await composition.control.setAgentEnabled(true)
     let pending = await composition.control.setSystemProxyEnabled(true)
-    XCTAssertEqual(pending.systemProxyApplication, .pending)
+    XCTAssertEqual(pending.systemProxyApplication, .paused)
 
     _ = try await composition.catalog.activate(server)
     let deadline = Date().addingTimeInterval(2)

@@ -45,9 +45,9 @@ struct ProxyControlSnapshot: Equatable, Sendable {
   let systemProxyIntentEnabled: Bool
   /// 系统代理实际应用状态（与 agent 运行状态分开呈现）。
   let systemProxyApplication: SystemProxyApplicationFacts
-  /// 特权系统代理 helper 需要登录项批准（issue #71）：意图开启且 helper
-  /// 不可用/待批准时为 true，呈现批准路径。
+  /// Helper approval blockage, including failed cleanup after intent is off.
   let systemProxyApprovalRequired: Bool
+  var systemProxyInspection = SystemProxyInspectionFacts()
   /// 当前已应用的代理模式（持久化成功的模式）。
   let proxyMode: ProxyMode
   /// 规则模式子选项（issue #63）：未匹配默认动作；仅规则模式呈现。
@@ -87,6 +87,7 @@ protocol ProxyRuntimeAdapting: AnyObject {
   var systemProxyApplication: SystemProxyApplicationFacts { get }
   /// 特权 helper 是否等待登录项批准（issue #71）。
   var systemProxyApprovalRequired: Bool { get }
+  var systemProxyInspection: SystemProxyInspectionFacts { get }
   /// 当前已应用的代理模式。
   var proxyMode: ProxyMode { get }
   /// 规则模式子选项（issue #63）。
@@ -110,8 +111,11 @@ protocol ProxyRuntimeAdapting: AnyObject {
   func setAgentEnabled(_ enabled: Bool) async
   /// 系统代理开关命令。
   func setSystemProxyEnabled(_ enabled: Bool) async
-  /// 打开 helper 的登录项批准路径并重试收敛（issue #71）。
+  /// 打开 helper 的登录项批准路径（issue #71）。
   func openSystemProxyHelperApproval() async
+  func repairSystemProxy() async
+  func retrySystemProxyClear() async
+  func recheckSystemProxy() async
   func setProxyMode(_ mode: ProxyMode) async
   /// 规则模式子选项命令（issue #63）。
   func setRuleDefaultAction(_ action: RuleDefaultAction) async
@@ -197,6 +201,24 @@ final class ProxyControlWorkflow: ObservableObject {
     return republish()
   }
 
+  @discardableResult
+  func repairSystemProxy() async -> ProxyControlSnapshot {
+    await runtime.repairSystemProxy()
+    return republish()
+  }
+
+  @discardableResult
+  func retrySystemProxyClear() async -> ProxyControlSnapshot {
+    await runtime.retrySystemProxyClear()
+    return republish()
+  }
+
+  @discardableResult
+  func recheckSystemProxy() async -> ProxyControlSnapshot {
+    await runtime.recheckSystemProxy()
+    return republish()
+  }
+
   /// 切换代理模式：可用性与 no-op 语义由控制器既有入口裁定（issue #46）；
   /// 完成后整体重发布。持久化失败保留旧模式，失败以 typed fact 呈现。
   @discardableResult
@@ -266,6 +288,7 @@ final class ProxyControlWorkflow: ObservableObject {
         systemProxyIntentEnabled: runtime.systemProxyIntentEnabled,
         systemProxyApplication: runtime.systemProxyApplication,
         systemProxyApprovalRequired: runtime.systemProxyApprovalRequired,
+        systemProxyInspection: runtime.systemProxyInspection,
         proxyMode: runtime.proxyMode,
         ruleDefaultAction: runtime.ruleDefaultAction,
         availableModes: ProxyMode.availableModes,

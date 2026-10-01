@@ -37,7 +37,8 @@ enum StatusMenuModel {
       ?? snapshot.activationFailure.map { AppPresentation.message(for: $0) }
     let systemProxy = systemProxyPresentation(
       for: snapshot.systemProxyApplication,
-      approvalRequired: snapshot.systemProxyApprovalRequired)
+      approvalRequired: snapshot.systemProxyApprovalRequired,
+      backgroundUnavailable: snapshot.systemProxyInspection.backgroundUnavailable)
     return Summary(
       agentIntentEnabled: snapshot.agentIntentEnabled,
       isOn: snapshot.runtime.isOn,
@@ -79,21 +80,51 @@ enum StatusMenuModel {
     }
   }
 
-  /// 系统代理应用状态 → 菜单文本（issue #71）：helper 待批准的待应用态以
-  /// 「待批准」呈现，提示用户走登录项批准路径。
+  // 系统代理应用状态 → 菜单文本；批准阻塞独立于操作结果。
+  // Exhaustive presentation mapping for the closed state family.
+  // swiftlint:disable:next cyclomatic_complexity
   private static func systemProxyPresentation(
     for application: SystemProxyApplicationFacts,
-    approvalRequired: Bool
+    approvalRequired: Bool,
+    backgroundUnavailable: Bool
   ) -> (label: String, detail: String?) {
     switch application {
     case .idle:
       return ("未应用", nil)
     case .pending:
       return approvalRequired ? ("待批准", nil) : ("待应用", nil)
+    case .changed: return ("配置已改变", nil)
+    case .applying: return ("应用中", nil)
+    case .repairing: return ("修复中", nil)
+    case .paused:
+      return ("已暂停", "后台代理不可用，已清除系统代理配置。恢复后将自动应用。")
+    case .unreadable(let facts):
+      return (
+        "无法检查",
+        "无法读取网络接口的代理配置：\(AppPresentation.message(for: RuntimeFailureFacts.systemProxy(facts)))"
+      )
+    case .repairFailed(let facts):
+      return (
+        "修复失败", failureDetail(facts, prefix: "无法修复系统代理配置：", approvalRequired: approvalRequired)
+      )
+    case .clearFailed(let facts):
+      return (
+        "清除失败",
+        failureDetail(
+          facts,
+          prefix: backgroundUnavailable ? "后台代理不可用，系统代理配置未能清除。\n" : "系统代理配置未能清除：",
+          approvalRequired: approvalRequired)
+      )
     case .applied:
       return ("已应用", nil)
     case .failed(let facts):
-      return ("应用失败", AppPresentation.message(for: RuntimeFailureFacts.systemProxy(facts)))
+      return ("应用失败", failureDetail(facts, prefix: "", approvalRequired: approvalRequired))
     }
+  }
+  private static func failureDetail(
+    _ facts: SystemProxyFailureFacts, prefix: String, approvalRequired: Bool
+  ) -> String? {
+    if approvalRequired && facts == .operation(.helperUnavailable) { return nil }
+    return prefix + AppPresentation.message(for: RuntimeFailureFacts.systemProxy(facts))
   }
 }

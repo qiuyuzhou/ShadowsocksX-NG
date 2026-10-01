@@ -16,6 +16,7 @@ final class FakeProxyRuntime: ProxyRuntimeAdapting {
   var systemProxyIntentEnabled: Bool
   var systemProxyApplication: SystemProxyApplicationFacts
   var systemProxyApprovalRequired = false
+  var systemProxyInspection = SystemProxyInspectionFacts()
   var proxyMode: ProxyMode
   var ruleDefaultAction: RuleDefaultAction = .proxyWhenUnmatched
   var skippedInvalidServerCount = 0
@@ -58,6 +59,10 @@ final class FakeProxyRuntime: ProxyRuntimeAdapting {
   func setSystemProxyEnabled(_ enabled: Bool) async { systemProxyCommands.append(enabled) }
 
   func openSystemProxyHelperApproval() async { approvalCommandCount += 1 }
+
+  func repairSystemProxy() async {}
+  func retrySystemProxyClear() async {}
+  func recheckSystemProxy() async {}
 
   func setProxyMode(_ mode: ProxyMode) async { modeCommands.append(mode) }
 

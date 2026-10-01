@@ -34,7 +34,13 @@ extension AppPresentation {
     case .idle: return "系统代理未应用"
     case .pending: return "系统代理待应用：等待代理就绪或可用出口"
     case .applied: return "系统代理已应用"
-    case .failed(let facts): return systemProxyFailure(facts)
+    case .failed(let facts), .repairFailed(let facts), .clearFailed(let facts),
+      .unreadable(let facts):
+      return systemProxyFailure(facts)
+    case .changed: return "系统代理配置已改变"
+    case .applying: return "系统代理应用中"
+    case .repairing: return "系统代理修复中"
+    case .paused: return "后台代理不可用，已清除系统代理配置。恢复后将自动应用。"
     }
   }
 

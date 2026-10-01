@@ -172,7 +172,7 @@ extension ProxyRuntimeController {
     }
 
     lastDocument = document
-    await convergeSystemProxy()
+    await convergeSystemProxy(forceApply: true)
   }
 
   private func restoreModeTransition(
@@ -205,12 +205,12 @@ extension ProxyRuntimeController {
       convergeProxyOnSuccess: false)
     guard generation == modeChangeGeneration else { return }
     guard restored else {
-      holdSystemProxyIntent()
+      await holdSystemProxyIntent()
       return
     }
 
     if settings.systemProxyEnabled != snapshot.settings.systemProxyEnabled {
-      await convergeSystemProxy()
+      await convergeSystemProxy(forceApply: true)
     } else {
       state = snapshot.state
     }
@@ -249,7 +249,7 @@ extension ProxyRuntimeController {
           try runtimeFileStore.write(previousDocument)
         } catch {
           state = .serviceFailed(.runtimeFile)
-          holdSystemProxyIntent()
+          await holdSystemProxyIntent()
           return false
         }
       }
@@ -273,13 +273,13 @@ extension ProxyRuntimeController {
     case .running(let pid):
       guard sendSignal(pid, SIGUSR1) == 0 else {
         state = .serviceFailed(.agent)
-        holdSystemProxyIntent()
+        await holdSystemProxyIntent()
         return false
       }
     case .notRunning:
       guard await execute(.run(previousDocument), document: previousDocument) else {
         guard generation == modeChangeGeneration else { return false }
-        holdSystemProxyIntent()
+        await holdSystemProxyIntent()
         return false
       }
     }

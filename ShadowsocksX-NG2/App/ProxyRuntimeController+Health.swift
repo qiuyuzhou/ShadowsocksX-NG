@@ -118,14 +118,14 @@ extension ProxyRuntimeController {
   private func reportAgentLost(preserveProxyOnFailure: Bool) async -> Bool {
     guard !preserveProxyOnFailure else { return false }
     state = .serviceFailed(.agent)
-    holdSystemProxyIntent()
+    await holdSystemProxyIntent()
     return false
   }
 
   private func reportRuntimeFileFailure(preserveProxyOnFailure: Bool) async -> Bool {
     guard !preserveProxyOnFailure else { return false }
     state = .serviceFailed(.runtimeFile)
-    holdSystemProxyIntent()
+    await holdSystemProxyIntent()
     return false
   }
 
@@ -143,7 +143,7 @@ extension ProxyRuntimeController {
       state = .launchFailed(
         .localEndpoint(endpoint: "SOCKS", host: "127.0.0.1", port: 0, cause: .unknown))
     }
-    holdSystemProxyIntent()
+    await holdSystemProxyIntent()
     return false
   }
 
@@ -188,5 +188,56 @@ extension ProxyRuntimeController {
     state = .launchFailed(
       .localEndpoint(
         endpoint: endpointName, host: failure.host, port: failure.local.localPort, cause: cause))
+  }
+}
+
+extension ProxyRuntimeController {
+  /// Uses the existing local endpoint/receipt health seam while the GUI is alive.
+  /// Network path availability is deliberately absent from this decision.
+  func startSystemProxyHealthObservation() {
+    guard systemProxyHealthTask == nil else { return }
+    let interval = systemProxyHealthPollIntervalNanoseconds
+    systemProxyHealthTask = Task { @MainActor [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(nanoseconds: interval)
+        guard !Task.isCancelled, let self,
+          settings.systemProxyEnabled || systemProxyState.hasOperationFailure
+        else { return }
+        refreshSystemProxyApproval()
+        updateSystemProxyActions()
+        guard settings.systemProxyEnabled, state != .starting,
+          !systemProxyStartupInProgress, settings.agentEnabled, let document = lastDocument
+        else { continue }
+        await inspectSystemProxyRuntimeHealth(document)
+      }
+    }
+  }
+
+  private func inspectSystemProxyRuntimeHealth(_ document: SslocalRuntimeDocument) async {
+    let generation = flowGeneration
+    let outcome = await launchHealthAttempt(
+      document, expectedDigest: document.aclRuntime != nil ? document.deploymentSHA256 : nil)
+    guard !Task.isCancelled, generation == flowGeneration, settings.systemProxyEnabled else {
+      return
+    }
+    switch outcome {
+    case .ready:
+      let wasUnavailable = systemProxyWasUnavailable
+      switch state {
+      case .running, .firewallBlocked: break
+      default: await presentFirewallStatus(for: document)
+      }
+      if !systemProxyExitAvailable {
+        await suspendSystemProxy()
+      } else if wasUnavailable || systemProxyInitialApplyPending {
+        await convergeSystemProxy()
+      }
+    case .agentLost:
+      state = .serviceFailed(.agent)
+      await suspendSystemProxy()
+    case .retry(let failure):
+      if let failure { presentEndpointFailure(failure) } else { state = .serviceFailed(.agent) }
+      await suspendSystemProxy()
+    }
   }
 }

@@ -180,6 +180,16 @@ final class SystemProxyTests: XCTestCase {
     XCTAssertTrue(SystemProxyPlanner.equivalent(projected, applied))
   }
 
+  func testEquivalentDisabledFlagsAndExceptionOrderProduceNoDifference() throws {
+    var values = SystemProxyPropertyList.applying(configuration, to: ["Unmanaged": "keep"])
+    values.removeValue(forKey: "ProxyAutoConfigEnable")
+    values.removeValue(forKey: "ProxyAutoDiscoveryEnable")
+    values["ExceptionsList"] = ["127.0.0.1", "localhost", "localhost"]
+    let plan = try SystemProxyPlanner.makeApplyPlan(
+      services: [service("wifi", configuration: serialized(values))], configuration: configuration)
+    XCTAssertTrue(plan.writes.isEmpty, "系统语义等价，不报告差异也不写入")
+  }
+
   func testApplyPlannerIsIdempotentWhenAllServicesMatch() throws {
     let applied = try serialized(SystemProxyPropertyList.applying(configuration, to: [:]))
 

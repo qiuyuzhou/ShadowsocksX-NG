@@ -113,40 +113,11 @@ extension ProxyRuntimeController {
 
   // MARK: - 系统代理门禁（issue #60/#71）
 
-  /// 系统代理收敛：helper 可用 + agent 健康 + 所选模式具备可用出口才经特权
-  /// helper 应用；任一条件关闭时意图保持待应用、系统设置保持原样，条件恢复
-  /// 后自动重写。收敛路径永不清理（issue #71）。
-  func convergeSystemProxy() async {
-    guard settings.systemProxyEnabled else { return }
-    guard await ensureHelperAvailableForApply() else {
-      systemProxyState = .pending
-      return
-    }
-    guard systemProxyExitAvailable, let document = lastDocument else {
-      systemProxyState = .pending
-      return
-    }
-    do {
-      let configuration = try proxyMode.systemProxyConfiguration(
-        for: document, exceptions: settings.proxyExceptionList)
-      let outcome = try await systemProxy.apply(configuration)
-      if outcome == .unchanged {
-        // 值语义等价的零写入路径：事件行供排障回答「这次为何没有授权弹窗」。
-        RuntimeLog.emit(.systemProxyUnchanged)
-      }
-      systemProxyState = .applied
-    } catch {
-      // 错误细节进日志：状态呈现走 facts，XPC/ helper 层失败原因只有这里可查。
-      RuntimeLog.emit(.systemProxyWriteFailed(detail: describe(error)))
-      systemProxyState = .failed(systemProxyFacts(for: error))
-    }
-  }
-
   /// helper 可用性门禁（issue #71）：已批准即通过——仅当 LaunchDaemon 清单
   /// 与上次注册时的指纹漂移（app 更新改过清单）才注销重注刷新 launchd 的
   /// job 定义；未注册则尝试注册（注册本身不弹授权框，成功即记指纹）；待批准
   /// 或注册失败时置位批准路径并保持待应用。
-  private func ensureHelperAvailableForApply() async -> Bool {
+  func ensureHelperAvailableForApply() async -> Bool {
     switch systemProxyHelper.status {
     case .approved:
       if helperRegistrationDrifted() {
@@ -200,16 +171,19 @@ extension ProxyRuntimeController {
       forKey: SystemProxyHelperRegistrationStamp.defaultsKey)
   }
 
-  /// 登录项批准路径（issue #71）：打开系统设置的登录项面板并立即重试收敛；
-  /// 批准完成前意图保持待应用、系统设置不变。
+  /// Approval continues only an unattempted initial request; failed writes need a user retry.
   func openSystemProxyHelperApproval() async {
     systemProxyHelper.openApprovalPath()
-    await convergeSystemProxy()
+    refreshSystemProxyApproval()
+    if systemProxyInitialApplyPending && !systemProxyState.hasOperationFailure {
+      await convergeSystemProxy()
+    }
+    updateSystemProxyActions()
   }
 
   /// 出口可用 = agent 入站健康（回环入口可用，含防火墙仅阻主机态的情形）
   /// 且模式有出口；直连不依赖活动服务器目标。
-  private var systemProxyExitAvailable: Bool {
+  var systemProxyExitAvailable: Bool {
     switch state {
     case .running, .firewallBlocked:
       return proxyMode == .direct || activeTargetID != nil
@@ -218,11 +192,13 @@ extension ProxyRuntimeController {
     }
   }
 
-  /// 门禁关闭（issue #71）：健康/出口/目标变化不撤回已写入的系统设置，
-  /// 意图保持待应用等恢复；意图关闭则为空闲。
-  func holdSystemProxyIntent() {
-    systemProxyApprovalRequired = false
-    systemProxyState = settings.systemProxyEnabled ? .pending : .idle
+  /// Health/exit loss clears unavailable settings while preserving enabled intent.
+  func holdSystemProxyIntent() async {
+    if settings.systemProxyEnabled {
+      await suspendSystemProxy()
+    } else if !systemProxyState.hasOperationFailure {
+      systemProxyState = .idle
+    }
   }
 
   /// 无条件清除全部系统代理配置（issue #71）：typed 失败原样呈现，不重试。
@@ -231,13 +207,15 @@ extension ProxyRuntimeController {
       try await systemProxy.clear()
       return .idle
     } catch {
-      return .failed(systemProxyFacts(for: error))
+      refreshSystemProxyApproval()
+      return .clearFailed(systemProxyFacts(for: error))
     }
   }
 
   func startEnabledSystemProxyObservation() {
     guard systemProxyObservationMode != .enabled else { return }
     systemProxyObservationMode = .enabled
+    startSystemProxyHealthObservation()
     systemProxyNetworkChangeMonitor.start { [weak self] change in
       self?.handleSystemProxyNetworkChange(change)
     }
@@ -265,6 +243,8 @@ extension ProxyRuntimeController {
       systemProxyObservationMode = .cleanup
     }
 
+    guard await waitForSystemProxyOperation() else { return systemProxyState }
+    beginSystemProxyOperation()
     var outcome: SystemProxyControlState = .idle
     repeat {
       systemProxyCleanupRescanRequested = false
@@ -273,10 +253,14 @@ extension ProxyRuntimeController {
       // location/service/proxy change during this cleanup starts another full scan.
       try? await Task.sleep(nanoseconds: 100_000_000)
       await Task.yield()
-    } while systemProxyCleanupRescanRequested
+    } while systemProxyCleanupRescanRequested && !outcome.hasOperationFailure
 
     systemProxyNetworkChangeMonitor.stop()
+    systemProxyHealthTask?.cancel()
+    systemProxyHealthTask = nil
     systemProxyObservationMode = .stopped
+    systemProxyInspection = SystemProxyInspectionFacts()
+    endSystemProxyOperation()
     return outcome
   }
 
@@ -290,18 +274,13 @@ extension ProxyRuntimeController {
       }
     case .enabled:
       guard settings.systemProxyEnabled else { return }
-      // Proxy-only changes are deliberately ignored while enabled: competing proxy
-      // software must not create a write loop. Location/service/path changes reapply.
-      guard !change.isDisjoint(with: [.networkConfiguration, .networkPath]) else {
-        return
-      }
-      guard !systemProxyConvergenceScheduled else { return }
-      systemProxyConvergenceScheduled = true
+      guard !systemProxyInspectionScheduled else { return }
+      systemProxyInspectionScheduled = true
       Task { @MainActor [weak self] in
         await Task.yield()
         guard let self else { return }
-        self.systemProxyConvergenceScheduled = false
-        await self.convergeSystemProxy()
+        self.systemProxyInspectionScheduled = false
+        await self.recheckSystemProxy()
       }
     }
   }

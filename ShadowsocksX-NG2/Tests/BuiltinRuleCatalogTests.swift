@@ -138,8 +138,8 @@ final class BuiltinRuleCatalogTests: XCTestCase {
   }
 
   func testRuleDefaultActionLabelsAndFallback() {
-    XCTAssertEqual(RuleDefaultAction.proxyWhenUnmatched.label, "未匹配时代理")
-    XCTAssertEqual(RuleDefaultAction.directWhenUnmatched.label, "未匹配时直连")
+    XCTAssertEqual(RuleDefaultAction.proxyWhenUnmatched.label, "代理")
+    XCTAssertEqual(RuleDefaultAction.directWhenUnmatched.label, "直连")
     XCTAssertEqual(RuleDefaultAction.proxyWhenUnmatched.fallbackAction, .proxy)
     XCTAssertEqual(RuleDefaultAction.directWhenUnmatched.fallbackAction, .direct)
     XCTAssertEqual(RuleDefaultAction.allCases, [.proxyWhenUnmatched, .directWhenUnmatched])

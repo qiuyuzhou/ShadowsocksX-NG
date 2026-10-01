@@ -71,9 +71,10 @@ extension ProxyRuntimeController {
     } else {
       let cleanupOutcome = await cascadeSystemProxyOffForAgentOff()
       await stopAgent()
-      if let cleanupOutcome, case .failed = cleanupOutcome {
+      if let cleanupOutcome, cleanupOutcome.hasOperationFailure {
         systemProxyState = cleanupOutcome
       }
+      updateSystemProxyActions()
     }
   }
 
@@ -111,22 +112,30 @@ extension ProxyRuntimeController {
     }
     settings = next
     if enabled {
+      systemProxyInitialApplyPending = true
+      systemProxyWasUnavailable = false
       await convergeSystemProxy()
       startEnabledSystemProxyObservation()
     } else {
       systemProxyApprovalRequired = false
+      systemProxyInitialApplyPending = false
+      systemProxyReadGeneration += 1
       systemProxyState = await clearAndStopSystemProxyObservation()
+      updateSystemProxyActions()
     }
   }
 
-  /// GUI 启动重同步（D5「GUI 下次启动重新校验同步」；issue #60/#71）：agent
-  /// 意图来自持久化设置——开启则自动注册/收敛 LaunchAgent 并部署（无活动目标时
-  /// 以空服务器列表提供监听），系统代理意图开启时做一次启动收敛后再开始网络
-  /// 观察；agent 意图关闭则按停止协议收敛。启动永不清理系统代理设置：意图
-  /// 关闭时直接呈现空闲（issue #71）。GUI 崩溃期间 agent 与 wrapper 均不受影响。
+  /// GUI startup restores the Agent. Healthy proxy intent only inspects; unhealthy
+  /// proxy intent suspends; disabled intent never writes SystemConfiguration.
   func resyncOnLaunch() async {
+    systemProxyStartupInProgress = true
     guard settings.agentEnabled else {
       await stopAgent()
+      systemProxyStartupInProgress = false
+      if settings.systemProxyEnabled {
+        await suspendSystemProxy()
+        startEnabledSystemProxyObservation()
+      }
       return
     }
     let catalog = catalogSnapshotReader.catalogSnapshot
@@ -138,9 +147,10 @@ extension ProxyRuntimeController {
     case nil:
       await deployListeningWithoutTarget()
     }
+    systemProxyStartupInProgress = false
     if settings.systemProxyEnabled {
-      // Startup reconciliation completes before the long-lived observer starts.
-      await convergeSystemProxy()
+      lastDesiredSystemProxyConfiguration = desiredSystemProxyConfiguration
+      if systemProxyExitAvailable { await recheckSystemProxy() } else { await suspendSystemProxy() }
       startEnabledSystemProxyObservation()
     } else {
       systemProxyState = .idle
@@ -168,6 +178,8 @@ extension ProxyRuntimeController {
   /// 启 + agent 关闭」组合保持待应用（不静默清理，也无需网络观察）。
   func stopAgent() async {
     systemProxyNetworkChangeMonitor.stop()
+    systemProxyHealthTask?.cancel()
+    systemProxyHealthTask = nil
     systemProxyObservationMode = .stopped
     _ = await execute(.stop, document: nil)
     state = .off
@@ -177,8 +189,8 @@ extension ProxyRuntimeController {
     if settings.systemProxyEnabled {
       systemProxyState = .pending
     } else {
-      systemProxyApprovalRequired = false
-      systemProxyState = .idle
+      if !systemProxyState.hasOperationFailure { systemProxyState = .idle }
+      updateSystemProxyActions()
     }
   }
 
@@ -222,7 +234,7 @@ extension ProxyRuntimeController {
     lastDocument = nil
     skippedServers = []
     state = .launchFailed(.unreadableSettings)
-    holdSystemProxyIntent()
+    await holdSystemProxyIntent()
   }
 
   /// 活动目标失效（issue #60）：清除并持久化 nil，点名原因独立呈现；agent
@@ -238,7 +250,7 @@ extension ProxyRuntimeController {
     }
     lastActivationFailure = failure
     skippedServers = []
-    holdSystemProxyIntent()
+    await holdSystemProxyIntent()
     if settings.agentEnabled {
       await deployListeningWithoutTarget()
     } else {

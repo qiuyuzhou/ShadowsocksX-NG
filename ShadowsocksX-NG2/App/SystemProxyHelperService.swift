@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import ServiceManagement
+import SystemConfiguration
 
 /// 系统代理写入缝（issue #71）：异步 typed apply 与无条件 clear 的边界，
 /// 形状为 XPC 就绪。GUI 域决策（意图、门禁、值、清理时机）全部在调用方；
@@ -10,6 +11,8 @@ protocol SystemProxyControlling {
   @discardableResult
   func apply(_ configuration: SystemProxyConfiguration) async throws -> SystemProxyWriteOutcome
   func clear() async throws
+  func readServices() async throws -> [SystemProxyServiceState]
+  func repair(_ configuration: SystemProxyConfiguration) async throws
 }
 
 /// helper 注册/审批状态缝（issue #71）：注册走 SMAppService.daemon；审批缺失
@@ -112,6 +115,42 @@ final class XPCSystemProxyController: SystemProxyControlling {
     case .applied:
       throw SystemProxyError.helperUnavailable("clear 收到 apply 应答")
     }
+  }
+
+  /// GUI-side read only; no helper registration or privileged writes.
+  func readServices() async throws -> [SystemProxyServiceState] {
+    try await Task.detached(priority: .utility) {
+      guard let preferences = SCPreferencesCreate(nil, "ShadowsocksX-NG2.Observe" as CFString, nil)
+      else { throw SystemProxyError.preferencesUnavailable }
+      guard let set = SCNetworkSetCopyCurrent(preferences),
+        let locationID = SCNetworkSetGetSetID(set) as String?
+      else { throw SystemProxyError.noCurrentNetworkSet }
+      let services = SCNetworkSetCopyServices(set) as? [SCNetworkService] ?? []
+      guard !services.isEmpty else { throw SystemProxyError.noProxyServices }
+      return try services.map { service in
+        guard let serviceID = SCNetworkServiceGetServiceID(service) as String?
+        else { throw SystemProxyError.unreadableService("unknown") }
+        let proxyProtocol = SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeProxies)
+        let value = proxyProtocol.flatMap { SCNetworkProtocolGetConfiguration($0) }
+        let data: Data?
+        if let value {
+          guard let dictionary = value as? [String: Any]
+          else { throw SystemProxyError.unreadableService(serviceID) }
+          data = try SystemProxyPlanner.propertyListData(from: dictionary, serviceID: serviceID)
+        } else {
+          data = nil
+        }
+        return SystemProxyServiceState(
+          identifier: SystemProxyServiceIdentifier(locationID: locationID, serviceID: serviceID),
+          configuration: data, name: SCNetworkServiceGetName(service) as String? ?? serviceID)
+      }
+    }.value
+  }
+
+  func repair(_ configuration: SystemProxyConfiguration) async throws {
+    // The helper rereads the current location under its preferences lock and plans
+    // only differing services, preserving fields outside the managed projection.
+    _ = try await apply(configuration)
   }
 
   // MARK: - XPC 请求

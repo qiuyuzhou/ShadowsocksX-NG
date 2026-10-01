@@ -21,13 +21,10 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
   var systemProxyIntentEnabled: Bool { controller.systemProxyIntentEnabled }
 
   var systemProxyApplication: SystemProxyApplicationFacts {
-    switch controller.systemProxyState {
-    case .idle: return .idle
-    case .pending: return .pending
-    case .applied: return .applied
-    case .failed(let facts): return .failed(facts)
-    }
+    controller.systemProxyState
   }
+
+  var systemProxyInspection: SystemProxyInspectionFacts { controller.systemProxyInspection }
 
   var systemProxyApprovalRequired: Bool { controller.systemProxyApprovalRequired }
 
@@ -71,6 +68,10 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
   func openSystemProxyHelperApproval() async {
     await controller.openSystemProxyHelperApproval()
   }
+
+  func repairSystemProxy() async { await controller.repairSystemProxy() }
+  func retrySystemProxyClear() async { await controller.retrySystemProxyClear() }
+  func recheckSystemProxy() async { await controller.recheckSystemProxy() }
 
   func setProxyMode(_ mode: ProxyMode) async {
     await controller.setProxyMode(mode)

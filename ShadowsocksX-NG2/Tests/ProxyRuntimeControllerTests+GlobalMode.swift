@@ -74,7 +74,7 @@ extension ProxyRuntimeControllerTests {
     XCTAssertTrue(document.servers.isEmpty, "无活动目标时服务器列表为空")
     XCTAssertEqual(document.aclRuntime?.summary, "global")
     XCTAssertEqual(
-      controller.systemProxyState, .pending,
+      controller.systemProxyState, .paused,
       "无可用代理出口时系统代理意图保持待应用")
     XCTAssertTrue(systemProxy.applied.isEmpty, "不得把系统代理指向无出口入口")
 

@@ -29,6 +29,7 @@ struct SystemProxyServiceState: Equatable, Sendable {
   let identifier: SystemProxyServiceIdentifier
   /// `nil` means that the service has no Proxies entity configuration.
   let configuration: Data?
+  var name: String = ""
 }
 
 /// One planned Proxies-entity write. `nil` clears the complete entity.
@@ -67,10 +68,15 @@ enum SystemProxyPlanner {
     for service in services {
       let original = try dictionary(
         from: service.configuration, serviceID: service.identifier.serviceID)
+      let projected = SystemProxyPropertyList.applying(configuration, to: original)
+      let normalizedOriginal =
+        SystemProxyPropertyList.semanticallyNormalized(original) as NSDictionary
+      let normalizedDesired =
+        SystemProxyPropertyList.semanticallyNormalized(projected) as NSDictionary
+      guard !normalizedOriginal.isEqual(normalizedDesired) else { continue }
       let desired = try propertyListData(
-        from: SystemProxyPropertyList.applying(configuration, to: original),
+        from: projected,
         serviceID: service.identifier.serviceID)
-      guard !equivalent(service.configuration, desired) else { continue }
       writes.append(SystemProxyPlannedWrite(identifier: service.identifier, configuration: desired))
     }
     return ApplyPlan(writes: writes)

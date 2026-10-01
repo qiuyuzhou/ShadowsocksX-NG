@@ -14,6 +14,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
   private var credentials: InMemoryCredentialStore!
   var agent: ProxyRuntimeFixture.FakeLaunchAgent!
   var systemProxy: ProxyRuntimeFixture.FakeSystemProxy!
+  var networkMonitor = ProxyRuntimeFixture.FakeSystemProxyNetworkChangeMonitor()
   var systemProxyHelper: ProxyRuntimeFixture.FakeSystemProxyHelperService!
 
   override func setUp() async throws {
@@ -25,6 +26,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     agent = ProxyRuntimeFixture.FakeLaunchAgent()
     systemProxy = ProxyRuntimeFixture.FakeSystemProxy()
     systemProxyHelper = ProxyRuntimeFixture.FakeSystemProxyHelperService()
+    networkMonitor = ProxyRuntimeFixture.FakeSystemProxyNetworkChangeMonitor()
   }
 
   override func tearDown() async throws {
@@ -52,7 +54,8 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     probe: EndpointProbing,
     agentStatus: LaunchAgentStatus = .notRegistered,
     settingsStore: ProxySettingsStoring? = nil,
-    settings: ProxySettings? = nil
+    settings: ProxySettings? = nil,
+    proxyMode: ProxyMode = .rule
   ) -> Composition {
     agent.setStatus(agentStatus)
     let runtimeFileStore = RuntimeFileStore(fileURL: runtime.contract)
@@ -77,12 +80,15 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
       probe: probe,
       systemProxy: systemProxy,
       systemProxyHelper: systemProxyHelper,
-      proxyMode: .rule,
+      systemProxyNetworkChangeMonitor: networkMonitor,
+      proxyMode: proxyMode,
       firewallChecker: ProxyRuntimeFixture.FakeFirewallChecker(),
       firewallExecutableURLs: [URL(fileURLWithPath: "/bundle/Helpers/sslocal")],
       firewallPollIntervalNanoseconds: 1_000_000,
       // 生产默认 15 秒健康窗；FakeProbe 结果确定，短窗口走同一超时呈现路径。
       launchHealthTimeoutSeconds: 0.05,
+      systemProxyHealthPollIntervalNanoseconds: 20_000_000,
+      helperRefreshDelayNanoseconds: 0,
       sendSignal: { _, _ in 0 },
       processIsAlive: { $0 == 42 })
     let fileStore = CatalogFileStore(fileURL: catalogFileURL)
@@ -216,7 +222,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
 
     XCTAssertEqual(snapshot.runtime, ProxyRuntimeFacts(status: .off, isOn: false))
     XCTAssertEqual(
-      snapshot.systemProxyApplication, .failed(.operation(.commitFailed)),
+      snapshot.systemProxyApplication, .clearFailed(.operation(.commitFailed)),
       "清理失败以 typed fact 呈现，不静默视为已清理")
   }
 
@@ -289,7 +295,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertTrue(summary.agentIntentEnabled)
     XCTAssertTrue(summary.isOn)
     XCTAssertEqual(summary.status, "代理运行中")
-    XCTAssertEqual(summary.modeLabel, "规则 · 未匹配时代理")
+    XCTAssertEqual(summary.modeLabel, "规则 · 代理")
     XCTAssertEqual(summary.targetPath, "香港 01")
     XCTAssertNil(summary.detail)
     XCTAssertTrue(summary.systemProxyIntentEnabled)

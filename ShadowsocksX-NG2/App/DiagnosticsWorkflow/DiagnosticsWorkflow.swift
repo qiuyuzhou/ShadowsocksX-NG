@@ -314,7 +314,7 @@ extension ProxyRuntimeController: ProxyRuntimeDiagnosticFacts {
   /// 激活拒绝优先于运行状态呈现（issue #60：两个状态面分开后仍归入同一组
   /// 固定诊断类别）。
   var proxyState: DiagnosticProxyState {
-    if case .failed = systemProxyState {
+    if systemProxyState.hasOperationFailure {
       return .systemProxyFailed
     }
     if let failure = lastActivationFailure {

@@ -110,7 +110,7 @@ extension ProxyRuntimeControllerTests {
       XCTFail("端点不可达应呈现启动失败，实际 \(controller.state)")
     }
     await controller.setSystemProxyEnabled(true)
-    XCTAssertEqual(controller.systemProxyState, .pending, "意图保留为待应用")
+    XCTAssertEqual(controller.systemProxyState, .paused, "失效时清除并保留意图")
     XCTAssertTrue(systemProxy.applied.isEmpty, "端点不健康不得写系统代理")
 
     // 条件恢复：探测可达后，下一次收敛自动应用待应用意图。
@@ -150,7 +150,7 @@ extension ProxyRuntimeControllerTests {
 
     await controller.setSystemProxyEnabled(false)
 
-    XCTAssertEqual(controller.systemProxyState, .failed(.operation(.commitFailed)))
+    XCTAssertEqual(controller.systemProxyState, .clearFailed(.operation(.commitFailed)))
     XCTAssertFalse(systemProxyNetworkChangeMonitor.isObserving, "清理失败后也结束临时观察")
   }
 
@@ -349,12 +349,12 @@ extension ProxyRuntimeControllerTests {
 
     await controller.setSystemProxyEnabled(false)
 
-    XCTAssertEqual(controller.systemProxyState, .failed(.operation(.helperUnavailable)))
+    XCTAssertEqual(controller.systemProxyState, .clearFailed(.operation(.helperUnavailable)))
     XCTAssertFalse(systemProxyNetworkChangeMonitor.isObserving, "清理失败后也结束临时观察")
     XCTAssertEqual(systemProxy.clearCount, 1, "只请求一次清理，无后台重试")
   }
 
-  func testEnabledSystemProxyIgnoresProxyOnlyChangesAndReappliesOnNetworkChanges() async throws {
+  func testEnabledSystemProxyInspectsAllPassiveChangesWithoutReapplying() async throws {
     let seeded = try makeSeededCatalog()
     let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
     try await controller.activate(seeded.server)
@@ -368,12 +368,14 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(systemProxy.applied.count, 1, "代理配置变化不触发重写")
 
     systemProxyNetworkChangeMonitor.emit(.networkConfiguration)
-    await waitUntil(systemProxy.applied.count == 2)
-    XCTAssertEqual(systemProxy.applied.count, 2, "网络位置或服务变化触发重应用")
+    let reads = systemProxy.readCount
+    await waitUntil(systemProxy.readCount > reads)
+    XCTAssertEqual(systemProxy.applied.count, 1, "网络位置或服务变化只检查")
 
     systemProxyNetworkChangeMonitor.emit(.networkPath)
-    await waitUntil(systemProxy.applied.count == 3)
-    XCTAssertEqual(systemProxy.applied.count, 3, "app 可见网络路径变化触发重应用")
+    let pathReads = systemProxy.readCount
+    await waitUntil(systemProxy.readCount > pathReads)
+    XCTAssertEqual(systemProxy.applied.count, 1, "网络路径变化只检查")
   }
 
   func testDisableCleanupRescansChangesThatArriveDuringCleanupThenStopsObservation() async throws {
@@ -424,8 +426,8 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(agent.unregisterCount, 0, "不注销 agent")
     let onDisk = try XCTUnwrap(RuntimeFileStore(fileURL: runtime.contract).loadDocument())
     XCTAssertTrue(onDisk.servers.isEmpty, "运行时以空服务器列表继续监听")
-    XCTAssertEqual(systemProxy.clearCount, 0, "目标失效不清理系统设置")
-    XCTAssertEqual(controller.systemProxyState, .pending, "意图保留待应用")
+    XCTAssertEqual(systemProxy.clearCount, 1, "目标失效清除不可用入口")
+    XCTAssertEqual(controller.systemProxyState, .paused, "清除成功后暂停并保留意图")
   }
   func testResyncWithInvalidActiveTargetClearsAndKeepsListening() async throws {
     _ = try makeSeededCatalog()

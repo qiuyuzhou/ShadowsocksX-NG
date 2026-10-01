@@ -125,7 +125,7 @@ extension ProxyRuntimeController {
       requiresReceipt: true,
       convergeProxyOnSuccess: false)
     if !restored {
-      holdSystemProxyIntent()
+      await holdSystemProxyIntent()
     } else {
       state = snapshot.state
     }

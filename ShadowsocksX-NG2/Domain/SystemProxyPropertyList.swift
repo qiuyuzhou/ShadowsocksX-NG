@@ -58,6 +58,26 @@ enum SystemProxyPropertyList {
     return dictionary
   }
 
+  /// Normalize only values whose SystemConfiguration meaning is equivalent.
+  /// Unknown fields stay verbatim; stale managed endpoint/PAC values still differ.
+  static func semanticallyNormalized(_ original: [String: Any]) -> [String: Any] {
+    var values = original
+    for key in [
+      httpEnabled, httpsEnabled, socksEnabled, pacEnabled,
+      autoDiscoveryEnabled, excludeSimpleHostnames,
+    ] {
+      if let number = values[key] as? NSNumber {
+        values[key] = number.boolValue ? 1 : 0
+      } else if values[key] == nil {
+        values[key] = 0
+      }
+    }
+    if let exceptions = values[exceptionsList] as? [String] {
+      values[exceptionsList] = Set(exceptions).sorted()
+    }
+    return values
+  }
+
   /// 启用的协议族写入显式端点；关闭的协议族移除端点键，保持字典与配置一致。
   private static func applyProtocol(
     enabled: Bool, endpoint: SystemProxyConfiguration.Endpoint,

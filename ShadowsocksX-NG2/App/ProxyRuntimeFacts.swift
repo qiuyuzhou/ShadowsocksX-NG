@@ -42,6 +42,31 @@ enum SystemProxyApplicationFacts: Equatable, Sendable {
   case applied
   /// 写入或恢复失败（typed）。
   case failed(SystemProxyFailureFacts)
+  case changed
+  case applying
+  case repairing
+  case repairFailed(SystemProxyFailureFacts)
+  case clearFailed(SystemProxyFailureFacts)
+  case paused
+  case unreadable(SystemProxyFailureFacts)
+}
+
+struct SystemProxyDifference: Equatable, Sendable, Identifiable {
+  enum Kind: Equatable, Sendable { case changed, notApplied, remaining }
+  let identifier: SystemProxyServiceIdentifier
+  let name: String
+  let kind: Kind
+  var id: SystemProxyServiceIdentifier { identifier }
+}
+
+/// Current observation and action availability, independent of the last operation result.
+struct SystemProxyInspectionFacts: Equatable, Sendable {
+  var differences: [SystemProxyDifference] = []
+  var readFailure: SystemProxyFailureFacts?
+  var canRepair = false
+  var canRetryClear = false
+  var isBusy = false
+  var backgroundUnavailable = false
 }
 
 /// Safe endpoint health categories used by runtime state and presentation.
@@ -124,5 +149,19 @@ extension ProxyRuntimeFacts {
     case .serviceFailed(let facts):
       self.init(status: .serviceFailed, isOn: false, failure: .service(facts))
     }
+  }
+}
+
+extension SystemProxyApplicationFacts {
+  var hasOperationFailure: Bool { isApplyFailure || isClearFailure }
+  var isApplyFailure: Bool {
+    switch self {
+    case .failed, .repairFailed: true
+    default: false
+    }
+  }
+  var isClearFailure: Bool {
+    if case .clearFailed = self { return true }
+    return false
   }
 }

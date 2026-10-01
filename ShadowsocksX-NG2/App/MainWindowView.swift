@@ -439,11 +439,11 @@ extension MainWindowView {
     switch control.snapshot.systemProxyApplication {
     case .idle:
       .secondary
-    case .pending:
+    case .pending, .changed, .applying, .repairing, .paused:
       .orange
     case .applied:
       .green
-    case .failed:
+    case .failed, .repairFailed, .clearFailed, .unreadable:
       .red
     }
   }

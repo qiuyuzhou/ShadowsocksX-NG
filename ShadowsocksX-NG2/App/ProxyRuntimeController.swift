@@ -1,23 +1,11 @@
 import Foundation
 
-/// 代理运行时控制器（spec #21 D2/D5/D7/D9，issue #27/#28/#60/#71）：把激活状态机
-/// 的产出接到「GUI → LaunchAgent → wrapper → sslocal」链路。launchd/契约动作
-/// 序列在纯域 `ProxyRuntimePlan`，本类按序执行、负责健康呈现与系统代理门禁
-/// 收敛（issue #60：意图持久化先行；issue #71：系统代理写入经特权 helper，
-/// 清理只随意图 on→off 迁移发生）；GUI 退出不会停止 launchd 持有的 agent，
-/// 网络变化观察则随 GUI 退出。
-///
-/// 两个用户意图相互独立（issue #60）：agent 意图（`settings.agentEnabled`，
-/// 默认开启）驱动 LaunchAgent 注册与本地监听；系统代理意图
-/// （`settings.systemProxyEnabled`，默认关闭）只在「helper 可用 + agent 健康
-/// + 模式具备可用出口」时经 helper 应用系统设置。清理是意图 on→off 迁移的
-/// 副作用：开关直接关闭，或关闭 agent 时级联关闭仍开启的系统代理意图；
-/// 启动、健康门禁、目标失效与被动网络事件永不清理（issue #71）。两个状态面
-/// （`state` 与 `systemProxyState`）分开呈现，互不代替。
-///
-/// 命令面、设置/目录同步、防火墙与系统代理门禁、只读事实投影分别在
-/// `+Commands` / `+SettingsSync` / `+SystemProxyGate` / `+Facts` 扩展文件；
-/// 本文件只保留状态、依赖缝与构造。
+/// GUI-owned runtime and system-proxy manager. Agent and system-proxy switches
+/// persist independent intentions. System proxy writes use the privileged helper;
+/// current configuration is observed read-only and differs from write outcomes.
+/// Health/exit loss suspends system proxy settings, real recovery reapplies, and
+/// passive network events only inspect (ADR-0022 / issue #73). GUI exit ends these
+/// observations without stopping the LaunchAgent or adding helper responsibilities.
 @MainActor
 final class ProxyRuntimeController: ObservableObject {
   /// Agent（后台代理运行时）运行状态。系统代理结果不在此面呈现——它有
@@ -36,20 +24,8 @@ final class ProxyRuntimeController: ObservableObject {
     case serviceFailed(ServiceFailureFacts)
   }
 
-  /// 系统代理实际作用状态（issue #60）：意图持久化在
-  /// `ProxySettings.systemProxyEnabled`，这里是 NG2 对系统设置的真实作用。
-  /// 清理失败（typed）也在此呈现；清理只由意图 on→off 迁移触发（issue #71）。
-  enum SystemProxyControlState: Equatable {
-    /// 意图关闭：系统代理清理完成。
-    case idle
-    /// 意图开启，但 helper 不可用/待批准、agent 未健康或模式缺少可用出口；
-    /// 条件恢复后随下次收敛自动应用，系统设置保持原样。
-    case pending
-    /// 已应用系统代理配置。
-    case applied
-    /// 应用或清理失败（typed）。
-    case failed(SystemProxyFailureFacts)
-  }
+  /// Current configuration or operation result, independent of persisted intent.
+  typealias SystemProxyControlState = SystemProxyApplicationFacts
 
   enum SystemProxyObservationMode: Equatable {
     case stopped
@@ -59,9 +35,17 @@ final class ProxyRuntimeController: ObservableObject {
 
   @Published var state: AgentRunState = .off
   @Published var systemProxyState: SystemProxyControlState = .idle
-  /// 特权 helper 需要登录项批准（issue #71）：意图开启且 helper 不可用/待批准
-  /// 时置位，呈现批准路径；helper 达到可用或意图关闭后复位。
+  /// Approval remains actionable even after an off-intent clear failure.
   @Published var systemProxyApprovalRequired = false
+  @Published var systemProxyInspection = SystemProxyInspectionFacts()
+  var lastDesiredSystemProxyConfiguration: SystemProxyConfiguration?
+  var knownSystemProxyServices: Set<SystemProxyServiceIdentifier> = []
+  var systemProxyOperationInProgress = false
+  var systemProxyStartupInProgress = false
+  var systemProxyInitialApplyPending = false
+  var systemProxyWasUnavailable = false
+  var systemProxyHealthTask: Task<Void, Never>?
+  var systemProxyReadGeneration = 0
   @Published var settings: ProxySettings
   /// 当前活动目标（菜单栏状态摘要与级联只读呈现用，issue #31）。machine 是
   /// 非发布值的普通结构体，代理关闭路径的激活动作不会触碰 state，菜单的
@@ -101,6 +85,7 @@ final class ProxyRuntimeController: ObservableObject {
   let firewallPollIntervalNanoseconds: UInt64
   let launchHealthTimeoutSeconds: TimeInterval
   /// 注册清单漂移重注时，注销与重注的间隔（launchd 对节流中 job 的移除异步）。
+  let systemProxyHealthPollIntervalNanoseconds: UInt64
   let helperRefreshDelayNanoseconds: UInt64
   /// 信号发送缝（默认 kill），单测观测 SIGUSR1 投递。
   let sendSignal: @Sendable (Int32, Int32) -> Int32
@@ -113,7 +98,7 @@ final class ProxyRuntimeController: ObservableObject {
   var systemProxyObservationMode = SystemProxyObservationMode.stopped
   var systemProxyCleanupRescanRequested = false
   var systemProxyCleanupTask: Task<SystemProxyControlState, Never>?
-  var systemProxyConvergenceScheduled = false
+  var systemProxyInspectionScheduled = false
 
   @Published var proxyMode: ProxyMode
 
@@ -143,6 +128,7 @@ final class ProxyRuntimeController: ObservableObject {
     firewallExecutableURLs: [URL]? = nil,
     firewallPollIntervalNanoseconds: UInt64 = 2_000_000_000,
     launchHealthTimeoutSeconds: TimeInterval = 15,
+    systemProxyHealthPollIntervalNanoseconds: UInt64 = 2_000_000_000,
     helperRefreshDelayNanoseconds: UInt64 = 15_000_000_000,
     sendSignal: @escaping @Sendable (Int32, Int32) -> Int32 = { kill($0, $1) },
     processIsAlive: @escaping @Sendable (Int32) -> Bool = { $0 > 0 && kill($0, 0) == 0 }
@@ -175,6 +161,7 @@ final class ProxyRuntimeController: ObservableObject {
     self.firewallExecutableURLs = firewallExecutableURLs ?? Self.defaultFirewallExecutableURLs
     self.firewallPollIntervalNanoseconds = firewallPollIntervalNanoseconds
     self.launchHealthTimeoutSeconds = launchHealthTimeoutSeconds
+    self.systemProxyHealthPollIntervalNanoseconds = systemProxyHealthPollIntervalNanoseconds
     self.helperRefreshDelayNanoseconds = helperRefreshDelayNanoseconds
     self.sendSignal = sendSignal
     self.processIsAlive = processIsAlive
