@@ -25,8 +25,19 @@ enum ListenerMode: String, Codable, CaseIterable, Equatable, Sendable {
     }
   }
 
+  /// 此监听方式可接受的回环地址（默认地址在前）：IPv4/仅本机只接受
+  /// 127.0.0.1，双栈通配绑定同时接受两个回环族，仅 IPv6 只接受 ::1。
+  var compatibleLoopbackAddresses: [String] {
+    switch self {
+    case .localhost, .allIPv4Interfaces: ["127.0.0.1"]
+    case .allIPv4AndIPv6Interfaces: ["127.0.0.1", "::1"]
+    case .allIPv6Interfaces: ["::1"]
+    }
+  }
+
+  /// 健康探测、系统代理与 HTTP 导出行使用的默认兼容回环地址。
   var proxyLoopbackAddress: String {
-    self == .allIPv6Interfaces ? "::1" : "127.0.0.1"
+    compatibleLoopbackAddresses[0]
   }
 
   var bindingHint: String {

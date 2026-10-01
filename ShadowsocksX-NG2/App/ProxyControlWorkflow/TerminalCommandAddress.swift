@@ -85,24 +85,19 @@ enum TerminalCommandAddressPolicy {
     return loopbacks + interfaceCandidates(mode: mode, interfaces: interfaces)
   }
 
-  /// 当前监听方式的默认回环地址（与 ListenerMode.proxyLoopbackAddress 一致）。
+  /// 当前监听方式的默认回环地址（Domain 回环清单首项）。
   static func defaultLoopback(for mode: ListenerMode) -> TerminalCommandAddress {
-    TerminalCommandAddress(bsdName: "lo0", address: mode.proxyLoopbackAddress, displayName: "lo0")
+    TerminalCommandAddress(
+      bsdName: "lo0", address: mode.proxyLoopbackAddress, displayName: "lo0")
   }
 
   // MARK: - 派生细节
 
+  /// 回环候选（置顶）直接来自 Domain 的监听方式回环清单，展示名固定 lo0。
   private static func loopbackCandidates(for mode: ListenerMode) -> [TerminalCommandAddress] {
-    let addresses: [String]
-    switch mode {
-    case .localhost, .allIPv4Interfaces:
-      addresses = ["127.0.0.1"]
-    case .allIPv4AndIPv6Interfaces:
-      addresses = ["127.0.0.1", "::1"]
-    case .allIPv6Interfaces:
-      addresses = ["::1"]
+    mode.compatibleLoopbackAddresses.map {
+      TerminalCommandAddress(bsdName: "lo0", address: $0, displayName: "lo0")
     }
-    return addresses.map { TerminalCommandAddress(bsdName: "lo0", address: $0, displayName: "lo0") }
   }
 
   /// 待排序的接口分组：显示名 + BSD 名 + 该接口的地址候选。

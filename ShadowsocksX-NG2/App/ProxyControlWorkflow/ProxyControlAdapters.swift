@@ -81,8 +81,8 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
   }
 }
 
-/// HTTP 导出能力的唯一派生点：监听设置 → 本机终端使用的可复制导出行。
-/// 环境变量始终指向回环地址，避免将命令误用于其他设备。
+/// HTTP 导出能力的唯一派生点：监听设置 → 可复制的 http/https 双导出行。
+/// 此导出行始终指向回环地址（与首页完整命令的命令地址选择无关，issue #72）。
 extension HTTPExportCapability {
   init(listen: SslocalListenSettings) {
     let urlHost = listen.proxyLoopbackURLHost

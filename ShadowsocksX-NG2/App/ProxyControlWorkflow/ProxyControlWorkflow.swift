@@ -226,7 +226,7 @@ final class ProxyControlWorkflow: ObservableObject {
   /// 事实变化通知自动刷新）。返回刷新后的两种 shell 命令供剪贴板副作用
   /// 使用——失效选择已在本次观察中回退，提示投影与返回值一致。
   @discardableResult
-  func refreshCommandAddresses() -> TerminalProxyEnvironmentCommands {
+  func refreshTerminalCommands() -> TerminalProxyEnvironmentCommands {
     republish().terminalProxyEnvironmentCommands
   }
 

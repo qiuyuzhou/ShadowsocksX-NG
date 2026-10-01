@@ -217,7 +217,7 @@ struct TerminalProxyEnvironmentCard: View {
       }
     )
     .onAppear {
-      control.refreshCommandAddresses()
+      control.refreshTerminalCommands()
     }
     .onDisappear {
       feedbackTask?.cancel()
@@ -261,7 +261,7 @@ struct TerminalProxyEnvironmentCard: View {
   private func copy(_ shell: TerminalCommandShell) {
     // 复制前刷新（issue #72）：失效选择回退后的命令即剪贴板内容，与按钮
     // 提示保持同一选择。
-    let commands = control.refreshCommandAddresses()
+    let commands = control.refreshTerminalCommands()
     do {
       try clipboard.write(shell.command(from: commands))
       feedbackTask?.cancel()

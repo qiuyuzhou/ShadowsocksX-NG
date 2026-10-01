@@ -28,6 +28,8 @@ final class SystemInterfaceFactsProvider: LocalInterfaceFactsReading {
   }
 
   private func startObserving() {
+    // 变化通知是尽力而为的增强：监视创建失败（罕见）只失去推送刷新，
+    // 进入首页与复制前刷新仍保证候选新鲜。
     var context = SCDynamicStoreContext(
       version: 0,
       info: Unmanaged.passUnretained(observation).toOpaque(),

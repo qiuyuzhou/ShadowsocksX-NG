@@ -233,7 +233,7 @@ final class ProxyCommandAddressLifecycleTests: XCTestCase {
     let wifi = workflow.snapshot.commandAddressPicker.candidates[1]
     _ = workflow.selectCommandAddress(wifi)
 
-    _ = workflow.refreshCommandAddresses()  // 离开再进入首页
+    _ = workflow.refreshTerminalCommands()  // 离开再进入首页
 
     XCTAssertEqual(
       workflow.snapshot.commandAddressPicker.selected.identity, wifi.identity,
@@ -330,7 +330,7 @@ final class ProxyCommandAddressLifecycleTests: XCTestCase {
 
     // 复制前地址消失且变化通知丢失：复制前刷新发现失效。
     interfaceFacts.interfaces = []
-    let prepared = workflow.refreshCommandAddresses()
+    let prepared = workflow.refreshTerminalCommands()
 
     XCTAssertFalse(
       prepared.zshBash.contains("192.168.1.10"), "复制内容不包含已消失的地址")
@@ -348,7 +348,7 @@ final class ProxyCommandAddressLifecycleTests: XCTestCase {
     runtime.runtimeFacts = ProxyRuntimeFacts(status: .off, isOn: false)
     runtime.emitChange()
 
-    let prepared = workflow.refreshCommandAddresses()
+    let prepared = workflow.refreshTerminalCommands()
 
     XCTAssertTrue(prepared.zshBash.contains("127.0.0.1"), "代理未运行时命令仍可准备")
     XCTAssertEqual(runtime.resyncCount, 0, "刷新不触碰运行时生命周期")
