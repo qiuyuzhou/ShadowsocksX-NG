@@ -204,11 +204,17 @@ struct TerminalProxyEnvironmentCard: View {
               ForEach(
                 control.snapshot.commandAddressPicker.candidates, id: \.identity
               ) { candidate in
-                Text(candidate.label).tag(candidate)
+                menuItemLabel(for: candidate).tag(candidate)
               }
             }
             .pickerStyle(.menu)
             .frame(maxWidth: .infinity, alignment: .leading)
+            if let annotation = control.snapshot.commandAddressPicker.selected.annotation {
+              Text("地址类型：\(annotation)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
           }
           commandButton(for: .zshBash)
           commandButton(for: .fish)
@@ -230,6 +236,16 @@ struct TerminalProxyEnvironmentCard: View {
     Binding(
       get: { control.snapshot.commandAddressPicker.selected },
       set: { address in control.selectCommandAddress(address) })
+  }
+
+  /// 菜单项文案：主行 `{IP} - {name}`；IPv6 类型注记作为第二个 Text——桥接
+  /// 为 NSMenuItem 的原生 subtitle 次行（macOS 14+），注记缺失时仅主行。
+  @ViewBuilder
+  private func menuItemLabel(for candidate: TerminalCommandAddress) -> some View {
+    Text(candidate.label)
+    if let annotation = candidate.annotation {
+      Text(annotation)
+    }
   }
 
   private func commandButton(for shell: TerminalCommandShell) -> some View {

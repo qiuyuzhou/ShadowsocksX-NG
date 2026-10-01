@@ -85,7 +85,7 @@ final class ProxyCommandAddressWorkflowTests: XCTestCase {
     XCTAssertEqual(picker.selected.address, "127.0.0.1")
   }
 
-  func testTemporaryIPv6ExcludedAndAnnotationsInLabelMiddle() {
+  func testTemporaryIPv6ExcludedAndAnnotationsKeptAsSeparateFacts() {
     setListenerMode(.allIPv4AndIPv6Interfaces)
     interfaceFacts.interfaces = [
       FakeLocalInterfaceFacts.wifi(
@@ -102,14 +102,12 @@ final class ProxyCommandAddressWorkflowTests: XCTestCase {
       picker.candidates.map(\.address),
       ["127.0.0.1", "::1", "240e::17", "240e::8150"],
       "RFC 4941 隐私临时地址被过滤（会轮换）；其余按地址稳定排序")
+    let secured = picker.candidates.first { $0.address == "240e::8150" }
+    XCTAssertEqual(secured?.label, "240e::8150 - Wi-Fi", "主行标签不含注记")
+    XCTAssertEqual(secured?.annotation, "autoconf secured", "注记作为独立呈现事实")
     XCTAssertEqual(
-      picker.candidates.first { $0.address == "240e::8150" }?.label,
-      "240e::8150 (autoconf secured) - Wi-Fi",
-      "注记位于标签中间，紧贴其描述的 IP")
-    XCTAssertEqual(
-      picker.candidates.first { $0.address == "240e::17" }?.label,
-      "240e::17 (dynamic) - Wi-Fi",
-      "DHCPv6 地址注记 dynamic")
+      picker.candidates.first { $0.address == "240e::17" }?.annotation,
+      "dynamic", "DHCPv6 地址注记 dynamic")
   }
 
   func testIPv6OnlyModeDefaultsToV1AndFiltersFamilies() {

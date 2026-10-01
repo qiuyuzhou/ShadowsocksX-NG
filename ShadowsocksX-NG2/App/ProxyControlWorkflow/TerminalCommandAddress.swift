@@ -29,11 +29,9 @@ struct TerminalCommandAddress: Equatable, Hashable, Sendable {
     TerminalCommandAddressIdentity(bsdName: bsdName, address: address)
   }
 
-  /// 候选标签：`{IP} - {name}`；带类型注记的 IPv6 为 `{IP} ({注记}) - {name}`。
-  var label: String {
-    let addressPart = annotation.map { "\(address) (\($0))" } ?? address
-    return "\(addressPart) - \(displayName)"
-  }
+  /// 候选主行标签：`{IP} - {name}`；类型注记由呈现层作为菜单项副标题与
+  /// 说明行单独渲染，不进主行。
+  var label: String { "\(address) - \(displayName)" }
 }
 
 /// 命令地址身份：BSD 接口名 + 规范化 IP。
