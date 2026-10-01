@@ -88,15 +88,15 @@ final class SystemInterfaceFactsProviderTests: XCTestCase {
       XCTAssertTrue(
         type == kSCNetworkInterfaceTypeIEEE80211 as String
           || type == kSCNetworkInterfaceTypeEthernet as String,
-        "候选 \(candidate.label) 必须来自允许类型接口（实际类型 \(type ?? "nil")）")
+        "候选 \(candidate.address) 必须来自允许类型接口（实际类型 \(type ?? "nil")）")
       XCTAssertFalse(candidate.address.contains("%"), "候选地址已规范化")
       XCTAssertFalse(
         fact?.v6Flags?.contains(.temporary) ?? false,
-        "临时地址（会轮换）不进候选：\(candidate.label)")
+        "临时地址（会轮换）不进候选：\(candidate.address)")
       let knownAnnotations: Set<String?> = ["autoconf secured", "autoconf", "dynamic", nil]
       XCTAssertTrue(
         knownAnnotations.contains(candidate.annotation),
-        "IPv6 候选注记只能来自 ifconfig 同源闭集：\(candidate.label)")
+        "IPv6 候选注记只能来自 ifconfig 同源闭集：\(candidate.address)")
     }
   }
 }

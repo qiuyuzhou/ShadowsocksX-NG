@@ -215,17 +215,26 @@ struct TerminalProxyEnvironmentCard: View {
                 }
               }
             } label: {
-              Text(control.snapshot.commandAddressPicker.selected.label)
+              Text(control.snapshot.commandAddressPicker.selected.address)
                 .lineLimit(1)
             }
             .menuStyle(.borderedButton)
             .frame(maxWidth: .infinity, alignment: .leading)
-            if let annotation = control.snapshot.commandAddressPicker.selected.annotation {
-              Text("地址类型：\(annotation)")
+            // 收起状态详情：接口名称与地址类型以说明行展示在按钮下方。
+            HStack(spacing: 4) {
+              Text("接口：\(control.snapshot.commandAddressPicker.selected.displayName)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+              if let annotation = control.snapshot.commandAddressPicker.selected.annotation {
+                Text("·")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                Text("地址类型：\(annotation)")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
           }
           commandButton(for: .zshBash)
           commandButton(for: .fish)

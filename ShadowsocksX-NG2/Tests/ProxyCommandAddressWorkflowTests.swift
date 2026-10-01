@@ -103,7 +103,7 @@ final class ProxyCommandAddressWorkflowTests: XCTestCase {
       ["127.0.0.1", "::1", "240e::17", "240e::8150"],
       "RFC 4941 隐私临时地址被过滤（会轮换）；其余按地址稳定排序")
     let secured = picker.candidates.first { $0.address == "240e::8150" }
-    XCTAssertEqual(secured?.label, "240e::8150 - Wi-Fi", "主行标签不含注记")
+    XCTAssertEqual(secured?.displayName, "Wi-Fi")
     XCTAssertEqual(secured?.annotation, "autoconf secured", "注记作为独立呈现事实")
     XCTAssertEqual(
       picker.candidates.first { $0.address == "240e::17" }?.annotation,
@@ -125,7 +125,7 @@ final class ProxyCommandAddressWorkflowTests: XCTestCase {
     XCTAssertEqual(picker.selected.address, "::1")
   }
 
-  func testLabelsUseLocalizedNameWithBSDNameFallback() {
+  func testDisplayNamesUseLocalizedNameWithBSDNameFallback() {
     setListenerMode(.allIPv4Interfaces)
     interfaceFacts.interfaces = [
       FakeLocalInterfaceFacts.wifi(localizedName: "Wi-Fi", addresses: [.ipv4("192.168.1.10")]),
@@ -134,9 +134,9 @@ final class ProxyCommandAddressWorkflowTests: XCTestCase {
     interfaceFacts.emitChange()
 
     XCTAssertEqual(
-      workflow.snapshot.commandAddressPicker.candidates.map(\.label),
-      ["127.0.0.1 - lo0", "10.0.0.5 - en1", "192.168.1.10 - Wi-Fi"],
-      "标签为 {IP} - {name}；名称缺失回退 BSD 名，回环显示 lo0")
+      workflow.snapshot.commandAddressPicker.candidates.map(\.displayName),
+      ["lo0", "en1", "Wi-Fi"],
+      "名称缺失回退 BSD 名，回环显示 lo0")
   }
 
   func testSameInterfaceDuplicateIPMergesAcrossInterfacesKept() {

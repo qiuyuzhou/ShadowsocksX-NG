@@ -4,9 +4,9 @@ import SystemConfiguration
 // MARK: - 命令地址投影（issue #72）
 
 /// 首页命令地址候选（CONTEXT.md「Terminal command address」）。身份 = BSD
-/// 接口身份 + 规范化 IP；显示名与类型注记仅用于呈现，不参与身份。`Hashable`
-/// 供 SwiftUI Picker 标签匹配使用，选择校验一律走 `identity`。
-struct TerminalCommandAddress: Equatable, Hashable, Sendable {
+/// 接口身份 + 规范化 IP；显示名与类型注记仅用于呈现，不参与身份，由呈现层
+/// 自行组合（菜单项主行 IP、副标题「注记 - 名称」与收起状态说明行）。
+struct TerminalCommandAddress: Equatable, Sendable {
   /// BSD 接口名；回环固定为 lo0。
   let bsdName: String
   /// 规范化 IP 文本。
@@ -28,10 +28,6 @@ struct TerminalCommandAddress: Equatable, Hashable, Sendable {
   var identity: TerminalCommandAddressIdentity {
     TerminalCommandAddressIdentity(bsdName: bsdName, address: address)
   }
-
-  /// 候选主行标签：`{IP} - {name}`；类型注记由呈现层作为菜单项副标题与
-  /// 说明行单独渲染，不进主行。
-  var label: String { "\(address) - \(displayName)" }
 }
 
 /// 命令地址身份：BSD 接口名 + 规范化 IP。
