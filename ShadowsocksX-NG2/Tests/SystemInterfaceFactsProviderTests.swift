@@ -34,7 +34,8 @@ final class SystemInterfaceFactsProviderTests: XCTestCase {
     XCTAssertNil(lo0.interfaceType, "回环无 SystemConfiguration 类型映射")
     XCTAssertTrue(
       lo0.addresses.contains(
-        LocalInterfaceAddress(address: "127.0.0.1", family: .ipv4, isIPv6LinkLocal: false)),
+        LocalInterfaceAddress(
+          address: "127.0.0.1", family: .ipv4, isIPv6LinkLocal: false, v6Flags: nil)),
       "回环单播含规范化 127.0.0.1")
   }
 
@@ -56,10 +57,16 @@ final class SystemInterfaceFactsProviderTests: XCTestCase {
         XCTAssertFalse(
           address.address.contains("%"),
           "\(interface.bsdName) 地址不含作用域后缀：\(address.address)")
-        if address.family == .ipv6, address.address.hasPrefix("fe80") {
-          XCTAssertTrue(address.isIPv6LinkLocal, "fe80 地址必须标记链路本地")
-        } else if address.family == .ipv6 {
-          XCTAssertFalse(address.isIPv6LinkLocal, "非 fe80 地址不应标记链路本地")
+        if address.family == .ipv6 {
+          XCTAssertNotNil(
+            address.v6Flags, "\(interface.bsdName) IPv6 地址标志查询不应失败")
+          if address.address.hasPrefix("fe80") {
+            XCTAssertTrue(address.isIPv6LinkLocal, "fe80 地址必须标记链路本地")
+          } else {
+            XCTAssertFalse(address.isIPv6LinkLocal, "非 fe80 地址不应标记链路本地")
+          }
+        } else {
+          XCTAssertNil(address.v6Flags, "IPv4 地址不携带 IPv6 标志")
         }
       }
     }
@@ -75,12 +82,21 @@ final class SystemInterfaceFactsProviderTests: XCTestCase {
     let nonLoopback = candidates.dropFirst(2)
     XCTAssertFalse(nonLoopback.isEmpty, "真实主机存在可列出的接口地址候选")
     for candidate in nonLoopback {
+      let fact = interfaces.first { $0.bsdName == candidate.bsdName }?
+        .addresses.first { $0.address == candidate.address }
       let type = interfaces.first { $0.bsdName == candidate.bsdName }?.interfaceType
       XCTAssertTrue(
         type == kSCNetworkInterfaceTypeIEEE80211 as String
           || type == kSCNetworkInterfaceTypeEthernet as String,
         "候选 \(candidate.label) 必须来自允许类型接口（实际类型 \(type ?? "nil")）")
       XCTAssertFalse(candidate.address.contains("%"), "候选地址已规范化")
+      XCTAssertFalse(
+        fact?.v6Flags?.contains(.temporary) ?? false,
+        "临时地址（会轮换）不进候选：\(candidate.label)")
+      let knownAnnotations: Set<String?> = ["autoconf secured", "autoconf", "dynamic", nil]
+      XCTAssertTrue(
+        knownAnnotations.contains(candidate.annotation),
+        "IPv6 候选注记只能来自 ifconfig 同源闭集：\(candidate.label)")
     }
   }
 }

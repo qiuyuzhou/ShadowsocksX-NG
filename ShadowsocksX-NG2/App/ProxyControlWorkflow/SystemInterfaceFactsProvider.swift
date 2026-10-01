@@ -61,6 +61,15 @@ final class SystemInterfaceFactsProvider: LocalInterfaceFactsReading {
     guard getifaddrs(&interfacesPtr) == 0, let first = interfacesPtr else { return nil }
     defer { freeifaddrs(first) }
 
+    // IPv6 地址标志查询共用一个 DGRAM socket；打开失败只失去标志事实
+    // （nil = 不过滤、不注记），不阻断枚举。
+    let flagsSocket = socket(AF_INET6, SOCK_DGRAM, 0)
+    defer {
+      if flagsSocket >= 0 {
+        close(flagsSocket)
+      }
+    }
+
     // 按首次出现顺序逐接口累积；同一接口的多个地址条目归并到同一事实。
     var order: [String] = []
     var loopbackByBSDName: [String: Bool] = [:]
@@ -78,7 +87,7 @@ final class SystemInterfaceFactsProvider: LocalInterfaceFactsReading {
         order.append(bsdName)
         loopbackByBSDName[bsdName] = flags & IFF_LOOPBACK == IFF_LOOPBACK
       }
-      if let address = interfaceAddress(socketAddress) {
+      if let address = interfaceAddress(socketAddress, flagsSocket: flagsSocket, bsdName: bsdName) {
         addressesByBSDName[bsdName, default: []].append(address)
       }
     }
@@ -97,7 +106,7 @@ final class SystemInterfaceFactsProvider: LocalInterfaceFactsReading {
   /// 单个地址条目的族与链路本地判定；非 IPv4/IPv6 条目（链路层等）或无法
   /// 规范化的地址为 nil。
   private static func interfaceAddress(
-    _ socketAddress: UnsafeMutablePointer<sockaddr>
+    _ socketAddress: UnsafeMutablePointer<sockaddr>, flagsSocket: Int32, bsdName: String
   ) -> LocalInterfaceAddress? {
     switch socketAddress.pointee.sa_family {
     case sa_family_t(AF_INET):
@@ -105,19 +114,54 @@ final class SystemInterfaceFactsProvider: LocalInterfaceFactsReading {
         $0.pointee
       }
       guard let text = addressText(family: AF_INET, address: socket.sin_addr) else { return nil }
-      return LocalInterfaceAddress(address: text, family: .ipv4, isIPv6LinkLocal: false)
+      return LocalInterfaceAddress(
+        address: text, family: .ipv4, isIPv6LinkLocal: false, v6Flags: nil)
     case sa_family_t(AF_INET6):
       let socket = socketAddress.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) {
         $0.pointee
       }
       guard let text = addressText(family: AF_INET6, address: socket.sin6_addr) else { return nil }
+      let v6Flags =
+        flagsSocket >= 0
+        ? v6AddressFlags(flagsSocket: flagsSocket, bsdName: bsdName, address: socketAddress)
+        : nil
       return LocalInterfaceAddress(
         address: text,
         family: .ipv6,
-        isIPv6LinkLocal: isIPv6LinkLocal(socket.sin6_addr))
+        isIPv6LinkLocal: isIPv6LinkLocal(socket.sin6_addr),
+        v6Flags: v6Flags)
     default:
       return nil
     }
+  }
+
+  /// `SIOCGIFAFLAG_IN6` 逐地址查询内核 IPv6 标志（与 ifconfig 的
+  /// 「autoconf secured / autoconf temporary / dynamic」注记同源）。查询
+  /// 失败返回 nil。
+  private static func v6AddressFlags(
+    flagsSocket: Int32, bsdName: String, address: UnsafeMutablePointer<sockaddr>
+  ) -> LocalInterfaceV6Flags? {
+    var request = in6_ifreq()
+    // _IOWR('i', 73, struct in6_ifreq) 手工展开：Darwin 模块不导出带结构体
+    // 参数的 ioctl 请求宏。
+    let requestCode =
+      UInt32(IOC_INOUT)
+      | (UInt32(MemoryLayout<in6_ifreq>.size) & UInt32(IOCPARM_MASK)) << 16
+      | UInt32(0x69) << 8 | 73
+    withUnsafeMutableBytes(of: &request.ifr_name) { nameBuffer in
+      _ = strlcpy(
+        nameBuffer.baseAddress!.assumingMemoryBound(to: CChar.self), bsdName, Int(IFNAMSIZ))
+    }
+    address.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { sin6 in
+      request.ifr_ifru.ifru_addr = sin6.pointee
+    }
+    guard ioctl(flagsSocket, UInt(requestCode), &request) == 0 else { return nil }
+    // ifru_flags 与 ifru_addr 在联合上重叠：内核回写在偏移 IFNAMSIZ 的首
+    // 4 字节，直接按位读取（不依赖 Swift 对 C 联合成员的重叠读写语义）。
+    let rawFlags = withUnsafeBytes(of: &request) {
+      $0.loadUnaligned(fromByteOffset: Int(IFNAMSIZ), as: Int32.self)
+    }
+    return LocalInterfaceV6Flags(rawValue: rawFlags)
   }
 
   /// inet_ntop 规范化呈现形；转换失败不产生候选地址。

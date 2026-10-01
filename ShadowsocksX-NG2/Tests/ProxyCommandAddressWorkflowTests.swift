@@ -85,6 +85,33 @@ final class ProxyCommandAddressWorkflowTests: XCTestCase {
     XCTAssertEqual(picker.selected.address, "127.0.0.1")
   }
 
+  func testTemporaryIPv6ExcludedAndAnnotationsInLabelMiddle() {
+    setListenerMode(.allIPv4AndIPv6Interfaces)
+    interfaceFacts.interfaces = [
+      FakeLocalInterfaceFacts.wifi(
+        addresses: [
+          .ipv6("240e::8150", flags: [.autoconf, .secured]),
+          .ipv6("240e::855", flags: [.autoconf, .temporary]),
+          .ipv6("240e::17", flags: [.dynamic]),
+        ])
+    ]
+    interfaceFacts.emitChange()
+
+    let picker = workflow.snapshot.commandAddressPicker
+    XCTAssertEqual(
+      picker.candidates.map(\.address),
+      ["127.0.0.1", "::1", "240e::17", "240e::8150"],
+      "RFC 4941 隐私临时地址被过滤（会轮换）；其余按地址稳定排序")
+    XCTAssertEqual(
+      picker.candidates.first { $0.address == "240e::8150" }?.label,
+      "240e::8150 (autoconf secured) - Wi-Fi",
+      "注记位于标签中间，紧贴其描述的 IP")
+    XCTAssertEqual(
+      picker.candidates.first { $0.address == "240e::17" }?.label,
+      "240e::17 (dynamic) - Wi-Fi",
+      "DHCPv6 地址注记 dynamic")
+  }
+
   func testIPv6OnlyModeDefaultsToV1AndFiltersFamilies() {
     setListenerMode(.allIPv6Interfaces)
     interfaceFacts.interfaces = [
@@ -208,20 +235,22 @@ final class ProxyCommandAddressLifecycleTests: XCTestCase {
   func testIPv6SelectionProducesBracketedURLs() {
     setListenerMode(.allIPv4AndIPv6Interfaces)
     interfaceFacts.interfaces = [
-      FakeLocalInterfaceFacts.wifi(addresses: [.ipv6("2001:db8::1")])
+      FakeLocalInterfaceFacts.wifi(
+        addresses: [.ipv6("2001:db8::1", flags: [.autoconf, .secured])])
     ]
     interfaceFacts.emitChange()
 
     let v6Candidate = workflow.snapshot.commandAddressPicker.candidates[2]
     _ = workflow.selectCommandAddress(v6Candidate)
 
+    let commands = workflow.snapshot.terminalProxyEnvironmentCommands
     XCTAssertTrue(
-      workflow.snapshot.terminalProxyEnvironmentCommands.zshBash
-        .contains("export http_proxy='http://[2001:db8::1]:11087'"),
+      commands.zshBash.contains("export http_proxy='http://[2001:db8::1]:11087'"),
       "IPv6 URL 使用方括号与已保存 HTTP 端口")
     XCTAssertTrue(
-      workflow.snapshot.terminalProxyEnvironmentCommands.fish
-        .contains("set -gx all_proxy 'socks5://[2001:db8::1]:11086'"))
+      commands.fish.contains("set -gx all_proxy 'socks5://[2001:db8::1]:11086'"))
+    XCTAssertFalse(
+      commands.zshBash.contains("autoconf"), "类型注记只进标签，不进命令")
   }
 
   func testSelectionSurvivesLeavingAndReenteringHome() {

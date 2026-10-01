@@ -4,23 +4,36 @@ import SystemConfiguration
 // MARK: - 命令地址投影（issue #72）
 
 /// 首页命令地址候选（CONTEXT.md「Terminal command address」）。身份 = BSD
-/// 接口身份 + 规范化 IP；本地化名称仅用于呈现，不参与身份。`Hashable` 供
-/// SwiftUI Picker 标签匹配使用，选择校验一律走 `identity`。
+/// 接口身份 + 规范化 IP；显示名与类型注记仅用于呈现，不参与身份。`Hashable`
+/// 供 SwiftUI Picker 标签匹配使用，选择校验一律走 `identity`。
 struct TerminalCommandAddress: Equatable, Hashable, Sendable {
   /// BSD 接口名；回环固定为 lo0。
   let bsdName: String
   /// 规范化 IP 文本。
   let address: String
-  /// `{IP} - {name}` 中的名称：系统本地化接口名称，缺失回退 BSD 名。
+  /// 系统本地化接口名称，缺失回退 BSD 名；回环显示 lo0。
   let displayName: String
+  /// IPv6 地址类型注记（与 ifconfig 同源：autoconf secured / autoconf /
+  /// dynamic）；IPv4 或标志缺失为 nil。
+  let annotation: String?
 
-  /// 跨刷新匹配既有选择的身份（不含显示名；显示名变化不使选择失效）。
+  init(bsdName: String, address: String, displayName: String, annotation: String? = nil) {
+    self.bsdName = bsdName
+    self.address = address
+    self.displayName = displayName
+    self.annotation = annotation
+  }
+
+  /// 跨刷新匹配既有选择的身份（不含显示名与注记；两者变化不使选择失效）。
   var identity: TerminalCommandAddressIdentity {
     TerminalCommandAddressIdentity(bsdName: bsdName, address: address)
   }
 
-  /// 候选标签：`{IP} - {name}`。
-  var label: String { "\(address) - \(displayName)" }
+  /// 候选标签：`{IP} - {name}`；带类型注记的 IPv6 为 `{IP} ({注记}) - {name}`。
+  var label: String {
+    let addressPart = annotation.map { "\(address) (\($0))" } ?? address
+    return "\(addressPart) - \(displayName)"
+  }
 }
 
 /// 命令地址身份：BSD 接口名 + 规范化 IP。
@@ -88,7 +101,7 @@ enum TerminalCommandAddressPolicy {
   /// 当前监听方式的默认回环地址（Domain 回环清单首项）。
   static func defaultLoopback(for mode: ListenerMode) -> TerminalCommandAddress {
     TerminalCommandAddress(
-      bsdName: "lo0", address: mode.proxyLoopbackAddress, displayName: "lo0")
+      bsdName: "lo0", address: mode.proxyLoopbackAddress, displayName: "lo0", annotation: nil)
   }
 
   // MARK: - 派生细节
@@ -96,7 +109,7 @@ enum TerminalCommandAddressPolicy {
   /// 回环候选（置顶）直接来自 Domain 的监听方式回环清单，展示名固定 lo0。
   private static func loopbackCandidates(for mode: ListenerMode) -> [TerminalCommandAddress] {
     mode.compatibleLoopbackAddresses.map {
-      TerminalCommandAddress(bsdName: "lo0", address: $0, displayName: "lo0")
+      TerminalCommandAddress(bsdName: "lo0", address: $0, displayName: "lo0", annotation: nil)
     }
   }
 
@@ -130,7 +143,11 @@ enum TerminalCommandAddressPolicy {
           return lhs.address < rhs.address
         }
         .map {
-          TerminalCommandAddress(bsdName: interface.bsdName, address: $0.address, displayName: name)
+          TerminalCommandAddress(
+            bsdName: interface.bsdName,
+            address: $0.address,
+            displayName: name,
+            annotation: annotation(for: $0))
         }
       if !addresses.isEmpty {
         groups.append(InterfaceGroup(name: name, bsdName: interface.bsdName, addresses: addresses))
@@ -154,6 +171,8 @@ enum TerminalCommandAddressPolicy {
     guard !wildcardAddresses.contains(address.address) else { return false }
     // IPv6 链路本地需要额外接口作用域，不作为命令目标；IPv4 链路本地允许。
     if address.family == .ipv6, address.isIPv6LinkLocal { return false }
+    // RFC 4941 隐私临时地址会轮换，不适合作为其他设备长期使用的命令目标。
+    if address.v6Flags?.contains(.temporary) == true { return false }
     switch (mode, address.family) {
     case (.allIPv4Interfaces, .ipv4):
       return true
@@ -164,5 +183,19 @@ enum TerminalCommandAddressPolicy {
     default:
       return false
     }
+  }
+
+  /// IPv6 地址类型注记（与 ifconfig 同源的打印逻辑）；无标志（标志查询
+  /// 失败或纯回环）不注记。
+  private static func annotation(for address: LocalInterfaceAddress) -> String? {
+    guard let flags = address.v6Flags else { return nil }
+    if flags.contains(.autoconf) {
+      if flags.contains(.secured) { return "autoconf secured" }
+      if flags.contains(.temporary) { return "autoconf temporary" }
+      return "autoconf"
+    }
+    if flags.contains(.secured) { return "secured" }
+    if flags.contains(.dynamic) { return "dynamic" }
+    return nil
   }
 }

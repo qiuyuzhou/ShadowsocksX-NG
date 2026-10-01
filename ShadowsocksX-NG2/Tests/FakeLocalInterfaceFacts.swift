@@ -6,11 +6,13 @@ import Foundation
 /// 测试专用地址便捷构造（数组字面量内以 `.ipv4("…")` 使用）。
 extension LocalInterfaceAddress {
   static func ipv4(_ text: String) -> LocalInterfaceAddress {
-    LocalInterfaceAddress(address: text, family: .ipv4, isIPv6LinkLocal: false)
+    LocalInterfaceAddress(address: text, family: .ipv4, isIPv6LinkLocal: false, v6Flags: nil)
   }
 
-  static func ipv6(_ text: String, linkLocal: Bool = false) -> LocalInterfaceAddress {
-    LocalInterfaceAddress(address: text, family: .ipv6, isIPv6LinkLocal: linkLocal)
+  static func ipv6(
+    _ text: String, linkLocal: Bool = false, flags: LocalInterfaceV6Flags? = nil
+  ) -> LocalInterfaceAddress {
+    LocalInterfaceAddress(address: text, family: .ipv6, isIPv6LinkLocal: linkLocal, v6Flags: flags)
   }
 }
 

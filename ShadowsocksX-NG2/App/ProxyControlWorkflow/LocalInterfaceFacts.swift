@@ -3,8 +3,22 @@ import Foundation
 
 // MARK: - 原始接口事实（issue #72）
 
-/// 单个本机接口单播地址的原始事实：族与 IPv6 链路本地标记已判明，过滤、
-/// 排序与取舍全部由工作流层策略完成。
+/// IPv6 地址的内核标志（经 `SIOCGIFAFLAG_IN6` 逐地址查询，netinet6/in6_var.h
+/// 的 `IN6_IFF_*` 子集）。仅 IPv6 单播地址携带；IPv4 或查询失败为 nil。
+struct LocalInterfaceV6Flags: OptionSet, Sendable {
+  let rawValue: Int32
+  /// `IN6_IFF_AUTOCONF`：SLAAC 自动配置地址。
+  static let autoconf = Self(rawValue: IN6_IFF_AUTOCONF)
+  /// `IN6_IFF_TEMPORARY`：RFC 4941 隐私临时地址（会轮换）。
+  static let temporary = Self(rawValue: IN6_IFF_TEMPORARY)
+  /// `IN6_IFF_SECURED`：稳定接口标识生成的地址。
+  static let secured = Self(rawValue: IN6_IFF_SECURED)
+  /// `IN6_IFF_DYNAMIC`：DHCPv6 分配的地址。
+  static let dynamic = Self(rawValue: IN6_IFF_DYNAMIC)
+}
+
+/// 单个本机接口单播地址的原始事实：族与 IPv6 标记已判明，过滤、排序与
+/// 取舍全部由工作流层策略完成。
 struct LocalInterfaceAddress: Equatable, Sendable {
   enum Family: Equatable, Sendable {
     case ipv4
@@ -17,6 +31,9 @@ struct LocalInterfaceAddress: Equatable, Sendable {
   /// IPv6 链路本地（fe80::/10）；IPv4 链路本地不置位（属于允许接口的单播
   /// 地址时可以列出）。
   let isIPv6LinkLocal: Bool
+  /// IPv6 地址内核标志（含临时地址、DHCPv6 等类型事实）；IPv4 或查询失败
+  /// 为 nil——nil 不触发过滤，也不注记。
+  let v6Flags: LocalInterfaceV6Flags?
 }
 
 /// 单个本机接口的原始事实（issue #72）：系统适配器逐接口提供，类型白名单、
