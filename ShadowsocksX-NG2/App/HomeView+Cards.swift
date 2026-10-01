@@ -200,14 +200,25 @@ struct TerminalProxyEnvironmentCard: View {
       content: {
         VStack(spacing: 10) {
           if control.snapshot.commandAddressPicker.isVisible {
-            Picker("命令地址", selection: commandAddressBinding) {
+            // Menu（而非 Picker）：菜单项经 adaptive-controls 机制桥接，
+            // 两个 Text 映射为 NSMenuItem 的原生 title/subtitle；Picker 的
+            // 选项桥接会把多 Text 压平成独立菜单项。
+            Menu {
               ForEach(
                 control.snapshot.commandAddressPicker.candidates, id: \.identity
               ) { candidate in
-                menuItemLabel(for: candidate).tag(candidate)
+                Button {
+                  control.selectCommandAddress(candidate)
+                } label: {
+                  Text(candidate.address)
+                  Text(menuSubtitle(for: candidate))
+                }
               }
+            } label: {
+              Text(control.snapshot.commandAddressPicker.selected.label)
+                .lineLimit(1)
             }
-            .pickerStyle(.menu)
+            .menuStyle(.borderedButton)
             .frame(maxWidth: .infinity, alignment: .leading)
             if let annotation = control.snapshot.commandAddressPicker.selected.annotation {
               Text("地址类型：\(annotation)")
@@ -232,20 +243,11 @@ struct TerminalProxyEnvironmentCard: View {
     }
   }
 
-  private var commandAddressBinding: Binding<TerminalCommandAddress> {
-    Binding(
-      get: { control.snapshot.commandAddressPicker.selected },
-      set: { address in control.selectCommandAddress(address) })
-  }
-
-  /// 菜单项文案：主行 `{IP} - {name}`；IPv6 类型注记作为第二个 Text——桥接
-  /// 为 NSMenuItem 的原生 subtitle 次行（macOS 14+），注记缺失时仅主行。
-  @ViewBuilder
-  private func menuItemLabel(for candidate: TerminalCommandAddress) -> some View {
-    Text(candidate.label)
-    if let annotation = candidate.annotation {
-      Text(annotation)
-    }
+  /// 菜单项副标题：接口名称 + IPv6 类型注记（ifconfig 同源），注记在前便于
+  /// 先辨认地址类型；无注记时仅接口名称。
+  private func menuSubtitle(for candidate: TerminalCommandAddress) -> String {
+    guard let annotation = candidate.annotation else { return candidate.displayName }
+    return "\(annotation) - \(candidate.displayName)"
   }
 
   private func commandButton(for shell: TerminalCommandShell) -> some View {

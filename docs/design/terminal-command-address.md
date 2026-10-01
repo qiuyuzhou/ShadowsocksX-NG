@@ -22,7 +22,7 @@
 | 所有 IPv4 与 IPv6 接口 | IPv4、IPv6，包含两个回环地址 | 127.0.0.1 |
 | 仅所有 IPv6 接口 | IPv6 | ::1 |
 
-每项主行显示 `{IP} - {name}`；带内核标志的 IPv6 地址附与 ifconfig 同源的类型注记（如 `autoconf secured`、`dynamic`），呈现为菜单项副标题行（两个 `Text` 桥接为 `NSMenuItem` 的原生 subtitle）与选择器下方的说明行，便于识别地址稳定性。接口名称优先取 `SCNetworkInterfaceGetLocalizedDisplayName(interface)`；名称缺失或无法映射到 SystemConfiguration 接口时，回退到 BSD 接口名，但不会因此放宽接口类型过滤。回环项回退名称为 lo0。
+下拉菜单项主行显示 `{IP}`，副标题行显示「注记 - 接口名称」（无注记时仅接口名称；菜单项经 adaptive-controls 机制把两个 `Text` 桥接为 `NSMenuItem` 的原生 title/subtitle，注记与 ifconfig 同源，如 `autoconf secured`、`dynamic`），收起状态显示当前选中项的 `{IP} - {name}`，其下另有类型说明行，便于识别地址稳定性。接口名称优先取 `SCNetworkInterfaceGetLocalizedDisplayName(interface)`；名称缺失或无法映射到 SystemConfiguration 接口时，回退到 BSD 接口名，但不会因此放宽接口类型过滤。回环项回退名称为 lo0。
 
 回环项置顶，双栈时 127.0.0.1 在 ::1 前。其余按接口名称排序，同一接口先 IPv4 后 IPv6，再按地址稳定排序。同一接口的重复 IP 合并；不同接口即使 IP 相同也保留接口身份。
 
