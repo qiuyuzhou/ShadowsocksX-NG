@@ -23,8 +23,7 @@ final class CatalogExpansionStateTests: XCTestCase {
     XCTAssertFalse(expansion.isCollapsed(id))
   }
 
-  /// 两处服务器树（服务器侧栏/首页目标树）共用同一实例：同一分组身份在两处
-  /// 读到同一折叠事实，互不覆盖。
+  /// 服务器管理树的各组折叠事实按身份独立保存。
   func testCollapseSetIsKeyedPerGroupID() {
     let expansion = CatalogExpansionState()
     let first = NodeID(rawValue: "g-first")

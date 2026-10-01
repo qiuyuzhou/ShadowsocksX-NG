@@ -36,12 +36,13 @@ struct MainWindowView: View {
   @ObservedObject var loginController: LaunchAtLoginController
   @ObservedObject var silentLaunch: SilentLaunchController
   /// 目录树折叠状态：组合根持有的长寿命对象，跨 destination 切换存续；服务器
-  /// 侧栏与首页目标树共用（见 CatalogExpansionState）。
+  /// 侧栏使用（见 CatalogExpansionState）；首页独立保存浏览状态。
   @ObservedObject var expansion: CatalogExpansionState
   let clipboard: any TextClipboard
   let diagnosticReportExporter: any DiagnosticReportExporter
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
 
+  @StateObject private var homeServerList = HomeServerListState()
   @State private var selection: NodeID?
   /// 全局添加菜单打开的表单，以及诊断导出由窗口壳持有。
   @State private var presentedWorkspaceSheet: WorkspaceSheet?
@@ -59,6 +60,9 @@ struct MainWindowView: View {
         }
     } detail: {
       destinationView
+    }
+    .onChange(of: workflow.tree, initial: true) {
+      homeServerList.update(tree: workflow.tree, activeTargetID: control.snapshot.activeTarget?.id)
     }
     .navigationTitle(route.destination.label)
     .frame(minWidth: 920, minHeight: 580)
@@ -186,7 +190,7 @@ struct MainWindowView: View {
       WorkspaceHomeView(
         workflow: workflow,
         control: control,
-        expansion: expansion,
+        serverList: homeServerList,
         clipboard: clipboard,
         onManageServers: { route.navigate(to: .servers) })
     case .servers:

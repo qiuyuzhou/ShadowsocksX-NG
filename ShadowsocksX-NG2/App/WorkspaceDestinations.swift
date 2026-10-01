@@ -6,7 +6,7 @@ import SwiftUI
 struct WorkspaceHomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
-  let expansion: CatalogExpansionState
+  let serverList: HomeServerListState
   let clipboard: any TextClipboard
   let onManageServers: () -> Void
   @StateObject private var errors = ErrorAlertPresenter()
@@ -18,7 +18,7 @@ struct WorkspaceHomeView: View {
     HomeView(
       workflow: workflow,
       control: control,
-      expansion: expansion,
+      serverList: serverList,
       clipboard: clipboard,
       onManageServers: onManageServers,
       errors: errors
