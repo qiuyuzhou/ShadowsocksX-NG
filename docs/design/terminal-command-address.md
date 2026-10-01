@@ -1,7 +1,7 @@
 # 首页代理环境变量命令地址选择
 
 日期：2026-10-01。
-状态：交互设计与测试边界已确定，spec 已发布为 [Issue #72](https://github.com/qiuyuzhou/ShadowsocksX-NG/issues/72)，标记 ready-for-agent；尚未实现。
+状态：已实现（issue #72）；交互设计与测试边界来自 grill-with-docs 会话，spec 已发布为 [Issue #72](https://github.com/qiuyuzhou/ShadowsocksX-NG/issues/72)。
 
 ## 功能范围
 
