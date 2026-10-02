@@ -11,6 +11,7 @@ final class RulesWorkflow: ObservableObject {
   private let loadBuiltin: @Sendable (RulesSource) throws -> RuleSnapshot
   private var collection: RulesCollection?
   private var refreshGeneration = 0
+  private var testGeneration = 0
 
   init(
     loadCustom: @escaping @Sendable () throws -> [CustomRule] = { try CustomRuleStore().load() },
@@ -30,6 +31,7 @@ final class RulesWorkflow: ObservableObject {
   func refresh() async {
     refreshGeneration += 1
     let generation = refreshGeneration
+    invalidateAddressTest()
     snapshot.isLoading = true
     let custom = loadCustom
     let builtin = loadBuiltin
@@ -44,6 +46,44 @@ final class RulesWorkflow: ObservableObject {
     next.issues = result.issues
     next.isLoading = false
     snapshot = applyingQuery(to: next)
+  }
+
+  func setTestTarget(_ target: String) {
+    guard target != snapshot.addressTest.target else { return }
+    invalidateAddressTest()
+    snapshot.addressTest.target = target
+  }
+
+  func testAddress() async {
+    invalidateAddressTest()
+    guard snapshot.isComplete, let collection else {
+      snapshot.addressTest.failure = .incompleteCollection
+      return
+    }
+    let generation = testGeneration
+    let target = snapshot.addressTest.target
+    snapshot.addressTest.isTesting = true
+    let result = await Task.detached(priority: .userInitiated) {
+      do {
+        return Result<OfflineRuleMatcher.Result, OfflineRuleMatcher.Failure>.success(
+          try OfflineRuleMatcher.test(collection: collection, address: target))
+      } catch {
+        return .failure(error as? OfflineRuleMatcher.Failure ?? .invalidTarget)
+      }
+    }.value
+    guard generation == testGeneration, snapshot.isComplete,
+      snapshot.version == collection.version
+    else { return }
+    snapshot.addressTest.isTesting = false
+    switch result {
+    case .success(let result): snapshot.addressTest.result = result
+    case .failure(let failure): snapshot.addressTest.failure = failure
+    }
+  }
+
+  private func invalidateAddressTest() {
+    testGeneration += 1
+    snapshot.addressTest = RulesAddressTest(target: snapshot.addressTest.target)
   }
 
   func query(_ query: RulesQuery) {

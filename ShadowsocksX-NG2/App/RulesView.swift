@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// Read-only first delivery. Every interaction goes through the workflow; no
-/// filesystem, runtime control, or placeholder mutation actions live here.
+/// Browsing and offline testing go through the workflow.
 struct RulesView: View {
   @ObservedObject var workflow: RulesWorkflow
   @Environment(\.openWindow) private var openWindow
 
   var body: some View {
     VStack(spacing: 0) {
+      RulesAddressTestView(workflow: workflow)
+      Divider()
       if workflow.snapshot.isLoading {
         ProgressView(RulesCopy.text("加载规则…")).padding()
       }

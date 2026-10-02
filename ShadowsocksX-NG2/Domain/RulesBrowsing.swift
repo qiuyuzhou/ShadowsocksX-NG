@@ -49,5 +49,6 @@ struct RulesPageSnapshot: Equatable, Sendable {
   var rows: [RulesRow] = []
   var selection: Set<RulesRow.SelectionID> = []
   var query = RulesQuery()
+  var addressTest = RulesAddressTest()
   var isComplete: Bool { !isLoading && issues.isEmpty && !version.isEmpty }
 }
