@@ -34,14 +34,16 @@ final class SystemProxyHelperEngine: NSObject, SystemProxyHelperControlling {
   }
 
   func apply(_ payload: Data, withReply reply: @escaping (Data) -> Void) {
-    queue.async { [perform] in
+    let reply = ReplyBox(reply)
+    queue.async { [perform, reply] in
       let request = Result { try SystemProxyHelperWire.decodeConfiguration(payload) }
       reply(Self.responseData(request: request.map { .apply($0) }, perform: perform))
     }
   }
 
   func clear(withReply reply: @escaping (Data) -> Void) {
-    queue.async { [perform] in
+    let reply = ReplyBox(reply)
+    queue.async { [perform, reply] in
       reply(Self.responseData(request: .success(.clear), perform: perform))
     }
   }
@@ -70,5 +72,20 @@ final class SystemProxyHelperEngine: NSObject, SystemProxyHelperControlling {
     } catch {
       return .failure(.helperUnavailable(String(describing: error)))
     }
+  }
+}
+
+/// XPC 应答闭包的 Sendable 桥。@objc 协议里 reply 参数无法标注 @Sendable，
+/// 但 XPC 运行时生成的应答块线程安全且恰好调用一次，引擎在串行工作队列上
+/// 调用它；装箱只为跨过 queue.async 的 @Sendable 边界。
+private final class ReplyBox: @unchecked Sendable {
+  private let reply: (Data) -> Void
+
+  init(_ reply: @escaping (Data) -> Void) {
+    self.reply = reply
+  }
+
+  func callAsFunction(_ data: Data) {
+    reply(data)
   }
 }
