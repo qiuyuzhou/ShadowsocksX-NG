@@ -43,14 +43,43 @@ struct CustomRule: Codable, Equatable, Hashable, Sendable, Identifiable {
 
 /// 自定义规则持久化文档（issue #66）：schema 版本 + 规则数组。
 struct CustomRuleDocument: Codable, Equatable, Sendable {
-  static let currentSchemaVersion = 1
-
+  static let currentSchemaVersion = 2
   let schemaVersion: Int
   let rules: [CustomRule]
+  let disabledIdentities: Set<RuleIdentity>
 
-  init(rules: [CustomRule]) {
-    self.schemaVersion = Self.currentSchemaVersion
+  init(rules: [CustomRule], disabledIdentities: Set<RuleIdentity> = []) {
+    schemaVersion = Self.currentSchemaVersion
     self.rules = rules
+    self.disabledIdentities = disabledIdentities
+  }
+
+  private enum CodingKeys: String, CodingKey { case schemaVersion, rules, disabledIdentities }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+    guard [1, Self.currentSchemaVersion].contains(schemaVersion) else {
+      throw CustomRuleStoreError.schemaVersionMismatch(
+        found: schemaVersion, expected: Self.currentSchemaVersion)
+    }
+    rules = try values.decode([CustomRule].self, forKey: .rules)
+    let disabled =
+      schemaVersion == 1 ? [] : try values.decode([RuleIdentity].self, forKey: .disabledIdentities)
+    disabledIdentities = Set(disabled)
+    guard disabledIdentities.count == disabled.count,
+      Set(rules.map(\.id)).count == rules.count,
+      Set(rules.map(\.identity)).count == rules.count,
+      rules.allSatisfy({ $0.source.kind == .custom })
+    else { throw CustomRuleStoreError.corrupt(detail: "Duplicate or invalid user rule records") }
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var values = encoder.container(keyedBy: CodingKeys.self)
+    try values.encode(Self.currentSchemaVersion, forKey: .schemaVersion)
+    try values.encode(rules, forKey: .rules)
+    try values.encode(
+      disabledIdentities.sorted { $0.contentToken < $1.contentToken }, forKey: .disabledIdentities)
   }
 }
 
@@ -70,6 +99,15 @@ struct CustomRuleSummary: Equatable, Sendable {
   let count: Int
   /// 内容版本：规则内容（动作+匹配）的稳定短摘要。
   let contentVersion: String
+
+  static func summarizing(_ document: CustomRuleDocument) -> CustomRuleSummary {
+    let tokens =
+      document.rules.map(\.contentToken).sorted()
+      + document.disabledIdentities.map { "disabled:" + $0.contentToken }.sorted()
+    return CustomRuleSummary(
+      count: document.rules.count,
+      contentVersion: String(ProxyACLDocument.digest(tokens.joined(separator: "\n")).prefix(12)))
+  }
 
   static func summarizing(_ rules: [CustomRule]) -> CustomRuleSummary {
     CustomRuleSummary(count: rules.count, contentVersion: contentVersion(of: rules))

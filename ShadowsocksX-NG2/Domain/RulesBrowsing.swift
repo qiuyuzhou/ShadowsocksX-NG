@@ -7,6 +7,7 @@ struct RulesQuery: Equatable, Sendable {
   var action: RuleAction?
   var source: RulesSource?
   var sort: Sort = .ascending
+  var enabled: Bool?
 }
 
 enum RulesSource: String, CaseIterable, Identifiable, Sendable {
@@ -33,6 +34,8 @@ struct RulesRow: Equatable, Identifiable, Sendable {
   let customIDs: Set<UUID>
   let relationships: [RuleRelationship]
   let fixedCoverage: FixedRuleCoverage?
+  var isEnabled = true
+  var hasCurrentSource: Bool { !sources.isEmpty }
   var isFixed: Bool { sources.contains(.fixed) }
   var action: RuleAction { identity?.action ?? .direct }
 }
@@ -44,11 +47,13 @@ struct RulesPageSnapshot: Equatable, Sendable {
   }
   var version = ""
   var isLoading = false
+  var isCommitting = false
+  var commitOutcome: CustomRuleUpdateOutcome?
   var issues: [Issue] = []
   var sources: [RulesSourceSnapshot] = []
   var rows: [RulesRow] = []
   var selection: Set<RulesRow.SelectionID> = []
   var query = RulesQuery()
   var addressTest = RulesAddressTest()
-  var isComplete: Bool { !isLoading && issues.isEmpty && !version.isEmpty }
+  var isComplete: Bool { !isLoading && !isCommitting && issues.isEmpty && !version.isEmpty }
 }

@@ -65,6 +65,7 @@ final class ProxyRuntimeController: ObservableObject {
   let plugins: ManagedPluginProviding
   let settingsStore: ProxySettingsStoring
   /// 自定义规则持久化（issue #66）：规则模式 ACL 合并的用户入口。
+  var isUpdatingRules = false
   let customRuleStore: CustomRuleStore
   /// 监听设置不可读时的点名原因（D8「任何路径不静默改端口」）；非 nil 时
   /// 设置只是占位出厂默认，禁止部署（见 `deploy`）。

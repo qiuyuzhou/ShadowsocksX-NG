@@ -112,21 +112,28 @@ extension ProxyRuntimeController {
 
   /// 规则模式的完整有效候选、硬拒绝项与当前 ACL 骨架下的覆盖说明。
   func ruleModeValidation() throws -> CustomRuleValidationResult {
-    let custom = try customRuleStore.load()
+    let document = try customRuleStore.loadDocument()
+    let custom = document.rules.filter { !document.disabledIdentities.contains($0.identity) }
     switch settings.ruleDefaultAction {
     case .proxyWhenUnmatched:
-      let builtIn = try chinaDirectRules()
+      let builtIn = try chinaDirectRules().filter {
+        !document.disabledIdentities.contains($0.identity)
+      }
       let validated = CustomRuleValidator.validate(
         custom: custom, builtIn: builtIn, defaultAction: .proxyWhenUnmatched)
       return CustomRuleValidationResult(
-        accepted: builtIn + validated.accepted, rejected: validated.rejected,
+        accepted: RuleAnalysis.runtimeCandidates(
+          builtIn + validated.accepted, defaultAction: settings.ruleDefaultAction),
+        rejected: validated.rejected,
         relationships: validated.relationships)
     case .directWhenUnmatched:
-      let builtIn = try gfwlistRules()
+      let builtIn = try gfwlistRules().filter { !document.disabledIdentities.contains($0.identity) }
       let validated = CustomRuleValidator.validate(
         custom: custom, builtIn: builtIn, defaultAction: .directWhenUnmatched)
       return CustomRuleValidationResult(
-        accepted: builtIn + validated.accepted, rejected: validated.rejected,
+        accepted: RuleAnalysis.runtimeCandidates(
+          builtIn + validated.accepted, defaultAction: settings.ruleDefaultAction),
+        rejected: validated.rejected,
         relationships: validated.relationships)
     }
   }

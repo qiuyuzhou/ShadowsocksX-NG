@@ -34,7 +34,7 @@ final class BuiltinRuleCatalogTests: XCTestCase {
       rules.contains { $0.match == .domainSuffix("cn") },
       "快照应含 .cn 后缀直连规则")
 
-    // .cn 吸收后不应再有独立 .cn 域名条目。
+    // 完整候选保留可恢复的独立 .cn 域名条目。
     let independentCN = rules.filter {
       switch $0.match {
       case .domainSuffix(let value): return value.hasSuffix(".cn") && value != "cn"
@@ -42,7 +42,7 @@ final class BuiltinRuleCatalogTests: XCTestCase {
       default: return false
       }
     }
-    XCTAssertTrue(independentCN.isEmpty, "同动作 .cn 域名应已被吸收")
+    XCTAssertFalse(independentCN.isEmpty, "候选保留被吸收的规则以便禁用宽规则后恢复")
   }
 
   /// china-ipv4 快照（issue #64）：从 bundle 或源码树加载，直连候选为 IPv4 CIDR。

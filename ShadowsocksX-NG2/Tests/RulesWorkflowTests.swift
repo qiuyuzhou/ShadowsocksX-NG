@@ -4,6 +4,62 @@ import XCTest
 
 @MainActor
 final class RulesWorkflowTests: XCTestCase {
+  func testDisableAcrossSourcesRestoresCoverageAndOrphanCanBeEnabled() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = CustomRuleStore(fileURL: directory.appendingPathComponent("rules.json"))
+    let broad = CustomRule(action: .proxy, match: .domainSuffix("example.com"))
+    let narrow = CustomRule(action: .direct, match: .domainExact("safe.example.com"))
+    let orphan = RuleIdentity(action: .proxy, match: .domainExact("gone.example"))
+    try store.saveDocument(
+      CustomRuleDocument(rules: [broad, narrow], disabledIdentities: [orphan]))
+    var commits = 0
+    let workflow = RulesWorkflow(
+      loadDocument: { try store.loadDocument() },
+      commitDocument: { document in
+        commits += 1
+        do {
+          try store.saveDocument(document)
+          return .saved
+        } catch {
+          XCTFail("Fixture save failed: \(error)")
+          return .persistenceFailed
+        }
+      },
+      loadBuiltin: { source in
+        guard source == .gfwlist else { return rulesFixture(source) }
+        let identity = RuleSourceIdentity(kind: .gfwlist, upstreamVersion: "v1", label: "fixture")
+        return rulesFixture(
+          source,
+          rules: [
+            ProxyRule(action: .proxy, match: broad.match, source: identity)
+          ])
+      })
+    await workflow.refresh()
+    let version = workflow.snapshot.version
+    let covered = try XCTUnwrap(workflow.snapshot.rows.first { $0.identity == narrow.identity })
+    XCTAssertTrue(covered.relationships.contains { $0.kind == .shadowing && $0.extent == .full })
+    workflow.select([.rule(broad.identity), .noDotHostname])
+    XCTAssertEqual(workflow.actionableSelection, [broad.identity])
+    await workflow.setEnabled(false, identities: workflow.actionableSelection)
+    XCTAssertEqual(commits, 1)
+    XCTAssertNotEqual(workflow.snapshot.version, version)
+    let disabled = try XCTUnwrap(workflow.snapshot.rows.first { $0.identity == broad.identity })
+    XCTAssertFalse(disabled.isEnabled)
+    XCTAssertEqual(disabled.sources, [.custom, .gfwlist])
+    XCTAssertTrue(
+      workflow.snapshot.rows.first { $0.identity == narrow.identity }!.relationships.isEmpty)
+    workflow.setTestTarget("safe.example.com")
+    await workflow.testAddress()
+    XCTAssertEqual(workflow.snapshot.addressTest.result?.outcome, .direct)
+    workflow.query(RulesQuery(enabled: false))
+    XCTAssertTrue(workflow.snapshot.rows.contains { $0.identity == orphan && !$0.hasCurrentSource })
+    await workflow.setEnabled(true, identities: [orphan])
+    XCTAssertFalse(workflow.snapshot.rows.contains { $0.identity == orphan })
+    XCTAssertNil(workflow.snapshot.addressTest.result)
+    XCTAssertFalse(try store.loadDocument().disabledIdentities.contains(orphan))
+  }
+
   func testEquivalentSourcesMergeAndAbsorbedCandidatesRemainBrowsable() async throws {
     let match = try RuleMatch(domainExact: "Example.COM")
     let custom = CustomRule(action: .direct, match: match)

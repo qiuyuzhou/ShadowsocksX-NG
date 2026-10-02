@@ -21,6 +21,25 @@ final class CustomRuleStoreTests: XCTestCase {
     try super.tearDownWithError()
   }
 
+  func testSchemaOneMigratesAndDisablementRoundTripsInSameDocument() throws {
+    let rule = CustomRule(action: .direct, match: .domainExact("private.example"))
+    let legacy = try JSONSerialization.data(withJSONObject: [
+      "schemaVersion": 1,
+      "rules": JSONSerialization.jsonObject(with: JSONEncoder().encode([rule])),
+    ])
+    try legacy.write(to: store.fileURL)
+    let migrated = try store.loadDocument()
+    XCTAssertEqual(migrated.rules, [rule])
+    XCTAssertTrue(migrated.disabledIdentities.isEmpty)
+    try store.saveDocument(
+      CustomRuleDocument(rules: migrated.rules, disabledIdentities: [rule.identity]))
+    let saved = try store.loadDocument()
+    XCTAssertEqual(saved.schemaVersion, 2)
+    XCTAssertEqual(saved.disabledIdentities, [rule.identity])
+    XCTAssertNotEqual(
+      try store.summary().contentVersion, CustomRuleSummary.summarizing([rule]).contentVersion)
+  }
+
   func testMissingFileLoadsAsEmpty() throws {
     XCTAssertEqual(try store.load(), [])
   }
@@ -63,7 +82,9 @@ final class CustomRuleStoreTests: XCTestCase {
 
   func testMalformedStoredCIDRReportsCorruptionWithoutRewritingDocument() throws {
     for match in [RuleMatch.ipv4CIDR("/"), .ipv6CIDR("/")] {
-      try store.save([CustomRule(action: .direct, match: match)])
+      try CustomRuleStore.encode(
+        CustomRuleDocument(rules: [CustomRule(action: .direct, match: match)])
+      ).write(to: store.fileURL)
       let before = try Data(contentsOf: store.fileURL)
       XCTAssertThrowsError(try store.load()) { error in
         guard case .corrupt = error as? CustomRuleStoreError else {

@@ -270,6 +270,7 @@ extension ProxyRuntimeController {
   func execute(_ intent: RuntimeIntent, document: SslocalRuntimeDocument?) async -> Bool {
     cancelFirewallObservation()
     flowGeneration += 1
+    let generation = flowGeneration
     let actions = ProxyRuntimePlan.actions(
       intent: intent,
       agentStatus: agent.status,
@@ -279,9 +280,11 @@ extension ProxyRuntimeController {
       RuntimeLog.emit(.contractUnchanged)
     }
     for action in actions {
-      guard await perform(action, document: document) else { return false }
+      guard generation == flowGeneration,
+        await perform(action, document: document)
+      else { return false }
     }
-    return true
+    return generation == flowGeneration
   }
 
   /// 执行单个动作；返回 false 表示应终止后续动作（状态已呈现）。

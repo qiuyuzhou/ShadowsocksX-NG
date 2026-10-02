@@ -9,6 +9,12 @@ struct RulesView: View {
     VStack(spacing: 0) {
       RulesAddressTestView(workflow: workflow)
       Divider()
+      if workflow.snapshot.isCommitting {
+        ProgressView(RulesCopy.text("正在保存并应用…")).padding()
+      }
+      if let outcome = workflow.snapshot.commitOutcome {
+        Text(verbatim: outcome.rulesMessage).textSelection(.enabled).padding(.horizontal)
+      }
       if workflow.snapshot.isLoading {
         ProgressView(RulesCopy.text("加载规则…")).padding()
       }
@@ -95,6 +101,16 @@ struct RulesView: View {
         Text(RulesCopy.text("代理")).tag(Optional(RuleAction.proxy))
       }.labelsHidden().fixedSize()
       Picker(
+        RulesCopy.text("状态"),
+        selection: Binding(
+          get: { workflow.snapshot.query.enabled },
+          set: { value in updateQuery { $0.enabled = value } })
+      ) {
+        Text(RulesCopy.text("全部状态")).tag(Optional<Bool>.none)
+        Text(RulesCopy.text("已启用")).tag(Optional(true))
+        Text(RulesCopy.text("已禁用")).tag(Optional(false))
+      }.labelsHidden().fixedSize()
+      Picker(
         RulesCopy.text("匹配内容"),
         selection: Binding(
           get: { workflow.snapshot.query.sort },
@@ -113,6 +129,19 @@ struct RulesView: View {
         get: { workflow.snapshot.selection },
         set: { ids in DispatchQueue.main.async { workflow.select(ids) } })
     ) {
+      TableColumn(RulesCopy.text("启用")) { row in
+        Toggle(
+          RulesCopy.text("启用"),
+          isOn: Binding(
+            get: { row.isEnabled },
+            set: { enabled in
+              guard let identity = row.identity else { return }
+              Task { await workflow.setEnabled(enabled, identities: [identity]) }
+            })
+        )
+        .labelsHidden()
+        .disabled(row.isFixed || !workflow.snapshot.isComplete || workflow.snapshot.isCommitting)
+      }.width(45)
       TableColumn(RulesCopy.text("匹配内容")) { row in Text(verbatim: row.displayContent) }
         .width(min: 120, ideal: 170)
       TableColumn(RulesCopy.text("类型")) { row in Text(verbatim: row.matchType) }
@@ -124,6 +153,21 @@ struct RulesView: View {
       TableColumn(RulesCopy.text("状态")) { row in Text(row.statusLabel) }
         .width(min: 80, ideal: 110)
     }.frame(minWidth: 0, maxWidth: .infinity)
+      .contextMenu {
+        ForEach([true, false], id: \.self) { enabled in
+          Button {
+            let identities = workflow.actionableSelection
+            Task { await workflow.setEnabled(enabled, identities: identities) }
+          } label: {
+            Text(
+              RulesCopy.text(enabled ? "启用" : "禁用") + " ("
+                + String(workflow.actionableSelection.count) + ")")
+          }
+          .disabled(
+            workflow.actionableSelection.isEmpty || !workflow.snapshot.isComplete
+              || workflow.snapshot.isCommitting)
+        }
+      }
   }
 
   private var sourceBinding: Binding<RulesSourceChoice?> {
@@ -228,12 +272,14 @@ extension RulesSource {
 extension RulesRow {
   var displayContent: String { identity == nil ? RulesCopy.text("简单主机名") : content }
   var sourceLabels: String {
-    RulesSource.allCases.filter { sources.contains($0) }.map(\.label).joined(separator: ", ")
+    guard hasCurrentSource else { return RulesCopy.text("无当前来源") }
+    return RulesSource.allCases.filter { sources.contains($0) }.map(\.label).joined(separator: ", ")
   }
   var actionLabel: String { RulesCopy.text(action == .direct ? "直连" : "代理") }
   var matchType: String { identity?.match.browsingType ?? RulesCopy.text("简单主机名") }
   var statusLabel: String {
     if isFixed { return RulesCopy.text("固定本地策略") }
+    if !isEnabled { return RulesCopy.text("已禁用") }
     var labels = relationships.map(\.browsingLabel)
     if let fixedCoverage {
       let label =
@@ -265,6 +311,21 @@ extension RuleMatch {
     case .domainSuffix: RulesCopy.text("域名后缀")
     case .ipv4CIDR: "IPv4 CIDR"
     case .ipv6CIDR: "IPv6 CIDR"
+    }
+  }
+}
+
+extension CustomRuleUpdateOutcome {
+  var rulesMessage: String {
+    switch self {
+    case .saved: RulesCopy.text("已保存")
+    case .persistenceFailed: RulesCopy.text("保存失败")
+    case .rolledBack: RulesCopy.text("部署失败，已恢复")
+    case .recoveryFailed(let detail): RulesCopy.text("恢复失败") + ": " + detail
+    case .busy: RulesCopy.text("正在保存并应用…")
+    case .versionConflict: RulesCopy.text("版本已变化，请刷新后重试")
+    case .invalidDocument(let detail): RulesCopy.text("规则文档无效") + ": " + detail
+    case .rejected(let rejected): rejected.map(\.explanation).joined(separator: "; ")
     }
   }
 }

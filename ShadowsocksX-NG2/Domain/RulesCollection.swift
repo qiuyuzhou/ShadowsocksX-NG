@@ -6,13 +6,15 @@ struct RulesCollection: Sendable {
   let rows: [RulesRow]
   let sources: [RulesSourceSnapshot]
   let issues: [RulesPageSnapshot.Issue]
+  let userDocument: CustomRuleDocument?
 
   static func load(
     custom loadCustom: () throws -> [CustomRule],
-    builtin loadBuiltin: (RulesSource) throws -> RuleSnapshot
+    builtin loadBuiltin: (RulesSource) throws -> RuleSnapshot,
+    document loadDocument: (() throws -> CustomRuleDocument)? = nil
   ) -> RulesCollection {
     var input = RulesCollectionInput()
-    input.readCustom(loadCustom)
+    input.readCustom { try loadDocument?() ?? CustomRuleDocument(rules: loadCustom()) }
     for source in [RulesSource.geolocationCN, .chinaIPv4, .gfwlist] {
       input.readBuiltin(source, using: loadBuiltin)
     }
@@ -27,14 +29,19 @@ private struct RulesCandidate {
 }
 
 private struct RulesCollectionInput {
+  var userDocument: CustomRuleDocument?
+  var disabled: Set<RuleIdentity> = []
   var entries: [RulesCandidate] = []
   var sources: [RulesSourceSnapshot] = []
   var issues: [RulesPageSnapshot.Issue] = []
   var metadataTokens: [String] = []
 
-  mutating func readCustom(_ loadCustom: () throws -> [CustomRule]) {
+  mutating func readCustom(_ loadCustom: () throws -> CustomRuleDocument) {
     do {
-      let custom = try loadCustom()
+      let document = try loadCustom()
+      let custom = document.rules
+      disabled = document.disabledIdentities
+      userDocument = document
       let validation = CustomRuleValidator.validate(
         custom: custom, defaultAction: .directWhenUnmatched)
       guard validation.rejected.isEmpty else {
@@ -97,11 +104,20 @@ private struct RulesCollectionInput {
     // Completely fixed-protected proxy candidates remain browsable but cannot
     // cover or shadow another candidate in the effective collection.
     let effective = rules.filter {
-      $0.action != .proxy || RuleCoverage.fixedLocalCoverage(of: $0.identity.match)?.extent != .full
+      !disabled.contains($0.identity)
+        && ($0.action != .proxy
+          || RuleCoverage.fixedLocalCoverage(of: $0.identity.match)?.extent != .full)
     }
     let index = RulesOverlapIndex(rules: effective)
     var rows = grouped.map { identity, entries in
       row(identity: identity, entries: entries, index: index)
+    }
+    for identity in disabled where grouped[identity] == nil {
+      rows.append(
+        RulesRow(
+          id: .rule(identity), identity: identity,
+          content: identity.match.browsingContent, sources: [], customIDs: [],
+          relationships: [], fixedCoverage: nil, isEnabled: false))
     }
     rows.append(
       RulesRow(
@@ -115,11 +131,12 @@ private struct RulesCollectionInput {
       rows.map { row in
         (row.identity?.contentToken ?? "fixed:no-dot") + "|"
           + row.sources.map(\.rawValue).sorted().joined(separator: ",")
-          + "|" + row.customIDs.map(\.uuidString).sorted().joined(separator: ",")
+          + "|" + String(row.isEnabled) + "|"
+          + row.customIDs.map(\.uuidString).sorted().joined(separator: ",")
       } + metadataTokens.sorted() + issues.map { String(describing: $0) }
     return RulesCollection(
       version: String(ProxyACLDocument.digest(tokens.sorted().joined(separator: "\n")).prefix(16)),
-      rows: rows, sources: sources, issues: issues)
+      rows: rows, sources: sources, issues: issues, userDocument: userDocument)
   }
   private func row(
     identity: RuleIdentity, entries: [RulesCandidate], index: RulesOverlapIndex
@@ -144,7 +161,8 @@ private struct RulesCollectionInput {
     return RulesRow(
       id: .rule(identity), identity: identity, content: identity.match.browsingContent,
       sources: memberships, customIDs: Set(entries.compactMap { $0.customID }),
-      relationships: relationships, fixedCoverage: fixedCoverage)
+      relationships: disabled.contains(identity) ? [] : relationships, fixedCoverage: fixedCoverage,
+      isEnabled: memberships.contains(.fixed) || !disabled.contains(identity))
   }
 
 }

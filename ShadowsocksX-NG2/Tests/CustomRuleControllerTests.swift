@@ -5,7 +5,7 @@ import XCTest
 
 /// 自定义规则变更的完整重启与失败回滚（issue #66 AC1/AC4）。
 extension ProxyRuntimeControllerTests {
-  private func makeCustomRuleStore() throws -> (store: CustomRuleStore, directory: URL) {
+  func makeCustomRuleStore() throws -> (store: CustomRuleStore, directory: URL) {
     let directory = runtime.directory.appendingPathComponent(
       "custom-rules-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -13,7 +13,7 @@ extension ProxyRuntimeControllerTests {
     return (store, directory)
   }
 
-  private func makeControllerWithCustomRules(
+  func makeControllerWithCustomRules(
     store: CustomRuleStore,
     probe: EndpointProbing = ProxyRuntimeFixture.FakeProbe.reachable(),
     settings: ProxySettings? = nil,
@@ -31,7 +31,7 @@ extension ProxyRuntimeControllerTests {
   }
 
   /// 从链接解析读取当前 ACL 变体内容（契约不再内嵌 content）。
-  private func activeACLContent(_ store: RuntimeFileStore) throws -> String {
+  func activeACLContent(_ store: RuntimeFileStore) throws -> String {
     let data = try Data(contentsOf: store.aclFileURL)
     return String(bytes: data, encoding: .utf8) ?? ""
   }

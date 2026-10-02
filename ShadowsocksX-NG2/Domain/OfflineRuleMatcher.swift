@@ -22,6 +22,7 @@ enum OfflineRuleMatcher {
     guard collection.issues.isEmpty else { throw Failure.incompleteCollection }
     let target = try OfflineRuleTarget(address)
     let matches = collection.rows.filter { row in
+      guard row.isEnabled else { return false }
       guard let identity = row.identity else { return target.isSimpleHostname }
       return RuleCoverage.domainCovers(identity.match, target.match)
         || RuleCoverage.ipCovers(identity.match, target.match)

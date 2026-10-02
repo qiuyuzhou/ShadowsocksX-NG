@@ -12,6 +12,10 @@ enum CustomRuleUpdateOutcome: Equatable, Sendable {
   case persistenceFailed
   /// 保存后部署失败并已回滚到旧规则与旧运行时。
   case rolledBack
+  case recoveryFailed(detail: String)
+  case busy
+  case versionConflict
+  case invalidDocument(detail: String)
 }
 
 // MARK: - 自定义规则命令面
@@ -21,29 +25,40 @@ extension ProxyRuntimeController {
   /// 校验拒绝时整批不落地；部署失败时回滚旧规则、旧 ACL 与旧系统代理状态。
   /// 全局和直连模式不加载自定义规则，但持久化仍然进行（切换到规则模式后生效）。
   func updateCustomRules(_ rules: [CustomRule]) async -> CustomRuleUpdateOutcome {
-    let validation = validateCustomRulesForPersistence(rules)
-    guard validation.rejected.isEmpty else {
-      return .rejected(validation.rejected)
-    }
-
-    let previousRules = (try? customRuleStore.load()) ?? []
-    let snapshot = ModeTransitionSnapshotForRules(
-      document: lastDocument, state: state)
-
     do {
-      try customRuleStore.save(validation.acceptedRules)
+      let previous = try customRuleStore.loadDocument()
+      return await updateRuleDocument(
+        CustomRuleDocument(rules: rules, disabledIdentities: previous.disabledIdentities))
+    } catch { return .persistenceFailed }
+  }
+
+  func updateRuleDocument(_ document: CustomRuleDocument) async -> CustomRuleUpdateOutcome {
+    guard !isUpdatingRules else { return .busy }
+    isUpdatingRules = true
+    defer { isUpdatingRules = false }
+    let validation = validateCustomRulesForPersistence(document.rules)
+    guard validation.rejected.isEmpty else { return .rejected(validation.rejected) }
+    guard
+      document.disabledIdentities.isDisjoint(
+        with:
+          Set(RuleCoverage.fixedLocalMatches.map { RuleIdentity(action: .direct, match: $0) }))
+    else { return .invalidDocument(detail: "Fixed local policy cannot be disabled") }
+    let previous: CustomRuleDocument
+    let snapshot = ModeTransitionSnapshotForRules(
+      document: lastDocument ?? runtimeFileStore.loadDocument(), state: state)
+    do {
+      previous = try customRuleStore.loadDocument()
+      try customRuleStore.saveDocument(document)
     } catch {
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-      state = .serviceFailed(.persistence)
       return .persistenceFailed
     }
-
-    return await deployCustomRuleChange(previousRules: previousRules, snapshot: snapshot)
+    return await deployCustomRuleChange(previousRules: previous, snapshot: snapshot)
   }
 
   /// 规则内容变化后重编译 ACL；非规则模式的 ACL 不含自定义规则，无变化即不重启。
   private func deployCustomRuleChange(
-    previousRules: [CustomRule],
+    previousRules: CustomRuleDocument,
     snapshot: ModeTransitionSnapshotForRules
   ) async -> CustomRuleUpdateOutcome {
     guard settings.agentEnabled, state != .off,
@@ -57,8 +72,12 @@ extension ProxyRuntimeController {
       nextDocument = try runtimeDocument(currentDocument, for: proxyMode)
     } catch {
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-      await restoreCustomRules(previousRules, snapshot: snapshot)
-      return .rolledBack
+      do {
+        try customRuleStore.saveDocument(previousRules)
+        return .rolledBack
+      } catch {
+        return .recoveryFailed(detail: String(describing: error))
+      }
     }
     guard nextDocument.aclRuntime != currentDocument.aclRuntime else {
       return .saved
@@ -66,28 +85,44 @@ extension ProxyRuntimeController {
 
     modeChangeGeneration += 1
     let generation = modeChangeGeneration
+    let runtimeGeneration = flowGeneration + 1
     lastDocument = nextDocument
     state = .starting
     guard await execute(.run(nextDocument), document: nextDocument) else {
-      guard generation == modeChangeGeneration else { return .rolledBack }
-      await restoreCustomRules(previousRules, snapshot: snapshot)
-      return .rolledBack
+      guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
+        settings.agentEnabled
+      else {
+        return .recoveryFailed(detail: "Runtime changed during rule deployment")
+      }
+      return await restoreCustomRules(previousRules, snapshot: snapshot)
     }
 
-    guard generation == modeChangeGeneration else { return .rolledBack }
+    guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
+      settings.agentEnabled
+    else {
+      return .recoveryFailed(detail: "Runtime changed during rule deployment")
+    }
     let healthy = await presentLaunchHealth(
       nextDocument,
       requiresReceipt: true,
       convergeProxyOnSuccess: false,
       preserveProxyOnFailure: true)
-    guard generation == modeChangeGeneration else { return .rolledBack }
+    guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
+      settings.agentEnabled
+    else {
+      return .recoveryFailed(detail: "Runtime changed during rule deployment")
+    }
     guard healthy else {
-      await restoreCustomRules(previousRules, snapshot: snapshot)
-      return .rolledBack
+      return await restoreCustomRules(previousRules, snapshot: snapshot)
     }
 
     lastDocument = nextDocument
     await convergeSystemProxy()
+    guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
+      settings.agentEnabled
+    else {
+      return .recoveryFailed(detail: "Runtime changed during rule deployment")
+    }
     return .saved
   }
 
@@ -107,27 +142,53 @@ extension ProxyRuntimeController {
   }
 
   private func restoreCustomRules(
-    _ previousRules: [CustomRule],
+    _ previousRules: CustomRuleDocument,
     snapshot: ModeTransitionSnapshotForRules
-  ) async {
+  ) async -> CustomRuleUpdateOutcome {
+    var failures: [String] = []
     do {
-      try customRuleStore.save(previousRules)
+      try customRuleStore.saveDocument(previousRules)
     } catch {
+      failures.append(String(describing: error))
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
     }
-    guard let previousDocument = snapshot.document else { return }
+    guard let previousDocument = snapshot.document else {
+      return failures.isEmpty
+        ? .rolledBack : .recoveryFailed(detail: failures.joined(separator: "; "))
+    }
+    guard settings.agentEnabled else {
+      return .recoveryFailed(detail: "Agent disabled during rule recovery")
+    }
+    let modeGeneration = modeChangeGeneration
+    let runtimeGeneration = flowGeneration + 1
     lastDocument = previousDocument
     state = .starting
-    _ = await execute(.run(previousDocument), document: previousDocument)
-    let restored = await presentLaunchHealth(
-      previousDocument,
-      requiresReceipt: true,
-      convergeProxyOnSuccess: false)
-    if !restored {
+    let executed = await execute(.run(previousDocument), document: previousDocument)
+    guard modeGeneration == modeChangeGeneration, runtimeGeneration == flowGeneration,
+      settings.agentEnabled
+    else {
+      return .recoveryFailed(detail: "Runtime changed during rule recovery")
+    }
+    guard executed else {
+      failures.append(String(describing: state))
+      await holdSystemProxyIntent()
+      return .recoveryFailed(detail: failures.joined(separator: "; "))
+    }
+    let healthy = await presentLaunchHealth(
+      previousDocument, requiresReceipt: true, convergeProxyOnSuccess: false)
+    guard modeGeneration == modeChangeGeneration, runtimeGeneration == flowGeneration,
+      settings.agentEnabled
+    else {
+      return .recoveryFailed(detail: "Runtime changed during rule recovery")
+    }
+    if !healthy {
+      failures.append(String(describing: state))
       await holdSystemProxyIntent()
     } else {
       state = snapshot.state
     }
+    return failures.isEmpty
+      ? .rolledBack : .recoveryFailed(detail: failures.joined(separator: "; "))
   }
 
   private struct ModeTransitionSnapshotForRules {
@@ -137,7 +198,6 @@ extension ProxyRuntimeController {
 
   /// 自定义规则安全摘要（issue #66 AC5）：数量 + 内容版本，不含原始域名。
   func readCustomRuleSummary() -> CustomRuleSummary? {
-    guard let rules = try? customRuleStore.load() else { return nil }
-    return CustomRuleSummary.summarizing(rules)
+    try? customRuleStore.summary()
   }
 }

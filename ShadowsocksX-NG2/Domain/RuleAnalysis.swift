@@ -88,3 +88,25 @@ extension RuleCoverage {
       matches: matches, includesSimpleHostname: simple)
   }
 }
+
+extension RuleAnalysis {
+  /// Select the actual ACL skeleton before calculating coverage.
+  static func runtimeCandidates(_ rules: [ProxyRule], defaultAction: RuleDefaultAction)
+    -> [ProxyRule]
+  {
+    let expressed = rules.filter { defaultAction != .proxyWhenUnmatched || $0.action == .direct }
+    let index = RulesOverlapIndex(rules: expressed)
+    return expressed.filter { rule in
+      let analysis = RuleAnalysis(rules: index.overlapping(rule.identity.match), subjects: [rule])
+      return !analysis.relationships.contains {
+        $0.extent == .full
+          && ($0.kind == .shadowing
+            || $0.covering.contains { other in
+              RuleCoverage.fullyCovered(rule.identity.match, by: [other.match])
+                && (!RuleCoverage.fullyCovered(other.match, by: [rule.identity.match])
+                  || other.contentToken < rule.identity.contentToken)
+            })
+      }
+    }
+  }
+}

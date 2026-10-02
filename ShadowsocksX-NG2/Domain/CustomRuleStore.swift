@@ -16,30 +16,37 @@ struct CustomRuleStore {
   }
 
   /// 读取规则集合；文件不存在视为无自定义规则。
-  func load() throws -> [CustomRule] {
-    guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
+  func load() throws -> [CustomRule] { try loadDocument().rules }
+
+  func loadDocument() throws -> CustomRuleDocument {
     let data: Data
     do {
       data = try Data(contentsOf: fileURL)
+    } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+      return CustomRuleDocument(rules: [])
     } catch {
       throw CustomRuleStoreError.ioFailure(detail: String(describing: error))
     }
     let document: CustomRuleDocument
     do {
       document = try Self.decode(data)
+    } catch let error as CustomRuleStoreError {
+      throw error
     } catch {
       throw CustomRuleStoreError.corrupt(detail: String(describing: error))
     }
-    guard document.schemaVersion == CustomRuleDocument.currentSchemaVersion else {
-      throw CustomRuleStoreError.schemaVersionMismatch(
-        found: document.schemaVersion, expected: CustomRuleDocument.currentSchemaVersion)
-    }
-    return document.rules
+    return document
   }
 
   /// 原子写入完整规则集合。
   func save(_ rules: [CustomRule]) throws {
-    let data = try Self.encode(CustomRuleDocument(rules: rules))
+    let old = try loadDocument()
+    try saveDocument(CustomRuleDocument(rules: rules, disabledIdentities: old.disabledIdentities))
+  }
+
+  func saveDocument(_ document: CustomRuleDocument) throws {
+    let data = try Self.encode(document)
+    _ = try Self.decode(data)
     do {
       try AtomicFileWriter.write(data, to: fileURL)
     } catch {
@@ -49,7 +56,7 @@ struct CustomRuleStore {
 
   /// 安全摘要：数量 + 内容版本（issue #66 AC5）。
   func summary() throws -> CustomRuleSummary {
-    CustomRuleSummary.summarizing(try load())
+    CustomRuleSummary.summarizing(try loadDocument())
   }
 
   static func decode(_ data: Data) throws -> CustomRuleDocument {
