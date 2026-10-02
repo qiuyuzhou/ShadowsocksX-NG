@@ -111,8 +111,14 @@ struct RulesCollectionIssuesView: View {
 extension RulesCommitFeedback {
   var summary: String {
     guard outcome.isSuccess else { return outcome.rulesMessage }
-    let count = String.localizedStringWithFormat(
-      RulesCopy.text(enabled ? "已启用 %lld 条规则" : "已禁用 %lld 条规则"), Int64(changedCount))
+    let count: String
+    switch operation {
+    case .enablement(let enabled):
+      count = String.localizedStringWithFormat(
+        RulesCopy.text(enabled ? "已启用 %lld 条规则" : "已禁用 %lld 条规则"), Int64(changedCount))
+    case .add: count = RulesCopy.text("已新增规则")
+    case .edit: count = RulesCopy.text("已编辑规则")
+    }
     let application: String
     switch outcome {
     case .applied: application = "已应用"
@@ -159,7 +165,7 @@ extension CustomRuleUpdateOutcome {
 
   var nextStep: String? {
     switch self {
-    case .persistenceFailed, .rolledBack, .busy: "请重新执行启用或禁用操作。"
+    case .persistenceFailed, .rolledBack, .busy: "请重试规则操作。"
     case .recoveryFailed, .runtimeChanged: "请在首页检查当前代理运行状态。"
     case .invalidDocument, .rejected: "请检查规则数据后再操作。"
     default: nil

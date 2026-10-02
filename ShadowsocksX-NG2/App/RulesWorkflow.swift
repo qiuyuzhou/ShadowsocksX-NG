@@ -98,7 +98,7 @@ final class RulesWorkflow: ObservableObject {
 
   func setEnabled(_ enabled: Bool, identities: Set<RuleIdentity>) async {
     guard snapshot.isComplete, !snapshot.isCommitting,
-      let commitDocument
+      commitDocument != nil
     else { return }
     let allowed = Set(snapshot.rows.filter { !$0.isFixed }.compactMap(\.identity))
     let targets = identities.intersection(allowed)
@@ -110,11 +110,19 @@ final class RulesWorkflow: ObservableObject {
       ? targets.intersection(disabled).count : targets.subtracting(disabled).count
     if enabled { disabled.subtract(targets) } else { disabled.formUnion(targets) }
     guard disabled != old.disabledIdentities else { return }
+    _ = await commit(
+      CustomRuleDocument(rules: old.rules, disabledIdentities: disabled),
+      operation: .enablement(enabled), changedCount: changedCount)
+  }
+
+  private func commit(
+    _ document: CustomRuleDocument, operation: RulesCommitFeedback.Operation, changedCount: Int = 1
+  ) async -> CustomRuleUpdateOutcome {
+    guard let commitDocument else { return .busy }
     snapshot.isCommitting = true
     dismissFeedback()
     invalidateAddressTest()
-    let result = await commitDocument(
-      CustomRuleDocument(rules: old.rules, disabledIdentities: disabled))
+    let result = await commitDocument(document)
     var next = snapshot
     if let document = result.document, let previous = collection,
       document != previous.userDocument
@@ -132,7 +140,8 @@ final class RulesWorkflow: ObservableObject {
       next.issues = [.userDocument("Saved rule document is unavailable")]
     }
     next.isCommitting = false
-    publishFeedback(result.outcome, enabled: enabled, changedCount: changedCount, page: next)
+    publishFeedback(result.outcome, operation: operation, changedCount: changedCount, page: next)
+    return result.outcome
   }
 
   func dismissFeedback() {
@@ -142,10 +151,11 @@ final class RulesWorkflow: ObservableObject {
   }
 
   private func publishFeedback(
-    _ outcome: CustomRuleUpdateOutcome, enabled: Bool, changedCount: Int, page: RulesPageSnapshot
+    _ outcome: CustomRuleUpdateOutcome, operation: RulesCommitFeedback.Operation, changedCount: Int,
+    page: RulesPageSnapshot
   ) {
     let feedback = RulesCommitFeedback(
-      outcome: outcome, enabled: enabled, changedCount: changedCount)
+      outcome: outcome, operation: operation, changedCount: changedCount)
     var next = page
     next.commitFeedback = feedback
     snapshot = next
@@ -243,5 +253,41 @@ final class RulesWorkflow: ObservableObject {
     next.rows = rows
     next.selection.formIntersection(Set(rows.map(\.id)))
     return next
+  }
+}
+
+extension RulesWorkflow {
+  func makeCustomRuleDraft(editing id: UUID? = nil) -> CustomRuleDraft? {
+    guard snapshot.isComplete, commitDocument != nil, let document = collection?.userDocument
+    else { return nil }
+    if let id {
+      guard let rule = document.rules.first(where: { $0.id == id }) else { return nil }
+      return CustomRuleDraft(
+        id: id, editingID: id, version: snapshot.version,
+        kind: rule.identity.match.editingKind, content: rule.identity.match.editingContent,
+        action: rule.action)
+    }
+    return CustomRuleDraft(id: UUID(), editingID: nil, version: snapshot.version)
+  }
+
+  func previewCustomRule(_ draft: CustomRuleDraft) async -> CustomRulePreview {
+    guard !snapshot.isCommitting else { return CustomRulePreview(failure: .busy) }
+    guard snapshot.isComplete, let collection, collection.userDocument != nil
+    else { return CustomRulePreview(failure: .incompleteCollection) }
+    guard draft.version == snapshot.version else { return CustomRulePreview(failure: .staleDraft) }
+    let prepared = await Task.detached(priority: .userInitiated) {
+      collection.previewCustomRule(draft)
+    }.value
+    guard !snapshot.isCommitting else { return CustomRulePreview(failure: .busy) }
+    guard snapshot.isComplete else { return CustomRulePreview(failure: .incompleteCollection) }
+    guard snapshot.version == draft.version else { return CustomRulePreview(failure: .staleDraft) }
+    return prepared
+  }
+
+  func saveCustomRule(_ draft: CustomRuleDraft) async -> CustomRuleSaveResult {
+    let preview = await previewCustomRule(draft)
+    if let failure = preview.failure { return .unavailable(failure) }
+    guard snapshot.isComplete, let document = preview.document else { return .unavailable(.busy) }
+    return .committed(await commit(document, operation: draft.editingID == nil ? .add : .edit))
   }
 }

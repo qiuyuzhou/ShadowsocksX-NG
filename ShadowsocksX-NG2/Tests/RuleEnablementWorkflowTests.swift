@@ -67,7 +67,7 @@ final class RuleEnablementWorkflowTests: XCTestCase {
     XCTAssertEqual(workflow.snapshot.commitOutcome, .saved)
     let feedback = try XCTUnwrap(workflow.snapshot.commitFeedback)
     XCTAssertEqual(feedback.changedCount, 1)
-    XCTAssertFalse(feedback.enabled)
+    XCTAssertEqual(feedback.operation, .enablement(false))
     XCTAssertEqual(workflow.snapshot.operationStatus, .feedback(feedback))
     XCTAssertFalse(workflow.snapshot.rows.first { $0.identity == rule.identity }!.isEnabled)
   }

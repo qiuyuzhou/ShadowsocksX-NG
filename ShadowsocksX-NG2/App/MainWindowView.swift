@@ -45,6 +45,7 @@ struct MainWindowView: View {
 
   @StateObject private var homeServerList = HomeServerListState()
   @State private var selection: NodeID?
+  @State private var ruleDraft: CustomRuleDraft?
   /// 全局添加菜单打开的表单，以及诊断导出由窗口壳持有。
   @State private var presentedWorkspaceSheet: WorkspaceSheet?
   @State private var exportedDiagnosticsPath: String?
@@ -85,6 +86,12 @@ struct MainWindowView: View {
       case .addSubscription:
         AddSubscriptionSheet(workflow: workflow, errors: shellActionErrors)
       }
+    }
+    .sheet(item: $ruleDraft) { draft in
+      CustomRuleEditorSheet(workflow: rulesWorkflow, draft: draft) { route.navigate(to: .home) }
+    }
+    .onChange(of: route.destination) { _, destination in
+      if destination != .rules { ruleDraft = nil }
     }
     .alert(
       "操作失败",
@@ -155,7 +162,9 @@ struct MainWindowView: View {
         .disabled(workflow.subscriptions.isEmpty)
       }
     case .rules:
-      EmptyView()
+      Button(RulesCopy.text("新增规则"), systemImage: "plus") {
+        ruleDraft = rulesWorkflow.makeCustomRuleDraft()
+      }.disabled(!rulesWorkflow.snapshot.isComplete)
     case .diagnostics:
       Button("导出诊断…", systemImage: "square.and.arrow.up") {
         exportDiagnostics()
@@ -209,7 +218,9 @@ struct MainWindowView: View {
         workflow: workflow,
         onNodesRemoved: clearSelectionIfInvalidated)
     case .rules:
-      RulesView(workflow: rulesWorkflow, onShowRuntime: { route.navigate(to: .home) })
+      RulesView(
+        workflow: rulesWorkflow, onShowRuntime: { route.navigate(to: .home) },
+        onEditRule: { ruleDraft = rulesWorkflow.makeCustomRuleDraft(editing: $0) })
     case .settings:
       SettingsView(
         workflow: settingsWorkflow, loginController: loginController,

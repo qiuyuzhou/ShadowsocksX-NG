@@ -5,6 +5,7 @@ struct RulesView: View {
   @ObservedObject var workflow: RulesWorkflow
   @Environment(\.openWindow) private var openWindow
   var onShowRuntime: () -> Void
+  var onEditRule: (UUID) -> Void
 
   var body: some View {
     VStack(spacing: 0) {
@@ -153,6 +154,14 @@ struct RulesView: View {
         .width(min: 75, ideal: 90)
       TableColumn(RulesCopy.text("状态")) { row in Text(row.statusLabel) }
         .width(min: 80, ideal: 110)
+      TableColumn("") { row in
+        if let id = row.customIDs.first {
+          Button(RulesCopy.text("编辑规则"), systemImage: "pencil") { onEditRule(id) }
+            .labelStyle(.iconOnly)
+            .help(RulesCopy.text("编辑规则"))
+            .disabled(!workflow.snapshot.isComplete)
+        }
+      }.width(30)
     }.frame(minWidth: 0, maxWidth: .infinity)
       .contextMenu {
         ForEach([true, false], id: \.self) { enabled in
@@ -197,52 +206,57 @@ struct RulesView: View {
 
 }
 
-private struct RulesRelationshipsView: View {
+struct RulesRelationshipsView: View {
   let row: RulesRow
 
   var body: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 10) {
-        ForEach([RuleRelationship.Kind.absorption, .shadowing], id: \.self) { kind in
-          let relationships = row.relationships.filter { $0.kind == kind }
-          let fixed = row.fixedCoverage.flatMap { coverage in
-            row.action == (kind == .absorption ? .direct : .proxy) ? coverage : nil
-          }
-          if !relationships.isEmpty || fixed != nil {
-            VStack(alignment: .leading, spacing: 4) {
-              Text(RulesCopy.text(kind == .absorption ? "被同行动规则覆盖" : "被相反行动规则遮蔽"))
-              ForEach(relationships, id: \.kind) { relationship in
-                let covering = relationship.covering.filter { identity in
-                  !(identity.action == .direct
-                    && (fixed?.matches.contains(identity.match) ?? false))
-                }
-                if !covering.isEmpty && relationship.extent == .partial {
-                  Text(RulesCopy.text("部分重叠"))
-                }
-                ForEach(covering, id: \.self) { identity in
-                  Text(
-                    verbatim: identity.match.browsingContent + " · "
-                      + identity.match.browsingType + " · "
-                      + RulesCopy.text(identity.action == .direct ? "直连" : "代理"))
-                }
+    ScrollView { RulesRelationshipsContent(row: row).padding() }
+  }
+}
+
+struct RulesRelationshipsContent: View {
+  let row: RulesRow
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      ForEach([RuleRelationship.Kind.absorption, .shadowing], id: \.self) { kind in
+        let relationships = row.relationships.filter { $0.kind == kind }
+        let fixed = row.fixedCoverage.flatMap { coverage in
+          row.action == (kind == .absorption ? .direct : .proxy) ? coverage : nil
+        }
+        if !relationships.isEmpty || fixed != nil {
+          VStack(alignment: .leading, spacing: 4) {
+            Text(RulesCopy.text(kind == .absorption ? "被同行动规则覆盖" : "被相反行动规则遮蔽"))
+            ForEach(relationships, id: \.kind) { relationship in
+              let covering = relationship.covering.filter { identity in
+                !(identity.action == .direct
+                  && (fixed?.matches.contains(identity.match) ?? false))
               }
-              if let fixed {
+              if !covering.isEmpty && relationship.extent == .partial {
+                Text(RulesCopy.text("部分重叠"))
+              }
+              ForEach(covering, id: \.self) { identity in
                 Text(
-                  RulesCopy.text("固定本地策略")
-                    + (fixed.extent == .partial ? " · " + RulesCopy.text("部分重叠") : ""))
-                ForEach(fixed.matches, id: \.self) { match in
-                  Text(verbatim: match.browsingContent)
-                }
-                if fixed.includesSimpleHostname { Text(RulesCopy.text("简单主机名")) }
+                  verbatim: identity.match.browsingContent + " · "
+                    + identity.match.browsingType + " · "
+                    + RulesCopy.text(identity.action == .direct ? "直连" : "代理"))
               }
+            }
+            if let fixed {
+              Text(
+                RulesCopy.text("固定本地策略")
+                  + (fixed.extent == .partial ? " · " + RulesCopy.text("部分重叠") : ""))
+              ForEach(fixed.matches, id: \.self) { match in
+                Text(verbatim: match.browsingContent)
+              }
+              if fixed.includesSimpleHostname { Text(RulesCopy.text("简单主机名")) }
             }
           }
         }
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding()
-      .textSelection(.enabled)
     }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .textSelection(.enabled)
   }
 }
 
@@ -265,7 +279,7 @@ extension RulesSource {
 }
 
 extension RulesRow {
-  var displayContent: String { identity == nil ? RulesCopy.text("简单主机名") : content }
+  var displayContent: String { identity?.match.editingContent ?? RulesCopy.text("简单主机名") }
   var sourceLabels: String {
     guard hasCurrentSource else { return RulesCopy.text("无当前来源") }
     return RulesSource.allCases.filter { sources.contains($0) }.map(\.label).joined(separator: ", ")
@@ -301,7 +315,8 @@ extension RuleRelationship {
 
 extension RuleMatch {
   var browsingType: String {
-    switch self {
+    if editingKind == .ipAddress { return RulesCopy.text("IP 地址") }
+    return switch self {
     case .domainExact: RulesCopy.text("精确域名")
     case .domainSuffix: RulesCopy.text("域名后缀")
     case .ipv4CIDR: "IPv4 CIDR"

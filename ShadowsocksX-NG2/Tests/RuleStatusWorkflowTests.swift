@@ -52,7 +52,7 @@ final class RuleStatusWorkflowTests: XCTestCase {
     await workflow.setEnabled(true, identities: [disabled.identity, enabled.identity, fixed])
     let feedback = try XCTUnwrap(workflow.snapshot.commitFeedback)
     XCTAssertEqual(feedback.changedCount, 1)
-    XCTAssertTrue(feedback.enabled)
+    XCTAssertEqual(feedback.operation, .enablement(true))
     XCTAssertEqual(feedback.outcome, .applied)
     XCTAssertTrue(workflow.snapshot.rows.first { $0.identity == disabled.identity }!.isEnabled)
     await fulfillment(of: [timerStarted], timeout: 3)

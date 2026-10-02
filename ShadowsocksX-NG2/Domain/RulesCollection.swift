@@ -23,6 +23,14 @@ struct RulesCollection: Sendable {
     return input.collection(builtinInput: builtin)
   }
 
+  /// A single prospective row uses the same analysis as browsing without sorting
+  /// or recomputing every saved row on each editor keystroke.
+  func previewRow(identity: RuleIdentity, document: CustomRuleDocument) -> RulesRow? {
+    var input = builtinInput
+    input.readCustom { document }
+    return input.previewRow(identity: identity)
+  }
+
   func replacingUserDocument(_ document: CustomRuleDocument) -> RulesCollection {
     var input = builtinInput
     input.readCustom { document }
@@ -96,7 +104,7 @@ private struct RulesCollectionInput: Sendable {
     }
   }
 
-  mutating func collection(builtinInput: RulesCollectionInput) -> RulesCollection {
+  private mutating func appendFixedPolicy() {
     let fixedSource = RuleSourceIdentity(kind: .custom, upstreamVersion: "fixed", label: "fixed")
     let fixedMatches = RuleCoverage.fixedLocalMatches
     entries += fixedMatches.map {
@@ -107,6 +115,26 @@ private struct RulesCollectionInput: Sendable {
     sources.append(
       RulesSourceSnapshot(
         id: .fixed, count: fixedMatches.count + 1, metadata: nil, conversionReport: nil))
+  }
+
+  mutating func previewRow(identity: RuleIdentity) -> RulesRow? {
+    appendFixedPolicy()
+    let memberships = entries.filter { $0.rule.identity == identity }
+    guard !memberships.isEmpty else { return nil }
+    let overlapping = entries.compactMap { candidate -> ProxyRule? in
+      let rule = candidate.rule
+      guard !disabled.contains(rule.identity),
+        RuleCoverage.intersects(rule.identity.match, identity.match),
+        rule.action != .proxy
+          || RuleCoverage.fixedLocalCoverage(of: rule.identity.match)?.extent != .full
+      else { return nil }
+      return rule
+    }
+    return row(identity: identity, entries: memberships, overlapping: overlapping)
+  }
+
+  mutating func collection(builtinInput: RulesCollectionInput) -> RulesCollection {
+    appendFixedPolicy()
     let grouped = Dictionary(grouping: entries, by: { $0.rule.identity })
     let rules = grouped.values.compactMap { $0.first?.rule }
     // Completely fixed-protected proxy candidates remain browsable but cannot
@@ -118,7 +146,7 @@ private struct RulesCollectionInput: Sendable {
     }
     let index = RulesOverlapIndex(rules: effective)
     var rows = grouped.map { identity, entries in
-      row(identity: identity, entries: entries, index: index)
+      row(identity: identity, entries: entries, overlapping: index.overlapping(identity.match))
     }
     for identity in disabled where grouped[identity] == nil {
       rows.append(
@@ -149,11 +177,10 @@ private struct RulesCollectionInput: Sendable {
       builtinInput: builtinInput)
   }
   private func row(
-    identity: RuleIdentity, entries: [RulesCandidate], index: RulesOverlapIndex
+    identity: RuleIdentity, entries: [RulesCandidate], overlapping: [ProxyRule]
   ) -> RulesRow {
     let memberships = Set(entries.map { $0.source })
     let representative = entries[0].rule
-    let overlapping = index.overlapping(identity.match)
     var relationships =
       memberships.contains(.fixed)
       ? [] : RuleAnalysis(rules: overlapping, subjects: [representative]).relationships
