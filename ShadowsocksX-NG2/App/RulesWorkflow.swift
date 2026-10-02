@@ -46,13 +46,16 @@ final class RulesWorkflow: ObservableObject {
   }
 
   func query(_ query: RulesQuery) {
+    guard query != snapshot.query else { return }
     var next = snapshot
     next.query = query
     snapshot = applyingQuery(to: next)
   }
 
   func select(_ ids: Set<RulesRow.SelectionID>) {
-    snapshot.selection = ids.intersection(Set(snapshot.rows.map(\.id)))
+    let selection = ids.intersection(Set(snapshot.rows.map(\.id)))
+    guard selection != snapshot.selection else { return }
+    snapshot.selection = selection
   }
 
   private func applyingQuery(to page: RulesPageSnapshot) -> RulesPageSnapshot {

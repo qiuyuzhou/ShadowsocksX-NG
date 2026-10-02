@@ -21,14 +21,18 @@ struct RulesView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding()
       }
-      HSplitView {
-        sourceList.frame(minWidth: 160, idealWidth: 180, maxWidth: 240)
+      HStack(spacing: 0) {
+        sourceList.frame(width: 180)
+        Divider()
         VStack(spacing: 0) {
           filters.padding()
           if let source = workflow.snapshot.sources.first(where: {
             $0.id == workflow.snapshot.query.source
           }) {
-            RulesSourceDetailsView(source: source).padding(.horizontal)
+            ScrollView {
+              RulesSourceDetailsView(source: source)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal)
+            }.frame(height: 160)
           }
           ruleTable
           if workflow.snapshot.rows.isEmpty && !workflow.snapshot.isLoading {
@@ -42,7 +46,7 @@ struct RulesView: View {
             RulesDetailsView(row: row, sources: workflow.snapshot.sources)
               .frame(minHeight: 110, idealHeight: 180, maxHeight: 260)
           }
-        }.frame(minWidth: 500)
+        }.frame(minWidth: 400, maxWidth: .infinity)
       }
     }
     .task {
@@ -102,15 +106,20 @@ struct RulesView: View {
     Table(
       workflow.snapshot.rows,
       selection: Binding(
-        get: { workflow.snapshot.selection }, set: { workflow.select($0) })
+        get: { workflow.snapshot.selection },
+        set: { ids in DispatchQueue.main.async { workflow.select(ids) } })
     ) {
       TableColumn(RulesCopy.text("匹配内容")) { row in Text(verbatim: row.displayContent) }
-        .width(min: 170, ideal: 260)
+        .width(min: 120, ideal: 170)
       TableColumn(RulesCopy.text("类型")) { row in Text(verbatim: row.matchType) }
+        .width(min: 70, ideal: 80)
       TableColumn(RulesCopy.text("行动")) { row in Text(row.actionLabel) }
+        .width(50)
       TableColumn(RulesCopy.text("来源")) { row in Text(row.sourceLabels) }
+        .width(min: 75, ideal: 90)
       TableColumn(RulesCopy.text("状态")) { row in Text(row.statusLabel) }
-    }
+        .width(min: 80, ideal: 110)
+    }.frame(minWidth: 0, maxWidth: .infinity)
   }
 
   private var sourceBinding: Binding<RulesSourceChoice?> {
@@ -119,16 +128,22 @@ struct RulesView: View {
         workflow.snapshot.query.source.map(RulesSourceChoice.source) ?? .all
       },
       set: { choice in
+        guard let choice else { return }
         updateQuery {
           if case .source(let source) = choice { $0.source = source } else { $0.source = nil }
         }
       })
   }
 
-  private func updateQuery(_ update: (inout RulesQuery) -> Void) {
-    var query = workflow.snapshot.query
-    update(&query)
-    workflow.query(query)
+  // Native controls can write their bindings during a SwiftUI update. Publish
+  // after that pass, and merge each edit into the latest query so queued edits
+  // to different filters do not overwrite one another.
+  private func updateQuery(_ update: @escaping @MainActor (inout RulesQuery) -> Void) {
+    DispatchQueue.main.async {
+      var query = workflow.snapshot.query
+      update(&query)
+      workflow.query(query)
+    }
   }
 
   private func issueDescription(_ issue: RulesPageSnapshot.Issue) -> String {
