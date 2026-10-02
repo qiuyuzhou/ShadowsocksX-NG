@@ -20,10 +20,11 @@ final class RulesWorkflowTests: XCTestCase {
         commits += 1
         do {
           try store.saveDocument(document)
-          return .saved
+          return RuleDocumentCommit(outcome: .saved, document: document)
         } catch {
           XCTFail("Fixture save failed: \(error)")
-          return .persistenceFailed
+          return RuleDocumentCommit(
+            outcome: .persistenceFailed, document: try? store.loadDocument())
         }
       },
       loadBuiltin: { source in

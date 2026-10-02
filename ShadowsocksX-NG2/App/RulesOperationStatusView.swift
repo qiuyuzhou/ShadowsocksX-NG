@@ -33,7 +33,6 @@ struct RulesOperationStatusView: View {
         .help(feedback.summary)
         if !feedback.outcome.isSuccess {
           detailsButton
-          if feedback.outcome == .versionConflict { refreshButton }
           if feedback.outcome.needsRuntimeInspection {
             Button(RulesCopy.text("查看运行状态"), action: onShowRuntime)
           }
@@ -64,7 +63,7 @@ struct RulesOperationStatusView: View {
   private var refreshButton: some View {
     Button(RulesCopy.text("刷新规则")) {
       showsDetails = false
-      Task { await workflow.refresh() }
+      Task { await workflow.refresh(retryFailedSources: true) }
     }
   }
 
@@ -135,7 +134,6 @@ extension CustomRuleUpdateOutcome {
     case .recoveryFailed: RulesCopy.text("恢复失败，请检查运行状态")
     case .runtimeChanged: RulesCopy.text("运行状态已变化，请检查当前状态")
     case .busy: RulesCopy.text("正在更新规则…")
-    case .versionConflict: RulesCopy.text("规则已变化，请刷新后重试")
     case .invalidDocument, .rejected: RulesCopy.text("无法更新规则")
     }
   }
@@ -162,7 +160,6 @@ extension CustomRuleUpdateOutcome {
   var nextStep: String? {
     switch self {
     case .persistenceFailed, .rolledBack, .busy: "请重新执行启用或禁用操作。"
-    case .versionConflict: "请刷新规则，重新选择后再操作。"
     case .recoveryFailed, .runtimeChanged: "请在首页检查当前代理运行状态。"
     case .invalidDocument, .rejected: "请检查规则数据后再操作。"
     default: nil

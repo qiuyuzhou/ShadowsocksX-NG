@@ -18,7 +18,8 @@ extension ProxyRuntimeControllerTests {
     probe: EndpointProbing = ProxyRuntimeFixture.FakeProbe.reachable(),
     settings: ProxySettings? = nil,
     proxyMode: ProxyMode? = nil,
-    launchHealthTimeoutSeconds: TimeInterval = 0.05
+    launchHealthTimeoutSeconds: TimeInterval = 0.05,
+    ruleSnapshots: BuiltinRuleSnapshots? = nil
   ) -> ProxyRuntimeController {
     makeController(
       probe: probe,
@@ -27,7 +28,7 @@ extension ProxyRuntimeControllerTests {
         ?? ProxySettings(listen: ActivationFixture.listen, agentEnabled: true),
       proxyMode: proxyMode,
       launchHealthTimeoutSeconds: launchHealthTimeoutSeconds,
-      customRuleStore: store)
+      customRuleStore: store, ruleSnapshots: ruleSnapshots)
   }
 
   /// 从链接解析读取当前 ACL 变体内容（契约不再内嵌 content）。
@@ -84,7 +85,7 @@ extension ProxyRuntimeControllerTests {
     let first = await controller.updateCustomRules(rules)
     XCTAssertEqual(first, .applied)
     XCTAssertEqual(try store.load(), rules, "保存保留用户 UUID 和全部意图")
-    let validation = try controller.ruleModeValidation()
+    let validation = try await controller.ruleModeValidation()
     XCTAssertTrue(
       validation.relationships.contains {
         $0.rule == rules[2].identity && $0.kind == .shadowing && $0.extent == .full
@@ -100,7 +101,8 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(try activeACLContent(runtimeStore), before)
     XCTAssertEqual(agent.unregisterCount, unregisterBefore)
     XCTAssertEqual(controller.readCustomRuleSummary(), summary)
-    XCTAssertEqual(try controller.ruleModeValidation(), validation)
+    let repeatedValidation = try await controller.ruleModeValidation()
+    XCTAssertEqual(repeatedValidation, validation)
   }
 
   /// 校验拒绝：固定本地冲突整批不落地，旧规则保持不变。
@@ -166,9 +168,10 @@ extension ProxyRuntimeControllerTests {
 
     let newRule = CustomRule(
       action: .direct, match: try RuleMatch(domainSuffix: "new-rule.example"))
-    let outcome = await controller.updateCustomRules([newRule])
+    let result = await controller.commitRuleDocument(CustomRuleDocument(rules: [newRule]))
 
-    XCTAssertEqual(outcome, .rolledBack)
+    XCTAssertEqual(result.outcome, .rolledBack)
+    XCTAssertEqual(result.document, CustomRuleDocument(rules: [existing]))
     XCTAssertEqual(try store.load(), [existing], "部署失败回滚旧规则")
     XCTAssertEqual(runtimeStore.loadDocument(), previousDocument, "回滚旧运行时")
     XCTAssertFalse(

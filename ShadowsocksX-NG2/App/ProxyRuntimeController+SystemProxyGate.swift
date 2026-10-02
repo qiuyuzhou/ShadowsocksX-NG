@@ -4,11 +4,15 @@ import Foundation
 
 extension ProxyRuntimeController {
   func presentFirewallStatus(for document: SslocalRuntimeDocument) async {
+    let generation = flowGeneration
+    let preparation = runtimePreparationGeneration
     guard document.listen.listenerMode.exposesNetworkInterfaces else {
       state = .running
       return
     }
-    if let blocked = await blockedFirewallExecutable() {
+    let blocked = await blockedFirewallExecutable()
+    guard generation == flowGeneration, preparation == runtimePreparationGeneration else { return }
+    if let blocked {
       presentFirewallBlocked(blocked)
       return
     }

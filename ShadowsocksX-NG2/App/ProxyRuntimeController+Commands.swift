@@ -212,15 +212,23 @@ extension ProxyRuntimeController {
     }
     let document: SslocalRuntimeDocument
     do {
-      document = try runtimeDocument(sourceDocument, for: proxyMode)
+      document = try await runtimeDocument(sourceDocument, for: proxyMode)
+    } catch RulePreparationError.superseded {
+      return false
     } catch {
       // 规则快照缺失/损坏：不静默退化成全局（issue #63 AC4）。
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
       state = .serviceFailed(.runtimeFile)
       return false
     }
+    return await deployPrepared(document, preparation: runtimePreparationGeneration)
+  }
+
+  func deployPrepared(_ document: SslocalRuntimeDocument, preparation: Int) async -> Bool {
+    guard preparation == runtimePreparationGeneration else { return false }
     lastDocument = document
     guard await execute(.run(document), document: document) else { return false }
+    guard preparation == runtimePreparationGeneration else { return false }
     state = .starting
     return await presentLaunchHealth(
       document, requiresReceipt: document.aclRuntime != nil)
@@ -271,6 +279,7 @@ extension ProxyRuntimeController {
     cancelFirewallObservation()
     flowGeneration += 1
     let generation = flowGeneration
+    let preparation = runtimePreparationGeneration
     let actions = ProxyRuntimePlan.actions(
       intent: intent,
       agentStatus: agent.status,
@@ -280,11 +289,11 @@ extension ProxyRuntimeController {
       RuntimeLog.emit(.contractUnchanged)
     }
     for action in actions {
-      guard generation == flowGeneration,
+      guard generation == flowGeneration, preparation == runtimePreparationGeneration,
         await perform(action, document: document)
       else { return false }
     }
-    return generation == flowGeneration
+    return generation == flowGeneration && preparation == runtimePreparationGeneration
   }
 
   /// 执行单个动作；返回 false 表示应终止后续动作（状态已呈现）。

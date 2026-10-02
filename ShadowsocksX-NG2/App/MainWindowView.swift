@@ -155,9 +155,7 @@ struct MainWindowView: View {
         .disabled(workflow.subscriptions.isEmpty)
       }
     case .rules:
-      Button(RulesCopy.text("刷新"), systemImage: "arrow.clockwise") {
-        Task { await rulesWorkflow.refresh() }
-      }.disabled(rulesWorkflow.snapshot.isLoading || rulesWorkflow.snapshot.isCommitting)
+      EmptyView()
     case .diagnostics:
       Button("导出诊断…", systemImage: "square.and.arrow.up") {
         exportDiagnostics()

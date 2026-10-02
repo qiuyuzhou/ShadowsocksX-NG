@@ -8,9 +8,9 @@ final class RulesWorkflow: ObservableObject {
   @Published private(set) var snapshot = RulesPageSnapshot()
   @Published private(set) var reportSource: RulesSourceSnapshot?
   private let loadCustom: @Sendable () throws -> [CustomRule]
-  private let loadBuiltin: @Sendable (RulesSource) throws -> RuleSnapshot
-  private let loadDocument: (@Sendable () throws -> CustomRuleDocument)?
-  private let commitDocument: (@MainActor (CustomRuleDocument) async -> CustomRuleUpdateOutcome)?
+  private let builtinSnapshots: BuiltinRuleSnapshots
+  private let loadDocument: (@MainActor () throws -> CustomRuleDocument)?
+  private let commitDocument: (@MainActor (CustomRuleDocument) async -> RuleDocumentCommit)?
   private var collection: RulesCollection?
   private var refreshGeneration = 0
   private var testGeneration = 0
@@ -19,11 +19,12 @@ final class RulesWorkflow: ObservableObject {
 
   init(
     loadCustom: (@Sendable () throws -> [CustomRule])? = nil,
-    loadDocument: (@Sendable () throws -> CustomRuleDocument)? = nil,
-    commitDocument: (@MainActor (CustomRuleDocument) async -> CustomRuleUpdateOutcome)? = nil,
+    loadDocument: (@MainActor () throws -> CustomRuleDocument)? = nil,
+    commitDocument: (@MainActor (CustomRuleDocument) async -> RuleDocumentCommit)? = nil,
     feedbackDelay: @escaping @Sendable () async throws -> Void = {
       try await Task.sleep(for: .seconds(3))
     },
+    builtinSnapshots: BuiltinRuleSnapshots? = nil,
     loadBuiltin: @escaping @Sendable (RulesSource) throws -> RuleSnapshot = { source in
       switch source {
       case .geolocationCN: try BuiltinRuleCatalog.loadGeolocationCN()
@@ -43,30 +44,36 @@ final class RulesWorkflow: ObservableObject {
     self.commitDocument = commitDocument
     self.feedbackDelay = feedbackDelay
     self.loadCustom = loadCustom ?? { try CustomRuleStore().load() }
-    self.loadBuiltin = loadBuiltin
+    self.builtinSnapshots = builtinSnapshots ?? BuiltinRuleSnapshots(loader: loadBuiltin)
   }
 
-  func refresh() async {
+  func refresh(retryFailedSources: Bool = false) async {
     guard !snapshot.isCommitting else { return }
-    if snapshot.commitOutcome == .versionConflict {
-      snapshot.selection = []
-      dismissFeedback()
-    } else if snapshot.commitOutcome?.isSuccess == true && !snapshot.issues.isEmpty {
+    if snapshot.commitOutcome?.isSuccess == true && !snapshot.issues.isEmpty {
       dismissFeedback()
     }
-    await refreshCollection()
+    await refreshCollection(retryFailedSources: retryFailedSources)
   }
 
-  private func refreshCollection() async {
+  private func refreshCollection(retryFailedSources: Bool) async {
     refreshGeneration += 1
     let generation = refreshGeneration
     invalidateAddressTest()
     snapshot.isLoading = true
     let custom = loadCustom
-    let builtin = loadBuiltin
-    let document = loadDocument
+    let sources = await builtinSnapshots.browsingSources(retryFailures: retryFailedSources)
+    let document: Result<CustomRuleDocument, Error>?
+    if let loadDocument {
+      do { document = .success(try loadDocument()) } catch { document = .failure(error) }
+    } else {
+      document = nil
+    }
     let result = await Task.detached(priority: .userInitiated) {
-      RulesCollection.load(custom: custom, builtin: builtin, document: document)
+      RulesCollection.load(
+        custom: custom,
+        builtin: { source in try sources[source, default: .failure(RuleSnapshotError.missing)].get()
+        },
+        document: document.map { saved in { try saved.get() } })
     }.value
     guard generation == refreshGeneration else { return }
     if !result.issues.isEmpty, collection != nil {
@@ -91,36 +98,41 @@ final class RulesWorkflow: ObservableObject {
 
   func setEnabled(_ enabled: Bool, identities: Set<RuleIdentity>) async {
     guard snapshot.isComplete, !snapshot.isCommitting,
-      let commitDocument, let loadDocument
+      let commitDocument
     else { return }
     let allowed = Set(snapshot.rows.filter { !$0.isFixed }.compactMap(\.identity))
     let targets = identities.intersection(allowed)
     guard !targets.isEmpty else { return }
+    guard let old = collection?.userDocument else { return }
+    var disabled = old.disabledIdentities
+    let changedCount =
+      enabled
+      ? targets.intersection(disabled).count : targets.subtracting(disabled).count
+    if enabled { disabled.subtract(targets) } else { disabled.formUnion(targets) }
+    guard disabled != old.disabledIdentities else { return }
     snapshot.isCommitting = true
     dismissFeedback()
     invalidateAddressTest()
-    defer { snapshot.isCommitting = false }
-    do {
-      let old = try loadDocument()
-      guard let prepared = collection?.userDocument,
-        old.rules == prepared.rules && old.disabledIdentities == prepared.disabledIdentities
-      else {
-        publishFeedback(.versionConflict, enabled: enabled, changedCount: 0)
-        return
-      }
-      var disabled = old.disabledIdentities
-      let changedCount =
-        enabled
-        ? targets.intersection(disabled).count : targets.subtracting(disabled).count
-      if enabled { disabled.subtract(targets) } else { disabled.formUnion(targets) }
-      guard disabled != old.disabledIdentities else { return }
-      let outcome = await commitDocument(
-        CustomRuleDocument(rules: old.rules, disabledIdentities: disabled))
-      await refreshCollection()
-      publishFeedback(outcome, enabled: enabled, changedCount: changedCount)
-    } catch {
-      publishFeedback(.persistenceFailed, enabled: enabled, changedCount: 0)
+    let result = await commitDocument(
+      CustomRuleDocument(rules: old.rules, disabledIdentities: disabled))
+    var next = snapshot
+    if let document = result.document, let previous = collection,
+      document != previous.userDocument
+    {
+      let updated = await Task.detached(priority: .userInitiated) {
+        previous.replacingUserDocument(document)
+      }.value
+      collection = updated
+      next = snapshot
+      next.version = updated.version
+      next.sources = updated.sources
+      next.issues = updated.issues
+      next = applyingQuery(to: next)
+    } else if result.document == nil {
+      next.issues = [.userDocument("Saved rule document is unavailable")]
     }
+    next.isCommitting = false
+    publishFeedback(result.outcome, enabled: enabled, changedCount: changedCount, page: next)
   }
 
   func dismissFeedback() {
@@ -130,11 +142,13 @@ final class RulesWorkflow: ObservableObject {
   }
 
   private func publishFeedback(
-    _ outcome: CustomRuleUpdateOutcome, enabled: Bool, changedCount: Int
+    _ outcome: CustomRuleUpdateOutcome, enabled: Bool, changedCount: Int, page: RulesPageSnapshot
   ) {
     let feedback = RulesCommitFeedback(
       outcome: outcome, enabled: enabled, changedCount: changedCount)
-    snapshot.commitFeedback = feedback
+    var next = page
+    next.commitFeedback = feedback
+    snapshot = next
     guard outcome.isSuccess, snapshot.issues.isEmpty else { return }
     let delay = feedbackDelay
     feedbackTask = Task { [weak self] in

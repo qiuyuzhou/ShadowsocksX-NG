@@ -3,6 +3,120 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 extension ProxyRuntimeControllerTests {
+  func testNewPreparationStopsRemainingActionsOfAnAwaitingRuntimeOperation() async throws {
+    let seeded = try makeSeededCatalog()
+    let (store, _) = try makeCustomRuleStore()
+    let started = expectation(description: "new source preparation")
+    let loader = PausedRuntimeRuleSource(started: started)
+    defer { loader.release.signal() }
+    let controller = makeControllerWithCustomRules(
+      store: store,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true),
+      proxyMode: .global, ruleSnapshots: BuiltinRuleSnapshots(loader: { loader.load($0) }))
+    try await controller.activate(seeded.server)
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    let previous = try XCTUnwrap(runtimeStore.loadDocument())
+    try Data("42".utf8).write(to: runtimeStore.pidFileURL)
+    let unregistered = expectation(description: "old operation waiting for wrapper exit")
+    agent.onUnregister = { unregistered.fulfill() }
+    let oldOperation = Task { await controller.execute(.stop, document: nil) }
+    await fulfillment(of: [unregistered], timeout: 3)
+    let newMode = Task { await controller.setProxyMode(.rule) }
+    await fulfillment(of: [started], timeout: 3)
+    try FileManager.default.removeItem(at: runtimeStore.pidFileURL)
+    let completed = await oldOperation.value
+    XCTAssertFalse(completed)
+    XCTAssertEqual(runtimeStore.loadDocument(), previous, "Stale stop must not delete the contract")
+    loader.release.signal()
+    await newMode.value
+    XCTAssertEqual(controller.lastDocument?.aclRuntime?.summary, "rule-proxy-default")
+    XCTAssertEqual(controller.state, .running)
+  }
+
+  func testSystemProxyToggleDoesNotDiscardPendingRuleModePreparation() async throws {
+    let seeded = try makeSeededCatalog()
+    let (store, _) = try makeCustomRuleStore()
+    let started = expectation(description: "background source preparation")
+    let loader = PausedRuntimeRuleSource(started: started)
+    defer { loader.release.signal() }
+    let controller = makeControllerWithCustomRules(
+      store: store,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true),
+      proxyMode: .global, ruleSnapshots: BuiltinRuleSnapshots(loader: { loader.load($0) }))
+    try await controller.activate(seeded.server)
+    let modeSwitch = Task { await controller.setProxyMode(.rule) }
+    await fulfillment(of: [started], timeout: 3)
+    await controller.setSystemProxyEnabled(true)
+    loader.release.signal()
+    await modeSwitch.value
+    XCTAssertEqual(controller.proxyMode, .rule)
+    XCTAssertTrue(controller.settings.systemProxyEnabled)
+    XCTAssertEqual(controller.lastDocument?.aclRuntime?.summary, "rule-proxy-default")
+    XCTAssertEqual(controller.state, .running)
+  }
+
+  func testOffIntentDuringSharedSourcePreparationCannotBeOverwritten() async throws {
+    let seeded = try makeSeededCatalog()
+    let (store, _) = try makeCustomRuleStore()
+    let started = expectation(description: "background source preparation")
+    let loader = PausedRuntimeRuleSource(started: started)
+    defer { loader.release.signal() }
+    let snapshots = BuiltinRuleSnapshots(loader: { loader.load($0) })
+    let settings = ProxySettings(
+      listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true)
+    let controller = makeControllerWithCustomRules(
+      store: store, settings: settings, proxyMode: .global, ruleSnapshots: snapshots)
+    try await controller.activate(seeded.server)
+    let modeSwitch = Task { await controller.setProxyMode(.rule) }
+    await fulfillment(of: [started], timeout: 3)
+    let identity = RuleIdentity(action: .proxy, match: .domainExact("kept.example"))
+    let ruleCommit = Task {
+      await controller.commitRuleDocument(
+        CustomRuleDocument(rules: [], disabledIdentities: [identity]))
+    }
+    // Persistence happens before the awaited source. Observe the owner, not timing.
+    while controller.ruleDocuments.current?.disabledIdentities.contains(identity) != true {
+      await Task.yield()
+    }
+    await controller.setAgentEnabled(false)
+    let registrationsAfterStop = agent.registerCount
+    loader.release.signal()
+    await modeSwitch.value
+    let result = await ruleCommit.value
+    XCTAssertEqual(result.outcome, .runtimeChanged(rulesRestored: false))
+    XCTAssertEqual(result.document?.disabledIdentities, [identity])
+    XCTAssertEqual(try store.loadDocument().disabledIdentities, [identity])
+    XCTAssertEqual(controller.state, .off)
+    XCTAssertFalse(controller.settings.agentEnabled)
+    XCTAssertEqual(agent.registerCount, registrationsAfterStop)
+    XCTAssertNil(RuntimeFileStore(fileURL: runtime.contract).loadDocument())
+  }
+
+  func testNewModeSupersedesRulePreparationWithoutRestoringOldMode() async throws {
+    let seeded = try makeSeededCatalog()
+    let (store, _) = try makeCustomRuleStore()
+    let started = expectation(description: "background source preparation")
+    let loader = PausedRuntimeRuleSource(started: started)
+    defer { loader.release.signal() }
+    let controller = makeControllerWithCustomRules(
+      store: store,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true),
+      proxyMode: .global, ruleSnapshots: BuiltinRuleSnapshots(loader: { loader.load($0) }))
+    try await controller.activate(seeded.server)
+    let old = Task { await controller.setProxyMode(.rule) }
+    await fulfillment(of: [started], timeout: 3)
+    await controller.setProxyMode(.direct)
+    loader.release.signal()
+    await old.value
+    XCTAssertEqual(controller.proxyMode, .direct)
+    XCTAssertEqual(controller.state, .running)
+    XCTAssertEqual(
+      RuntimeFileStore(fileURL: runtime.contract).loadDocument()?.aclRuntime?.summary, "direct")
+  }
+
   func testBatchDisableRestartsOnceAndRestoresAbsorbedChinaCandidate() async throws {
     let seeded = try makeSeededCatalog()
     let (store, _) = try makeCustomRuleStore()
@@ -53,14 +167,14 @@ extension ProxyRuntimeControllerTests {
       CustomRuleDocument(rules: [], disabledIdentities: blockers))
     XCTAssertEqual(outcome, .applied)
     XCTAssertEqual(agent.unregisterCount, before + 1)
-    let candidates = try controller.ruleModeCandidateRules()
+    let candidates = try await controller.ruleModeCandidateRules()
     XCTAssertTrue(
       candidates.contains {
         $0.action == .direct && RuleCoverage.domainCovers($0.match, exception.match)
       })
   }
 
-  func testDisableWhileOffPersistsWithoutStartingAndCorruptDocumentIsPreserved() async throws {
+  func testOffSaveUsesOwnedDocumentAndNewSessionRejectsCorruption() async throws {
     let (store, _) = try makeCustomRuleStore()
     let controller = makeControllerWithCustomRules(
       store: store, settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
@@ -72,7 +186,9 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(try store.loadDocument().disabledIdentities, [identity])
     let broken = Data("broken".utf8)
     try broken.write(to: store.fileURL)
-    let rejected = await controller.updateRuleDocument(CustomRuleDocument(rules: []))
+    let newSession = makeControllerWithCustomRules(
+      store: store, settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
+    let rejected = await newSession.updateRuleDocument(CustomRuleDocument(rules: []))
     XCTAssertEqual(rejected, .persistenceFailed)
     XCTAssertEqual(try Data(contentsOf: store.fileURL), broken)
     XCTAssertEqual(agent.registerCount, 0)
@@ -155,14 +271,28 @@ extension ProxyRuntimeControllerTests {
     agent.onRegister = {
       try? FileManager.default.removeItem(at: runtimeStore.runtimeStatusFileURL)
     }
-    let result = await controller.updateRuleDocument(
+    let result = await controller.commitRuleDocument(
       CustomRuleDocument(rules: [rule], disabledIdentities: [rule.identity]))
-    guard case .recoveryFailed(let detail, let rulesRestored) = result else {
+    guard case .recoveryFailed(let detail, let rulesRestored) = result.outcome else {
       return XCTFail("Expected actual recovery failure, got \(result)")
     }
     XCTAssertTrue(rulesRestored)
+    XCTAssertEqual(result.document, CustomRuleDocument(rules: [rule]))
     XCTAssertFalse(detail.isEmpty)
     XCTAssertEqual(try store.loadDocument().disabledIdentities, [])
     XCTAssertNotEqual(controller.state, .running)
+  }
+}
+
+private final class PausedRuntimeRuleSource: @unchecked Sendable {
+  let started: XCTestExpectation
+  let release = DispatchSemaphore(value: 0)
+  init(started: XCTestExpectation) { self.started = started }
+  func load(_ source: RulesSource) -> RuleSnapshot {
+    if source == .geolocationCN {
+      started.fulfill()
+      release.wait()
+    }
+    return rulesFixture(source)
   }
 }

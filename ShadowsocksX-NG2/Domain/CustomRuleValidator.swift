@@ -284,6 +284,19 @@ enum CustomRuleValidator {
     builtIn: [ProxyRule] = [],
     defaultAction: RuleDefaultAction
   ) -> CustomRuleValidationResult {
+    let validated = hardValidation(custom: custom)
+    let candidates = builtIn + validated.accepted
+    let expressed =
+      defaultAction == .proxyWhenUnmatched
+      ? candidates.filter { $0.action == .direct } : candidates
+    let analysis = RuleAnalysis(rules: expressed, subjects: validated.accepted)
+    return CustomRuleValidationResult(
+      accepted: validated.accepted, rejected: validated.rejected,
+      relationships: analysis.relationships)
+  }
+
+  /// Persistence and ACL compilation need blocking validation, not browsing explanations.
+  static func hardValidation(custom: [CustomRule]) -> CustomRuleValidationResult {
     var accepted: [ProxyRule] = []
     var rejected: [RejectedCustomRule] = []
     let counts = Dictionary(grouping: custom, by: \.contentToken).mapValues(\.count)
@@ -300,13 +313,7 @@ enum CustomRuleValidator {
         accepted.append(rule.proxyRule)
       }
     }
-    let candidates = builtIn + accepted
-    let expressed =
-      defaultAction == .proxyWhenUnmatched
-      ? candidates.filter { $0.action == .direct } : candidates
-    let analysis = RuleAnalysis(rules: expressed, subjects: accepted)
-    return CustomRuleValidationResult(
-      accepted: accepted, rejected: rejected, relationships: analysis.relationships)
+    return CustomRuleValidationResult(accepted: accepted, rejected: rejected)
   }
 
   /// 单条规则的固定本地冲突检查（保存与编译共用）。
@@ -326,4 +333,51 @@ enum CustomRuleValidator {
       explanation: "应用固定的本地绕过规则优先；这些本地目标不会经代理")
   }
 
+}
+
+/// Pure runtime projection; browsing uses all sources, this projection uses only
+/// the source subset expressed by the current ACL skeleton.
+enum RuleRuntimeCompiler {
+  struct Input: Sendable {
+    let source: SslocalRuntimeDocument
+    let mode: ProxyMode
+    let defaultAction: RuleDefaultAction
+    let document: CustomRuleDocument?
+    let builtIn: [ProxyRule]
+    let aclURL: URL
+  }
+  static func validation(
+    document: CustomRuleDocument, builtIn: [ProxyRule], defaultAction: RuleDefaultAction
+  ) -> CustomRuleValidationResult {
+    let custom = document.rules.filter { !document.disabledIdentities.contains($0.identity) }
+    let enabled = builtIn.filter { !document.disabledIdentities.contains($0.identity) }
+    let validated = CustomRuleValidator.validate(
+      custom: custom, builtIn: enabled, defaultAction: defaultAction)
+    return CustomRuleValidationResult(
+      accepted: RuleAnalysis.runtimeCandidates(
+        enabled + validated.accepted, defaultAction: defaultAction),
+      rejected: validated.rejected, relationships: validated.relationships)
+  }
+
+  static func compile(_ input: Input) -> SslocalRuntimeDocument {
+    let source = input.source
+    let mode = input.mode
+    let defaultAction = input.defaultAction
+    let document = input.document
+    let builtIn = input.builtIn
+    let aclURL = input.aclURL
+    switch mode {
+    case .direct: return source.replacingACL(.direct(at: aclURL))
+    case .global: return source.replacingACL(.global(at: aclURL))
+    case .rule:
+      let document = document ?? CustomRuleDocument(rules: [])
+      let custom = document.rules.filter { !document.disabledIdentities.contains($0.identity) }
+      let enabled = builtIn.filter { !document.disabledIdentities.contains($0.identity) }
+      let validated = CustomRuleValidator.hardValidation(custom: custom)
+      let candidates = RuleAnalysis.runtimeCandidates(
+        enabled + validated.accepted, defaultAction: defaultAction)
+      return source.replacingACL(
+        .rule(at: aclURL, defaultAction: defaultAction, rules: candidates))
+    }
+  }
 }

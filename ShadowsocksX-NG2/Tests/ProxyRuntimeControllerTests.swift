@@ -97,7 +97,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     // 漂移重注的注销-重注间隔与用例无关，缩短保持套件快速。
     helperRefreshDelayNanoseconds: UInt64 = 10_000_000,
     processIsAlive: @escaping @Sendable (Int32) -> Bool = { $0 == 42 },
-    customRuleStore: CustomRuleStore? = nil
+    customRuleStore: CustomRuleStore? = nil,
+    ruleSnapshots: BuiltinRuleSnapshots? = nil
   ) -> ProxyRuntimeController {
     agent.setStatus(agentStatus)
     let runtimeFileStore = RuntimeFileStore(fileURL: runtime.contract)
@@ -127,6 +128,7 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       customRuleStore: customRuleStore
         ?? CustomRuleStore(fileURL: runtime.directory.appendingPathComponent("custom-rules.json")),
       appBundle: AppArtifact.bundle,
+      ruleSnapshots: ruleSnapshots,
       settingsRestore: restored,
       agent: agent,
       probe: probe,

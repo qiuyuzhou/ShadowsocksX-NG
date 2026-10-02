@@ -7,28 +7,36 @@ struct RulesCollection: Sendable {
   let sources: [RulesSourceSnapshot]
   let issues: [RulesPageSnapshot.Issue]
   let userDocument: CustomRuleDocument?
+  fileprivate let builtinInput: RulesCollectionInput
 
   static func load(
     custom loadCustom: () throws -> [CustomRule],
     builtin loadBuiltin: (RulesSource) throws -> RuleSnapshot,
     document loadDocument: (() throws -> CustomRuleDocument)? = nil
   ) -> RulesCollection {
-    var input = RulesCollectionInput()
-    input.readCustom { try loadDocument?() ?? CustomRuleDocument(rules: loadCustom()) }
+    var builtin = RulesCollectionInput()
     for source in [RulesSource.geolocationCN, .chinaIPv4, .gfwlist] {
-      input.readBuiltin(source, using: loadBuiltin)
+      builtin.readBuiltin(source, using: loadBuiltin)
     }
-    return input.collection()
+    var input = builtin
+    input.readCustom { try loadDocument?() ?? CustomRuleDocument(rules: loadCustom()) }
+    return input.collection(builtinInput: builtin)
+  }
+
+  func replacingUserDocument(_ document: CustomRuleDocument) -> RulesCollection {
+    var input = builtinInput
+    input.readCustom { document }
+    return input.collection(builtinInput: builtinInput)
   }
 }
 
-private struct RulesCandidate {
+private struct RulesCandidate: Sendable {
   let rule: ProxyRule
   let source: RulesSource
   let customID: UUID?
 }
 
-private struct RulesCollectionInput {
+private struct RulesCollectionInput: Sendable {
   var userDocument: CustomRuleDocument?
   var disabled: Set<RuleIdentity> = []
   var entries: [RulesCandidate] = []
@@ -42,16 +50,16 @@ private struct RulesCollectionInput {
       let custom = document.rules
       disabled = document.disabledIdentities
       userDocument = document
-      let validation = CustomRuleValidator.validate(
-        custom: custom, defaultAction: .directWhenUnmatched)
+      let validation = CustomRuleValidator.hardValidation(custom: custom)
       guard validation.rejected.isEmpty else {
         throw CustomRuleStoreError.corrupt(detail: "Invalid custom rule collection")
       }
       entries += custom.map { RulesCandidate(rule: $0.proxyRule, source: .custom, customID: $0.id) }
-      sources.append(
-        RulesSourceSnapshot(id: .custom, count: custom.count, metadata: nil, conversionReport: nil))
+      sources.insert(
+        RulesSourceSnapshot(id: .custom, count: custom.count, metadata: nil, conversionReport: nil),
+        at: 0)
     } catch {
-      issues.append(.userDocument(String(describing: error)))
+      issues.insert(.userDocument(String(describing: error)), at: 0)
     }
   }
 
@@ -88,7 +96,7 @@ private struct RulesCollectionInput {
     }
   }
 
-  mutating func collection() -> RulesCollection {
+  mutating func collection(builtinInput: RulesCollectionInput) -> RulesCollection {
     let fixedSource = RuleSourceIdentity(kind: .custom, upstreamVersion: "fixed", label: "fixed")
     let fixedMatches = RuleCoverage.fixedLocalMatches
     entries += fixedMatches.map {
@@ -137,7 +145,8 @@ private struct RulesCollectionInput {
       } + metadataTokens.sorted() + issues.map { String(describing: $0) }
     return RulesCollection(
       version: String(ProxyACLDocument.digest(tokens.sorted().joined(separator: "\n")).prefix(16)),
-      rows: rows, sources: sources, issues: issues, userDocument: userDocument)
+      rows: rows, sources: sources, issues: issues, userDocument: userDocument,
+      builtinInput: builtinInput)
   }
   private func row(
     identity: RuleIdentity, entries: [RulesCandidate], index: RulesOverlapIndex

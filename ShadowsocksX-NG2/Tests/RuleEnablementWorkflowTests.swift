@@ -4,6 +4,27 @@ import XCTest
 
 @MainActor
 final class RuleEnablementWorkflowTests: XCTestCase {
+  func testSuccessfulCommitDoesNotReadSourcesOrUserDocumentAgain() async throws {
+    let reads = RulesReadCounts()
+    let rule = CustomRule(action: .proxy, match: .domainExact("saved.example"))
+    let workflow = RulesWorkflow(
+      loadDocument: {
+        reads.recordDocument()
+        return CustomRuleDocument(rules: [rule])
+      },
+      commitDocument: { RuleDocumentCommit(outcome: .saved, document: $0) },
+      loadBuiltin: { source in
+        reads.recordSource()
+        return rulesFixture(source)
+      })
+    await workflow.refresh()
+    await workflow.setEnabled(false, identities: [rule.identity])
+    XCTAssertEqual(reads.documentCount, 1)
+    XCTAssertEqual(reads.sourceCount, 3)
+    XCTAssertFalse(
+      try XCTUnwrap(workflow.snapshot.rows.first { $0.identity == rule.identity }).isEnabled)
+  }
+
   func testInFlightBatchRejectsRepeatedCommandAndPublishesProgress() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -23,10 +44,11 @@ final class RuleEnablementWorkflowTests: XCTestCase {
         }
         do {
           try store.saveDocument(document)
-          return .saved
+          return RuleDocumentCommit(outcome: .saved, document: document)
         } catch {
           XCTFail("Fixture save failed: \(error)")
-          return .persistenceFailed
+          return RuleDocumentCommit(
+            outcome: .persistenceFailed, document: try? store.loadDocument())
         }
       },
       loadBuiltin: { rulesFixture($0) })
@@ -50,7 +72,7 @@ final class RuleEnablementWorkflowTests: XCTestCase {
     XCTAssertFalse(workflow.snapshot.rows.first { $0.identity == rule.identity }!.isEnabled)
   }
 
-  func testFailedSaveKeepsSnapshotAndExternalDocumentChangeRejectsStaleCommand() async throws {
+  func testFailedSaveKeepsSnapshotWithoutReload() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = CustomRuleStore(fileURL: directory.appendingPathComponent("rules.json"))
@@ -61,7 +83,7 @@ final class RuleEnablementWorkflowTests: XCTestCase {
       loadDocument: { try store.loadDocument() },
       commitDocument: { _ in
         commits += 1
-        return .persistenceFailed
+        return RuleDocumentCommit(outcome: .persistenceFailed, document: try? store.loadDocument())
       },
       loadBuiltin: { rulesFixture($0) })
     await workflow.refresh()
@@ -70,17 +92,16 @@ final class RuleEnablementWorkflowTests: XCTestCase {
     XCTAssertEqual(workflow.snapshot.commitOutcome, .persistenceFailed)
     XCTAssertEqual(workflow.snapshot.version, version)
     XCTAssertTrue(workflow.snapshot.rows.first { $0.identity == rule.identity }!.isEnabled)
-    let selected = try XCTUnwrap(workflow.snapshot.rows.first { $0.identity == rule.identity }?.id)
-    workflow.select([selected])
-    try store.saveDocument(CustomRuleDocument(rules: [rule], disabledIdentities: [rule.identity]))
-    await workflow.setEnabled(false, identities: [rule.identity])
-    XCTAssertEqual(workflow.snapshot.commitOutcome, .versionConflict)
     XCTAssertEqual(commits, 1)
-    XCTAssertEqual(workflow.snapshot.version, version)
-    XCTAssertEqual(workflow.snapshot.selection, [selected])
-    XCTAssertTrue(workflow.snapshot.rows.first { $0.identity == rule.identity }!.isEnabled)
-    await workflow.refresh()
-    XCTAssertTrue(workflow.snapshot.selection.isEmpty)
-    XCTAssertFalse(workflow.snapshot.rows.first { $0.identity == rule.identity }!.isEnabled)
   }
+}
+
+private final class RulesReadCounts: @unchecked Sendable {
+  private let lock = NSLock()
+  private var documents = 0
+  private var sources = 0
+  func recordDocument() { lock.withLock { documents += 1 } }
+  func recordSource() { lock.withLock { sources += 1 } }
+  var documentCount: Int { lock.withLock { documents } }
+  var sourceCount: Int { lock.withLock { sources } }
 }

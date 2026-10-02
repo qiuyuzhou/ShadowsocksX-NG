@@ -16,6 +16,7 @@ private struct LaunchHealthTimeout {
   let expectedDigest: String?
   let endpointFailure: LocalEndpointFailure?
   let generation: Int
+  let preparation: Int
   let preserveProxyOnFailure: Bool
 }
 
@@ -30,6 +31,7 @@ extension ProxyRuntimeController {
     preserveProxyOnFailure: Bool = false
   ) async -> Bool {
     let generation = flowGeneration
+    let preparation = runtimePreparationGeneration
     let expectedDigest = requiresReceipt ? document.deploymentSHA256 : nil
     guard !requiresReceipt || expectedDigest != nil else {
       return await reportRuntimeFileFailure(preserveProxyOnFailure: preserveProxyOnFailure)
@@ -38,13 +40,19 @@ extension ProxyRuntimeController {
     let deadline = Date().addingTimeInterval(launchHealthTimeoutSeconds)
     var endpointFailure: LocalEndpointFailure?
     while Date() < deadline {
-      guard generation == flowGeneration else { return false }
-      switch await launchHealthAttempt(document, expectedDigest: expectedDigest) {
+      guard generation == flowGeneration, preparation == runtimePreparationGeneration else {
+        return false
+      }
+      let attempt = await launchHealthAttempt(document, expectedDigest: expectedDigest)
+      guard generation == flowGeneration, preparation == runtimePreparationGeneration else {
+        return false
+      }
+      switch attempt {
       case .ready(let receipt):
         return await finishHealthyLaunch(
           document,
           receipt: receipt,
-          generation: generation,
+          generation: (generation, preparation),
           convergeProxyOnSuccess: convergeProxyOnSuccess,
           preserveProxyOnFailure: preserveProxyOnFailure)
       case .retry(let endpoint):
@@ -58,7 +66,7 @@ extension ProxyRuntimeController {
       LaunchHealthTimeout(
         expectedDigest: expectedDigest,
         endpointFailure: endpointFailure,
-        generation: generation,
+        generation: generation, preparation: preparation,
         preserveProxyOnFailure: preserveProxyOnFailure))
   }
 
@@ -95,12 +103,17 @@ extension ProxyRuntimeController {
   private func finishHealthyLaunch(
     _ document: SslocalRuntimeDocument,
     receipt: RuntimeDeploymentReceipt?,
-    generation: Int,
+    generation: (flow: Int, preparation: Int),
     convergeProxyOnSuccess: Bool,
     preserveProxyOnFailure: Bool
   ) async -> Bool {
-    guard generation == flowGeneration else { return false }
+    guard generation.flow == flowGeneration,
+      generation.preparation == runtimePreparationGeneration
+    else { return false }
     await presentFirewallStatus(for: document)
+    guard generation.flow == flowGeneration,
+      generation.preparation == runtimePreparationGeneration
+    else { return false }
     if let receipt, !receiptIsCurrentAndLive(receipt) {
       return await reportAgentLost(preserveProxyOnFailure: preserveProxyOnFailure)
     }
@@ -130,7 +143,9 @@ extension ProxyRuntimeController {
   }
 
   private func reportLaunchHealthTimeout(_ timeout: LaunchHealthTimeout) async -> Bool {
-    guard timeout.generation == flowGeneration else { return false }
+    guard timeout.generation == flowGeneration,
+      timeout.preparation == runtimePreparationGeneration
+    else { return false }
     guard !timeout.preserveProxyOnFailure else { return false }
     if let expectedDigest = timeout.expectedDigest,
       !hasLiveReceipt(expectedDigest: expectedDigest)

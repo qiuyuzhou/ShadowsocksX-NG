@@ -17,7 +17,6 @@ enum CustomRuleUpdateOutcome: Equatable, Sendable {
   case recoveryFailed(detail: String, rulesRestored: Bool)
   case runtimeChanged(rulesRestored: Bool)
   case busy
-  case versionConflict
   case invalidDocument(detail: String)
 
   var isSuccess: Bool {
@@ -28,15 +27,27 @@ enum CustomRuleUpdateOutcome: Equatable, Sendable {
   }
 }
 
+/// Final persisted facts, independent of whether runtime application succeeded.
+struct RuleDocumentCommit: Sendable {
+  let outcome: CustomRuleUpdateOutcome
+  let document: CustomRuleDocument?
+}
+
 // MARK: - 自定义规则命令面
 
 extension ProxyRuntimeController {
   /// 更新自定义规则（issue #66 AC1）：校验 → 持久化 → 重编译 ACL → 完整重启。
   /// 校验拒绝时整批不落地；部署失败时回滚旧规则、旧 ACL 与旧系统代理状态。
   /// 全局和直连模式不加载自定义规则，但持久化仍然进行（切换到规则模式后生效）。
+  func commitRuleDocument(_ document: CustomRuleDocument) async -> RuleDocumentCommit {
+    let previous = try? ruleDocuments.load()
+    let outcome = await updateRuleDocument(document)
+    return RuleDocumentCommit(outcome: outcome, document: ruleDocuments.current ?? previous)
+  }
+
   func updateCustomRules(_ rules: [CustomRule]) async -> CustomRuleUpdateOutcome {
     do {
-      let previous = try customRuleStore.loadDocument()
+      let previous = try ruleDocuments.load()
       return await updateRuleDocument(
         CustomRuleDocument(rules: rules, disabledIdentities: previous.disabledIdentities))
     } catch { return .persistenceFailed }
@@ -57,8 +68,8 @@ extension ProxyRuntimeController {
     let snapshot = ModeTransitionSnapshotForRules(
       document: lastDocument ?? runtimeFileStore.loadDocument(), state: state)
     do {
-      previous = try customRuleStore.loadDocument()
-      try customRuleStore.saveDocument(document)
+      previous = try ruleDocuments.load()
+      try ruleDocuments.save(document)
     } catch {
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
       return .persistenceFailed
@@ -79,36 +90,31 @@ extension ProxyRuntimeController {
 
     let nextDocument: SslocalRuntimeDocument
     do {
-      nextDocument = try runtimeDocument(currentDocument, for: proxyMode)
+      nextDocument = try await runtimeDocument(currentDocument, for: proxyMode)
+    } catch RulePreparationError.superseded {
+      return .runtimeChanged(rulesRestored: false)
     } catch {
-      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-      do {
-        try customRuleStore.saveDocument(previousRules)
-        return .rolledBack
-      } catch {
-        return .recoveryFailed(detail: String(describing: error), rulesRestored: false)
-      }
+      return restoreRulesAfterPreparationFailure(previousRules, error: error)
     }
     guard nextDocument.aclRuntime != currentDocument.aclRuntime else {
       return .runtimeUnchanged
     }
 
+    let preparation = runtimePreparationGeneration
     modeChangeGeneration += 1
     let generation = modeChangeGeneration
     let runtimeGeneration = flowGeneration + 1
     lastDocument = nextDocument
     state = .starting
     guard await execute(.run(nextDocument), document: nextDocument) else {
-      guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
-        settings.agentEnabled
+      guard ruleDeploymentIsCurrent(preparation, generation, runtimeGeneration)
       else {
         return .runtimeChanged(rulesRestored: false)
       }
       return await restoreCustomRules(previousRules, snapshot: snapshot)
     }
 
-    guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
-      settings.agentEnabled
+    guard ruleDeploymentIsCurrent(preparation, generation, runtimeGeneration)
     else {
       return .runtimeChanged(rulesRestored: false)
     }
@@ -117,8 +123,7 @@ extension ProxyRuntimeController {
       requiresReceipt: true,
       convergeProxyOnSuccess: false,
       preserveProxyOnFailure: true)
-    guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
-      settings.agentEnabled
+    guard ruleDeploymentIsCurrent(preparation, generation, runtimeGeneration)
     else {
       return .runtimeChanged(rulesRestored: false)
     }
@@ -128,12 +133,30 @@ extension ProxyRuntimeController {
 
     lastDocument = nextDocument
     await convergeSystemProxy()
-    guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
-      settings.agentEnabled
+    guard ruleDeploymentIsCurrent(preparation, generation, runtimeGeneration)
     else {
       return .runtimeChanged(rulesRestored: false)
     }
     return .applied
+  }
+
+  private func restoreRulesAfterPreparationFailure(
+    _ previousRules: CustomRuleDocument, error: Error
+  ) -> CustomRuleUpdateOutcome {
+    RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+    do {
+      try ruleDocuments.save(previousRules)
+      return .rolledBack
+    } catch {
+      return .recoveryFailed(detail: String(describing: error), rulesRestored: false)
+    }
+  }
+
+  private func ruleDeploymentIsCurrent(
+    _ preparation: Int, _ mode: Int, _ runtime: Int
+  ) -> Bool {
+    preparation == runtimePreparationGeneration && mode == modeChangeGeneration
+      && runtime == flowGeneration && settings.agentEnabled
   }
 
   /// 保存前校验（issue #66 AC2）：固定本地冲突与重复整批拒绝并返回可解释原因。
@@ -141,8 +164,7 @@ extension ProxyRuntimeController {
   func validateCustomRulesForPersistence(_ rules: [CustomRule]) -> (
     acceptedRules: [CustomRule], rejected: [RejectedCustomRule]
   ) {
-    let base = CustomRuleValidator.validate(
-      custom: rules, defaultAction: .proxyWhenUnmatched)
+    let base = CustomRuleValidator.hardValidation(custom: rules)
     let hardRejected = base.rejected.filter {
       $0.reason == .conflictsWithFixedLocalScope || $0.reason == .duplicate
     }
@@ -157,7 +179,7 @@ extension ProxyRuntimeController {
   ) async -> CustomRuleUpdateOutcome {
     var failures: [String] = []
     do {
-      try customRuleStore.saveDocument(previousRules)
+      try ruleDocuments.save(previousRules)
     } catch {
       failures.append(String(describing: error))
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
@@ -172,12 +194,12 @@ extension ProxyRuntimeController {
       return .runtimeChanged(rulesRestored: rulesRestored)
     }
     let modeGeneration = modeChangeGeneration
+    let preparation = runtimePreparationGeneration
     let runtimeGeneration = flowGeneration + 1
     lastDocument = previousDocument
     state = .starting
     let executed = await execute(.run(previousDocument), document: previousDocument)
-    guard modeGeneration == modeChangeGeneration, runtimeGeneration == flowGeneration,
-      settings.agentEnabled
+    guard ruleDeploymentIsCurrent(preparation, modeGeneration, runtimeGeneration)
     else {
       return .runtimeChanged(rulesRestored: rulesRestored)
     }
@@ -188,8 +210,7 @@ extension ProxyRuntimeController {
     }
     let healthy = await presentLaunchHealth(
       previousDocument, requiresReceipt: true, convergeProxyOnSuccess: false)
-    guard modeGeneration == modeChangeGeneration, runtimeGeneration == flowGeneration,
-      settings.agentEnabled
+    guard ruleDeploymentIsCurrent(preparation, modeGeneration, runtimeGeneration)
     else {
       return .runtimeChanged(rulesRestored: rulesRestored)
     }

@@ -69,3 +69,27 @@ struct CustomRuleStore {
     return try encoder.encode(document)
   }
 }
+
+/// One saved-document owner per app process. Writes and rollback update the same
+/// fact only after atomic persistence succeeds; ordinary commands do not reread it.
+@MainActor
+final class RuleDocumentSession {
+  private let store: CustomRuleStore
+  private(set) var current: CustomRuleDocument?
+  private(set) var revision = 0
+
+  init(store: CustomRuleStore) { self.store = store }
+
+  func load() throws -> CustomRuleDocument {
+    if let current { return current }
+    let loaded = try store.loadDocument()
+    current = loaded
+    return loaded
+  }
+
+  func save(_ document: CustomRuleDocument) throws {
+    try store.saveDocument(document)
+    if current != document { revision += 1 }
+    current = document
+  }
+}

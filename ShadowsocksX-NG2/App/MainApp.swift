@@ -157,10 +157,10 @@ private struct AppComposition {
     let workspaceRoute = WorkspaceRoute()
     let silentLaunch = SilentLaunchController(store: dependencies.silentLaunchStore)
     let expansion = CatalogExpansionState()
-    let rulesStore = controller.customRuleStore
     let rulesWorkflow = RulesWorkflow(
-      loadDocument: { try rulesStore.loadDocument() },
-      commitDocument: { await controller.updateRuleDocument($0) })
+      loadDocument: { try controller.ruleDocuments.load() },
+      commitDocument: { await controller.commitRuleDocument($0) },
+      builtinSnapshots: controller.ruleSnapshots)
     let workspaceContent = MainWindowView(
       rulesWorkflow: rulesWorkflow,
       route: workspaceRoute,

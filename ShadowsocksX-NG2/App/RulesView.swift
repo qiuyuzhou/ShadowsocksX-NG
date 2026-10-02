@@ -56,8 +56,10 @@ struct RulesView: View {
         VStack(spacing: 10) {
           Label(RulesCopy.text("集合不完整"), systemImage: "exclamationmark.triangle")
           RulesCollectionIssuesView(issues: workflow.snapshot.issues)
-          Button(RulesCopy.text("刷新规则")) { Task { await workflow.refresh() } }
-            .disabled(workflow.snapshot.isCommitting)
+          Button(RulesCopy.text("刷新规则")) {
+            Task { await workflow.refresh(retryFailedSources: true) }
+          }
+          .disabled(workflow.snapshot.isCommitting)
         }.padding()
       }
     }

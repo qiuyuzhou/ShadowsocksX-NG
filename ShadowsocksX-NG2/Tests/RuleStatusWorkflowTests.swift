@@ -5,23 +5,23 @@ import XCTest
 
 @MainActor
 final class RuleStatusWorkflowTests: XCTestCase {
-  func testSavedRulesWithFailedReloadKeepOldRowsAndRequireExplicitRefresh() async throws {
+  func testUnavailableFinalDocumentKeepsRowsAndRequiresExplicitRetry() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = CustomRuleStore(fileURL: directory.appendingPathComponent("rules.json"))
     let rule = CustomRule(action: .proxy, match: .domainExact("example.net"))
     try store.save([rule])
-    let reloadStarted = expectation(description: "failed reload")
-    let gate = RuleDocumentReloadGate(store: store, started: reloadStarted, failureOnReload: true)
     let workflow = RulesWorkflow(
-      loadDocument: { try gate.load() },
-      commitDocument: { document in saveFixture(document, to: store, outcome: .applied) },
+      loadDocument: { try store.loadDocument() },
+      commitDocument: { document in
+        _ = saveFixture(document, to: store, outcome: .applied)
+        return RuleDocumentCommit(outcome: .applied, document: nil)
+      },
       feedbackDelay: { XCTFail("An incomplete collection must not start the success timer") },
       loadBuiltin: { rulesFixture($0) })
     await workflow.refresh()
     let rows = workflow.snapshot.rows
     await workflow.setEnabled(false, identities: [rule.identity])
-    await fulfillment(of: [reloadStarted], timeout: 3)
     XCTAssertEqual(workflow.snapshot.operationStatus, .collectionIncomplete)
     XCTAssertEqual(workflow.snapshot.rows, rows)
     XCTAssertFalse(workflow.snapshot.isComplete)
@@ -66,25 +66,25 @@ final class RuleStatusWorkflowTests: XCTestCase {
     withExtendedLifetime(observation) {}
   }
 
-  func testCollectionRefreshRemainsOneBusyOperationAndAllowsBrowsing() async throws {
+  func testCommitRemainsOneBusyOperationAndAllowsBrowsing() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = CustomRuleStore(fileURL: directory.appendingPathComponent("rules.json"))
     let rule = CustomRule(action: .proxy, match: .domainExact("example.net"))
     try store.save([rule])
     let reloadStarted = expectation(description: "collection reload paused")
-    let gate = RuleDocumentReloadGate(store: store, started: reloadStarted)
-    defer { gate.release.signal() }
+    let gate = RuleFeedbackClock(started: reloadStarted)
     let workflow = RulesWorkflow(
-      loadDocument: { try gate.load() },
+      loadDocument: { try store.loadDocument() },
       commitDocument: { document in
-        saveFixture(document, to: store, outcome: .runtimeUnchanged)
+        await gate.wait()
+        return saveFixture(document, to: store, outcome: .runtimeUnchanged)
       },
       loadBuiltin: { rulesFixture($0) })
     await workflow.refresh()
     let pending = Task { await workflow.setEnabled(false, identities: [rule.identity]) }
     await fulfillment(of: [reloadStarted], timeout: 3)
-    XCTAssertTrue(workflow.snapshot.isLoading)
+    XCTAssertFalse(workflow.snapshot.isLoading)
     XCTAssertEqual(workflow.snapshot.operationStatus, .updating)
     XCTAssertNil(workflow.snapshot.commitFeedback)
     XCTAssertTrue(workflow.snapshot.rows.first { $0.identity == rule.identity }!.isEnabled)
@@ -92,7 +92,7 @@ final class RuleStatusWorkflowTests: XCTestCase {
     workflow.query(query)
     let row = try XCTUnwrap(workflow.snapshot.rows.first)
     workflow.select([row.id])
-    gate.release.signal()
+    await gate.resume()
     await pending.value
     XCTAssertEqual(workflow.snapshot.query, query)
     XCTAssertEqual(workflow.snapshot.selection, [row.id])
@@ -114,7 +114,8 @@ final class RuleStatusWorkflowTests: XCTestCase {
       loadDocument: { try store.loadDocument() },
       commitDocument: { document in
         commitState.outcome.isSuccess
-          ? saveFixture(document, to: store, outcome: commitState.outcome) : commitState.outcome
+          ? saveFixture(document, to: store, outcome: commitState.outcome)
+          : RuleDocumentCommit(outcome: commitState.outcome, document: try? store.loadDocument())
       },
       feedbackDelay: {
         await clock.wait()
@@ -160,42 +161,14 @@ private actor RuleFeedbackClock {
   }
 }
 
-private final class RuleDocumentReloadGate: @unchecked Sendable {
-  let store: CustomRuleStore
-  let started: XCTestExpectation
-  let release = DispatchSemaphore(value: 0)
-  private let lock = NSLock()
-  private var reads = 0
-  private let failureOnReload: Bool
-
-  init(store: CustomRuleStore, started: XCTestExpectation, failureOnReload: Bool = false) {
-    self.store = store
-    self.started = started
-    self.failureOnReload = failureOnReload
-  }
-
-  func load() throws -> CustomRuleDocument {
-    let shouldPause = lock.withLock {
-      reads += 1
-      return reads == 3
-    }
-    if shouldPause {
-      started.fulfill()
-      if failureOnReload { throw CocoaError(.fileReadCorruptFile) }
-      release.wait()
-    }
-    return try store.loadDocument()
-  }
-}
-
 private func saveFixture(
   _ document: CustomRuleDocument, to store: CustomRuleStore, outcome: CustomRuleUpdateOutcome
-) -> CustomRuleUpdateOutcome {
+) -> RuleDocumentCommit {
   do {
     try store.saveDocument(document)
-    return outcome
+    return RuleDocumentCommit(outcome: outcome, document: document)
   } catch {
     XCTFail("Fixture save failed: \(error)")
-    return .persistenceFailed
+    return RuleDocumentCommit(outcome: .persistenceFailed, document: try? store.loadDocument())
   }
 }

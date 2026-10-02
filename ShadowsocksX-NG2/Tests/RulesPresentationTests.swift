@@ -15,7 +15,7 @@ final class RulesPresentationTests: XCTestCase {
     await workflow.refresh()
     XCTAssertEqual(workflow.reportSource, opened)
     XCTAssertTrue(workflow.openSourceReport(.gfwlist))
-    XCTAssertNotEqual(workflow.reportSource, opened)
+    XCTAssertEqual(workflow.reportSource, opened)
     XCTAssertTrue(workflow.openSourceReport(.chinaIPv4))
     XCTAssertEqual(workflow.reportSource?.id, .chinaIPv4)
     XCTAssertFalse(workflow.openSourceReport(.custom))

@@ -13,13 +13,20 @@ extension ProxyRuntimeController {
       guard settings.agentEnabled else {
         return .revalidated
       }
-      if runtimeAlreadyConverged(with: configuration.document) {
-        RuntimeLog.emit(.contractUnchanged)
-        return Self.syncOutcome(
-          agentState: state, systemProxyState: systemProxyState,
-          skippedServers: configuration.skippedServers)
+      do {
+        let document = try await runtimeDocument(configuration.document, for: proxyMode)
+        let preparation = runtimePreparationGeneration
+        if runtimeAlreadyConverged(with: document) {
+          RuntimeLog.emit(.contractUnchanged)
+        } else {
+          _ = await deployPrepared(document, preparation: preparation)
+        }
+      } catch RulePreparationError.superseded {
+        return .revalidated
+      } catch {
+        RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+        state = .serviceFailed(.runtimeFile)
       }
-      await deploy(configuration.document)
       return Self.syncOutcome(
         agentState: state, systemProxyState: systemProxyState,
         skippedServers: configuration.skippedServers)
@@ -49,18 +56,11 @@ extension ProxyRuntimeController {
   /// （`ProxyRuntimePlan.actions` 返回空 = 幂等跳过）：磁盘漂移或 wrapper 失踪
   /// 时动作序列自然非空，走完整 deploy 自愈。目录重校验（跳过名单、目标失效
   /// 清除）已在 `reexpand` 完成，不受此门影响。
-  private func runtimeAlreadyConverged(with sourceDocument: SslocalRuntimeDocument) -> Bool {
+  private func runtimeAlreadyConverged(with document: SslocalRuntimeDocument) -> Bool {
     switch state {
     case .running, .firewallBlocked:
       break
     case .off, .starting, .launchFailed, .requiresApproval, .serviceFailed:
-      return false
-    }
-    let document: SslocalRuntimeDocument
-    do {
-      document = try runtimeDocument(sourceDocument, for: proxyMode)
-    } catch {
-      // 规则快照缺失/损坏：交完整 deploy 如实呈现，不静默当作已收敛。
       return false
     }
     let actions = ProxyRuntimePlan.actions(

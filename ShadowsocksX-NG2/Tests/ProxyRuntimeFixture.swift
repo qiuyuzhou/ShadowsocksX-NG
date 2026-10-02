@@ -141,6 +141,7 @@ enum ProxyRuntimeFixture {
     var statusAfterRegister: LaunchAgentStatus = .registered
     /// 测试用的运行回执。生产 wrapper 对 ACL 实例需等 sslocal 绑定监听后才写。
     var onRegister: (() -> Void)?
+    var onUnregister: (() -> Void)?
     /// 可选共享事件日志（次序断言用）。
     weak var eventLog: ProxyRuntimeEventLog?
 
@@ -169,6 +170,7 @@ enum ProxyRuntimeFixture {
       unregisterCount += 1
       eventLog?.record("unregister")
       currentStatus = .notRegistered
+      onUnregister?()
     }
   }
 

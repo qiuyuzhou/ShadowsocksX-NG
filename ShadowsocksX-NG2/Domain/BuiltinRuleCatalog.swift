@@ -46,3 +46,73 @@ struct BuiltinRuleCatalog {
     snapshot.rules + snapshot.absorbed
   }
 }
+
+/// App-process source facts. Concurrent consumers share one attempt per source;
+/// successful bundled snapshots never expire, failed attempts require explicit retry.
+actor BuiltinRuleSnapshots {
+  typealias Loader = @Sendable (RulesSource) throws -> RuleSnapshot
+  private struct Attempt {
+    let id: UUID
+    let task: Task<RuleSnapshot, Error>
+  }
+  private let loader: Loader
+  private var attempts: [RulesSource: Attempt] = [:]
+  private var failures: Set<RulesSource> = []
+
+  init(bundle: Bundle = .main, loader: Loader? = nil) {
+    self.loader =
+      loader ?? { source in
+        switch source {
+        case .geolocationCN: try BuiltinRuleCatalog.loadGeolocationCN(from: bundle)
+        case .chinaIPv4: try BuiltinRuleCatalog.loadChinaIPv4(from: bundle)
+        case .gfwlist: try BuiltinRuleCatalog.loadGFWList(from: bundle)
+        case .fixed, .custom: throw RuleSnapshotError.missing
+        }
+      }
+  }
+
+  func load(_ source: RulesSource, retryFailure: Bool = false) async throws -> RuleSnapshot {
+    if retryFailure, failures.remove(source) != nil { attempts[source] = nil }
+    let attempt: Attempt
+    if let existing = attempts[source] {
+      attempt = existing
+    } else {
+      let loader = loader
+      attempt = Attempt(
+        id: UUID(),
+        task: Task.detached(priority: .userInitiated) {
+          let snapshot = try loader(source)
+          let kind: RuleSourceKind
+          switch source {
+          case .geolocationCN: kind = .geolocationCN
+          case .chinaIPv4: kind = .chinaIPv4
+          case .gfwlist: kind = .gfwlist
+          case .custom, .fixed: throw RuleSnapshotError.missing
+          }
+          guard snapshot.metadata.source.kind == kind,
+            (snapshot.rules + snapshot.absorbed).allSatisfy({ $0.source.kind == kind })
+          else { throw RuleSnapshotError.corrupt(detail: "Unexpected rule source") }
+          return snapshot
+        })
+      attempts[source] = attempt
+    }
+    do {
+      return try await attempt.task.value
+    } catch {
+      if attempts[source]?.id == attempt.id { failures.insert(source) }
+      throw error
+    }
+  }
+
+  func browsingSources(retryFailures: Bool = false) async -> [RulesSource: Result<
+    RuleSnapshot, Error
+  >] {
+    var results: [RulesSource: Result<RuleSnapshot, Error>] = [:]
+    for source in [RulesSource.geolocationCN, .chinaIPv4, .gfwlist] {
+      do { results[source] = .success(try await load(source, retryFailure: retryFailures)) } catch {
+        results[source] = .failure(error)
+      }
+    }
+    return results
+  }
+}

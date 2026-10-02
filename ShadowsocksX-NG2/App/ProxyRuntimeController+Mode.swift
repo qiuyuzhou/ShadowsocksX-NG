@@ -62,7 +62,9 @@ extension ProxyRuntimeController {
 
     let nextDocument: SslocalRuntimeDocument
     do {
-      nextDocument = try runtimeDocument(currentDocument, for: mode)
+      nextDocument = try await runtimeDocument(currentDocument, for: mode)
+    } catch RulePreparationError.superseded {
+      return
     } catch {
       // 快照缺失/损坏：不静默退化，恢复旧模式与旧子选项。
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
@@ -79,102 +81,118 @@ extension ProxyRuntimeController {
 
     await deployModeTransition(
       nextDocument, snapshot: snapshot.resolvingDocument(currentDocument),
-      generation: generation)
+      generation: generation, preparation: runtimePreparationGeneration)
   }
 
+  enum RulePreparationError: Error { case superseded }
+
+  private struct RulePreparationTicket {
+    let generation: Int
+    let flow: Int
+    let modeGeneration: Int
+    let settings: ProxySettings
+    let target: NodeID?
+    let ruleRevision: Int?
+  }
+
+  /// Capture mutable facts before leaving the UI actor. A stale task may not
+  /// mutate runtime state or write a contract, even when its calculation fails.
   func runtimeDocument(
-    _ document: SslocalRuntimeDocument,
-    for mode: ProxyMode
-  ) throws -> SslocalRuntimeDocument {
-    switch mode {
-    case .direct:
-      return document.replacingACL(.direct(at: runtimeFileStore.aclFileURL))
-    case .global:
-      return document.replacingACL(.global(at: runtimeFileStore.aclFileURL))
-    case .rule:
-      let candidates = try ruleModeCandidateRules()
-      return document.replacingACL(
-        .rule(
-          at: runtimeFileStore.aclFileURL,
-          defaultAction: settings.ruleDefaultAction,
-          rules: candidates))
+    _ source: SslocalRuntimeDocument, for mode: ProxyMode
+  ) async throws -> SslocalRuntimeDocument {
+    runtimePreparationGeneration += 1
+    let ticket = RulePreparationTicket(
+      generation: runtimePreparationGeneration, flow: flowGeneration,
+      modeGeneration: modeChangeGeneration, settings: settings, target: activeTargetID,
+      ruleRevision: mode == .rule ? ruleDocuments.revision : nil)
+    do {
+      let user = mode == .rule ? try ruleDocuments.load() : nil
+      let builtIn =
+        mode == .rule ? try await runtimeBuiltinRules(ticket.settings.ruleDefaultAction) : []
+      let aclURL = runtimeFileStore.aclFileURL
+      let result = await Task.detached(priority: .userInitiated) {
+        RuleRuntimeCompiler.compile(
+          .init(
+            source: source, mode: mode, defaultAction: ticket.settings.ruleDefaultAction,
+            document: user, builtIn: builtIn, aclURL: aclURL))
+      }.value
+      guard preparationIsCurrent(ticket) else { throw RulePreparationError.superseded }
+      return result
+    } catch {
+      guard preparationIsCurrent(ticket) else { throw RulePreparationError.superseded }
+      throw error
     }
   }
 
-  /// 规则模式候选按默认动作取对应来源（issue #65/#66）：「未匹配时代理」用
-  /// 中国直连候选；「未匹配时直连」用 GFWList 代理候选。两种默认动作不把
-  /// 全部内置来源无条件并集。自定义规则与对应内置来源合并（issue #66）；
-  /// 保留可表达自定义条目，并经 `ruleModeValidation` 返回覆盖关系。
-  /// 全局和直连模式不加载自定义规则（它们不调用本方法）。
-  func ruleModeCandidateRules() throws -> [ProxyRule] {
-    try ruleModeValidation().accepted
+  private func preparationIsCurrent(_ ticket: RulePreparationTicket) -> Bool {
+    ticket.generation == runtimePreparationGeneration && ticket.flow == flowGeneration
+      && ticket.modeGeneration == modeChangeGeneration
+      && ticket.settings.listen == settings.listen
+      && ticket.settings.preferredMode == settings.preferredMode
+      && ticket.settings.ruleDefaultAction == settings.ruleDefaultAction
+      && ticket.settings.agentEnabled == settings.agentEnabled
+      && ticket.target == activeTargetID
+      && (ticket.ruleRevision == nil || ticket.ruleRevision == ruleDocuments.revision)
   }
 
-  /// 规则模式的完整有效候选、硬拒绝项与当前 ACL 骨架下的覆盖说明。
-  func ruleModeValidation() throws -> CustomRuleValidationResult {
-    let document = try customRuleStore.loadDocument()
-    let custom = document.rules.filter { !document.disabledIdentities.contains($0.identity) }
-    switch settings.ruleDefaultAction {
+  private func runtimeBuiltinRules(_ action: RuleDefaultAction) async throws -> [ProxyRule] {
+    switch action {
     case .proxyWhenUnmatched:
-      let builtIn = try chinaDirectRules().filter {
-        !document.disabledIdentities.contains($0.identity)
-      }
-      let validated = CustomRuleValidator.validate(
-        custom: custom, builtIn: builtIn, defaultAction: .proxyWhenUnmatched)
-      return CustomRuleValidationResult(
-        accepted: RuleAnalysis.runtimeCandidates(
-          builtIn + validated.accepted, defaultAction: settings.ruleDefaultAction),
-        rejected: validated.rejected,
-        relationships: validated.relationships)
+      let geolocation = try await ruleSnapshots.load(.geolocationCN)
+      let china = try await ruleSnapshots.load(.chinaIPv4)
+      return await Task.detached(priority: .userInitiated) {
+        BuiltinRuleCatalog.chinaDirectRules(from: [geolocation, china])
+      }.value
     case .directWhenUnmatched:
-      let builtIn = try gfwlistRules().filter { !document.disabledIdentities.contains($0.identity) }
-      let validated = CustomRuleValidator.validate(
-        custom: custom, builtIn: builtIn, defaultAction: .directWhenUnmatched)
-      return CustomRuleValidationResult(
-        accepted: RuleAnalysis.runtimeCandidates(
-          builtIn + validated.accepted, defaultAction: settings.ruleDefaultAction),
-        rejected: validated.rejected,
-        relationships: validated.relationships)
+      let snapshot = try await ruleSnapshots.load(.gfwlist)
+      return await Task.detached(priority: .userInitiated) {
+        BuiltinRuleCatalog.gfwlistRules(from: snapshot)
+      }.value
     }
   }
 
-  /// 内置中国直连候选：geolocation-cn 域名 + china-operator-ip IPv4 CIDR
-  /// （issue #63/#64）。快照缺失/损坏/版本不匹配时抛错，调用方必须失败
-  /// 并保留旧 ACL，不得静默退化成全局（issue #63 AC4）。
-  func chinaDirectRules() throws -> [ProxyRule] {
-    let geolocation = try BuiltinRuleCatalog.loadGeolocationCN(from: appBundle)
-    let chinaIPv4 = try BuiltinRuleCatalog.loadChinaIPv4(from: appBundle)
-    return BuiltinRuleCatalog.chinaDirectRules(from: [geolocation, chinaIPv4])
+  func ruleModeCandidateRules() async throws -> [ProxyRule] {
+    try await ruleModeValidation().accepted
   }
 
-  /// GFWList 候选（issue #65）：可准确表达且未被更宽代理规则遮蔽的规则
-  /// （含未遮蔽例外），参与 `bypass_all` ACL 编译。
-  func gfwlistRules() throws -> [ProxyRule] {
-    BuiltinRuleCatalog.gfwlistRules(
-      from: try BuiltinRuleCatalog.loadGFWList(from: appBundle))
+  func ruleModeValidation() async throws -> CustomRuleValidationResult {
+    let document = try ruleDocuments.load()
+    let action = settings.ruleDefaultAction
+    let builtIn = try await runtimeBuiltinRules(action)
+    return await Task.detached(priority: .userInitiated) {
+      RuleRuntimeCompiler.validation(document: document, builtIn: builtIn, defaultAction: action)
+    }.value
   }
 
   private func deployModeTransition(
     _ document: SslocalRuntimeDocument,
     snapshot: ModeTransitionSnapshot,
-    generation: Int
+    generation: Int, preparation: Int
   ) async {
-    guard generation == modeChangeGeneration else { return }
+    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+      return
+    }
     lastDocument = document
     state = .starting
     guard await execute(.run(document), document: document) else {
-      guard generation == modeChangeGeneration else { return }
+      guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+        return
+      }
       await restoreModeTransition(snapshot: snapshot, generation: generation)
       return
     }
 
-    guard generation == modeChangeGeneration else { return }
+    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+      return
+    }
     let healthy = await presentLaunchHealth(
       document,
       requiresReceipt: true,
       convergeProxyOnSuccess: false,
       preserveProxyOnFailure: true)
-    guard generation == modeChangeGeneration else { return }
+    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+      return
+    }
     guard healthy else {
       await restoreModeTransition(snapshot: snapshot, generation: generation)
       return
@@ -188,6 +206,7 @@ extension ProxyRuntimeController {
     snapshot: ModeTransitionSnapshot,
     generation: Int
   ) async {
+    let preparation = runtimePreparationGeneration
     // 两个调用点都经 resolvingDocument 补齐文档；防御性解包失败即无事可做。
     guard let previousDocument = snapshot.document else { return }
     let restoredSettings = restoredSettings(for: snapshot)
@@ -198,7 +217,9 @@ extension ProxyRuntimeController {
       persistenceFailed = true
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
     }
-    guard generation == modeChangeGeneration else { return }
+    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+      return
+    }
     settings = restoredSettings
     proxyMode = snapshot.mode
     lastDocument = previousDocument
@@ -206,13 +227,17 @@ extension ProxyRuntimeController {
     guard await restoreRuntimeDocument(previousDocument, generation: generation)
     else { return }
 
-    guard generation == modeChangeGeneration else { return }
+    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+      return
+    }
     state = .starting
     let restored = await presentLaunchHealth(
       previousDocument,
       requiresReceipt: true,
       convergeProxyOnSuccess: false)
-    guard generation == modeChangeGeneration else { return }
+    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+      return
+    }
     guard restored else {
       await holdSystemProxyIntent()
       return
@@ -278,6 +303,7 @@ extension ProxyRuntimeController {
     previousDocument: SslocalRuntimeDocument,
     generation: Int
   ) async -> Bool {
+    let preparation = runtimePreparationGeneration
     switch wrapper {
     case .running(let pid):
       guard sendSignal(pid, SIGUSR1) == 0 else {
@@ -287,7 +313,9 @@ extension ProxyRuntimeController {
       }
     case .notRunning:
       guard await execute(.run(previousDocument), document: previousDocument) else {
-        guard generation == modeChangeGeneration else { return false }
+        guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+          return false
+        }
         await holdSystemProxyIntent()
         return false
       }
