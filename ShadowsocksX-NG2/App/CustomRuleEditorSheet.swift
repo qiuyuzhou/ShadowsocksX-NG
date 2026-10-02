@@ -21,16 +21,20 @@ struct CustomRuleEditorSheet: View {
       Text(RulesCopy.text(draft.editingID == nil ? "新增规则" : "编辑规则"))
         .font(.headline)
       Form {
-        Picker(RulesCopy.text("类型"), selection: $draft.kind) {
-          ForEach(CustomRuleDraft.Kind.allCases, id: \.self) { kind in
-            Text(verbatim: kind.label).tag(kind)
+        VStack(alignment: .leading, spacing: 10) {
+          Picker(RulesCopy.text("类型"), selection: $draft.kind) {
+            ForEach(CustomRuleDraft.Kind.allCases, id: \.self) { kind in
+              Text(verbatim: kind.label).tag(kind)
+            }
           }
-        }
-        TextField(RulesCopy.text("匹配内容"), text: $draft.content)
-          .autocorrectionDisabled()
-        Picker(RulesCopy.text("行动"), selection: $draft.action) {
-          Text(RulesCopy.text("代理")).tag(RuleAction.proxy)
-          Text(RulesCopy.text("直连")).tag(RuleAction.direct)
+          .pickerStyle(.segmented)
+          TextField(RulesCopy.text("匹配内容"), text: $draft.content)
+            .autocorrectionDisabled()
+          Picker(RulesCopy.text("行动"), selection: $draft.action) {
+            Text(RulesCopy.text("代理")).tag(RuleAction.proxy)
+            Text(RulesCopy.text("直连")).tag(RuleAction.direct)
+          }
+          .pickerStyle(.segmented)
         }
       }.disabled(isSaving || workflow.snapshot.isCommitting)
       ScrollView {
