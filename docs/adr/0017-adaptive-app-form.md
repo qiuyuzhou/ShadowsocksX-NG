@@ -22,3 +22,7 @@ Accepted (2026-09-29). Supersedes ADR-0016's constant menu-bar-only form. The sc
 - ⌘H hiding orders the window out without posting `willClose`, so hiding is never mistaken for closing: the current form is kept and the Dock icon stays available to unhide.
 - With silent launch on, the scene's pre-built but unpresented window triggers no policy change (not visible, never key): launches start and stay accessory until the user opens the window.
 - The preference is inline-toggled and persisted immediately; it affects only the next launch. (2026-09-29: with the UserDefaults migration the failure clause is historical — `UserDefaults.set` reports no failure, so persistence is best-effort and the toggle simply reflects the attempted value.)
+
+## 2026-10-02 amendment: independent rule-report window
+
+The user-confirmed rule-browser simplification adds a single independent conversion-report window. It may remain open after the workspace closes. Activation policy therefore follows all explicitly anchored application windows through one shared coordinator: any open workspace or report window keeps the regular form, and closing the last one returns to accessory. Unanchored sheets and system panels still do not participate; hiding remains distinct from closing. Report launch presentation is suppressed and restoration is disabled, since its contents are an explicitly opened, session-only snapshot.

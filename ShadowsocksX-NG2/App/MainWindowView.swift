@@ -27,6 +27,7 @@ private enum WorkspaceSheet: String, Identifiable {
 /// 状态与摘要只来自代理控制工作流的整体 snapshot（issue #47），与状态菜单
 /// 使用同一口径。
 struct MainWindowView: View {
+  @ObservedObject var rulesWorkflow: RulesWorkflow
   @ObservedObject var route: WorkspaceRoute
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
@@ -42,7 +43,6 @@ struct MainWindowView: View {
   let diagnosticReportExporter: any DiagnosticReportExporter
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
 
-  @StateObject private var rulesWorkflow = RulesWorkflow()
   @StateObject private var homeServerList = HomeServerListState()
   @State private var selection: NodeID?
   /// 全局添加菜单打开的表单，以及诊断导出由窗口壳持有。

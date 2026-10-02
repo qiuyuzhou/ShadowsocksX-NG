@@ -3,10 +3,8 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 随窗激活策略协调器（ADR 0017）：窗口成为 key → regular，willClose →
-/// accessory，按锚定窗口的对象身份过滤（sheet/辅助窗口不在匹配集）。通知用
-/// 手工 post 驱动、applier 用 spy 注入，全程 hermetic，不触碰真实 NSApp 策略
-/// 与 WindowServer 呈现。
+/// Anchored app windows share activation policy; foreign windows are ignored.
+/// Notifications and an injected spy keep these tests independent of presentation.
 @MainActor
 final class WindowActivationPolicyTests: XCTestCase {
   private var spy: SpyApplier!
@@ -34,7 +32,7 @@ final class WindowActivationPolicyTests: XCTestCase {
   /// 策略落点 spy（ADR 0017）：只记录目标策略，不触碰真实 NSApp。
   @MainActor
   private final class SpyApplier: WindowActivationPolicyApplying {
-    private(set) var applied: [NSApplication.ActivationPolicy] = []
+    var applied: [NSApplication.ActivationPolicy] = []
 
     func apply(_ policy: NSApplication.ActivationPolicy) {
       applied.append(policy)
@@ -82,13 +80,61 @@ final class WindowActivationPolicyTests: XCTestCase {
     XCTAssertTrue(spy.applied.isEmpty, "非锚定窗口（sheet/辅助窗口）不得驱动策略")
   }
 
-  func testAnchorReplacementRetargetsFiltering() {
+  func testClosingOneOfTwoWindowsKeepsRegularUntilLastCloses() {
     coordinator.anchorDidAttach(to: foreignWindow)
-
+    post(NSWindow.didBecomeKeyNotification, on: window)
+    post(NSWindow.didBecomeKeyNotification, on: foreignWindow)
+    spy.applied.removeAll()
     post(NSWindow.willCloseNotification, on: window)
-    XCTAssertTrue(spy.applied.isEmpty, "旧窗口不再匹配")
-
+    XCTAssertFalse(spy.applied.contains(.accessory))
     post(NSWindow.willCloseNotification, on: foreignWindow)
-    XCTAssertEqual(spy.applied, [.accessory])
+    XCTAssertEqual(spy.applied.last, .accessory)
   }
+
+  func testClosedWindowCanReopenWhileOtherWindowRemainsTracked() {
+    coordinator.anchorDidAttach(to: foreignWindow)
+    post(NSWindow.didBecomeKeyNotification, on: window)
+    post(NSWindow.willCloseNotification, on: window)
+    post(NSWindow.didBecomeKeyNotification, on: window)
+    post(NSWindow.didBecomeKeyNotification, on: foreignWindow)
+    spy.applied.removeAll()
+    post(NSWindow.willCloseNotification, on: foreignWindow)
+    XCTAssertFalse(spy.applied.contains(.accessory))
+    post(NSWindow.willCloseNotification, on: window)
+    XCTAssertEqual(spy.applied.last, .accessory)
+  }
+
+  func testWindowShownWithoutBecomingKeyParticipatesInLastClosePolicy() {
+    let visible = VisibilityWindow(
+      contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+    coordinator.anchorDidAttach(to: visible)
+    visible.pretendVisible = true
+    post(NSWindow.didChangeOcclusionStateNotification, on: visible)
+    XCTAssertEqual(spy.applied.last, .regular)
+    post(NSWindow.didBecomeKeyNotification, on: window)
+    spy.applied.removeAll()
+    post(NSWindow.willCloseNotification, on: window)
+    XCTAssertFalse(spy.applied.contains(.accessory))
+    post(NSWindow.willCloseNotification, on: visible)
+    XCTAssertEqual(spy.applied.last, .accessory)
+  }
+
+  func testCloseIncludesVisibleSiblingWhenPresentationNotificationWasMissed() {
+    let visible = VisibilityWindow(
+      contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+    coordinator.anchorDidAttach(to: visible)
+    visible.pretendVisible = true
+    post(NSWindow.didBecomeKeyNotification, on: window)
+    spy.applied.removeAll()
+    post(NSWindow.willCloseNotification, on: window)
+    XCTAssertFalse(spy.applied.contains(.accessory))
+    visible.pretendVisible = false
+    post(NSWindow.willCloseNotification, on: visible)
+    XCTAssertEqual(spy.applied.last, .accessory)
+  }
+}
+
+private final class VisibilityWindow: NSWindow {
+  var pretendVisible = false
+  override var isVisible: Bool { pretendVisible }
 }

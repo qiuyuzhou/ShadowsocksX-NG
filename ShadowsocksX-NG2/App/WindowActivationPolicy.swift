@@ -1,22 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// 随窗激活策略（ADR 0017）：工作区窗口成为 key → regular（Dock 图标与
-/// Cmd-Tab 存在），窗口关闭 → accessory，回菜单栏形态。
-///
-/// 驱动是窗口自身的 NSWindow 生命周期通知，而非 scenePhase——真机实测
-/// （2026-09-29）：macOS 上 scenePhase 跟随应用而非窗口，关窗（红点与 ⌘W
-/// 同为 performClose）不产生任何 phase 事件，图标摘不掉。`willCloseNotification`
-/// 对全部关闭路径必然发布；⌘H 隐藏走 orderOut、不发 willClose，形态自然保持
-/// （隐藏≠关窗），unhide 后窗口重回 key 再收敛。
-///
-/// 目标窗口经内容层锚点视图捕获（`viewDidMoveToWindow` 上交 hosting
-/// NSWindow），通知按对象身份过滤——sheet/辅助窗口不是锚点宿主，天然不在
-/// 匹配集，无需 window identifier 约定。锚点只在拿到非 nil 窗口时更新：关窗
-/// 后 SwiftUI 复用同一 NSWindow（冒烟实测），重开时视 attached 状态或由 key
-/// 事件收敛。
-/// 策略落点缝：协调器只产出目标策略，真实 NSApp 副作用由注入对象承担
-/// （生产=MainApp 组合根；测试=spy，全程 hermetic）。
+/// All explicitly anchored application windows share one coordinator. Sheets and
+/// unrelated windows do not participate. Hiding does not count as closing.
 @MainActor
 protocol WindowActivationPolicyApplying: AnyObject {
   func apply(_ policy: NSApplication.ActivationPolicy)
@@ -24,7 +10,8 @@ protocol WindowActivationPolicyApplying: AnyObject {
 
 @MainActor
 final class WindowActivationPolicyCoordinator: ObservableObject {
-  private var anchoredWindow: NSWindow?
+  private let anchoredWindows = NSHashTable<NSWindow>.weakObjects()
+  private var openWindows: Set<ObjectIdentifier> = []
   private let applier: any WindowActivationPolicyApplying
 
   /// `applier` 注入以便 hermetic 单测；生产实现里单测 host 不触碰真实 NSApp。
@@ -37,6 +24,9 @@ final class WindowActivationPolicyCoordinator: ObservableObject {
     center.addObserver(
       self, selector: #selector(windowWillClose(_:)),
       name: NSWindow.willCloseNotification, object: nil)
+    center.addObserver(
+      self, selector: #selector(windowVisibilityChanged(_:)),
+      name: NSWindow.didChangeOcclusionStateNotification, object: nil)
   }
 
   deinit {
@@ -47,26 +37,40 @@ final class WindowActivationPolicyCoordinator: ObservableObject {
   /// key 事件的可见路径）；静默启动预建未呈现的窗口保持 accessory，等打开
   /// 后的 key 事件。
   func anchorDidAttach(to window: NSWindow) {
-    guard anchoredWindow !== window else { return }
-    anchoredWindow = window
+    anchoredWindows.add(window)
     if window.isVisible {
+      openWindows.insert(ObjectIdentifier(window))
       applier.apply(.regular)
     }
   }
 
   @objc private func windowDidBecomeKey(_ notification: Notification) {
-    handle(notification, target: .regular)
+    guard let window = trackedWindow(in: notification) else { return }
+    openWindows.insert(ObjectIdentifier(window))
+    applier.apply(.regular)
   }
 
   @objc private func windowWillClose(_ notification: Notification) {
-    handle(notification, target: .accessory)
+    guard let window = trackedWindow(in: notification) else { return }
+    // A background window can be presented without ever becoming key. Include
+    // visible siblings even if their initial visibility notification was missed.
+    for sibling in anchoredWindows.allObjects where sibling !== window && sibling.isVisible {
+      openWindows.insert(ObjectIdentifier(sibling))
+    }
+    openWindows.remove(ObjectIdentifier(window))
+    if openWindows.isEmpty { applier.apply(.accessory) }
   }
 
-  private func handle(_ notification: Notification, target: NSApplication.ActivationPolicy) {
-    guard let window = notification.object as? NSWindow,
-      window === anchoredWindow
-    else { return }
-    applier.apply(target)
+  @objc private func windowVisibilityChanged(_ notification: Notification) {
+    guard let window = trackedWindow(in: notification), window.isVisible else { return }
+    let inserted = openWindows.insert(ObjectIdentifier(window)).inserted
+    if inserted { applier.apply(.regular) }
+  }
+
+  private func trackedWindow(in notification: Notification) -> NSWindow? {
+    guard let window = notification.object as? NSWindow, anchoredWindows.contains(window)
+    else { return nil }
+    return window
   }
 }
 
@@ -74,11 +78,7 @@ final class WindowActivationPolicyCoordinator: ObservableObject {
 /// 协调器据其生命周期收敛 app 激活策略。NSApp 侧 applier 由 MainApp 注入
 /// （hermetic 判定 `ApplicationDependencies` 是组合根的 private 类型）。
 struct WindowActivationPolicy: ViewModifier {
-  @StateObject private var coordinator: WindowActivationPolicyCoordinator
-
-  init(applying applier: any WindowActivationPolicyApplying) {
-    _coordinator = StateObject(wrappedValue: WindowActivationPolicyCoordinator(applying: applier))
-  }
+  @ObservedObject var coordinator: WindowActivationPolicyCoordinator
 
   func body(content: Content) -> some View {
     content.background(WindowActivationAnchor(onAttach: coordinator.anchorDidAttach))

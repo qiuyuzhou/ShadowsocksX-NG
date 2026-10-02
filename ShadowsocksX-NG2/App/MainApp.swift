@@ -11,6 +11,8 @@ struct ShadowsocksXNG2App: App {
   @StateObject private var diagnosticsWorkflow: DiagnosticsWorkflow
   @StateObject private var workspaceRoute: WorkspaceRoute
   @StateObject private var silentLaunch: SilentLaunchController
+  @StateObject private var rulesWorkflow: RulesWorkflow
+  @StateObject private var windowActivation: WindowActivationPolicyCoordinator
   private let textClipboard: any TextClipboard
   private let workspaceContent: MainWindowView
   /// 启动呈现行为在进程内一次性定格（ADR 0017）：静默启动偏好关闭（默认）
@@ -27,6 +29,9 @@ struct ShadowsocksXNG2App: App {
     _diagnosticsWorkflow = StateObject(wrappedValue: composition.diagnosticsWorkflow)
     _workspaceRoute = StateObject(wrappedValue: composition.workspaceRoute)
     _silentLaunch = StateObject(wrappedValue: composition.silentLaunch)
+    _rulesWorkflow = StateObject(wrappedValue: composition.rulesWorkflow)
+    _windowActivation = StateObject(
+      wrappedValue: WindowActivationPolicyCoordinator(applying: NSAppWindowActivationApplier()))
     textClipboard = composition.textClipboard
     workspaceContent = composition.workspaceContent
     launchPresentation = composition.silentLaunch.isEnabled ? .suppressed : .presented
@@ -49,17 +54,26 @@ struct ShadowsocksXNG2App: App {
     // defaultLaunchBehavior 决定：静默启动关闭（默认）时 presented 启动即呈现
     // （scene 方式启动开窗，LSUIElement 下实测生效），开启时 suppressed 直接
     // 进菜单栏形态。窗口开着期间 app 为 regular（Dock 图标/Cmd-Tab/默认菜单
-    // 栏），关窗回 accessory 菜单栏形态——随窗激活策略由窗口 NSWindow 生命
+    // 栏），最后一个窗口关闭回 accessory 菜单栏形态——随窗激活策略由窗口 NSWindow 生命
     // 周期通知驱动（WindowActivationPolicy，scenePhase 在 macOS 跟随应用而非
     // 窗口、关窗无事件，实测不可用）；关窗后由状态菜单首项（打开主窗口）经
     // openWindow 重开。
     // 关窗不退进程（MenuBarExtra 持进程）。
     Window("ShadowsocksX-NG2", id: WorkspaceRoute.workspaceSceneID) {
       workspaceContent
-        .modifier(WindowActivationPolicy(applying: NSAppWindowActivationApplier()))
+        .modifier(WindowActivationPolicy(coordinator: windowActivation))
     }
     .defaultLaunchBehavior(launchPresentation)
     .defaultSize(width: 960, height: 640)
+
+    Window(RulesCopy.text("快照制作时的转换报告"), id: RulesReportView.sceneID) {
+      RulesReportView(workflow: rulesWorkflow)
+        .modifier(WindowActivationPolicy(coordinator: windowActivation))
+    }
+    .defaultLaunchBehavior(.suppressed)
+    .restorationBehavior(.disabled)
+    .commandsRemoved()
+    .defaultSize(width: 680, height: 480)
   }
 }
 
@@ -106,6 +120,7 @@ private struct AppComposition {
   let silentLaunch: SilentLaunchController
   let expansion: CatalogExpansionState
   let textClipboard: any TextClipboard
+  let rulesWorkflow: RulesWorkflow
   let workspaceContent: MainWindowView
 
   static func make() -> AppComposition {
@@ -142,7 +157,9 @@ private struct AppComposition {
     let workspaceRoute = WorkspaceRoute()
     let silentLaunch = SilentLaunchController(store: dependencies.silentLaunchStore)
     let expansion = CatalogExpansionState()
+    let rulesWorkflow = RulesWorkflow()
     let workspaceContent = MainWindowView(
+      rulesWorkflow: rulesWorkflow,
       route: workspaceRoute,
       workflow: catalogWorkflow,
       control: proxyControl,
@@ -166,6 +183,7 @@ private struct AppComposition {
       silentLaunch: silentLaunch,
       expansion: expansion,
       textClipboard: textClipboard,
+      rulesWorkflow: rulesWorkflow,
       workspaceContent: workspaceContent)
   }
 

@@ -6,6 +6,7 @@ import Foundation
 @MainActor
 final class RulesWorkflow: ObservableObject {
   @Published private(set) var snapshot = RulesPageSnapshot()
+  @Published private(set) var reportSource: RulesSourceSnapshot?
   private let loadCustom: @Sendable () throws -> [CustomRule]
   private let loadBuiltin: @Sendable (RulesSource) throws -> RuleSnapshot
   private var collection: RulesCollection?
@@ -56,6 +57,24 @@ final class RulesWorkflow: ObservableObject {
     let selection = ids.intersection(Set(snapshot.rows.map(\.id)))
     guard selection != snapshot.selection else { return }
     snapshot.selection = selection
+  }
+
+  /// Capture only on an explicit open request, independently of browsing and refresh.
+  @discardableResult
+  func openSourceReport(_ source: RulesSource) -> Bool {
+    guard let loaded = snapshot.sources.first(where: { $0.id == source }),
+      loaded.metadata != nil, loaded.conversionReport != nil
+    else { return false }
+    reportSource = loaded
+    return true
+  }
+
+  var selectedRelationshipRow: RulesRow? {
+    guard snapshot.selection.count == 1,
+      let row = snapshot.rows.first(where: { snapshot.selection.contains($0.id) }),
+      !row.relationships.isEmpty || row.fixedCoverage != nil
+    else { return nil }
+    return row
   }
 
   private func applyingQuery(to page: RulesPageSnapshot) -> RulesPageSnapshot {
