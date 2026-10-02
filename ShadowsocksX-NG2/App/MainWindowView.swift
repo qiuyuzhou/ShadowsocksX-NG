@@ -289,7 +289,7 @@ extension MainWindowView {
       ZStack {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
           .fill(Color.primary)
-        Image(systemName: "network")
+        Image(systemName: "paperplane.fill")
           .font(.system(size: 15, weight: .semibold))
           .foregroundStyle(Color(nsColor: .windowBackgroundColor))
       }
