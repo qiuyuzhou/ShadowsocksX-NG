@@ -172,9 +172,10 @@ extension ProxyRuntimeController {
     guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
       return
     }
+    let contract = try? PreparedRuntimeContract(document)
     lastDocument = document
     state = .starting
-    guard await execute(.run(document), document: document) else {
+    guard await execute(.run(document), document: document, preparedContract: contract) else {
       guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
         return
       }
@@ -189,7 +190,7 @@ extension ProxyRuntimeController {
       document,
       requiresReceipt: true,
       convergeProxyOnSuccess: false,
-      preserveProxyOnFailure: true)
+      preserveProxyOnFailure: true, preparedContract: contract)
     guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
       return
     }
@@ -224,7 +225,10 @@ extension ProxyRuntimeController {
     proxyMode = snapshot.mode
     lastDocument = previousDocument
 
-    guard await restoreRuntimeDocument(previousDocument, generation: generation)
+    let contract = try? PreparedRuntimeContract(previousDocument)
+    guard
+      await restoreRuntimeDocument(
+        previousDocument, generation: generation, preparedContract: contract)
     else { return }
 
     guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
@@ -234,7 +238,7 @@ extension ProxyRuntimeController {
     let restored = await presentLaunchHealth(
       previousDocument,
       requiresReceipt: true,
-      convergeProxyOnSuccess: false)
+      convergeProxyOnSuccess: false, preparedContract: contract)
     guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
       return
     }
@@ -263,9 +267,9 @@ extension ProxyRuntimeController {
   /// 代理并返回 false（健康检查由调用方继续）。
   private func restoreRuntimeDocument(
     _ previousDocument: SslocalRuntimeDocument,
-    generation: Int
+    generation: Int, preparedContract: PreparedRuntimeContract?
   ) async -> Bool {
-    let expectedDigest = previousDocument.deploymentSHA256
+    let expectedDigest = preparedContract?.sha256 ?? previousDocument.deploymentSHA256
     let currentDocument = runtimeFileStore.loadDocument()
     let receipt = runtimeFileStore.readRuntimeReceipt()
     let wrapper = wrapperState()
@@ -280,7 +284,11 @@ extension ProxyRuntimeController {
     if currentDocument != previousDocument || !previousInstanceIsRunning {
       if currentDocument != previousDocument {
         do {
-          try runtimeFileStore.write(previousDocument)
+          if let preparedContract {
+            try runtimeFileStore.write(preparedContract)
+          } else {
+            try runtimeFileStore.write(previousDocument)
+          }
         } catch {
           state = .serviceFailed(.runtimeFile)
           await holdSystemProxyIntent()
@@ -290,7 +298,8 @@ extension ProxyRuntimeController {
       if !previousInstanceIsRunning {
         guard
           await relaunchPreviousInstance(
-            wrapper: wrapper, previousDocument: previousDocument, generation: generation)
+            wrapper: wrapper, previousDocument: previousDocument, generation: generation,
+            preparedContract: preparedContract)
         else { return false }
       }
     }
@@ -301,7 +310,7 @@ extension ProxyRuntimeController {
   private func relaunchPreviousInstance(
     wrapper: WrapperProcessState,
     previousDocument: SslocalRuntimeDocument,
-    generation: Int
+    generation: Int, preparedContract: PreparedRuntimeContract?
   ) async -> Bool {
     let preparation = runtimePreparationGeneration
     switch wrapper {
@@ -312,7 +321,11 @@ extension ProxyRuntimeController {
         return false
       }
     case .notRunning:
-      guard await execute(.run(previousDocument), document: previousDocument) else {
+      guard
+        await execute(
+          .run(previousDocument), document: previousDocument,
+          preparedContract: preparedContract)
+      else {
         guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
           return false
         }

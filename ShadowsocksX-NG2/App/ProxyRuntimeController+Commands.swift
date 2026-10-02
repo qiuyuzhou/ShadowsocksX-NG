@@ -210,9 +210,9 @@ extension ProxyRuntimeController {
       await refuseDeployForUnreadableListenSettings()
       return false
     }
-    let document: SslocalRuntimeDocument
+    let contract: PreparedRuntimeContract
     do {
-      document = try await runtimeDocument(sourceDocument, for: proxyMode)
+      contract = try PreparedRuntimeContract(await runtimeDocument(sourceDocument, for: proxyMode))
     } catch RulePreparationError.superseded {
       return false
     } catch {
@@ -221,17 +221,20 @@ extension ProxyRuntimeController {
       state = .serviceFailed(.runtimeFile)
       return false
     }
-    return await deployPrepared(document, preparation: runtimePreparationGeneration)
+    return await deployPrepared(contract, preparation: runtimePreparationGeneration)
   }
 
-  func deployPrepared(_ document: SslocalRuntimeDocument, preparation: Int) async -> Bool {
+  func deployPrepared(_ contract: PreparedRuntimeContract, preparation: Int) async -> Bool {
     guard preparation == runtimePreparationGeneration else { return false }
+    let document = contract.document
     lastDocument = document
-    guard await execute(.run(document), document: document) else { return false }
+    guard await execute(.run(document), document: document, preparedContract: contract) else {
+      return false
+    }
     guard preparation == runtimePreparationGeneration else { return false }
     state = .starting
     return await presentLaunchHealth(
-      document, requiresReceipt: document.aclRuntime != nil)
+      document, requiresReceipt: document.aclRuntime != nil, preparedContract: contract)
   }
 
   /// D8「任何路径不静默改端口」：监听设置不可读时以占位出厂端口部署等于
@@ -275,32 +278,49 @@ extension ProxyRuntimeController {
 extension ProxyRuntimeController {
   /// 按计划顺序执行动作；返回 false 表示中途失败、状态已呈现（后续动作与
   /// 健康探测都不应继续）。
-  func execute(_ intent: RuntimeIntent, document: SslocalRuntimeDocument?) async -> Bool {
+  func execute(
+    _ intent: RuntimeIntent, document: SslocalRuntimeDocument?,
+    preparedContract: PreparedRuntimeContract? = nil
+  ) async -> Bool {
     cancelFirewallObservation()
     flowGeneration += 1
     let generation = flowGeneration
     let preparation = runtimePreparationGeneration
+    let contract: PreparedRuntimeContract?
+    if case .run(let desired) = intent {
+      guard let prepared = preparedContract ?? (try? PreparedRuntimeContract(desired)),
+        prepared.document == desired, document == desired
+      else {
+        state = .serviceFailed(document == nil ? .missingDocument : .runtimeFile)
+        return false
+      }
+      contract = prepared
+    } else {
+      contract = nil
+    }
     let actions = ProxyRuntimePlan.actions(
       intent: intent,
       agentStatus: agent.status,
       wrapper: wrapperState(),
-      contractOnDisk: runtimeFileStore.readData())
+      contractOnDisk: runtimeFileStore.readData(), preparedContract: contract)
     if case .run = intent, actions.isEmpty {
       RuntimeLog.emit(.contractUnchanged)
     }
     for action in actions {
       guard generation == flowGeneration, preparation == runtimePreparationGeneration,
-        await perform(action, document: document)
+        await perform(action, preparedContract: contract)
       else { return false }
     }
     return generation == flowGeneration && preparation == runtimePreparationGeneration
   }
 
   /// 执行单个动作；返回 false 表示应终止后续动作（状态已呈现）。
-  private func perform(_ action: RuntimeAction, document: SslocalRuntimeDocument?) async -> Bool {
+  private func perform(
+    _ action: RuntimeAction, preparedContract: PreparedRuntimeContract?
+  ) async -> Bool {
     switch action {
     case .writeContract:
-      return performWriteContract(document)
+      return performWriteContract(preparedContract)
     case .registerAgent:
       return performAgentRegistration()
     case .unregisterAgent:
@@ -315,14 +335,14 @@ extension ProxyRuntimeController {
   }
 
   /// 原子写契约文件；缺文档或写失败即终止。
-  private func performWriteContract(_ document: SslocalRuntimeDocument?) -> Bool {
-    guard let document else {
+  private func performWriteContract(_ contract: PreparedRuntimeContract?) -> Bool {
+    guard let contract else {
       state = .serviceFailed(.missingDocument)
       return false
     }
     do {
-      try runtimeFileStore.write(document)
-      RuntimeLog.emit(.contractWritten(serverCount: document.servers.count))
+      try runtimeFileStore.write(contract)
+      RuntimeLog.emit(.contractWritten(serverCount: contract.document.servers.count))
       return true
     } catch {
       state = .serviceFailed(.runtimeFile)

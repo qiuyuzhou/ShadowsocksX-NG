@@ -10,7 +10,7 @@ struct RuntimeFileStore {
   enum PersistenceError: Error, Equatable {
     /// 写入时的文件系统错误。
     case ioFailure(detail: String)
-    /// Runtime JSON 写失败后无法恢复此前的 ACL 变体或链接。
+    /// 部署失败后无法恢复已修改的 ACL 变体或链接。
     case rollbackFailed(detail: String)
   }
 
@@ -54,62 +54,88 @@ struct RuntimeFileStore {
     directoryURL.appendingPathComponent("agent-runtime-status.json")
   }
 
-  /// 原子写盘；任一步失败保留原文件。
+  /// 变体、链接、契约按序原子替换；失败时恢复已完成的变更。
   func write(_ document: SslocalRuntimeDocument) throws {
-    let data: Data
+    let contract: PreparedRuntimeContract
     do {
-      data = try document.jsonData()
+      contract = try PreparedRuntimeContract(document)
     } catch {
       throw PersistenceError.ioFailure(detail: String(describing: error))
     }
+    try write(contract)
+  }
 
-    var previousVariantData: Data?
-    var previousLinkTarget: String?
-    var wroteVariant = false
-    if let acl = document.aclRuntime {
-      guard
-        acl.path == aclFileURL.standardizedFileURL.path,
-        acl.isWellFormed
-      else {
-        throw PersistenceError.ioFailure(detail: "ACL sidecar path or digest is invalid")
-      }
-      let variantURL = aclVariantFileURL(summary: acl.summary)
-      previousLinkTarget = try? FileManager.default.destinationOfSymbolicLink(
-        atPath: aclFileURL.path)
-      do {
-        if !acl.content.isEmpty {
-          previousVariantData = try? Data(contentsOf: variantURL)
-          if try shouldWriteVariant(summary: acl.summary, sha256: acl.sha256, at: variantURL) {
-            try fileWriter(Data(acl.content.utf8), variantURL)
-            wroteVariant = true
-          }
-        }
-        try repointActiveLink(to: variantURL)
-      } catch {
-        try? restoreVariant(previousVariantData, at: variantURL)
-        try? restoreLink(previousLinkTarget)
-        throw PersistenceError.ioFailure(detail: String(describing: error))
-      }
-    }
-
+  /// 单次部署准备好的契约字节由比较与写入共用。
+  func write(_ contract: PreparedRuntimeContract) throws {
+    let document = contract.document
+    var mutations: [Mutation] = []
+    var verifiedDigest: DigestEntry?
     do {
-      try fileWriter(data, fileURL)
-    } catch {
       if let acl = document.aclRuntime {
-        do {
-          try restoreVariant(previousVariantData, at: aclVariantFileURL(summary: acl.summary))
-          try restoreLink(previousLinkTarget)
-        } catch {
-          throw PersistenceError.rollbackFailed(detail: String(describing: error))
+        guard acl.path == aclFileURL.standardizedFileURL.path, acl.isWellFormed else {
+          throw PersistenceError.ioFailure(detail: "ACL sidecar path or digest is invalid")
+        }
+        let variant = aclVariantFileURL(summary: acl.summary)
+        if acl.content.isEmpty {
+          guard isRegularVariant(variant) else {
+            throw PersistenceError.ioFailure(detail: "Existing ACL variant is unavailable")
+          }
+        } else {
+          let change = try prepareVariant(acl, at: variant)
+          if change.needsWrite {
+            try fileWriter(Data(acl.content.utf8), variant)
+            mutations.append(.variant(variant, change.previous))
+          }
+          verifiedDigest = DigestEntry(sha256: acl.sha256, size: acl.content.utf8.count)
+        }
+        let previousLink = try activeLinkState()
+        if previousLink != .link(variant.lastPathComponent) {
+          try repointActiveLink(to: variant)
+          mutations.append(.link(previousLink))
         }
       }
-      throw PersistenceError.ioFailure(detail: String(describing: error))
+      try fileWriter(contract.data, fileURL)
+    } catch {
+      let original = String(describing: error)
+      let failures = rollback(mutations)
+      if !failures.isEmpty {
+        throw PersistenceError.rollbackFailed(
+          detail: original + "; rollback: " + failures.joined(separator: "; "))
+      }
+      throw PersistenceError.ioFailure(detail: original)
     }
-    // digest 清单只是跳写缓存：契约写成功后才登记，失败回滚不会留下
-    // 「清单说新内容、盘上是旧内容」的脱节（下轮退化为全量哈希仍正确）。
-    if wroteVariant, let acl = document.aclRuntime {
-      recordDigest(summary: acl.summary, sha256: acl.sha256, size: acl.content.utf8.count)
+    // 清单只在契约成功后登记；它不参与部署事务的正确性。
+    if let verifiedDigest, let acl = document.aclRuntime {
+      recordDigest(summary: acl.summary, entry: verifiedDigest)
     }
+  }
+
+  private enum LinkState: Equatable {
+    case absent
+    case link(String)
+    case file(Data)
+  }
+
+  private enum Mutation {
+    case variant(URL, Data?)
+    case link(LinkState)
+  }
+
+  private func rollback(_ mutations: [Mutation]) -> [String] {
+    var failures: [String] = []
+    for mutation in mutations.reversed() {
+      do {
+        switch mutation {
+        case .variant(let url, let data):
+          try restoreVariant(data, at: url)
+        case .link(let state):
+          try restoreLink(state)
+        }
+      } catch {
+        failures.append(String(describing: error))
+      }
+    }
+    return failures
   }
 
   /// 读取侧判定：结构有效 + 链接解析后仍在运行目录内。不读 ACL 内容、
@@ -172,25 +198,57 @@ struct RuntimeFileStore {
     }
   }
 
+}
+
+extension RuntimeFileStore {
   // MARK: - ACL 变体与链接
 
-  /// digest 清单命中（摘要 + 字节数一致）且文件在盘则跳过写；清单失效时
-  /// 退化为对文件做一次全量哈希确认（ADR-0011）。
-  private func shouldWriteVariant(summary: String, sha256: String, at variantURL: URL) throws
-    -> Bool
+  /// 命中清单不读正文；未命中只读一次，同时保留需要写入时的回滚字节。
+  private func prepareVariant(_ acl: ProxyACLDocument, at url: URL) throws
+    -> (needsWrite: Bool, previous: Data?)
   {
-    let fileManager = FileManager.default
-    if let recorded = loadDigestManifest()[summary], recorded.sha256 == sha256 {
-      let attributes = try? fileManager.attributesOfItem(atPath: variantURL.path)
-      let size = (attributes?[.size] as? NSNumber)?.intValue
-      if size == recorded.size { return false }
+    let attributes = try attributesIfPresent(url)
+    if let attributes {
+      guard attributes[.type] as? FileAttributeType == .typeRegular else {
+        throw PersistenceError.ioFailure(detail: "ACL variant is not a regular file")
+      }
+      if let recorded = loadDigestManifest()[acl.summary], recorded.sha256 == acl.sha256,
+        recorded.size == acl.content.utf8.count,
+        (attributes[.size] as? NSNumber)?.intValue == recorded.size
+      {
+        return (false, nil)
+      }
+      let previous = try Data(contentsOf: url)
+      return (ProxyACLDocument.digest(previous) != acl.sha256, previous)
     }
-    if let existing = try? Data(contentsOf: variantURL), ProxyACLDocument.digest(existing) == sha256
+    return (true, nil)
+  }
+
+  private func attributesIfPresent(_ url: URL) throws -> [FileAttributeKey: Any]? {
+    do {
+      return try FileManager.default.attributesOfItem(atPath: url.path)
+    } catch let error as NSError
+      where error.domain == NSCocoaErrorDomain
+      && error.code == NSFileReadNoSuchFileError
     {
-      recordDigest(summary: summary, sha256: sha256, size: existing.count)
-      return false
+      return nil
     }
-    return true
+  }
+
+  private func isRegularVariant(_ url: URL) -> Bool {
+    (try? attributesIfPresent(url))?[.type] as? FileAttributeType == .typeRegular
+  }
+
+  private func activeLinkState() throws -> LinkState {
+    guard let attributes = try attributesIfPresent(aclFileURL) else { return .absent }
+    switch attributes[.type] as? FileAttributeType {
+    case .typeSymbolicLink:
+      return .link(try FileManager.default.destinationOfSymbolicLink(atPath: aclFileURL.path))
+    case .typeRegular:
+      return .file(try Data(contentsOf: aclFileURL))
+    default:
+      throw PersistenceError.ioFailure(detail: "Active ACL path is not a file or link")
+    }
   }
 
   private struct DigestEntry: Codable, Equatable {
@@ -203,9 +261,10 @@ struct RuntimeFileStore {
     return (try? JSONDecoder().decode([String: DigestEntry].self, from: data)) ?? [:]
   }
 
-  private func recordDigest(summary: String, sha256: String, size: Int) {
+  private func recordDigest(summary: String, entry: DigestEntry) {
     var manifest = loadDigestManifest()
-    manifest[summary] = DigestEntry(sha256: sha256, size: size)
+    guard manifest[summary] != entry else { return }
+    manifest[summary] = entry
     guard let data = try? JSONEncoder().encode(manifest) else { return }
     try? fileWriter(data, aclDigestManifestURL)
   }
@@ -235,24 +294,25 @@ struct RuntimeFileStore {
     if let previousData {
       try fileWriter(previousData, variantURL)
     } else {
-      try? FileManager.default.removeItem(at: variantURL)
+      try FileManager.default.removeItem(at: variantURL)
     }
   }
 
-  private func restoreLink(_ previousTarget: String?) throws {
-    let fileManager = FileManager.default
-    if let previousTarget {
-      let temporaryLink = directoryURL.appendingPathComponent(
+  private func restoreLink(_ state: LinkState) throws {
+    switch state {
+    case .link(let target):
+      let temporary = directoryURL.appendingPathComponent(
         ".\(aclFileURL.lastPathComponent).tmp-\(UUID().uuidString)")
-      try? fileManager.removeItem(at: temporaryLink)
-      try fileManager.createSymbolicLink(
-        atPath: temporaryLink.path, withDestinationPath: previousTarget)
-      guard rename(temporaryLink.path, aclFileURL.path) == 0 else {
-        try? fileManager.removeItem(at: temporaryLink)
+      defer { try? FileManager.default.removeItem(at: temporary) }
+      try FileManager.default.createSymbolicLink(
+        atPath: temporary.path, withDestinationPath: target)
+      guard rename(temporary.path, aclFileURL.path) == 0 else {
         throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
       }
-    } else {
-      try? fileManager.removeItem(at: aclFileURL)
+    case .file(let data):
+      try fileWriter(data, aclFileURL)
+    case .absent:
+      try FileManager.default.removeItem(at: aclFileURL)
     }
   }
 

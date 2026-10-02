@@ -28,11 +28,16 @@ extension ProxyRuntimeController {
     _ document: SslocalRuntimeDocument,
     requiresReceipt: Bool = false,
     convergeProxyOnSuccess: Bool = true,
-    preserveProxyOnFailure: Bool = false
+    preserveProxyOnFailure: Bool = false,
+    preparedContract: PreparedRuntimeContract? = nil
   ) async -> Bool {
+    guard preparedContract == nil || preparedContract?.document == document else {
+      return await reportRuntimeFileFailure(preserveProxyOnFailure: preserveProxyOnFailure)
+    }
     let generation = flowGeneration
     let preparation = runtimePreparationGeneration
-    let expectedDigest = requiresReceipt ? document.deploymentSHA256 : nil
+    let expectedDigest =
+      requiresReceipt ? (preparedContract?.sha256 ?? document.deploymentSHA256) : nil
     guard !requiresReceipt || expectedDigest != nil else {
       return await reportRuntimeFileFailure(preserveProxyOnFailure: preserveProxyOnFailure)
     }

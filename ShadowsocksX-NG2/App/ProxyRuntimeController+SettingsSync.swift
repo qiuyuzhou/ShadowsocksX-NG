@@ -16,10 +16,11 @@ extension ProxyRuntimeController {
       do {
         let document = try await runtimeDocument(configuration.document, for: proxyMode)
         let preparation = runtimePreparationGeneration
-        if runtimeAlreadyConverged(with: document) {
+        let contract = try PreparedRuntimeContract(document)
+        if runtimeAlreadyConverged(with: contract) {
           RuntimeLog.emit(.contractUnchanged)
         } else {
-          _ = await deployPrepared(document, preparation: preparation)
+          _ = await deployPrepared(contract, preparation: preparation)
         }
       } catch RulePreparationError.superseded {
         return .revalidated
@@ -56,7 +57,7 @@ extension ProxyRuntimeController {
   /// （`ProxyRuntimePlan.actions` 返回空 = 幂等跳过）：磁盘漂移或 wrapper 失踪
   /// 时动作序列自然非空，走完整 deploy 自愈。目录重校验（跳过名单、目标失效
   /// 清除）已在 `reexpand` 完成，不受此门影响。
-  private func runtimeAlreadyConverged(with document: SslocalRuntimeDocument) -> Bool {
+  private func runtimeAlreadyConverged(with contract: PreparedRuntimeContract) -> Bool {
     switch state {
     case .running, .firewallBlocked:
       break
@@ -64,10 +65,10 @@ extension ProxyRuntimeController {
       return false
     }
     let actions = ProxyRuntimePlan.actions(
-      intent: .run(document),
+      intent: .run(contract.document),
       agentStatus: agent.status,
       wrapper: wrapperState(),
-      contractOnDisk: runtimeFileStore.readData())
+      contractOnDisk: runtimeFileStore.readData(), preparedContract: contract)
     return actions.isEmpty
   }
 

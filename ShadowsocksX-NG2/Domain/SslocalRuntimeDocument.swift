@@ -275,3 +275,17 @@ extension SslocalRuntimeDocument {
     }
   }
 }
+
+/// A single deployment's encoded contract and receipt identity. Keep this value
+/// local to preparation/deployment so on-disk state is still checked each time.
+struct PreparedRuntimeContract: Sendable {
+  let document: SslocalRuntimeDocument
+  let data: Data
+  let sha256: String
+
+  init(_ document: SslocalRuntimeDocument) throws {
+    self.document = document
+    data = try document.jsonData()
+    sha256 = ProxyACLDocument.digest(data)
+  }
+}

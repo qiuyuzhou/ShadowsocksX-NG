@@ -49,10 +49,14 @@ enum ProxyRuntimePlan {
     intent: RuntimeIntent,
     agentStatus: LaunchAgentStatus,
     wrapper: WrapperProcessState,
-    contractOnDisk: Data?
+    contractOnDisk: Data?,
+    preparedContract: PreparedRuntimeContract? = nil
   ) -> [RuntimeAction] {
     switch intent {
     case .run(let document):
+      let preparedData = preparedContract.flatMap { contract in
+        contract.document == document ? contract.data : nil
+      }
       switch agentStatus {
       case .notRegistered, .notFound, .requiresApproval:
         // 首次启用或从未注册：写盘后注册，launchd 拉起的 wrapper 直接读新档。
@@ -62,7 +66,8 @@ enum ProxyRuntimePlan {
         case .running(let pid):
           // 相同内容跳过写入（幂等优化）；内容比较本身失败时宁可重写——
           // 写入侧会如实呈现错误，不静默跳过部署。
-          if let onDisk = contractOnDisk, let desiredData = try? document.jsonData(),
+          if let onDisk = contractOnDisk,
+            let desiredData = preparedData ?? (try? document.jsonData()),
             desiredData == onDisk
           {
             return []

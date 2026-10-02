@@ -104,9 +104,11 @@ extension ProxyRuntimeController {
     modeChangeGeneration += 1
     let generation = modeChangeGeneration
     let runtimeGeneration = flowGeneration + 1
+    let contract = try? PreparedRuntimeContract(nextDocument)
     lastDocument = nextDocument
     state = .starting
-    guard await execute(.run(nextDocument), document: nextDocument) else {
+    guard await execute(.run(nextDocument), document: nextDocument, preparedContract: contract)
+    else {
       guard ruleDeploymentIsCurrent(preparation, generation, runtimeGeneration)
       else {
         return .runtimeChanged(rulesRestored: false)
@@ -122,7 +124,7 @@ extension ProxyRuntimeController {
       nextDocument,
       requiresReceipt: true,
       convergeProxyOnSuccess: false,
-      preserveProxyOnFailure: true)
+      preserveProxyOnFailure: true, preparedContract: contract)
     guard ruleDeploymentIsCurrent(preparation, generation, runtimeGeneration)
     else {
       return .runtimeChanged(rulesRestored: false)
@@ -196,9 +198,11 @@ extension ProxyRuntimeController {
     let modeGeneration = modeChangeGeneration
     let preparation = runtimePreparationGeneration
     let runtimeGeneration = flowGeneration + 1
+    let contract = try? PreparedRuntimeContract(previousDocument)
     lastDocument = previousDocument
     state = .starting
-    let executed = await execute(.run(previousDocument), document: previousDocument)
+    let executed = await execute(
+      .run(previousDocument), document: previousDocument, preparedContract: contract)
     guard ruleDeploymentIsCurrent(preparation, modeGeneration, runtimeGeneration)
     else {
       return .runtimeChanged(rulesRestored: rulesRestored)
@@ -209,7 +213,8 @@ extension ProxyRuntimeController {
       return .recoveryFailed(detail: failures.joined(separator: "; "), rulesRestored: rulesRestored)
     }
     let healthy = await presentLaunchHealth(
-      previousDocument, requiresReceipt: true, convergeProxyOnSuccess: false)
+      previousDocument, requiresReceipt: true, convergeProxyOnSuccess: false,
+      preparedContract: contract)
     guard ruleDeploymentIsCurrent(preparation, modeGeneration, runtimeGeneration)
     else {
       return .runtimeChanged(rulesRestored: rulesRestored)

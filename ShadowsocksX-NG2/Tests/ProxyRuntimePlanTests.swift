@@ -18,11 +18,17 @@ final class ProxyRuntimePlanTests: XCTestCase {
     disk: Data?? = nil
   ) throws -> [RuntimeAction] {
     let fallback = try contractData()
+    let prepared: PreparedRuntimeContract?
+    if case .run(let desired) = intent {
+      prepared = try PreparedRuntimeContract(desired)
+    } else {
+      prepared = nil
+    }
     return ProxyRuntimePlan.actions(
       intent: intent,
       agentStatus: agent,
       wrapper: wrapper,
-      contractOnDisk: disk ?? fallback)
+      contractOnDisk: disk ?? fallback, preparedContract: prepared)
   }
 
   // MARK: 开启代理
@@ -54,6 +60,18 @@ final class ProxyRuntimePlanTests: XCTestCase {
         disk: try contractData()),
       [],
       "相同内容跳过写入与信号（激活状态机幂等注记）")
+  }
+
+  func testPreparedContractForAnotherDocumentDoesNotSkipDeployment() throws {
+    let other = ProxyRuntimeFixture.makeDocument(serverAddress: "198.51.100.9")
+    let prepared = try PreparedRuntimeContract(other)
+
+    XCTAssertEqual(
+      ProxyRuntimePlan.actions(
+        intent: .run(document), agentStatus: .registered, wrapper: .running(pid: 42),
+        contractOnDisk: prepared.data, preparedContract: prepared),
+      [.writeContract, .signalReload(pid: 42)],
+      "Another document's prepared bytes cannot make this intent appear converged")
   }
 
   func testRunningWithStaleContractWritesThenSignalsReload() throws {
