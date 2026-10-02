@@ -1,6 +1,6 @@
 # Delegate privileged system-proxy writes to a LaunchDaemon
 
-**Status**: accepted
+**Status**: accepted; lifecycle trigger and apply-scope clauses are partially superseded by [ADR-0022](0022-observe-system-proxy-differences-and-repair.md). Its passive observation, explicit repair, and health-driven suspension policy was implemented in commit `4a0a72c` for Issue #73. Privileged execution, registration, typed values, and unconditional all-location cleanup remain in force.
 
 ## Context
 
@@ -9,6 +9,8 @@ macOS system proxy configuration is device-wide, while each account has an indep
 System proxy writes require privileged SystemConfiguration access. The GUI must also make the domain decisions: whether proxying is intended, whether the runtime is healthy, which network changes should trigger application, and what complete values should be applied. The privileged process should execute that intent without reconstructing it or deciding when cleanup is appropriate.
 
 ## Decision
+
+The lifecycle paragraphs below preserve the original ADR-0020 decision. For when to apply or clear, repair scope, and approval/retry behavior, use ADR-0022; its exceptions replace the original “only on-to-off” cleanup restriction and automatic network/launch reapplication.
 
 Package a root LaunchDaemon with the app and register it through `SMAppService.daemon`. The GUI registers the service when an enabled intent first needs it: on the first explicit system-proxy enable, and again from launch reconciliation if the registration was lost (for example after reinstalling the app). It presents the macOS Login Items approval path when needed. The daemon is activated on demand and remains registered when the agent switch or the system proxy switch is off. The existing per-user proxy Agent remains separate. The GUI does not fall back to direct Authorization Services writes.
 
