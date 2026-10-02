@@ -28,7 +28,11 @@ final class WorkspaceRoute: ObservableObject {
   @Published private(set) var destination: WorkspaceDestination = .home
 
   /// workspace 内部导航只改变 route destination；开窗不由 route 驱动。
+  /// 同值导航必须是无操作：macOS 的 List/NavigationSplitView 会在视图更新
+  /// 期间回写 selection Binding（选择再同步），此时 publish 会触发
+  /// "Publishing changes from within view updates" 运行时警告。
   func navigate(to destination: WorkspaceDestination) {
+    guard destination != self.destination else { return }
     self.destination = destination
   }
 }
