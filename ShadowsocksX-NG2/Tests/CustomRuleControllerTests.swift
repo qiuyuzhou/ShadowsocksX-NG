@@ -67,6 +67,42 @@ extension ProxyRuntimeControllerTests {
       "自定义直连规则应进入规则模式 ACL")
   }
 
+  func testOppositeActionsPersistAndReorderingDoesNotRedeploy() async throws {
+    let seeded = try makeSeededCatalog()
+    let (store, _) = try makeCustomRuleStore()
+    let settings = ProxySettings(
+      listen: ActivationFixture.listen, preferredMode: .rule,
+      ruleDefaultAction: .directWhenUnmatched, agentEnabled: true)
+    let controller = makeControllerWithCustomRules(
+      store: store, settings: settings, proxyMode: .rule)
+    try await controller.activate(seeded.server)
+    let rules = [
+      CustomRule(action: .direct, match: .domainSuffix("order.example")),
+      CustomRule(action: .proxy, match: .domainExact("a.order.example")),
+      CustomRule(action: .direct, match: .domainExact("a.order.example")),
+    ]
+    let first = await controller.updateCustomRules(rules)
+    XCTAssertEqual(first, .saved)
+    XCTAssertEqual(try store.load(), rules, "保存保留用户 UUID 和全部意图")
+    let validation = try controller.ruleModeValidation()
+    XCTAssertTrue(
+      validation.relationships.contains {
+        $0.rule == rules[2].identity && $0.kind == .shadowing && $0.extent == .full
+      })
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    let before = try activeACLContent(runtimeStore)
+    let unregisterBefore = agent.unregisterCount
+    let summary = controller.readCustomRuleSummary()
+    let reversed = Array(rules.reversed())
+    let reordered = await controller.updateCustomRules(reversed)
+    XCTAssertEqual(reordered, .saved)
+    XCTAssertEqual(try store.load(), reversed)
+    XCTAssertEqual(try activeACLContent(runtimeStore), before)
+    XCTAssertEqual(agent.unregisterCount, unregisterBefore)
+    XCTAssertEqual(controller.readCustomRuleSummary(), summary)
+    XCTAssertEqual(try controller.ruleModeValidation(), validation)
+  }
+
   /// 校验拒绝：固定本地冲突整批不落地，旧规则保持不变。
   func testUpdateCustomRulesRejectsFixedLocalConflictAndKeepsPreviousRules() async throws {
     let seeded = try makeSeededCatalog()

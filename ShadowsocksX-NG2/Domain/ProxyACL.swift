@@ -113,12 +113,17 @@ struct ProxyACLDocument: Codable, Equatable, Sendable {
     defaultAction: RuleDefaultAction,
     rules: [ProxyRule]
   ) -> ProxyACLDocument {
+    // Select expressed actions before any coverage analysis. Keep fixed policy
+    // first; equivalent source entries and array order never change ACL bytes.
+    let directLines = Array(Set(rules.filter { $0.action == .direct }.map(\.aclLine)))
+      .filter { !FixedLocalProxyRanges.aclBypassRules.contains($0) }.sorted()
+    let proxyLines = Array(Set(rules.filter { $0.action == .proxy }.map(\.aclLine))).sorted()
     switch defaultAction {
     case .proxyWhenUnmatched:
       // proxy_all + 直连候选进 bypass_list（中国域名 / IPv4 CIDR）。
       let bypass =
         FixedLocalProxyRanges.aclBypassRules
-        + rules.filter { $0.action == .direct }.map { $0.aclLine }
+        + directLines
       return makeDocument(
         at: fileURL, header: "[proxy_all]", summary: "rule-proxy-default",
         bypassRules: bypass, proxyRules: [])
@@ -127,8 +132,8 @@ struct ProxyACLDocument: Codable, Equatable, Sendable {
       // 进 bypass_list。两种默认动作不无条件并集中国来源。
       let bypass =
         FixedLocalProxyRanges.aclBypassRules
-        + rules.filter { $0.action == .direct }.map { $0.aclLine }
-      let proxy = rules.filter { $0.action == .proxy }.map { $0.aclLine }
+        + directLines
+      let proxy = proxyLines
       return makeDocument(
         at: fileURL, header: "[bypass_all]", summary: "rule-direct-default",
         bypassRules: bypass, proxyRules: proxy)

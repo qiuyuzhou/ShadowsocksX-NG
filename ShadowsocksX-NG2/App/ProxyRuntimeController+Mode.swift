@@ -104,13 +104,13 @@ extension ProxyRuntimeController {
   /// 规则模式候选按默认动作取对应来源（issue #65/#66）：「未匹配时代理」用
   /// 中国直连候选；「未匹配时直连」用 GFWList 代理候选。两种默认动作不把
   /// 全部内置来源无条件并集。自定义规则与对应内置来源合并（issue #66）；
-  /// 被遮蔽的自定义规则不进入 ACL，并经 `ruleModeValidation` 返回原因。
+  /// 保留可表达自定义条目，并经 `ruleModeValidation` 返回覆盖关系。
   /// 全局和直连模式不加载自定义规则（它们不调用本方法）。
   func ruleModeCandidateRules() throws -> [ProxyRule] {
     try ruleModeValidation().accepted
   }
 
-  /// 规则模式编译校验结果：可生效候选 + 被拒绝的自定义规则及原因（issue #66 AC2）。
+  /// 规则模式的完整有效候选、硬拒绝项与当前 ACL 骨架下的覆盖说明。
   func ruleModeValidation() throws -> CustomRuleValidationResult {
     let custom = try customRuleStore.load()
     switch settings.ruleDefaultAction {
@@ -119,13 +119,15 @@ extension ProxyRuntimeController {
       let validated = CustomRuleValidator.validate(
         custom: custom, builtIn: builtIn, defaultAction: .proxyWhenUnmatched)
       return CustomRuleValidationResult(
-        accepted: builtIn + validated.accepted, rejected: validated.rejected)
+        accepted: builtIn + validated.accepted, rejected: validated.rejected,
+        relationships: validated.relationships)
     case .directWhenUnmatched:
       let builtIn = try gfwlistRules()
       let validated = CustomRuleValidator.validate(
         custom: custom, builtIn: builtIn, defaultAction: .directWhenUnmatched)
       return CustomRuleValidationResult(
-        accepted: builtIn + validated.accepted, rejected: validated.rejected)
+        accepted: builtIn + validated.accepted, rejected: validated.rejected,
+        relationships: validated.relationships)
     }
   }
 

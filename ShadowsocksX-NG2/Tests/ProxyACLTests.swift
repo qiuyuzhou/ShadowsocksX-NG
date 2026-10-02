@@ -170,8 +170,9 @@ final class ProxyACLTests: XCTestCase {
     XCTAssertTrue(acl.isWellFormed)
     XCTAssertEqual(acl.summary, "rule-direct-default")
     XCTAssertTrue(acl.content.hasPrefix("[bypass_all]\n[bypass_list]\n"))
-    XCTAssertTrue(acl.content.contains("[proxy_list]\n||blocked.example\n"))
-    XCTAssertTrue(acl.content.contains("||also-blocked.example\n"))
+    XCTAssertEqual(
+      acl.content.components(separatedBy: "[proxy_list]\n").last,
+      "||also-blocked.example\n||blocked.example\n")
     XCTAssertTrue(acl.content.contains("||unshadowed.example\n"), "未遮蔽例外参与编译进 bypass_list")
     XCTAssertFalse(acl.content.contains("[proxy_all]"))
     // 不无条件并集中国来源。

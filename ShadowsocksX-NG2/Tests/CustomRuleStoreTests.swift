@@ -52,6 +52,28 @@ final class CustomRuleStoreTests: XCTestCase {
     XCTAssertEqual(try store.load(), rules)
   }
 
+  func testStoredMatchIsNormalizedWithoutChangingCustomIdentity() throws {
+    let rule = CustomRule(action: .direct, match: .ipv4CIDR("203.0.113.15/24"))
+    try store.save([rule])
+    let loaded = try XCTUnwrap(store.load().first)
+    XCTAssertEqual(loaded.id, rule.id)
+    XCTAssertEqual(loaded.match, .ipv4CIDR("203.0.113.0/24"))
+    XCTAssertEqual(loaded.identity, rule.identity)
+  }
+
+  func testMalformedStoredCIDRReportsCorruptionWithoutRewritingDocument() throws {
+    for match in [RuleMatch.ipv4CIDR("/"), .ipv6CIDR("/")] {
+      try store.save([CustomRule(action: .direct, match: match)])
+      let before = try Data(contentsOf: store.fileURL)
+      XCTAssertThrowsError(try store.load()) { error in
+        guard case .corrupt = error as? CustomRuleStoreError else {
+          return XCTFail("Expected corrupt document, got \(error)")
+        }
+      }
+      XCTAssertEqual(try Data(contentsOf: store.fileURL), before)
+    }
+  }
+
   func testCorruptFileThrowsCorrupt() throws {
     try Data("not-json".utf8).write(to: store.fileURL)
 

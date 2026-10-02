@@ -16,18 +16,11 @@ struct ParsedCIDR: Equatable, Sendable {
 
 // MARK: - 拒绝原因
 
-/// 自定义规则被拒绝的原因（issue #66 AC2）：与固定本地范围冲突，或被原版
-/// sslocal 域名代理 / IP 直连优先级遮蔽。每条附可解释说明。
+/// Blocking custom-rule validation errors. Shadowing is a relationship, not an error.
 enum CustomRuleRejection: Equatable, Sendable {
   /// 代理动作覆盖固定本地范围（回环/私有/链路本地/localhost/*.local/无点主机名）。
   /// 应用固定的本地绕过规则始终优先于用户代理规则；冲突规则不会生效。
   case conflictsWithFixedLocalScope
-  /// 域名直连规则被更宽（或同覆盖）的域名代理规则遮蔽：sslocal 域名匹配
-  /// 时 proxy_list 优先于 bypass_list。
-  case shadowedByDomainProxy
-  /// IP 代理规则被更宽（或同覆盖）的 IP 直连规则遮蔽：sslocal IP 匹配时
-  /// bypass_list 优先于 proxy_list。
-  case shadowedByIPDirect
   /// 同动作+同匹配条件重复。
   case duplicate
 
@@ -35,10 +28,6 @@ enum CustomRuleRejection: Equatable, Sendable {
     switch self {
     case .conflictsWithFixedLocalScope:
       return "与固定本地范围冲突"
-    case .shadowedByDomainProxy:
-      return "被域名代理优先级遮蔽"
-    case .shadowedByIPDirect:
-      return "被 IP 直连优先级遮蔽"
     case .duplicate:
       return "重复规则"
     }
@@ -53,10 +42,11 @@ struct RejectedCustomRule: Equatable, Sendable {
   let explanation: String
 }
 
-/// 校验结果：可生效规则（折叠为运行时规则）与被拒绝项。
+/// Valid candidates, blocking errors, and nonblocking coverage explanations.
 struct CustomRuleValidationResult: Equatable, Sendable {
   let accepted: [ProxyRule]
   let rejected: [RejectedCustomRule]
+  var relationships: [RuleRelationship] = []
 }
 
 // MARK: - 覆盖判定
@@ -86,8 +76,7 @@ enum RuleCoverage {
 
   /// 域名目标集合是否相交（用于固定本地冲突）。
   static func domainIntersects(_ lhs: RuleMatch, _ rhs: RuleMatch) -> Bool {
-    // 任一覆盖另一即相交；后缀 vs 后缀若互不覆盖也可能相交（如 a.b 与 b.c），
-    // 但固定本地规则是 `local`/`localhost`/无点，与多标签后缀的相交只能经覆盖。
+    // 任一覆盖另一即相交；后缀的点分隔边界确保互不覆盖的两个后缀不相交。
     domainCovers(lhs, rhs) || domainCovers(rhs, lhs)
   }
 
@@ -122,10 +111,9 @@ enum RuleCoverage {
 
   // MARK: IP
 
-  /// `covering` 的 IP 目标集合是否包含 `covered` 的 IP 目标集合（同地址族）。
+  /// `covering` 的 IP 目标集合是否包含 `covered` 的 IP 目标集合（含 mapped 跨家族匹配）。
   static func ipCovers(_ covering: RuleMatch, _ covered: RuleMatch) -> Bool {
-    guard let outer = parseCIDR(covering), let inner = parseCIDR(covered),
-      outer.family == inner.family
+    guard let outer = matchingCIDR(covering), let inner = matchingCIDR(covered)
     else { return false }
     return outer.prefixLength <= inner.prefixLength
       && networkContains(outer: outer, inner: inner)
@@ -133,7 +121,7 @@ enum RuleCoverage {
 
   /// IP 目标集合是否相交。
   static func ipIntersects(_ lhs: RuleMatch, _ rhs: RuleMatch) -> Bool {
-    guard let left = parseCIDR(lhs), let right = parseCIDR(rhs), left.family == right.family
+    guard let left = matchingCIDR(lhs), let right = matchingCIDR(rhs)
     else { return false }
     return networkContains(outer: left, inner: right) || networkContains(outer: right, inner: left)
   }
@@ -146,6 +134,52 @@ enum RuleCoverage {
       }
     }
     return false
+  }
+
+  static func winningAction(for match: RuleMatch) -> RuleAction {
+    switch match {
+    case .domainExact, .domainSuffix: .proxy
+    case .ipv4CIDR, .ipv6CIDR: .direct
+    }
+  }
+
+  static func intersects(_ lhs: RuleMatch, _ rhs: RuleMatch) -> Bool {
+    domainIntersects(lhs, rhs) || ipIntersects(lhs, rhs)
+  }
+
+  static func fullyCovered(_ target: RuleMatch, by matches: [RuleMatch]) -> Bool {
+    if matches.contains(where: { domainCovers($0, target) }) { return true }
+    guard let range = matchingCIDR(target) else { return false }
+    return fullyCovered(range, by: matches.compactMap { matchingCIDR($0) })
+  }
+
+  /// IPv4 and its mapped IPv6 image match the same addresses in sslocal v1.25.0.
+  /// Identity keeps the original family; coverage uses the common IPv6 space.
+  private static func matchingCIDR(_ match: RuleMatch) -> ParsedCIDR? {
+    guard let range = parseCIDR(match) else { return nil }
+    guard range.family == .ipv4 else { return range }
+    return ParsedCIDR(
+      family: .ipv6, bytes: Array(repeating: 0, count: 10) + [255, 255] + range.bytes,
+      prefixLength: 96 + range.prefixLength)
+  }
+
+  /// Several disjoint narrower CIDRs can together cover a whole range.
+  private static func fullyCovered(_ target: ParsedCIDR, by ranges: [ParsedCIDR]) -> Bool {
+    let overlapping = ranges.filter {
+      networkContains(outer: $0, inner: target) || networkContains(outer: target, inner: $0)
+    }
+    if overlapping.contains(where: {
+      $0.prefixLength <= target.prefixLength && networkContains(outer: $0, inner: target)
+    }) {
+      return true
+    }
+    guard !overlapping.isEmpty, target.prefixLength < 128 else { return false }
+    let nextPrefix = target.prefixLength + 1
+    var upperBytes = target.bytes
+    upperBytes[target.prefixLength / 8] |= UInt8(1) << (7 - target.prefixLength % 8)
+    let lower = ParsedCIDR(family: .ipv6, bytes: target.bytes, prefixLength: nextPrefix)
+    let upper = ParsedCIDR(family: .ipv6, bytes: upperBytes, prefixLength: nextPrefix)
+    return fullyCovered(lower, by: overlapping) && fullyCovered(upper, by: overlapping)
   }
 
   // MARK: 解析
@@ -241,74 +275,49 @@ enum RuleCoverage {
 
 // MARK: - 校验器
 
-/// 自定义规则校验（issue #66 AC2）：拒绝与固定本地范围冲突、重复，以及
-/// 被原版 sslocal 域名代理 / IP 直连优先级遮蔽的规则，并返回可解释原因。
-///
-/// 遮蔽判定相对「将进入同一 ACL 的规则集合」（内置来源 + 其他自定义规则）。
-/// 固定本地冲突是模式无关的硬拒绝；遮蔽与 ACL 骨架有关，由调用方按默认动作
-/// 提供对应上下文。不把无效规则标为生效。
+/// Reject only duplicate custom identities and fixed-local conflicts. Analyze
+/// coverage against the complete valid set using the runtime's expressed actions.
+/// Accepted candidates retain saved intent; relationships never remove entries.
 enum CustomRuleValidator {
-  /// 校验一组自定义规则（issue #66）。
-  ///
-  /// - Parameters:
-  ///   - custom: 待校验的自定义规则（顺序保留）。
-  ///   - builtIn: 将与自定义规则合并进同一 ACL 的内置规则。
-  ///   - defaultAction: 规则模式子选项，决定 ACL 骨架与遮蔽语义。
-  ///     「未匹配时代理」骨架不写 proxy_list（默认已是代理），代理动作规则
-  ///     不会被域名代理优先级遮蔽（域名代理表为空），IP 代理也不参与
-  ///     bypass 优先判定。
   static func validate(
     custom: [CustomRule],
     builtIn: [ProxyRule] = [],
     defaultAction: RuleDefaultAction
   ) -> CustomRuleValidationResult {
-    let writesProxySide = defaultAction == .directWhenUnmatched
-
     var accepted: [ProxyRule] = []
     var rejected: [RejectedCustomRule] = []
-    var seenTokens = Set<String>()
-    // 遮蔽判定集合：先通过固定本地/重复检查的规则才可能进入 ACL，
-    // 被拒绝的规则不得充当遮蔽方。
-    var shadowContext = builtIn
-
-    for rule in custom {
-      let token = rule.contentToken
-      if !seenTokens.insert(token).inserted {
+    let counts = Dictionary(grouping: custom, by: \.contentToken).mapValues(\.count)
+    for rule in custom.sorted(by: {
+      ($0.contentToken, $0.id.uuidString) < ($1.contentToken, $1.id.uuidString)
+    }) {
+      if counts[rule.contentToken, default: 0] > 1 {
         rejected.append(
           RejectedCustomRule(
-            rule: rule,
-            reason: .duplicate,
-            explanation: "同动作同匹配条件的规则已存在"))
-        continue
-      }
-
-      if let rejection = fixedLocalRejection(for: rule) {
+            rule: rule, reason: .duplicate, explanation: "同动作同匹配条件的规则已存在"))
+      } else if let rejection = fixedLocalRejection(for: rule) {
         rejected.append(rejection)
-        continue
+      } else {
+        accepted.append(rule.proxyRule)
       }
-
-      if let rejection = shadowRejection(
-        for: rule, in: shadowContext, writesProxySide: writesProxySide)
-      {
-        rejected.append(rejection)
-        continue
-      }
-
-      accepted.append(rule.proxyRule)
-      shadowContext.append(rule.proxyRule)
     }
-    return CustomRuleValidationResult(accepted: accepted, rejected: rejected)
+    let candidates = builtIn + accepted
+    let expressed =
+      defaultAction == .proxyWhenUnmatched
+      ? candidates.filter { $0.action == .direct } : candidates
+    let analysis = RuleAnalysis(rules: expressed, subjects: accepted)
+    return CustomRuleValidationResult(
+      accepted: accepted, rejected: rejected, relationships: analysis.relationships)
   }
 
   /// 单条规则的固定本地冲突检查（保存与编译共用）。
   static func fixedLocalRejection(for rule: CustomRule) -> RejectedCustomRule? {
     guard rule.action == .proxy else { return nil }
     let conflicts: Bool
-    switch rule.match {
+    switch rule.identity.match {
     case .domainExact, .domainSuffix:
-      conflicts = RuleCoverage.domainConflictsWithFixedLocal(rule.match)
+      conflicts = RuleCoverage.domainConflictsWithFixedLocal(rule.identity.match)
     case .ipv4CIDR, .ipv6CIDR:
-      conflicts = RuleCoverage.ipConflictsWithFixedLocal(rule.match)
+      conflicts = RuleCoverage.ipConflictsWithFixedLocal(rule.identity.match)
     }
     guard conflicts else { return nil }
     return RejectedCustomRule(
@@ -317,54 +326,4 @@ enum CustomRuleValidator {
       explanation: "应用固定的本地绕过规则优先；这些本地目标不会经代理")
   }
 
-  /// ACL 优先级遮蔽检查：
-  /// - 域名直连 vs 域名代理（proxy_list 优先）。
-  /// - IP 代理 vs IP 直连（bypass_list 优先）。
-  /// 仅在对应侧写入 ACL 时才可能被遮蔽。
-  private static func shadowRejection(
-    for rule: CustomRule,
-    in merged: [ProxyRule],
-    writesProxySide: Bool
-  ) -> RejectedCustomRule? {
-    switch rule.match {
-    case .domainExact, .domainSuffix:
-      // 域名直连被域名代理遮蔽；仅当代理侧写入 ACL 时才存在代理优先表。
-      guard rule.action == .direct, writesProxySide else { return nil }
-      for other in merged where other.action == .proxy {
-        if RuleCoverage.domainCovers(other.match, rule.match) {
-          return RejectedCustomRule(
-            rule: rule,
-            reason: .shadowedByDomainProxy,
-            explanation: "域名代理规则 \(describe(other.match)) 优先于直连规则，本规则不会生效")
-        }
-      }
-      return nil
-    case .ipv4CIDR, .ipv6CIDR:
-      // IP 代理被 IP 直连遮蔽；直连侧在两种骨架下都写入。
-      guard rule.action == .proxy else { return nil }
-      // 「未匹配时代理」不写 proxy_list，IP 代理规则不进入 ACL（默认已代理），
-      // 不构成「被遮蔽」；只有写入 proxy 侧时才检查 IP 直连优先。
-      guard writesProxySide else { return nil }
-      for other in merged where other.action == .direct {
-        if RuleCoverage.ipCovers(other.match, rule.match) {
-          return RejectedCustomRule(
-            rule: rule,
-            reason: .shadowedByIPDirect,
-            explanation: "IP 直连规则 \(describe(other.match)) 优先于代理规则，本规则不会生效")
-        }
-      }
-      return nil
-    }
-  }
-
-  private static func describe(_ match: RuleMatch) -> String {
-    switch match {
-    case .domainExact(let domain):
-      return "|\(domain)"
-    case .domainSuffix(let domain):
-      return "||\(domain)"
-    case .ipv4CIDR(let cidr), .ipv6CIDR(let cidr):
-      return cidr
-    }
-  }
 }

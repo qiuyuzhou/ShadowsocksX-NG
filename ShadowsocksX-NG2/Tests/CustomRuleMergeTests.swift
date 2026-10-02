@@ -15,6 +15,21 @@ final class CustomRuleMergeTests: XCTestCase {
     CustomRule(action: action, match: match)
   }
 
+  func testACLIdentityDoesNotDependOnRuleOrSourceOrder() {
+    let first = ProxyRule(action: .direct, match: .domainSuffix("z.example"), source: chinaSource)
+    let equivalent = ProxyRule(
+      action: .direct, match: .domainSuffix("z.example"), source: gfwSource)
+    let second = ProxyRule(action: .proxy, match: .domainExact("a.example"), source: gfwSource)
+    let url = URL(fileURLWithPath: "/tmp/rules-order.acl")
+    for action in RuleDefaultAction.allCases {
+      let expected = ProxyACLDocument.rule(at: url, defaultAction: action, rules: [first, second])
+      let reordered = ProxyACLDocument.rule(
+        at: url, defaultAction: action, rules: [second, equivalent, first])
+      XCTAssertEqual(expected.content, reordered.content)
+      XCTAssertEqual(expected.sha256, reordered.sha256)
+    }
+  }
+
   /// 「未匹配时代理」：中国直连候选 + 自定义直连进 bypass_list；自定义代理
   /// 不写 proxy_list（默认已代理）。
   func testProxyWhenUnmatchedMergesChinaDirectAndCustomDirect() throws {
@@ -76,8 +91,8 @@ final class CustomRuleMergeTests: XCTestCase {
     XCTAssertTrue(acl.content.hasPrefix("[bypass_all]"))
   }
 
-  /// 被 GFWList 域名代理遮蔽的自定义直连不进入 ACL。
-  func testShadowedCustomDirectIsExcludedFromACL() throws {
+  /// 被遮蔽条目保留；ACL 优先级决定其实际作用。
+  func testShadowedCustomDirectIsRetainedAndExplained() throws {
     let builtIn = [
       ProxyRule(
         action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: gfwSource)
@@ -90,19 +105,18 @@ final class CustomRuleMergeTests: XCTestCase {
       custom: customRules, builtIn: builtIn, defaultAction: .directWhenUnmatched)
     let merged = builtIn + result.accepted
 
-    XCTAssertEqual(result.rejected.map(\.reason), [.shadowedByDomainProxy])
+    XCTAssertTrue(result.rejected.isEmpty)
+    XCTAssertEqual(result.relationships.first?.extent, .full)
     let acl = ProxyACLDocument.rule(
       at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"),
       defaultAction: .directWhenUnmatched,
       rules: merged)
-    XCTAssertFalse(
-      acl.content.contains("sub.blocked.example"),
-      "被遮蔽的自定义规则不得写入 ACL")
+    XCTAssertTrue(acl.content.contains("sub.blocked.example"), "保留可表达意图，路由由 sslocal 优先级决定")
   }
 
   /// 单模式遮蔽：在「未匹配时代理」下有效（不被遮蔽），在「未匹配时直连」下
   /// 被 GFWList 代理遮蔽并返回原因。保存允许（另一模式可生效），编译按当前
-  /// 模式过滤。
+  /// 模式解释。
   func testOneModeShadowedRuleIsValidInTheOtherMode() throws {
     let gfwBuiltIn = [
       ProxyRule(
@@ -124,9 +138,9 @@ final class CustomRuleMergeTests: XCTestCase {
 
     let directDefault = CustomRuleValidator.validate(
       custom: customRules, builtIn: gfwBuiltIn, defaultAction: .directWhenUnmatched)
-    XCTAssertEqual(directDefault.rejected.map(\.reason), [.shadowedByDomainProxy])
-    XCTAssertFalse(directDefault.rejected[0].explanation.isEmpty, "返回可解释原因")
-    XCTAssertTrue(directDefault.accepted.isEmpty, "被遮蔽规则不得进入编译结果")
+    XCTAssertTrue(directDefault.rejected.isEmpty)
+    XCTAssertEqual(directDefault.relationships.first?.kind, .shadowing)
+    XCTAssertEqual(directDefault.accepted.count, 1)
   }
 
   /// 全局模式 ACL 不加载自定义规则（issue #66 AC3）。

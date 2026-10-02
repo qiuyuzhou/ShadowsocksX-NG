@@ -92,8 +92,7 @@ extension ProxyRuntimeController {
   }
 
   /// 保存前校验（issue #66 AC2）：固定本地冲突与重复整批拒绝并返回可解释原因。
-  /// 单模式遮蔽的规则允许保存（在另一模式可生效），编译时按当前模式过滤并
-  /// 通过 `ruleModeValidation` 返回原因；不把无效规则标为生效。
+  /// 同行动覆盖和相反行动遮蔽不阻止保存；编译时按当前骨架解释完整集合。
   func validateCustomRulesForPersistence(_ rules: [CustomRule]) -> (
     acceptedRules: [CustomRule], rejected: [RejectedCustomRule]
   ) {

@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 自定义规则校验（issue #66 AC2）：固定本地冲突、ACL 优先级遮蔽与重复拒绝，
+/// 自定义规则校验（issue #66 AC2）：固定本地冲突、ACL 优先级说明与重复拒绝，
 /// 并返回可解释原因。
 final class CustomRuleValidatorTests: XCTestCase {
   private let customSource = RuleSourceIdentity(
@@ -21,6 +21,20 @@ final class CustomRuleValidatorTests: XCTestCase {
     CustomRule(id: id, action: action, match: match)
   }
 
+  func testOppositeActionsAreRetainedRegardlessOfCustomOrder() throws {
+    let rules = [
+      rule(.direct, try RuleMatch(domainExact: "a.example.com")),
+      rule(.proxy, try RuleMatch(domainSuffix: "example.com")),
+    ]
+    let first = CustomRuleValidator.validate(custom: rules, defaultAction: .directWhenUnmatched)
+    let reversed = CustomRuleValidator.validate(
+      custom: Array(rules.reversed()), defaultAction: .directWhenUnmatched)
+    XCTAssertTrue(first.rejected.isEmpty)
+    XCTAssertTrue(reversed.rejected.isEmpty)
+    XCTAssertEqual(first, reversed)
+    XCTAssertEqual(first.accepted.count, 2)
+  }
+
   // MARK: 有效规则
 
   func testValidDomainAndCIDRRulesAreAccepted() throws {
@@ -36,8 +50,19 @@ final class CustomRuleValidatorTests: XCTestCase {
 
     XCTAssertTrue(result.rejected.isEmpty)
     XCTAssertEqual(result.accepted.count, 4)
-    XCTAssertEqual(result.accepted.first?.action, .proxy)
-    XCTAssertEqual(result.accepted.first?.aclLine, "||blocked.example")
+    XCTAssertTrue(
+      result.accepted.contains { $0.aclLine == "||blocked.example" && $0.action == .proxy })
+  }
+
+  func testMappedIPv6CannotBypassFixedLocalConflictValidation() throws {
+    let privateRule = rule(.proxy, try RuleMatch(ipv6CIDR: "::ffff:192.168.1.2"))
+    let broadRule = rule(.proxy, try RuleMatch(ipv6CIDR: "::ffff:0.0.0.0/96"))
+    let publicRule = rule(.proxy, try RuleMatch(ipv6CIDR: "::ffff:203.0.113.8"))
+    let result = CustomRuleValidator.validate(
+      custom: [privateRule, publicRule, broadRule], defaultAction: .directWhenUnmatched)
+    XCTAssertEqual(result.rejected.count, 2)
+    XCTAssertTrue(result.rejected.allSatisfy { $0.reason == .conflictsWithFixedLocalScope })
+    XCTAssertEqual(result.accepted, [publicRule.proxyRule])
   }
 
   // MARK: 固定本地冲突
@@ -107,7 +132,7 @@ final class CustomRuleValidatorTests: XCTestCase {
 
   // MARK: 遮蔽
 
-  func testDomainDirectShadowedByBroaderDomainProxyIsRejectedWhenProxySideWritten() throws {
+  func testDomainDirectShadowedByBroaderDomainProxyIsExplainedWhenProxySideWritten() throws {
     let builtIn = [
       ProxyRule(
         action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: gfwSource)
@@ -117,9 +142,9 @@ final class CustomRuleValidatorTests: XCTestCase {
     let result = CustomRuleValidator.validate(
       custom: custom, builtIn: builtIn, defaultAction: .directWhenUnmatched)
 
-    XCTAssertEqual(result.accepted.count, 0)
-    XCTAssertEqual(result.rejected.map(\.reason), [.shadowedByDomainProxy])
-    XCTAssertTrue(result.rejected[0].explanation.contains("blocked.example"))
+    XCTAssertEqual(result.accepted.count, 1)
+    XCTAssertTrue(result.rejected.isEmpty)
+    XCTAssertEqual(result.relationships.first?.extent, .full)
   }
 
   func testDomainDirectNotShadowedWhenProxySideNotWritten() throws {
@@ -137,7 +162,7 @@ final class CustomRuleValidatorTests: XCTestCase {
     XCTAssertEqual(result.accepted.count, 1)
   }
 
-  func testIPProxyShadowedByBroaderIPDirectIsRejectedWhenProxySideWritten() throws {
+  func testIPProxyShadowedByBroaderIPDirectIsExplainedWhenProxySideWritten() throws {
     let builtIn = [
       ProxyRule(
         action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24"), source: chinaSource)
@@ -147,7 +172,9 @@ final class CustomRuleValidatorTests: XCTestCase {
     let result = CustomRuleValidator.validate(
       custom: custom, builtIn: builtIn, defaultAction: .directWhenUnmatched)
 
-    XCTAssertEqual(result.rejected.map(\.reason), [.shadowedByIPDirect])
+    XCTAssertTrue(result.rejected.isEmpty)
+    XCTAssertEqual(result.relationships.first?.kind, .shadowing)
+    XCTAssertEqual(result.relationships.first?.extent, .full)
   }
 
   func testIPProxyNotRejectedWhenProxySideNotWritten() throws {
@@ -188,9 +215,9 @@ final class CustomRuleValidatorTests: XCTestCase {
     let result = CustomRuleValidator.validate(
       custom: custom, defaultAction: .directWhenUnmatched)
 
-    XCTAssertEqual(result.accepted.count, 1, "只保留先通过校验的代理规则")
-    XCTAssertEqual(result.rejected.map(\.reason), [.shadowedByDomainProxy])
-    XCTAssertEqual(result.rejected[0].rule.action, .direct)
+    XCTAssertEqual(result.accepted.count, 2)
+    XCTAssertTrue(result.rejected.isEmpty)
+    XCTAssertEqual(result.relationships.first?.rule.action, .direct)
   }
 
   func testCustomToCustomIPShadowingIsDetected() throws {
@@ -202,8 +229,10 @@ final class CustomRuleValidatorTests: XCTestCase {
     let result = CustomRuleValidator.validate(
       custom: custom, defaultAction: .directWhenUnmatched)
 
-    XCTAssertEqual(result.rejected.map(\.reason), [.shadowedByIPDirect])
-    XCTAssertEqual(result.rejected[0].rule.action, .proxy)
+    XCTAssertTrue(result.rejected.isEmpty)
+    XCTAssertEqual(result.relationships.first?.kind, .shadowing)
+    XCTAssertEqual(result.relationships.first?.extent, .full)
+    XCTAssertEqual(result.relationships.first?.rule.action, .proxy)
   }
 
   // MARK: 重复
@@ -218,8 +247,8 @@ final class CustomRuleValidatorTests: XCTestCase {
     let result = CustomRuleValidator.validate(
       custom: custom, defaultAction: .directWhenUnmatched)
 
-    XCTAssertEqual(result.accepted.count, 1)
-    XCTAssertEqual(result.rejected.map(\.reason), [.duplicate])
+    XCTAssertTrue(result.accepted.isEmpty)
+    XCTAssertEqual(result.rejected.map(\.reason), [.duplicate, .duplicate])
   }
 
   // MARK: 覆盖判定

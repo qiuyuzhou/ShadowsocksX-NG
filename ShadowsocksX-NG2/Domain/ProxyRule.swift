@@ -50,13 +50,13 @@ enum RuleMatch: Equatable, Hashable, Codable, Sendable {
     let value = try container.decode(String.self, forKey: .value)
     switch try container.decode(Kind.self, forKey: .kind) {
     case .domainExact:
-      self = .domainExact(value)
+      try self.init(domainExact: value)
     case .domainSuffix:
-      self = .domainSuffix(value)
+      try self.init(nationalDomainSuffix: value)
     case .ipv4CIDR:
-      self = .ipv4CIDR(value)
+      try self.init(ipv4CIDR: value)
     case .ipv6CIDR:
-      self = .ipv6CIDR(value)
+      try self.init(ipv6CIDR: value)
     }
   }
 
@@ -145,7 +145,7 @@ enum RuleMatch: Equatable, Hashable, Codable, Sendable {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { throw RuleMatchError.invalidCIDR(raw) }
     let parts = trimmed.split(separator: "/", maxSplits: 1)
-    let addressPart = String(parts[0])
+    let addressPart = String(parts.first ?? "")
     let prefixLength: Int
     if parts.count == 2 {
       guard let parsed = Int(parts[1]), (0...32).contains(parsed) else {
@@ -183,7 +183,7 @@ enum RuleMatch: Equatable, Hashable, Codable, Sendable {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { throw RuleMatchError.invalidCIDR(raw) }
     let parts = trimmed.split(separator: "/", maxSplits: 1)
-    let addressPart = String(parts[0])
+    let addressPart = String(parts.first ?? "")
     let prefixLength: Int
     if parts.count == 2 {
       guard let parsed = Int(parts[1]), (0...128).contains(parsed) else {
@@ -238,6 +238,29 @@ enum RuleMatchError: Error, Equatable, Sendable {
   case emptyDomain
   case invalidDomain(String)
   case invalidCIDR(String)
+}
+
+/// Source-independent routing identity; custom UUIDs continue to identify edits.
+/// Callers supply valid RuleMatch values; decoding and input constructors validate them.
+struct RuleIdentity: Codable, Equatable, Hashable, Sendable {
+  let action: RuleAction
+  let match: RuleMatch
+
+  init(action: RuleAction, match: RuleMatch) {
+    self.action = action
+    switch match {
+    case .domainExact(let value):
+      self.match = (try? RuleMatch(domainExact: value)) ?? match
+    case .domainSuffix(let value):
+      self.match = (try? RuleMatch(nationalDomainSuffix: value)) ?? match
+    case .ipv4CIDR(let value):
+      self.match = (try? RuleMatch(ipv4CIDR: value)) ?? match
+    case .ipv6CIDR(let value):
+      self.match = (try? RuleMatch(ipv6CIDR: value)) ?? match
+    }
+  }
+
+  var contentToken: String { "\(action.rawValue)|\(String(describing: match))" }
 }
 
 // MARK: - 来源身份
@@ -310,10 +333,12 @@ struct ProxyRule: Codable, Equatable, Hashable, Sendable {
     self.conflict = conflict
   }
 
+  var identity: RuleIdentity { RuleIdentity(action: action, match: match) }
+
   /// sslocal ACL 单行表示（ASCII）。域名后缀 `||host`、完整域名 `|host`、
   /// CIDR 原样写入。
   var aclLine: String {
-    switch match {
+    switch identity.match {
     case .domainExact(let domain):
       return "|\(domain)"
     case .domainSuffix(let domain):
