@@ -1,0 +1,178 @@
+import XCTest
+
+@testable import ShadowsocksX_NG2
+
+extension ProxyRuntimeControllerTests {
+  func testDeletionWhileOffPersistsBatchAndDisabledOrphansWithoutStarting() async throws {
+    let (store, _) = try makeCustomRuleStore()
+    let rules = [
+      CustomRule(action: .direct, match: .domainExact("one.example")),
+      CustomRule(action: .direct, match: .domainExact("two.example")),
+    ]
+    let original = CustomRuleDocument(rules: rules, disabledIdentities: [rules[0].identity])
+    try store.saveDocument(original)
+    let controller = makeControllerWithCustomRules(
+      store: store, settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
+    let workflow = deletionWorkflow(controller)
+    await workflow.refresh()
+    workflow.select(Set(workflow.snapshot.rows.map(\.id)))
+    let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())
+    let result = await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(result, .committed(.saved))
+    XCTAssertEqual(
+      try store.loadDocument(),
+      CustomRuleDocument(rules: [], disabledIdentities: original.disabledIdentities))
+    XCTAssertEqual(controller.state, .off)
+    XCTAssertEqual(agent.registerCount, 0)
+    var query = workflow.snapshot.query
+    query.enabled = false
+    workflow.query(query)
+    let orphan = try XCTUnwrap(workflow.snapshot.rows.first { $0.identity == rules[0].identity })
+    XCTAssertFalse(orphan.hasCurrentSource)
+    await workflow.setEnabled(true, identities: [rules[0].identity])
+    XCTAssertFalse(workflow.snapshot.rows.contains { $0.identity == rules[0].identity })
+    XCTAssertTrue(try store.loadDocument().disabledIdentities.isEmpty)
+  }
+
+  func testBatchDeletionDeploysOnceAndInvalidatesAddressTest() async throws {
+    let seeded = try makeSeededCatalog()
+    let (store, _) = try makeCustomRuleStore()
+    let rules = [
+      CustomRule(action: .direct, match: .domainExact("one-delete.example")),
+      CustomRule(action: .direct, match: .domainExact("two-delete.example")),
+    ]
+    try store.save(rules)
+    let controller = makeControllerWithCustomRules(
+      store: store,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, preferredMode: .rule,
+        ruleDefaultAction: .proxyWhenUnmatched, agentEnabled: true), proxyMode: .rule)
+    try await controller.activate(seeded.server)
+    let workflow = deletionWorkflow(controller)
+    await workflow.refresh()
+    workflow.setTestTarget("one-delete.example")
+    await workflow.testAddress()
+    XCTAssertNotNil(workflow.snapshot.addressTest.result)
+    workflow.select(Set(workflow.snapshot.rows.filter { !$0.customIDs.isEmpty }.map(\.id)))
+    let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())
+    let registrations = agent.registerCount
+    let result = await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(result, .committed(.applied))
+    XCTAssertEqual(agent.registerCount, registrations + 1)
+    XCTAssertTrue(try store.load().isEmpty)
+    let content = try activeACLContent(RuntimeFileStore(fileURL: runtime.contract))
+    XCTAssertFalse(content.contains("one-delete.example"))
+    XCTAssertFalse(content.contains("two-delete.example"))
+    XCTAssertNil(workflow.snapshot.addressTest.result)
+    XCTAssertTrue(workflow.snapshot.selection.isEmpty)
+    XCTAssertEqual(workflow.snapshot.commitFeedback?.operation, .delete)
+  }
+
+  func testDeletionInNonRuleModesOnlySavesAndCoveredRuleDoesNotRestart() async throws {
+    let seeded = try makeSeededCatalog()
+    let (store, _) = try makeCustomRuleStore()
+    let rule = CustomRule(action: .direct, match: .domainExact("covered.cn"))
+    for mode in [ProxyMode.global, .direct, .rule] {
+      try store.save([rule])
+      let controller = makeControllerWithCustomRules(
+        store: store,
+        settings: ProxySettings(
+          listen: ActivationFixture.listen, preferredMode: mode.kind,
+          ruleDefaultAction: .proxyWhenUnmatched, agentEnabled: true), proxyMode: mode)
+      try await controller.activate(seeded.server)
+      let workflow = deletionWorkflow(controller)
+      await workflow.refresh()
+      workflow.select(Set(workflow.snapshot.rows.filter { !$0.customIDs.isEmpty }.map(\.id)))
+      let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())
+      let registrations = agent.registerCount
+      let result = await workflow.deleteCustomRules(confirmation)
+      XCTAssertEqual(result, .committed(mode == .rule ? .runtimeUnchanged : .saved))
+      XCTAssertEqual(agent.registerCount, registrations)
+      XCTAssertTrue(try store.load().isEmpty)
+      await controller.setAgentEnabled(false)
+    }
+  }
+
+  func testDeletionFailureRestoresWholeDocumentAndReportsRuntimeRecoveryFailure() async throws {
+    let seeded = try makeSeededCatalog()
+    let (store, _) = try makeCustomRuleStore()
+    let rules = [
+      CustomRule(action: .direct, match: .domainExact("keep-one.example")),
+      CustomRule(action: .direct, match: .domainExact("keep-two.example")),
+    ]
+    let orphan = RuleIdentity(action: .proxy, match: .domainExact("orphan.example"))
+    let original = CustomRuleDocument(rules: rules, disabledIdentities: [orphan])
+    try store.saveDocument(original)
+    let controller = makeControllerWithCustomRules(
+      store: store,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, preferredMode: .rule,
+        ruleDefaultAction: .proxyWhenUnmatched, agentEnabled: true), proxyMode: .rule)
+    try await controller.activate(seeded.server)
+    let workflow = deletionWorkflow(controller)
+    await workflow.refresh()
+    workflow.select(Set(workflow.snapshot.rows.filter { !$0.customIDs.isEmpty }.map(\.id)))
+    let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    let previousRuntime = try XCTUnwrap(runtimeStore.loadDocument())
+    let previousACL = try activeACLContent(runtimeStore)
+    agent.onRegister = {
+      guard let requested = runtimeStore.loadDocument() else { return }
+      let isRecovery = (try? store.load().count) == rules.count
+      try? runtimeStore.writeRuntimeReceipt(
+        for: isRecovery ? requested : previousRuntime, processID: 42)
+    }
+    let rolledBack = await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(rolledBack, .committed(.rolledBack))
+    XCTAssertEqual(try store.loadDocument(), original)
+    XCTAssertEqual(runtimeStore.loadDocument(), previousRuntime)
+    XCTAssertEqual(try activeACLContent(runtimeStore), previousACL)
+    XCTAssertEqual(workflow.snapshot.version, confirmation.version)
+    XCTAssertEqual(controller.state, .running)
+    agent.onRegister = {
+      try? FileManager.default.removeItem(at: runtimeStore.runtimeStatusFileURL)
+    }
+    let failed = await workflow.deleteCustomRules(confirmation)
+    guard case .committed(.recoveryFailed(let detail, let restored)) = failed else {
+      return XCTFail("Expected explicit recovery failure, got \(failed)")
+    }
+    XCTAssertTrue(restored)
+    XCTAssertFalse(detail.isEmpty)
+    XCTAssertEqual(try store.loadDocument(), original)
+    XCTAssertNotEqual(controller.state, .running)
+    XCTAssertEqual(
+      workflow.snapshot.commitOutcome, .recoveryFailed(detail: detail, rulesRestored: restored))
+  }
+
+  func testDeletionPersistenceFailureRetainsOwnedDocumentAndDoesNotStartRuntime() async throws {
+    let (store, directory) = try makeCustomRuleStore()
+    let rule = CustomRule(action: .direct, match: .domainExact("kept.example"))
+    let original = CustomRuleDocument(rules: [rule], disabledIdentities: [rule.identity])
+    try store.saveDocument(original)
+    let controller = makeControllerWithCustomRules(
+      store: store, settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
+    let workflow = deletionWorkflow(controller)
+    await workflow.refresh()
+    workflow.select(Set(workflow.snapshot.rows.map(\.id)))
+    let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())
+    let originalData = try Data(contentsOf: store.fileURL)
+    let backupDirectory = directory.appendingPathExtension("backup")
+    try FileManager.default.moveItem(at: directory, to: backupDirectory)
+    try Data("blocks parent directory".utf8).write(to: directory)
+    let backup = backupDirectory.appendingPathComponent(store.fileURL.lastPathComponent)
+    let result = await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(result, .committed(.persistenceFailed))
+    XCTAssertEqual(controller.ruleDocuments.current, original)
+    XCTAssertEqual(try Data(contentsOf: backup), originalData)
+    XCTAssertEqual(workflow.snapshot.version, confirmation.version)
+    XCTAssertEqual(workflow.deletableSelection, [rule.id])
+    XCTAssertEqual(agent.registerCount, 0)
+  }
+
+  private func deletionWorkflow(_ controller: ProxyRuntimeController) -> RulesWorkflow {
+    RulesWorkflow(
+      loadDocument: { try controller.ruleDocuments.load() },
+      commitDocument: { await controller.commitRuleDocument($0) },
+      builtinSnapshots: controller.ruleSnapshots)
+  }
+}

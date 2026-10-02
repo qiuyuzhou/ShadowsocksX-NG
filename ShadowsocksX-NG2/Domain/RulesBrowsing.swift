@@ -76,7 +76,7 @@ enum RulesOperationStatus: Equatable, Sendable {
 struct RulesCommitFeedback: Equatable, Sendable, Identifiable {
   enum Operation: Equatable, Sendable {
     case enablement(Bool)
-    case add, edit
+    case add, edit, delete
   }
   let id = UUID()
   let outcome: CustomRuleUpdateOutcome

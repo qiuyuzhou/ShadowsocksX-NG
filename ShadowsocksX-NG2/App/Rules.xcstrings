@@ -1202,6 +1202,72 @@
           }
         }
       }
+    },
+    "删除 %lld 条自定义规则…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete %lld Custom Rules…"
+          }
+        }
+      }
+    },
+    "删除 %lld 条自定义规则？": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete %lld Custom Rules?"
+          }
+        }
+      }
+    },
+    "只删除所选自定义条目。其他来源的规则和已有禁用记录将保留。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the selected custom entries will be deleted. Rules from other sources and existing disablement records will be kept."
+          }
+        }
+      }
+    },
+    "删除": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete"
+          }
+        }
+      }
+    },
+    "已删除 %lld 条自定义规则": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deleted %lld Custom Rules"
+          }
+        }
+      }
+    },
+    "规则集合已变化，请重新确认删除。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The rule collection has changed. Confirm the deletion again."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

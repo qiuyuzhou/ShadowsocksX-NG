@@ -29,7 +29,10 @@ struct RulesView: View {
         VStack(spacing: 0) {
           VStack(spacing: 6) {
             filters
-            RulesOperationStatusView(workflow: workflow, onShowRuntime: onShowRuntime)
+            HStack {
+              RulesDeletionButton(workflow: workflow)
+              RulesOperationStatusView(workflow: workflow, onShowRuntime: onShowRuntime)
+            }
           }.padding()
           ruleTable.overlay { emptyState }
           if let row = workflow.selectedRelationshipRow {

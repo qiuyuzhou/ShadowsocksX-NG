@@ -291,3 +291,43 @@ extension RulesWorkflow {
     return .committed(await commit(document, operation: draft.editingID == nil ? .add : .edit))
   }
 }
+
+/// Deletion targets custom memberships, never the shared match-and-action identity.
+extension RulesWorkflow {
+  var deletableSelection: Set<UUID> {
+    Set(snapshot.rows.filter { snapshot.selection.contains($0.id) }.flatMap(\.customIDs))
+  }
+
+  func prepareCustomRuleDeletion() -> CustomRuleDeletion? {
+    guard snapshot.isComplete, !snapshot.isCommitting, commitDocument != nil,
+      !deletableSelection.isEmpty
+    else { return nil }
+    return CustomRuleDeletion(customIDs: deletableSelection, version: snapshot.version)
+  }
+
+  func deleteCustomRules(_ confirmation: CustomRuleDeletion) async -> CustomRuleDeletionResult {
+    guard !snapshot.isCommitting else { return .unavailable(.busy) }
+    guard snapshot.isComplete, commitDocument != nil, let old = collection?.userDocument
+    else { return .unavailable(.incompleteCollection) }
+    guard confirmation.version == snapshot.version,
+      !confirmation.customIDs.isEmpty,
+      confirmation.customIDs.isSubset(of: Set(old.rules.map(\.id)))
+    else { return .unavailable(.staleConfirmation) }
+    let document = CustomRuleDocument(
+      rules: old.rules.filter { !confirmation.customIDs.contains($0.id) },
+      disabledIdentities: old.disabledIdentities)
+    return .committed(
+      await commit(
+        document, operation: .delete, changedCount: confirmation.customIDs.count))
+  }
+}
+
+struct CustomRuleDeletion: Equatable, Sendable {
+  let customIDs: Set<UUID>
+  let version: String
+
+  fileprivate init(customIDs: Set<UUID>, version: String) {
+    self.customIDs = customIDs
+    self.version = version
+  }
+}

@@ -118,6 +118,9 @@ extension RulesCommitFeedback {
         RulesCopy.text(enabled ? "已启用 %lld 条规则" : "已禁用 %lld 条规则"), Int64(changedCount))
     case .add: count = RulesCopy.text("已新增规则")
     case .edit: count = RulesCopy.text("已编辑规则")
+    case .delete:
+      count = String.localizedStringWithFormat(
+        RulesCopy.text("已删除 %lld 条自定义规则"), Int64(changedCount))
     }
     let application: String
     switch outcome {
