@@ -16,7 +16,9 @@ struct RulesAddressTestView: View {
         .autocorrectionDisabled()
         .onSubmit { submit() }
         Button(RulesCopy.text("测试")) { submit() }
-          .disabled(workflow.snapshot.isLoading || workflow.snapshot.addressTest.isTesting)
+          .disabled(
+            workflow.snapshot.isLoading || workflow.snapshot.isCommitting
+              || workflow.snapshot.addressTest.isTesting)
       }
       if workflow.snapshot.addressTest.isTesting {
         ProgressView(RulesCopy.text("测试中…")).controlSize(.small)
@@ -44,7 +46,9 @@ struct RulesAddressTestView: View {
   }
 
   private func submit() {
-    guard !workflow.snapshot.isLoading, !workflow.snapshot.addressTest.isTesting else { return }
+    guard !workflow.snapshot.isLoading, !workflow.snapshot.isCommitting,
+      !workflow.snapshot.addressTest.isTesting
+    else { return }
     Task { await workflow.testAddress() }
   }
 

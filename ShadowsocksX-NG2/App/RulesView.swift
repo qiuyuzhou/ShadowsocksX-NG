@@ -4,31 +4,12 @@ import SwiftUI
 struct RulesView: View {
   @ObservedObject var workflow: RulesWorkflow
   @Environment(\.openWindow) private var openWindow
+  var onShowRuntime: () -> Void
 
   var body: some View {
     VStack(spacing: 0) {
       RulesAddressTestView(workflow: workflow)
       Divider()
-      if workflow.snapshot.isCommitting {
-        ProgressView(RulesCopy.text("正在保存并应用…")).padding()
-      }
-      if let outcome = workflow.snapshot.commitOutcome {
-        Text(verbatim: outcome.rulesMessage).textSelection(.enabled).padding(.horizontal)
-      }
-      if workflow.snapshot.isLoading {
-        ProgressView(RulesCopy.text("加载规则…")).padding()
-      }
-      if !workflow.snapshot.issues.isEmpty {
-        VStack(alignment: .leading) {
-          Label(RulesCopy.text("集合不完整"), systemImage: "exclamationmark.triangle")
-          Text(RulesCopy.text("集合不完整时，覆盖解释仅基于已加载来源。")).font(.caption)
-          ForEach(workflow.snapshot.issues, id: \.self) { issue in
-            Text(verbatim: issueDescription(issue))
-              .font(.caption).textSelection(.enabled)
-          }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading).padding()
-      }
       HStack(spacing: 0) {
         VStack(spacing: 0) {
           sourceList
@@ -45,12 +26,11 @@ struct RulesView: View {
         }.frame(width: 180)
         Divider()
         VStack(spacing: 0) {
-          filters.padding()
-          ruleTable
-          if workflow.snapshot.rows.isEmpty && !workflow.snapshot.isLoading {
-            ContentUnavailableView(
-              RulesCopy.text("没有符合条件的规则"), systemImage: "line.3.horizontal.decrease.circle")
-          }
+          VStack(spacing: 6) {
+            filters
+            RulesOperationStatusView(workflow: workflow, onShowRuntime: onShowRuntime)
+          }.padding()
+          ruleTable.overlay { emptyState }
           if let row = workflow.selectedRelationshipRow {
             Divider()
             RulesRelationshipsView(row: row)
@@ -61,6 +41,25 @@ struct RulesView: View {
     }
     .task {
       if workflow.snapshot.version.isEmpty { await workflow.refresh() }
+    }
+  }
+
+  @ViewBuilder
+  private var emptyState: some View {
+    if workflow.snapshot.operationStatus == .initialLoading {
+      ProgressView(RulesCopy.text("正在加载规则…"))
+    } else if workflow.snapshot.rows.isEmpty && !workflow.snapshot.isLoading {
+      if workflow.snapshot.issues.isEmpty {
+        ContentUnavailableView(
+          RulesCopy.text("没有符合条件的规则"), systemImage: "line.3.horizontal.decrease.circle")
+      } else {
+        VStack(spacing: 10) {
+          Label(RulesCopy.text("集合不完整"), systemImage: "exclamationmark.triangle")
+          RulesCollectionIssuesView(issues: workflow.snapshot.issues)
+          Button(RulesCopy.text("刷新规则")) { Task { await workflow.refresh() } }
+            .disabled(workflow.snapshot.isCommitting)
+        }.padding()
+      }
     }
   }
 
@@ -194,12 +193,6 @@ struct RulesView: View {
     }
   }
 
-  private func issueDescription(_ issue: RulesPageSnapshot.Issue) -> String {
-    switch issue {
-    case .userDocument(let detail): "\(RulesCopy.text("自定义规则")): \(detail)"
-    case .builtin(let source, let detail): "\(source.label): \(detail)"
-    }
-  }
 }
 
 private struct RulesRelationshipsView: View {
@@ -311,21 +304,6 @@ extension RuleMatch {
     case .domainSuffix: RulesCopy.text("域名后缀")
     case .ipv4CIDR: "IPv4 CIDR"
     case .ipv6CIDR: "IPv6 CIDR"
-    }
-  }
-}
-
-extension CustomRuleUpdateOutcome {
-  var rulesMessage: String {
-    switch self {
-    case .saved: RulesCopy.text("已保存")
-    case .persistenceFailed: RulesCopy.text("保存失败")
-    case .rolledBack: RulesCopy.text("部署失败，已恢复")
-    case .recoveryFailed(let detail): RulesCopy.text("恢复失败") + ": " + detail
-    case .busy: RulesCopy.text("正在保存并应用…")
-    case .versionConflict: RulesCopy.text("版本已变化，请刷新后重试")
-    case .invalidDocument(let detail): RulesCopy.text("规则文档无效") + ": " + detail
-    case .rejected(let rejected): rejected.map(\.explanation).joined(separator: "; ")
     }
   }
 }

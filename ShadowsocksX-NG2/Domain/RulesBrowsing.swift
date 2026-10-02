@@ -48,7 +48,8 @@ struct RulesPageSnapshot: Equatable, Sendable {
   var version = ""
   var isLoading = false
   var isCommitting = false
-  var commitOutcome: CustomRuleUpdateOutcome?
+  var commitFeedback: RulesCommitFeedback?
+  var commitOutcome: CustomRuleUpdateOutcome? { commitFeedback?.outcome }
   var issues: [Issue] = []
   var sources: [RulesSourceSnapshot] = []
   var rows: [RulesRow] = []
@@ -56,4 +57,25 @@ struct RulesPageSnapshot: Equatable, Sendable {
   var query = RulesQuery()
   var addressTest = RulesAddressTest()
   var isComplete: Bool { !isLoading && !isCommitting && issues.isEmpty && !version.isEmpty }
+  var operationStatus: RulesOperationStatus {
+    if isCommitting { return .updating }
+    if isLoading { return version.isEmpty ? .initialLoading : .refreshing }
+    if !issues.isEmpty && commitFeedback?.outcome.isSuccess != false {
+      return .collectionIncomplete
+    }
+    if let commitFeedback { return .feedback(commitFeedback) }
+    return issues.isEmpty ? .idle : .collectionIncomplete
+  }
+}
+
+enum RulesOperationStatus: Equatable, Sendable {
+  case idle, initialLoading, refreshing, updating, collectionIncomplete
+  case feedback(RulesCommitFeedback)
+}
+
+struct RulesCommitFeedback: Equatable, Sendable, Identifiable {
+  let id = UUID()
+  let outcome: CustomRuleUpdateOutcome
+  let enabled: Bool
+  let changedCount: Int
 }

@@ -198,11 +198,14 @@ final class RulesWorkflowTests: XCTestCase {
     observation.cancel()
     XCTAssertNotEqual(workflow.snapshot.version, oldVersion)
     XCTAssertEqual(workflow.snapshot.rows.map(\.identity), [new.identity])
+    let loadedVersion = workflow.snapshot.version
     try Data("broken".utf8).write(to: store.fileURL)
     await workflow.refresh()
     XCTAssertFalse(workflow.snapshot.isComplete)
     XCTAssertEqual(workflow.snapshot.issues.count, 1)
-    XCTAssertTrue(workflow.snapshot.rows.isEmpty)
+    XCTAssertEqual(workflow.snapshot.rows.map(\.identity), [new.identity])
+    XCTAssertEqual(workflow.snapshot.version, loadedVersion)
+    XCTAssertEqual(workflow.snapshot.operationStatus, .collectionIncomplete)
   }
 
   func testLateOldRefreshCannotReplaceTheNewCollection() async throws {

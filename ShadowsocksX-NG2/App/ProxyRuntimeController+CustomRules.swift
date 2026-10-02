@@ -4,18 +4,28 @@ import Foundation
 
 /// 自定义规则更新结果（issue #66）：持久化成功、校验拒绝、持久化失败或部署回滚。
 enum CustomRuleUpdateOutcome: Equatable, Sendable {
-  /// 规则已保存并生效（或在非规则模式下仅持久化，ACL 不变）。
+  /// 规则已保存；运行规则模式时应用。
   case saved
+  case applied
+  case runtimeUnchanged
   /// 校验拒绝：整批不落地，旧规则保持不变；附可解释原因。
   case rejected([RejectedCustomRule])
   /// 持久化失败：旧规则保持不变。
   case persistenceFailed
   /// 保存后部署失败并已回滚到旧规则与旧运行时。
   case rolledBack
-  case recoveryFailed(detail: String)
+  case recoveryFailed(detail: String, rulesRestored: Bool)
+  case runtimeChanged(rulesRestored: Bool)
   case busy
   case versionConflict
   case invalidDocument(detail: String)
+
+  var isSuccess: Bool {
+    switch self {
+    case .saved, .applied, .runtimeUnchanged: true
+    default: false
+    }
+  }
 }
 
 // MARK: - 自定义规则命令面
@@ -61,7 +71,7 @@ extension ProxyRuntimeController {
     previousRules: CustomRuleDocument,
     snapshot: ModeTransitionSnapshotForRules
   ) async -> CustomRuleUpdateOutcome {
-    guard settings.agentEnabled, state != .off,
+    guard proxyMode == .rule, settings.agentEnabled, state != .off,
       let currentDocument = lastDocument ?? runtimeFileStore.loadDocument()
     else {
       return .saved
@@ -76,11 +86,11 @@ extension ProxyRuntimeController {
         try customRuleStore.saveDocument(previousRules)
         return .rolledBack
       } catch {
-        return .recoveryFailed(detail: String(describing: error))
+        return .recoveryFailed(detail: String(describing: error), rulesRestored: false)
       }
     }
     guard nextDocument.aclRuntime != currentDocument.aclRuntime else {
-      return .saved
+      return .runtimeUnchanged
     }
 
     modeChangeGeneration += 1
@@ -92,7 +102,7 @@ extension ProxyRuntimeController {
       guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
         settings.agentEnabled
       else {
-        return .recoveryFailed(detail: "Runtime changed during rule deployment")
+        return .runtimeChanged(rulesRestored: false)
       }
       return await restoreCustomRules(previousRules, snapshot: snapshot)
     }
@@ -100,7 +110,7 @@ extension ProxyRuntimeController {
     guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
       settings.agentEnabled
     else {
-      return .recoveryFailed(detail: "Runtime changed during rule deployment")
+      return .runtimeChanged(rulesRestored: false)
     }
     let healthy = await presentLaunchHealth(
       nextDocument,
@@ -110,7 +120,7 @@ extension ProxyRuntimeController {
     guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
       settings.agentEnabled
     else {
-      return .recoveryFailed(detail: "Runtime changed during rule deployment")
+      return .runtimeChanged(rulesRestored: false)
     }
     guard healthy else {
       return await restoreCustomRules(previousRules, snapshot: snapshot)
@@ -121,9 +131,9 @@ extension ProxyRuntimeController {
     guard generation == modeChangeGeneration, runtimeGeneration == flowGeneration,
       settings.agentEnabled
     else {
-      return .recoveryFailed(detail: "Runtime changed during rule deployment")
+      return .runtimeChanged(rulesRestored: false)
     }
-    return .saved
+    return .applied
   }
 
   /// 保存前校验（issue #66 AC2）：固定本地冲突与重复整批拒绝并返回可解释原因。
@@ -152,12 +162,14 @@ extension ProxyRuntimeController {
       failures.append(String(describing: error))
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
     }
+    let rulesRestored = failures.isEmpty
     guard let previousDocument = snapshot.document else {
       return failures.isEmpty
-        ? .rolledBack : .recoveryFailed(detail: failures.joined(separator: "; "))
+        ? .rolledBack
+        : .recoveryFailed(detail: failures.joined(separator: "; "), rulesRestored: rulesRestored)
     }
     guard settings.agentEnabled else {
-      return .recoveryFailed(detail: "Agent disabled during rule recovery")
+      return .runtimeChanged(rulesRestored: rulesRestored)
     }
     let modeGeneration = modeChangeGeneration
     let runtimeGeneration = flowGeneration + 1
@@ -167,19 +179,19 @@ extension ProxyRuntimeController {
     guard modeGeneration == modeChangeGeneration, runtimeGeneration == flowGeneration,
       settings.agentEnabled
     else {
-      return .recoveryFailed(detail: "Runtime changed during rule recovery")
+      return .runtimeChanged(rulesRestored: rulesRestored)
     }
     guard executed else {
       failures.append(String(describing: state))
       await holdSystemProxyIntent()
-      return .recoveryFailed(detail: failures.joined(separator: "; "))
+      return .recoveryFailed(detail: failures.joined(separator: "; "), rulesRestored: rulesRestored)
     }
     let healthy = await presentLaunchHealth(
       previousDocument, requiresReceipt: true, convergeProxyOnSuccess: false)
     guard modeGeneration == modeChangeGeneration, runtimeGeneration == flowGeneration,
       settings.agentEnabled
     else {
-      return .recoveryFailed(detail: "Runtime changed during rule recovery")
+      return .runtimeChanged(rulesRestored: rulesRestored)
     }
     if !healthy {
       failures.append(String(describing: state))
@@ -188,7 +200,8 @@ extension ProxyRuntimeController {
       state = snapshot.state
     }
     return failures.isEmpty
-      ? .rolledBack : .recoveryFailed(detail: failures.joined(separator: "; "))
+      ? .rolledBack
+      : .recoveryFailed(detail: failures.joined(separator: "; "), rulesRestored: rulesRestored)
   }
 
   private struct ModeTransitionSnapshotForRules {

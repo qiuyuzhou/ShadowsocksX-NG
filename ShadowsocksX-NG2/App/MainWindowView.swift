@@ -157,7 +157,7 @@ struct MainWindowView: View {
     case .rules:
       Button(RulesCopy.text("刷新"), systemImage: "arrow.clockwise") {
         Task { await rulesWorkflow.refresh() }
-      }.disabled(rulesWorkflow.snapshot.isLoading)
+      }.disabled(rulesWorkflow.snapshot.isLoading || rulesWorkflow.snapshot.isCommitting)
     case .diagnostics:
       Button("导出诊断…", systemImage: "square.and.arrow.up") {
         exportDiagnostics()
@@ -211,7 +211,7 @@ struct MainWindowView: View {
         workflow: workflow,
         onNodesRemoved: clearSelectionIfInvalidated)
     case .rules:
-      RulesView(workflow: rulesWorkflow)
+      RulesView(workflow: rulesWorkflow, onShowRuntime: { route.navigate(to: .home) })
     case .settings:
       SettingsView(
         workflow: settingsWorkflow, loginController: loginController,

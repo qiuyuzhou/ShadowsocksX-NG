@@ -56,7 +56,7 @@ extension ProxyRuntimeControllerTests {
       action: .direct, match: try RuleMatch(domainSuffix: "internal.example"))
     let outcome = await controller.updateCustomRules([rule])
 
-    XCTAssertEqual(outcome, .saved)
+    XCTAssertEqual(outcome, .applied)
     XCTAssertEqual(try store.load(), [rule])
     XCTAssertEqual(agent.unregisterCount, unregisterBefore + 1, "ACL 变化触发完整 agent 重启")
     let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
@@ -82,7 +82,7 @@ extension ProxyRuntimeControllerTests {
       CustomRule(action: .direct, match: .domainExact("a.order.example")),
     ]
     let first = await controller.updateCustomRules(rules)
-    XCTAssertEqual(first, .saved)
+    XCTAssertEqual(first, .applied)
     XCTAssertEqual(try store.load(), rules, "保存保留用户 UUID 和全部意图")
     let validation = try controller.ruleModeValidation()
     XCTAssertTrue(
@@ -95,7 +95,7 @@ extension ProxyRuntimeControllerTests {
     let summary = controller.readCustomRuleSummary()
     let reversed = Array(rules.reversed())
     let reordered = await controller.updateCustomRules(reversed)
-    XCTAssertEqual(reordered, .saved)
+    XCTAssertEqual(reordered, .runtimeUnchanged)
     XCTAssertEqual(try store.load(), reversed)
     XCTAssertEqual(try activeACLContent(runtimeStore), before)
     XCTAssertEqual(agent.unregisterCount, unregisterBefore)

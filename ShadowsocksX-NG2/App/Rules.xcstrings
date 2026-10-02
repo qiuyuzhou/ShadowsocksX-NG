@@ -727,6 +727,283 @@
           }
         }
       }
+    },
+    "正在更新规则…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updating rules…"
+          }
+        }
+      }
+    },
+    "正在加载规则…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading rules…"
+          }
+        }
+      }
+    },
+    "已应用": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Applied"
+          }
+        }
+      }
+    },
+    "无需重新应用": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No runtime update needed"
+          }
+        }
+      }
+    },
+    "运行规则模式时应用": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Applies when running in Rules mode"
+          }
+        }
+      }
+    },
+    "保存失败，规则未更改": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't save; rules unchanged"
+          }
+        }
+      }
+    },
+    "应用失败，已恢复原规则": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't apply; previous rules restored"
+          }
+        }
+      }
+    },
+    "恢复失败，请检查运行状态": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recovery failed; check runtime status"
+          }
+        }
+      }
+    },
+    "运行状态已变化，请检查当前状态": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Runtime state changed; check current status"
+          }
+        }
+      }
+    },
+    "规则已变化，请刷新后重试": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rules changed; refresh and try again"
+          }
+        }
+      }
+    },
+    "无法更新规则": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't update rules"
+          }
+        }
+      }
+    },
+    "查看详情": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View Details"
+          }
+        }
+      }
+    },
+    "关闭": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dismiss"
+          }
+        }
+      }
+    },
+    "刷新规则": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh Rules"
+          }
+        }
+      }
+    },
+    "查看运行状态": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View Runtime Status"
+          }
+        }
+      }
+    },
+    "已恢复原规则": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous rules restored"
+          }
+        }
+      }
+    },
+    "已启用 %lld 条规则": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Enabled %lld rule"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Enabled %lld rules"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "已禁用 %lld 条规则": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Disabled %lld rule"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Disabled %lld rules"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "规则列表未更新，请刷新规则。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't update the rule list. Refresh rules."
+          }
+        }
+      }
+    },
+    "请重新执行启用或禁用操作。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try enabling or disabling the rules again."
+          }
+        }
+      }
+    },
+    "请刷新规则，重新选择后再操作。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh rules, then select the rules again."
+          }
+        }
+      }
+    },
+    "请在首页检查当前代理运行状态。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check the current proxy runtime status on Home."
+          }
+        }
+      }
+    },
+    "请检查规则数据后再操作。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check the rule data before trying again."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

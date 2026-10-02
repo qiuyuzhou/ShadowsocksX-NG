@@ -14,11 +14,16 @@ final class RulesWorkflow: ObservableObject {
   private var collection: RulesCollection?
   private var refreshGeneration = 0
   private var testGeneration = 0
+  private let feedbackDelay: @Sendable () async throws -> Void
+  private var feedbackTask: Task<Void, Never>?
 
   init(
     loadCustom: (@Sendable () throws -> [CustomRule])? = nil,
     loadDocument: (@Sendable () throws -> CustomRuleDocument)? = nil,
     commitDocument: (@MainActor (CustomRuleDocument) async -> CustomRuleUpdateOutcome)? = nil,
+    feedbackDelay: @escaping @Sendable () async throws -> Void = {
+      try await Task.sleep(for: .seconds(3))
+    },
     loadBuiltin: @escaping @Sendable (RulesSource) throws -> RuleSnapshot = { source in
       switch source {
       case .geolocationCN: try BuiltinRuleCatalog.loadGeolocationCN()
@@ -36,12 +41,19 @@ final class RulesWorkflow: ObservableObject {
       self.loadDocument = nil
     }
     self.commitDocument = commitDocument
+    self.feedbackDelay = feedbackDelay
     self.loadCustom = loadCustom ?? { try CustomRuleStore().load() }
     self.loadBuiltin = loadBuiltin
   }
 
   func refresh() async {
     guard !snapshot.isCommitting else { return }
+    if snapshot.commitOutcome == .versionConflict {
+      snapshot.selection = []
+      dismissFeedback()
+    } else if snapshot.commitOutcome?.isSuccess == true && !snapshot.issues.isEmpty {
+      dismissFeedback()
+    }
     await refreshCollection()
   }
 
@@ -57,6 +69,11 @@ final class RulesWorkflow: ObservableObject {
       RulesCollection.load(custom: custom, builtin: builtin, document: document)
     }.value
     guard generation == refreshGeneration else { return }
+    if !result.issues.isEmpty, collection != nil {
+      snapshot.issues = result.issues
+      snapshot.isLoading = false
+      return
+    }
     collection = result
     var next = snapshot
     next.version = result.version
@@ -80,7 +97,7 @@ final class RulesWorkflow: ObservableObject {
     let targets = identities.intersection(allowed)
     guard !targets.isEmpty else { return }
     snapshot.isCommitting = true
-    snapshot.commitOutcome = nil
+    dismissFeedback()
     invalidateAddressTest()
     defer { snapshot.isCommitting = false }
     do {
@@ -88,19 +105,42 @@ final class RulesWorkflow: ObservableObject {
       guard let prepared = collection?.userDocument,
         old.rules == prepared.rules && old.disabledIdentities == prepared.disabledIdentities
       else {
-        snapshot.commitOutcome = .versionConflict
-        await refreshCollection()
+        publishFeedback(.versionConflict, enabled: enabled, changedCount: 0)
         return
       }
       var disabled = old.disabledIdentities
+      let changedCount =
+        enabled
+        ? targets.intersection(disabled).count : targets.subtracting(disabled).count
       if enabled { disabled.subtract(targets) } else { disabled.formUnion(targets) }
       guard disabled != old.disabledIdentities else { return }
       let outcome = await commitDocument(
         CustomRuleDocument(rules: old.rules, disabledIdentities: disabled))
-      snapshot.commitOutcome = outcome
       await refreshCollection()
+      publishFeedback(outcome, enabled: enabled, changedCount: changedCount)
     } catch {
-      snapshot.commitOutcome = .persistenceFailed
+      publishFeedback(.persistenceFailed, enabled: enabled, changedCount: 0)
+    }
+  }
+
+  func dismissFeedback() {
+    feedbackTask?.cancel()
+    feedbackTask = nil
+    snapshot.commitFeedback = nil
+  }
+
+  private func publishFeedback(
+    _ outcome: CustomRuleUpdateOutcome, enabled: Bool, changedCount: Int
+  ) {
+    let feedback = RulesCommitFeedback(
+      outcome: outcome, enabled: enabled, changedCount: changedCount)
+    snapshot.commitFeedback = feedback
+    guard outcome.isSuccess, snapshot.issues.isEmpty else { return }
+    let delay = feedbackDelay
+    feedbackTask = Task { [weak self] in
+      do { try await delay() } catch { return }
+      guard !Task.isCancelled, self?.snapshot.commitFeedback?.id == feedback.id else { return }
+      self?.dismissFeedback()
     }
   }
 

@@ -18,7 +18,7 @@ extension ProxyRuntimeControllerTests {
     let absent = RuleIdentity(action: .direct, match: .domainExact("absent.example"))
     let outcome = await controller.updateRuleDocument(
       CustomRuleDocument(rules: [], disabledIdentities: [cn, absent]))
-    XCTAssertEqual(outcome, .saved)
+    XCTAssertEqual(outcome, .applied)
     XCTAssertEqual(agent.unregisterCount, before + 1)
     let content = try activeACLContent(runtimeStore)
     XCTAssertFalse(content.split(separator: "\n").contains("||cn"))
@@ -28,7 +28,7 @@ extension ProxyRuntimeControllerTests {
     let noOpBefore = agent.unregisterCount
     let unchanged = await controller.updateRuleDocument(
       CustomRuleDocument(rules: [], disabledIdentities: [cn]))
-    XCTAssertEqual(unchanged, .saved)
+    XCTAssertEqual(unchanged, .runtimeUnchanged)
     XCTAssertEqual(agent.unregisterCount, noOpBefore, "Absent identities change only persistence")
   }
 
@@ -51,7 +51,7 @@ extension ProxyRuntimeControllerTests {
     let before = agent.unregisterCount
     let outcome = await controller.updateRuleDocument(
       CustomRuleDocument(rules: [], disabledIdentities: blockers))
-    XCTAssertEqual(outcome, .saved)
+    XCTAssertEqual(outcome, .applied)
     XCTAssertEqual(agent.unregisterCount, before + 1)
     let candidates = try controller.ruleModeCandidateRules()
     XCTAssertTrue(
@@ -125,9 +125,10 @@ extension ProxyRuntimeControllerTests {
     }
     let registrations = agent.registerCount
     let outcome = await pending.value
-    guard case .recoveryFailed = outcome else {
+    guard case .runtimeChanged(let rulesRestored) = outcome else {
       return XCTFail("Interrupted recovery must not report success: \(outcome)")
     }
+    XCTAssertTrue(rulesRestored)
     XCTAssertEqual(agent.registerCount, registrations)
     if switchMode {
       XCTAssertEqual(controller.proxyMode, .global)
@@ -156,9 +157,10 @@ extension ProxyRuntimeControllerTests {
     }
     let result = await controller.updateRuleDocument(
       CustomRuleDocument(rules: [rule], disabledIdentities: [rule.identity]))
-    guard case .recoveryFailed(let detail) = result else {
+    guard case .recoveryFailed(let detail, let rulesRestored) = result else {
       return XCTFail("Expected actual recovery failure, got \(result)")
     }
+    XCTAssertTrue(rulesRestored)
     XCTAssertFalse(detail.isEmpty)
     XCTAssertEqual(try store.loadDocument().disabledIdentities, [])
     XCTAssertNotEqual(controller.state, .running)
