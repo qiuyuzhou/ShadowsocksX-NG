@@ -89,7 +89,7 @@ Scripts/packaging-gate.sh \
 
 快照使用 schema 2 / converter 2.0.0 的紧凑 JSON：每条规则只有 `action` 和 `match`，来源只在 `metadata.source`，转换报告只保留计数。被吸收的 `.cn` 条目与被遮蔽的 GFWList 例外不随快照分发，禁用宽规则后不再恢复；详见 [ADR-0024](../docs/adr/0024-snapshot-drops-absorbed-and-forensics.md)。旧版本快照拒载。
 
-转换脚本的离线回归检查：`PYTHONDONTWRITEBYTECODE=1 python3 Scripts/test-rule-snapshot-converters.py`。快照完整性检查：`Scripts/verify-rule-snapshots.sh`。
+Python 是唯一的上游转换实现；Swift 只加载、校验并消费快照，不另行解析上游输入。转换脚本的离线回归检查：`PYTHONDONTWRITEBYTECODE=1 python3 Scripts/test-rule-snapshot-converters.py`。默认 `task test` 也会运行两组 Python 检查；可单独运行 `task test:rules`。另运行 `PYTHONDONTWRITEBYTECODE=1 python3 Scripts/test-rule-conversion-behavior.py`，验证转换行为和单测 bundle 使用的固定快照夹具。审查转换变化后，可通过同一命令加 `--write-fixtures` 重建夹具。夹具时间固定，正常测试逐字节检查生成结果。快照完整性检查：`Scripts/verify-rule-snapshots.sh`。
 
 更新失败保留上一份有效快照。geolocation-cn 转换会因未知语法/损坏输入失败；china-ipv4 转换还会因异常格式（拒绝率过高）、全部失效或相对上一份快照的异常规模变化失败；gfwlist 转换因未知语法、损坏 Base64、异常规模或相对上一份快照的异常规模变化失败。普通构建由 `Scripts/verify-rule-snapshots.sh` 离线校验快照存在、摘要匹配且 schema/转换器版本一致，缺失或损坏即构建失败。分发物必须携带各自的 `NOTICE`（许可证与归属）。
 

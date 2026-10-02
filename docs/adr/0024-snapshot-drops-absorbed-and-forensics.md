@@ -10,4 +10,4 @@ The artifact contract is schema version 2 with converter version 2.0.0 and compa
 
 The loader rejects old schema/converter versions and rule counts outside the generator limits: 100–200000 for geolocation-cn and 100–50000 for china-ipv4 and gfwlist. Source validation uses snapshot metadata; custom-rule documents keep their existing source metadata and schema. Browsing and independent offline matching consume only shipped rules, while relationships among surviving built-in and saved custom rules are still computed dynamically. Disabling `.cn` also removes the omitted domains from offline explanations; disabling a GFWList blocker does not bring back its omitted `@@` exceptions.
 
-This supersedes the preserved-candidate recovery invariant in `CONTEXT.md`. Python generation and Swift converter implementations remain separate; consolidating them is outside this change.
+This supersedes the preserved-candidate recovery invariant in `CONTEXT.md`. Converter consolidation was outside this change. ADR-0025 subsequently makes Python the sole upstream conversion path and removes the duplicate Swift converters.

@@ -117,40 +117,4 @@ final class ProxyRuleTests: XCTestCase {
     XCTAssertEqual(set.conflicts[0].match, .domainSuffix("example.com"))
     XCTAssertEqual(set.conflicts[0].actions, [.direct, .proxy])
   }
-
-  // MARK: - .cn 后缀吸收
-
-  func testCNSuffixAbsorbsSameActionIndependentCNDomains() throws {
-    let cnSuffix = ProxyRule(
-      action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"))
-    let covered = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "foo.cn"))
-    let coveredExact = ProxyRule(
-      action: .direct, match: try RuleMatch(domainExact: "bar.cn"))
-    let otherAction = ProxyRule(
-      action: .proxy, match: try RuleMatch(domainSuffix: "proxy.cn"))
-    let unrelated = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
-
-    let absorbed = RuleCNabsorption.absorb(
-      rules: [cnSuffix, covered, coveredExact, otherAction, unrelated])
-
-    let matches = Set(absorbed.rules.map(\.match))
-    XCTAssertTrue(matches.contains(.domainSuffix("cn")))
-    XCTAssertTrue(matches.contains(.domainSuffix("example.com")))
-    XCTAssertTrue(matches.contains(.domainSuffix("proxy.cn")), "不同动作不吸收")
-    XCTAssertFalse(matches.contains(.domainSuffix("foo.cn")), "同动作 .cn 域名被吸收")
-    XCTAssertFalse(matches.contains(.domainExact("bar.cn")), "同动作 .cn 完整域名被吸收")
-
-    XCTAssertEqual(absorbed.absorbedCount, 2)
-  }
-
-  func testCNExactDoesNotAbsorbAnything() throws {
-    let cnExact = ProxyRule(
-      action: .direct, match: try RuleMatch(domainExact: "cn"))
-    let covered = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "foo.cn"))
-    let result = RuleCNabsorption.absorb(rules: [cnExact, covered])
-    XCTAssertEqual(result.rules.count, 2, "只有 .cn 后缀才能吸收，完整域名 cn 不吸收")
-  }
 }

@@ -40,8 +40,9 @@ tasks:
       - swiftlint lint --fix --config .swiftlint.yml --no-cache
   
   test:
-    desc: 'Run unit tests'
+    desc: 'Run conversion and unit tests'
     cmds:
+      - task: test:rules
       - >-
         xcodebuild
         -project ShadowsocksX-NG2.xcodeproj
@@ -49,6 +50,12 @@ tasks:
         -destination 'platform=macOS,arch=arm64'
         -derivedDataPath {{ .DERIVED_DATA_DIR }}
         test
+
+  test:rules:
+    desc: 'Run offline rule conversion and generated fixture checks'
+    cmds:
+      - PYTHONDONTWRITEBYTECODE=1 python3 Scripts/test-rule-snapshot-converters.py
+      - PYTHONDONTWRITEBYTECODE=1 python3 Scripts/test-rule-conversion-behavior.py
 
   test:smoke:
     desc: 'Run real-process smoke tests (real sslocal; release gate)'

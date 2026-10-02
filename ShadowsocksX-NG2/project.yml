@@ -194,6 +194,10 @@ targets:
         # 真实进程冒烟归 SmokeTests target，不进默认 task test 快车道。
         excludes:
           - "Smoke"
+          - "Fixtures"
+      - path: Tests/Fixtures/RuleSnapshots
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.Tests
