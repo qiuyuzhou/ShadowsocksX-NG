@@ -44,6 +44,13 @@ struct MainWindowView: View {
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
 
   @StateObject private var homeServerList = HomeServerListState()
+  /// 侧栏选中项中转：macOS 的 List/NavigationSplitView 会在视图更新期间回写
+  /// selection（选择再同步，且可能携带缓存的旧值），回写必须落在 SwiftUI 自管
+  /// 的 @State 上，再经 onChange 单向驱动 route；直接 publish 到 route 会触发
+  /// view-update 期间发布警告，且缓存的旧值会把外部导航弹回。route 的外部
+  /// 导航（添加菜单、规则编辑器返回等）经 sidebar 上的 onChange 回填选中项。
+  /// 初值须与 WorkspaceRoute 的初始 destination 对齐，否则首帧侧栏无高亮行。
+  @State private var sidebarSelection: WorkspaceDestination? = WorkspaceRoute.initialDestination
   @State private var selection: NodeID?
   @State private var ruleDraft: CustomRuleDraft?
   /// 全局添加菜单打开的表单，以及诊断导出由窗口壳持有。
@@ -271,7 +278,7 @@ extension MainWindowView {
   // MARK: - 侧栏
 
   private var sidebar: some View {
-    List(selection: navigationBinding) {
+    List(selection: $sidebarSelection) {
       Section {
         ForEach(WorkspaceDestination.allCases) { destination in
           sidebarRow(destination)
@@ -280,6 +287,17 @@ extension MainWindowView {
       }
     }
     .listStyle(.sidebar)
+    // 点击行 → @State 选中项 → route；nil 回写无对应 destination，忽略。
+    .onChange(of: sidebarSelection) { _, destination in
+      guard let destination else { return }
+      route.navigate(to: destination)
+    }
+    // route 的外部导航 → 回填选中项；等值不写，避免导航回声。
+    .onChange(of: route.destination) { _, destination in
+      if sidebarSelection != destination {
+        sidebarSelection = destination
+      }
+    }
     .safeAreaInset(edge: .top, spacing: 4) { identityHeader }
     .safeAreaInset(edge: .bottom, spacing: 4) { statusCard }
   }
@@ -317,15 +335,6 @@ extension MainWindowView {
           .background(Capsule().fill(.quaternary))
       }
     }
-  }
-
-  private var navigationBinding: Binding<WorkspaceDestination?> {
-    Binding(
-      get: { route.destination },
-      set: { destination in
-        guard let destination else { return }
-        route.navigate(to: destination)
-      })
   }
 
   /// 行尾数量角标：服务器 = 目录树内服务器叶子数；订阅 = 订阅数。

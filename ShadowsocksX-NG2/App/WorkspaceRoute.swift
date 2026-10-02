@@ -25,12 +25,17 @@ final class WorkspaceRoute: ObservableObject {
   /// scene id 散落（架构测试锚定）。
   static let workspaceSceneID = "workspace"
 
-  @Published private(set) var destination: WorkspaceDestination = .home
+  /// 实例初始 destination。MainWindowView 侧栏 @State 选中项的初值须与此
+  /// 对齐，否则首帧侧栏无高亮行。
+  static let initialDestination: WorkspaceDestination = .home
+
+  @Published private(set) var destination: WorkspaceDestination = initialDestination
 
   /// workspace 内部导航只改变 route destination；开窗不由 route 驱动。
-  /// 同值导航必须是无操作：macOS 的 List/NavigationSplitView 会在视图更新
-  /// 期间回写 selection Binding（选择再同步），此时 publish 会触发
-  /// "Publishing changes from within view updates" 运行时警告。
+  /// 同值导航必须是无操作：外部导航经 onChange 回填侧栏选中项后会再触发
+  /// 一次 selection onChange（导航回声），由同值短路变成无操作；publish
+  /// 一旦发生在视图更新期间（List/NavigationSplitView 的选择再同步回写）
+  /// 会触发 "Publishing changes from within view updates" 运行时警告。
   func navigate(to destination: WorkspaceDestination) {
     guard destination != self.destination else { return }
     self.destination = destination

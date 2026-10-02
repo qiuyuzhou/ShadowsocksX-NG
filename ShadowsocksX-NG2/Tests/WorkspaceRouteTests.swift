@@ -10,6 +10,12 @@ final class WorkspaceRouteTests: XCTestCase {
     XCTAssertEqual(WorkspaceRoute().destination, .home)
   }
 
+  /// 侧栏 @State 选中项的初值锚定在 initialDestination 上（见 MainWindowView）；
+  /// 两者脱钩会导致首帧侧栏无高亮行。
+  func testInitialDestinationConstantMatchesFreshRoute() {
+    XCTAssertEqual(WorkspaceRoute.initialDestination, WorkspaceRoute().destination)
+  }
+
   /// 侧栏 List/NavigationSplitView 会在视图更新期间回写 selection Binding；
   /// 同值导航不得 publish（否则触发 view-update 期间发布警告）。
   func testNavigateToCurrentDestinationDoesNotPublish() {
