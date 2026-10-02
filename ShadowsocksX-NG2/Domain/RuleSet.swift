@@ -17,7 +17,7 @@ struct RuleSet: Codable, Equatable, Sendable {
     var ordered: [ProxyRule] = []
     var seen = Set<String>()
     for rule in rules {
-      // 去重按 (action, match)：冲突元数据不同不影响运行时等价。
+      // 去重按 (action, match)：来源不影响运行时等价。
       let token = "\(rule.action.rawValue)|\(String(describing: rule.match))"
       guard seen.insert(token).inserted else { continue }
       ordered.append(rule)
@@ -50,19 +50,19 @@ enum RuleCNabsorption {
   struct Result {
     /// 吸收后仍生效的规则。
     let rules: [ProxyRule]
-    /// 被吸收的规则（conflict.absorbedBy 指向 `.cn` 后缀）。
-    let absorbed: [ProxyRule]
+    /// 转换期间删除的同动作 .cn 条目数。
+    let absorbedCount: Int
   }
 
   static func absorb(rules: [ProxyRule]) -> Result {
     let cnSuffix = RuleMatch.domainSuffix("cn")
     guard rules.contains(where: { $0.match == cnSuffix }) else {
-      return Result(rules: rules, absorbed: [])
+      return Result(rules: rules, absorbedCount: 0)
     }
     // 取 `.cn` 后缀规则的动作集合；只有同动作条目才被吸收。
     let cnActions = Set(rules.filter { $0.match == cnSuffix }.map(\.action))
     var kept: [ProxyRule] = []
-    var absorbed: [ProxyRule] = []
+    var absorbedCount = 0
     for rule in rules {
       if rule.match == cnSuffix {
         kept.append(rule)
@@ -72,16 +72,9 @@ enum RuleCNabsorption {
         kept.append(rule)
         continue
       }
-      var conflict = rule.conflict
-      conflict = RuleConflictMetadata(
-        originalEntry: conflict.originalEntry.isEmpty
-          ? String(describing: rule.match) : conflict.originalEntry,
-        absorbedBy: cnSuffix,
-        notes: conflict.notes + ["absorbed-by-cn-suffix"])
-      absorbed.append(
-        ProxyRule(action: rule.action, match: rule.match, source: rule.source, conflict: conflict))
+      absorbedCount += 1
     }
-    return Result(rules: kept, absorbed: absorbed)
+    return Result(rules: kept, absorbedCount: absorbedCount)
   }
 
   private static func isCoveredCNDomain(_ match: RuleMatch) -> Bool {

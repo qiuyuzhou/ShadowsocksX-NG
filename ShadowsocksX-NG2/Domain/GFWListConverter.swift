@@ -211,16 +211,10 @@ struct GFWListConverter {
     // 被更宽（或同宽）代理规则遮蔽的 @@ 例外不写入无效 ACL 项。
     let shadowing = ShadowingAnalyzer.split(
       proxyRules: proxyRules, exceptionRules: exceptionRules)
-    report.incrementSkipped("shadowedException", by: shadowing.shadowed.count)
-    for (exception, shadowedBy) in shadowing.shadowed {
-      report.notes.append(
-        "shadowed-exception: \(exception.conflict.originalEntry) shadowed-by \(shadowedBy.conflict.originalEntry)"
-      )
-    }
 
     let rules = RuleSet(rules: shadowing.keptProxy + shadowing.keptExceptions).rules
     report.convertedCount = rules.count
-    report.absorbedCount = shadowing.shadowed.count
+    report.absorbedCount = shadowing.shadowedCount
     try validateRuleCount(rules.count, previousRuleCount: previousRuleCount)
 
     let metadata = RuleSnapshotMetadata(
@@ -233,7 +227,6 @@ struct GFWListConverter {
     return RuleSnapshot(
       metadata: metadata,
       rules: rules,
-      absorbed: shadowing.shadowed.map(\.exception),
       lossReport: report)
   }
 
@@ -252,66 +245,33 @@ struct GFWListConverter {
       report.incrementSkipped("comment")
     case .header:
       report.incrementSkipped("header")
-    case .domainProxy(let host, let original):
+    case .domainProxy(let host, _):
       sawCodeLine = true
       proxyRules.append(
-        makeRule(action: .proxy, match: try RuleMatch(domainSuffix: host), original: original))
-    case .domainException(let host, let original):
+        ProxyRule(action: .proxy, match: try RuleMatch(domainSuffix: host)))
+    case .domainException(let host, _):
       sawCodeLine = true
       exceptionRules.append(
-        makeRule(action: .direct, match: try RuleMatch(domainSuffix: host), original: original))
+        ProxyRule(action: .direct, match: try RuleMatch(domainSuffix: host)))
     case .urlPrefix, .urlPath, .filterOption, .wildcard, .regexp, .plainText,
       .singleLabelPrefix, .ipLiteral:
       sawCodeLine = true
-      let label = unexpressibleLabel(for: entry)
-      recordUnexpressible(
-        label.category, note: label.note, original: label.original, report: &report)
+      report.incrementSkipped(unexpressibleCategory(for: entry))
     }
   }
 
-  private struct UnexpressibleLabel {
-    let category: String
-    let note: String
-    let original: String
-  }
-
-  private func unexpressibleLabel(for entry: AutoProxyEntry) -> UnexpressibleLabel {
+  private func unexpressibleCategory(for entry: AutoProxyEntry) -> String {
     switch entry {
-    case .urlPrefix(let original, _):
-      return UnexpressibleLabel(category: "urlPrefix", note: "url-prefix", original: original)
-    case .urlPath(let original, _):
-      return UnexpressibleLabel(category: "urlPath", note: "url-path", original: original)
-    case .filterOption(let original, _):
-      return UnexpressibleLabel(category: "filterOption", note: "filter-option", original: original)
-    case .wildcard(let original, _):
-      return UnexpressibleLabel(category: "wildcard", note: "wildcard", original: original)
-    case .regexp(let original, _):
-      return UnexpressibleLabel(category: "regexp", note: "regexp", original: original)
-    case .plainText(let original, _):
-      return UnexpressibleLabel(category: "plainText", note: "plain-text", original: original)
-    case .singleLabelPrefix(let original, _):
-      return UnexpressibleLabel(
-        category: "singleLabelPrefix", note: "single-label-prefix", original: original)
-    case .ipLiteral(let original, _):
-      return UnexpressibleLabel(category: "ipLiteral", note: "ip-literal", original: original)
-    default:
-      return UnexpressibleLabel(category: "", note: "", original: "")
+    case .urlPrefix: "urlPrefix"
+    case .urlPath: "urlPath"
+    case .filterOption: "filterOption"
+    case .wildcard: "wildcard"
+    case .regexp: "regexp"
+    case .plainText: "plainText"
+    case .singleLabelPrefix: "singleLabelPrefix"
+    case .ipLiteral: "ipLiteral"
+    default: ""
     }
-  }
-
-  private func recordUnexpressible(
-    _ category: String, note: String, original: String, report: inout RuleConversionLossReport
-  ) {
-    report.incrementSkipped(category)
-    report.notes.append("unexpressible-\(note): \(original)")
-  }
-
-  private func makeRule(action: RuleAction, match: RuleMatch, original: String) -> ProxyRule {
-    ProxyRule(
-      action: action,
-      match: match,
-      source: source,
-      conflict: RuleConflictMetadata(originalEntry: original))
   }
 
   private func validateRuleCount(_ ruleCount: Int, previousRuleCount: Int?) throws {
@@ -337,35 +297,27 @@ struct GFWListConverter {
 // MARK: - 例外遮蔽
 
 /// 域名优先下（proxy_list 先于 bypass_list），被更宽代理规则覆盖的 `@@` 例外
-/// 写入 ACL 也不会生效。保留代理规则，例外逐项报告并不进入规则列表。
+/// 写入 ACL 也不会生效。保留代理规则，遮蔽例外只计数，不进入快照规则列表。
 enum ShadowingAnalyzer {
   struct Result {
     let keptProxy: [ProxyRule]
     let keptExceptions: [ProxyRule]
-    let shadowed: [(exception: ProxyRule, shadowedBy: ProxyRule)]
+    let shadowedCount: Int
   }
 
   static func split(proxyRules: [ProxyRule], exceptionRules: [ProxyRule]) -> Result {
     var keptExceptions: [ProxyRule] = []
-    var shadowed: [(ProxyRule, ProxyRule)] = []
+    var shadowedCount = 0
     for exception in exceptionRules {
-      if let blocker = proxyRules.first(where: { covers(proxy: $0, exception: exception) }) {
-        let marked = ProxyRule(
-          action: exception.action,
-          match: exception.match,
-          source: exception.source,
-          conflict: RuleConflictMetadata(
-            originalEntry: exception.conflict.originalEntry,
-            absorbedBy: blocker.match,
-            notes: exception.conflict.notes + ["shadowed-by-broader-proxy"]))
-        shadowed.append((marked, blocker))
+      if proxyRules.contains(where: { covers(proxy: $0, exception: exception) }) {
+        shadowedCount += 1
       } else {
         keptExceptions.append(exception)
       }
     }
     return Result(
       keptProxy: proxyRules, keptExceptions: keptExceptions,
-      shadowed: shadowed.map { (exception: $0.0, shadowedBy: $0.1) })
+      shadowedCount: shadowedCount)
   }
 
   /// 代理规则是否在域名匹配上覆盖例外（相等或更宽的后缀）。

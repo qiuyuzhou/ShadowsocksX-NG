@@ -28,7 +28,7 @@ struct CustomRule: Codable, Equatable, Hashable, Sendable, Identifiable {
 
   /// 折叠为来源无关的运行时规则，参与 ACL 合并。
   var proxyRule: ProxyRule {
-    ProxyRule(action: action, match: identity.match, source: source)
+    ProxyRule(action: action, match: identity.match)
   }
 
   var identity: RuleIdentity { RuleIdentity(action: action, match: match) }

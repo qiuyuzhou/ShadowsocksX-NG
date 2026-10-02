@@ -76,6 +76,6 @@ private final class ReportFixtureLoader: @unchecked Sendable {
           kind: metadata.source.kind, upstreamVersion: "v\(version)", label: metadata.source.label),
         upstreamReference: metadata.upstreamReference, inputDigest: "digest-\(version)",
         fetchedAt: metadata.fetchedAt, license: metadata.license, attribution: metadata.attribution),
-      rules: fixture.rules, lossReport: RuleConversionLossReport(notes: ["v\(version)"]))
+      rules: fixture.rules, lossReport: RuleConversionLossReport(absorbedCount: version))
   }
 }

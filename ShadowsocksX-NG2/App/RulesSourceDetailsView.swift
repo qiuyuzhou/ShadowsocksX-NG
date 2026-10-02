@@ -39,7 +39,6 @@ struct RulesReportView: View {
             Text(verbatim: "\(RulesCopy.text("已吸收")): \(report.absorbedCount)")
             counts(report.skipped, label: RulesCopy.text("已跳过"))
             counts(report.rejected, label: RulesCopy.text("已拒绝"))
-            ForEach(report.notes, id: \.self) { Text(verbatim: $0) }
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

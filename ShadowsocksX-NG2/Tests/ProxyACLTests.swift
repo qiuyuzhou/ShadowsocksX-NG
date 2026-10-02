@@ -119,13 +119,11 @@ final class ProxyACLTests: XCTestCase {
 
   /// 规则＋未匹配时代理：proxy_all + 固定本地绕过 + 中国域名直连候选。
   func testRuleProxyDefaultACLUsesProxyAllAndChinaDirectCandidates() throws {
-    let source = RuleSourceIdentity(
-      kind: .geolocationCN, upstreamVersion: "v1", label: "geolocation-cn")
     let rules = [
-      ProxyRule(action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"), source: source),
-      ProxyRule(action: .direct, match: try RuleMatch(domainSuffix: "qq.com"), source: source),
+      ProxyRule(action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn")),
+      ProxyRule(action: .direct, match: try RuleMatch(domainSuffix: "qq.com")),
       ProxyRule(
-        action: .direct, match: try RuleMatch(domainExact: "api.example.cn"), source: source),
+        action: .direct, match: try RuleMatch(domainExact: "api.example.cn")),
     ]
     let acl = ProxyACLDocument.rule(
       at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"),
@@ -150,17 +148,13 @@ final class ProxyACLTests: XCTestCase {
   /// 规则＋未匹配时直连（issue #65）：bypass_all + 固定本地 + GFWList 可生效
   /// 代理规则。两种默认动作不把全部内置来源无条件并集，因此不混入中国直连项。
   func testRuleDirectDefaultACLUsesBypassAllAndGFWListProxyCandidates() throws {
-    let gfwSource = RuleSourceIdentity(
-      kind: .gfwlist, upstreamVersion: "v1", label: "GFWList")
     let rules = [
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: gfwSource),
+        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example")),
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "also-blocked.example"),
-        source: gfwSource),
+        action: .proxy, match: try RuleMatch(domainSuffix: "also-blocked.example")),
       ProxyRule(
-        action: .direct, match: try RuleMatch(domainSuffix: "unshadowed.example"), source: gfwSource
-      ),
+        action: .direct, match: try RuleMatch(domainSuffix: "unshadowed.example")),
     ]
     let acl = ProxyACLDocument.rule(
       at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"),
@@ -187,11 +181,9 @@ final class ProxyACLTests: XCTestCase {
   /// 规则＋未匹配时直连：IP 字面目标无可用规则命中时直连（无 IP 代理规则时
   /// proxy_list 只有域名项）。
   func testRuleDirectDefaultACLLeavesIPLiteralsUnmatchedDirect() throws {
-    let gfwSource = RuleSourceIdentity(
-      kind: .gfwlist, upstreamVersion: "v1", label: "GFWList")
     let rules = [
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: gfwSource)
+        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"))
     ]
     let acl = ProxyACLDocument.rule(
       at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"),
@@ -211,17 +203,13 @@ final class ProxyACLTests: XCTestCase {
   /// 规则＋未匹配时代理（issue #64）：proxy_all 同时含中国域名与 IPv4 CIDR
   /// 直连候选，固定本地绕过仍优先。
   func testRuleProxyDefaultACLIncludesChinaIPv4CIDRCandidates() throws {
-    let domainSource = RuleSourceIdentity(
-      kind: .geolocationCN, upstreamVersion: "v1", label: "geolocation-cn")
-    let cidrSource = RuleSourceIdentity(
-      kind: .chinaIPv4, upstreamVersion: "c1", label: "china-operator-ip")
     let rules = [
       ProxyRule(
-        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"), source: domainSource),
+        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn")),
       ProxyRule(
-        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24"), source: cidrSource),
+        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24")),
       ProxyRule(
-        action: .direct, match: try RuleMatch(ipv4CIDR: "198.51.100.0/24"), source: cidrSource),
+        action: .direct, match: try RuleMatch(ipv4CIDR: "198.51.100.0/24")),
     ]
     let acl = ProxyACLDocument.rule(
       at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"),
@@ -242,21 +230,20 @@ final class ProxyACLTests: XCTestCase {
 
   /// 冲突元数据不影响 ACL 行；同匹配只输出一行。
   func testRuleACLLineMapping() throws {
-    let source = RuleSourceIdentity(kind: .custom, upstreamVersion: "v1", label: "custom")
     XCTAssertEqual(
-      ProxyRule(action: .direct, match: try RuleMatch(domainSuffix: "example.com"), source: source)
+      ProxyRule(action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
         .aclLine,
       "||example.com")
     XCTAssertEqual(
-      ProxyRule(action: .direct, match: try RuleMatch(domainExact: "a.example.com"), source: source)
+      ProxyRule(action: .direct, match: try RuleMatch(domainExact: "a.example.com"))
         .aclLine,
       "|a.example.com")
     XCTAssertEqual(
-      ProxyRule(action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24"), source: source)
+      ProxyRule(action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24"))
         .aclLine,
       "203.0.113.0/24")
     XCTAssertEqual(
-      ProxyRule(action: .direct, match: try RuleMatch(ipv6CIDR: "2001:db8::/32"), source: source)
+      ProxyRule(action: .direct, match: try RuleMatch(ipv6CIDR: "2001:db8::/32"))
         .aclLine,
       "2001:db8::/32")
   }

@@ -17,8 +17,8 @@ import struct
 import sys
 from pathlib import Path
 
-CONVERTER_VERSION = "1.0.0"
-SCHEMA_VERSION = 1
+CONVERTER_VERSION = "2.0.0"
+SCHEMA_VERSION = 2
 
 # v2ray geosite Domain.Type
 TYPE_PLAIN = 0
@@ -190,15 +190,15 @@ def domain_exact(value: str) -> str | None:
     return v
 
 
-def convert(entries: list[dict], source: dict) -> dict:
+def convert(entries: list[dict]) -> dict:
     report = {
         "convertedCount": 0,
         "absorbedCount": 0,
         "skipped": {},
         "rejected": {},
-        "notes": [],
     }
     rules: list[dict] = []
+    originals: dict[tuple[str, str], str] = {}
 
     def bump(bucket: str, key: str, n: int = 1) -> None:
         target = report[bucket]
@@ -207,11 +207,12 @@ def convert(entries: list[dict], source: dict) -> dict:
     for entry in entries:
         etype = entry["type"]
         value = entry["value"]
-        name = TYPE_NAMES.get(etype, f"unknown-{etype}")
         if etype == TYPE_PLAIN:
+            print(f"keyword: {value}")
             bump("skipped", "keyword")
             continue
         if etype == TYPE_REGEX:
+            print(f"regexp: {value}")
             bump("skipped", "regexp")
             continue
         if etype == TYPE_DOMAIN:
@@ -226,18 +227,14 @@ def convert(entries: list[dict], source: dict) -> dict:
             bump("skipped", "unknownType")
             continue
         if normalized is None:
+            print(f"invalidDomain: {value}")
             bump("rejected", "invalidDomain")
             continue
+        originals.setdefault((kind, normalized), original)
         rules.append(
             {
                 "action": "direct",
                 "match": {"kind": kind, "value": normalized},
-                "source": source,
-                "conflict": {
-                    "originalEntry": original,
-                    "absorbedBy": None,
-                    "notes": [],
-                },
             }
         )
 
@@ -261,17 +258,11 @@ def convert(entries: list[dict], source: dict) -> dict:
             {
                 "action": "direct",
                 "match": {"kind": "domainSuffix", "value": "cn"},
-                "source": source,
-                "conflict": {
-                    "originalEntry": "synthesized:.cn-suffix",
-                    "absorbedBy": None,
-                    "notes": ["synthesized-cn-suffix"],
-                },
             },
         )
-        report["notes"].append("synthesized-cn-suffix")
+        print("synthesized-cn-suffix")
 
-    absorbed: list[dict] = []
+    absorbed_count = 0
     kept: list[dict] = []
     for rule in rules:
         kind = rule["match"]["kind"]
@@ -283,23 +274,16 @@ def convert(entries: list[dict], source: dict) -> dict:
             kind == "domainExact" and value.endswith(".cn")
         )
         if covered and rule["action"] == "direct":
-            rule = dict(rule)
-            rule["conflict"] = {
-                "originalEntry": rule["conflict"]["originalEntry"]
-                or f"{kind}:{value}",
-                "absorbedBy": {"kind": "domainSuffix", "value": "cn"},
-                "notes": list(rule["conflict"].get("notes") or []) + ["absorbed-by-cn-suffix"],
-            }
-            absorbed.append(rule)
+            print(f"absorbed-by-cn-suffix: {originals[(kind, value)]}")
+            absorbed_count += 1
         else:
             kept.append(rule)
 
     report["convertedCount"] = len(kept)
-    report["absorbedCount"] = len(absorbed)
+    report["absorbedCount"] = absorbed_count
     return {
         "schemaVersion": SCHEMA_VERSION,
         "rules": kept,
-        "absorbed": absorbed,
         "lossReport": report,
     }
 
@@ -335,7 +319,7 @@ def build_snapshot(
         "license": license_name,
         "attribution": attribution,
     }
-    snapshot = convert(match["domains"], source)
+    snapshot = convert(match["domains"])
     snapshot["metadata"] = metadata
     return snapshot
 
@@ -367,7 +351,7 @@ def main() -> int:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     tmp = args.out.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.write_text(json.dumps(snapshot, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")
     tmp.replace(args.out)
     loss = snapshot["lossReport"]
     print(

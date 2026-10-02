@@ -29,11 +29,10 @@ final class RulesWorkflowTests: XCTestCase {
       },
       loadBuiltin: { source in
         guard source == .gfwlist else { return rulesFixture(source) }
-        let identity = RuleSourceIdentity(kind: .gfwlist, upstreamVersion: "v1", label: "fixture")
         return rulesFixture(
           source,
           rules: [
-            ProxyRule(action: .proxy, match: broad.match, source: identity)
+            ProxyRule(action: .proxy, match: broad.match)
           ])
       })
     await workflow.refresh()
@@ -61,7 +60,7 @@ final class RulesWorkflowTests: XCTestCase {
     XCTAssertFalse(try store.loadDocument().disabledIdentities.contains(orphan))
   }
 
-  func testEquivalentSourcesMergeAndAbsorbedCandidatesRemainBrowsable() async throws {
+  func testEquivalentSourcesMergeForShippedRules() async throws {
     let match = try RuleMatch(domainExact: "Example.COM")
     let custom = CustomRule(action: .direct, match: match)
     let source = RuleSourceIdentity(kind: .geolocationCN, upstreamVersion: "fixture", label: "geo")
@@ -69,7 +68,7 @@ final class RulesWorkflowTests: XCTestCase {
       metadata: RuleSnapshotMetadata(
         source: source, upstreamReference: "upstream", inputDigest: "digest",
         fetchedAt: Date(timeIntervalSince1970: 0), license: "MIT", attribution: "author"),
-      rules: [], absorbed: [ProxyRule(action: .direct, match: match, source: source)])
+      rules: [ProxyRule(action: .direct, match: match)])
     let workflow = RulesWorkflow(
       loadCustom: { [custom] },
       loadBuiltin: { source in source == .geolocationCN ? snapshot : rulesFixture(source) })
@@ -150,7 +149,7 @@ final class RulesWorkflowTests: XCTestCase {
     XCTAssertEqual(workflow.snapshot.issues.count, 2)
   }
 
-  func testPackagedCollectionLoadsMetadataAbsorbedRulesAndFixedSemanticPolicy() async throws {
+  func testPackagedCollectionLoadsMetadataShippedRulesAndFixedSemanticPolicy() async throws {
     let bundle = AppArtifact.bundle
     let workflow = RulesWorkflow(
       loadCustom: { [] },
@@ -167,7 +166,7 @@ final class RulesWorkflowTests: XCTestCase {
     XCTAssertEqual(workflow.snapshot.sources.count, 5)
     XCTAssertTrue(workflow.snapshot.rows.contains { $0.id == .noDotHostname && $0.isFixed })
     let geo = try XCTUnwrap(workflow.snapshot.sources.first { $0.id == .geolocationCN })
-    XCTAssertEqual(geo.count, 5379)
+    XCTAssertEqual(geo.count, 4241)
     XCTAssertEqual(geo.metadata?.source.upstreamVersion, "20260925234224")
     XCTAssertNotNil(geo.conversionReport)
     let rows = workflow.snapshot.rows
@@ -179,7 +178,7 @@ final class RulesWorkflowTests: XCTestCase {
       })
     workflow.query(RulesQuery(source: .geolocationCN))
     XCTAssertTrue(workflow.snapshot.rows.contains { $0.content == "cn" })
-    XCTAssertGreaterThan(workflow.snapshot.rows.count, 4241)
+    XCTAssertEqual(workflow.snapshot.rows.count, 4241)
   }
 
   func testRefreshPublishesVersionAndRowsTogetherAndInvalidatesRemovedSelection() async throws {
@@ -286,7 +285,7 @@ extension RulesWorkflowTests {
 }
 
 func rulesFixture(
-  _ source: RulesSource, rules: [ProxyRule] = [], absorbed: [ProxyRule] = []
+  _ source: RulesSource, rules: [ProxyRule] = []
 ) -> RuleSnapshot {
   let kind: RuleSourceKind
   switch source {
@@ -300,7 +299,7 @@ func rulesFixture(
       source: RuleSourceIdentity(kind: kind, upstreamVersion: "v1", label: source.rawValue),
       upstreamReference: "https://example.com/source", inputDigest: "fixture",
       fetchedAt: Date(timeIntervalSince1970: 0),
-      license: "MIT", attribution: "fixture author"), rules: rules, absorbed: absorbed)
+      license: "MIT", attribution: "fixture author"), rules: rules)
 }
 
 private final class RulesReadBarrier: @unchecked Sendable {

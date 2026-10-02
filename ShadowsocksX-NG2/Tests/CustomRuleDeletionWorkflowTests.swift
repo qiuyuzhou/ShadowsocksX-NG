@@ -10,8 +10,7 @@ final class CustomRuleDeletionWorkflowTests: XCTestCase {
     let custom = CustomRule(action: .proxy, match: .domainSuffix("merged.example"))
     let other = CustomRule(action: .direct, match: .domainExact("other.example"))
     let orphan = RuleIdentity(action: .proxy, match: .domainExact("orphan.example"))
-    let source = RuleSourceIdentity(kind: .gfwlist, upstreamVersion: "fixture", label: "GFWList")
-    let builtin = ProxyRule(action: custom.action, match: custom.match, source: source)
+    let builtin = ProxyRule(action: custom.action, match: custom.match)
     var saved = CustomRuleDocument(
       rules: [custom, other], disabledIdentities: [custom.identity, orphan])
     var commits = 0

@@ -6,12 +6,6 @@ import XCTest
 /// 自定义规则校验（issue #66 AC2）：固定本地冲突、ACL 优先级说明与重复拒绝，
 /// 并返回可解释原因。
 final class CustomRuleValidatorTests: XCTestCase {
-  private let customSource = RuleSourceIdentity(
-    kind: .custom, upstreamVersion: "user", label: "自定义")
-  private let gfwSource = RuleSourceIdentity(
-    kind: .gfwlist, upstreamVersion: "v1", label: "GFWList")
-  private let chinaSource = RuleSourceIdentity(
-    kind: .geolocationCN, upstreamVersion: "v1", label: "geolocation-cn")
 
   private func rule(
     _ action: RuleAction,
@@ -135,7 +129,7 @@ final class CustomRuleValidatorTests: XCTestCase {
   func testDomainDirectShadowedByBroaderDomainProxyIsExplainedWhenProxySideWritten() throws {
     let builtIn = [
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: gfwSource)
+        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"))
     ]
     let custom = [rule(.direct, try RuleMatch(domainExact: "sub.blocked.example"))]
 
@@ -151,7 +145,7 @@ final class CustomRuleValidatorTests: XCTestCase {
     // 「未匹配时代理」骨架不写 proxy_list，域名代理表为空，直连规则不会被遮蔽。
     let builtIn = [
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: gfwSource)
+        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"))
     ]
     let custom = [rule(.direct, try RuleMatch(domainExact: "sub.blocked.example"))]
 
@@ -165,7 +159,7 @@ final class CustomRuleValidatorTests: XCTestCase {
   func testIPProxyShadowedByBroaderIPDirectIsExplainedWhenProxySideWritten() throws {
     let builtIn = [
       ProxyRule(
-        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24"), source: chinaSource)
+        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24"))
     ]
     let custom = [rule(.proxy, try RuleMatch(ipv4CIDR: "203.0.113.10/32"))]
 
@@ -181,7 +175,7 @@ final class CustomRuleValidatorTests: XCTestCase {
     // 「未匹配时代理」不写 proxy_list；IP 代理规则不参与 bypass 优先判定。
     let builtIn = [
       ProxyRule(
-        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24"), source: chinaSource)
+        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24"))
     ]
     let custom = [rule(.proxy, try RuleMatch(ipv4CIDR: "203.0.113.10/32"))]
 
@@ -196,7 +190,7 @@ final class CustomRuleValidatorTests: XCTestCase {
     // 域名 proxy_list 优先于 bypass_list：代理规则不会被直连遮蔽。
     let builtIn = [
       ProxyRule(
-        action: .direct, match: try RuleMatch(domainSuffix: "example.com"), source: chinaSource)
+        action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
     ]
     let custom = [rule(.proxy, try RuleMatch(domainExact: "a.example.com"))]
 

@@ -38,17 +38,17 @@ try:
 except Exception as exc:  # noqa: BLE001
     raise SystemExit(f"snapshot is not valid JSON: {exc}")
 
-if snapshot.get("schemaVersion") != 1:
-    raise SystemExit(f"schemaVersion mismatch: {snapshot.get('schemaVersion')!r} != 1")
+if snapshot.get("schemaVersion") != 2:
+    raise SystemExit(f"schemaVersion mismatch: {snapshot.get('schemaVersion')!r} != 2")
 
 meta = snapshot.get("metadata") or {}
 for key in ("source", "upstreamReference", "inputDigest", "fetchedAt", "converterVersion", "license", "attribution"):
     if key not in meta:
         raise SystemExit(f"snapshot metadata missing {key!r}")
 
-if meta.get("converterVersion") != "1.0.0":
+if meta.get("converterVersion") != "2.0.0":
     raise SystemExit(
-        f"converterVersion mismatch: {meta.get('converterVersion')!r} != '1.0.0' "
+        f"converterVersion mismatch: {meta.get('converterVersion')!r} != '2.0.0' "
         "(re-run the explicit update or bump both sides together)"
     )
 

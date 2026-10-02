@@ -175,16 +175,12 @@ struct GeolocationCNConverter {
     if !rules.contains(where: { $0.match == .domainSuffix("cn") }) {
       let cnRule = ProxyRule(
         action: .direct,
-        match: .domainSuffix("cn"),
-        source: source,
-        conflict: RuleConflictMetadata(
-          originalEntry: "synthesized:.cn-suffix", notes: ["synthesized-cn-suffix"]))
+        match: .domainSuffix("cn"))
       rules.insert(cnRule, at: 0)
-      report.notes.append("synthesized-cn-suffix")
     }
     let absorption = RuleCNabsorption.absorb(rules: rules)
     report.convertedCount = absorption.rules.count
-    report.absorbedCount = absorption.absorbed.count
+    report.absorbedCount = absorption.absorbedCount
 
     let ruleCount = absorption.rules.count
     guard ruleCount >= minimumRuleCount else {
@@ -204,16 +200,13 @@ struct GeolocationCNConverter {
     return RuleSnapshot(
       metadata: metadata,
       rules: absorption.rules,
-      absorbed: absorption.absorbed,
       lossReport: report)
   }
 
-  private func makeRule(match: RuleMatch, original: String) -> ProxyRule {
+  private func makeRule(match: RuleMatch) -> ProxyRule {
     ProxyRule(
       action: .direct,
-      match: match,
-      source: source,
-      conflict: RuleConflictMetadata(originalEntry: original))
+      match: match)
   }
 
   /// 单条 typed 条目 → 规则；跳过/拒绝计入损失报告。返回 nil 表示不产出规则。
@@ -235,20 +228,20 @@ struct GeolocationCNConverter {
       report.incrementSkipped("regexp")
       return nil
     case .domain(let value, _):
-      return domainRule(value, original: "domain:\(value)", report: &report)
+      return domainRule(value, report: &report)
     case .full(let value, _):
-      return exactRule(value, original: "full:\(value)", report: &report)
+      return exactRule(value, report: &report)
     case .bareDomain(let value, _):
       // 裸域名按 domain 后缀语义；`cn` 作为国家后缀单独引入。
       if value.lowercased() == "cn" {
-        return domainRule(value, original: value, report: &report, allowNationalCN: true)
+        return domainRule(value, report: &report, allowNationalCN: true)
       }
-      return domainRule(value, original: value, report: &report)
+      return domainRule(value, report: &report)
     }
   }
 
   private func domainRule(
-    _ value: String, original: String, report: inout RuleConversionLossReport,
+    _ value: String, report: inout RuleConversionLossReport,
     allowNationalCN: Bool = false
   ) -> ProxyRule? {
     do {
@@ -258,7 +251,7 @@ struct GeolocationCNConverter {
       } else {
         match = try RuleMatch(domainSuffix: value)
       }
-      return makeRule(match: match, original: original)
+      return makeRule(match: match)
     } catch {
       report.incrementRejected("invalidDomain")
       return nil
@@ -266,10 +259,10 @@ struct GeolocationCNConverter {
   }
 
   private func exactRule(
-    _ value: String, original: String, report: inout RuleConversionLossReport
+    _ value: String, report: inout RuleConversionLossReport
   ) -> ProxyRule? {
     do {
-      return makeRule(match: try RuleMatch(domainExact: value), original: original)
+      return makeRule(match: try RuleMatch(domainExact: value))
     } catch {
       report.incrementRejected("invalidDomain")
       return nil

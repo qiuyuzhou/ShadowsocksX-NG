@@ -53,7 +53,7 @@ final class ChinaIPv4ConverterTests: XCTestCase {
     }
     XCTAssertEqual(values, ["1.0.1.0/24", "1.0.2.0/23", "203.0.113.7/32"])
     XCTAssertTrue(snapshot.rules.allSatisfy { $0.action == .direct })
-    XCTAssertEqual(snapshot.rules.allSatisfy { $0.source.kind == .chinaIPv4 }, true)
+    XCTAssertEqual(snapshot.metadata.source.kind, .chinaIPv4)
     XCTAssertEqual(snapshot.lossReport.convertedCount, 3)
     XCTAssertEqual(snapshot.lossReport.rejected["invalidCIDR"] ?? 0, 0)
   }
@@ -179,12 +179,11 @@ final class ChinaIPv4ConverterTests: XCTestCase {
     XCTAssertEqual(
       snapshot.metadata.inputDigest,
       ProxyACLDocument.digest(Data("1.0.1.0/24\n".utf8)))
-    XCTAssertEqual(snapshot.lossReport.notes, ["china-ipv4-direct-candidates"])
-    XCTAssertTrue(snapshot.absorbed.isEmpty)
+    XCTAssertEqual(snapshot.lossReport.absorbedCount, 0)
   }
 
   func testSnapshotRoundTripsThroughStore() throws {
-    let snapshot = try convert("1.0.1.0/24\n1.0.2.0/23\n")
+    let snapshot = try convert((0..<100).map { "1.0.\($0).0/24" }.joined(separator: "\n"))
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent("ssxng-china-ipv4-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

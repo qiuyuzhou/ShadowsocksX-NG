@@ -32,7 +32,7 @@ struct BuiltinRuleCatalog {
 
   /// 供 ACL 编译的中国直连候选（`.cn` 后缀 + geolocation-cn + china-ipv4）。
   static func chinaDirectRules(from snapshot: RuleSnapshot) -> [ProxyRule] {
-    (snapshot.rules + snapshot.absorbed).filter { $0.action == .direct }
+    snapshot.rules.filter { $0.action == .direct }
   }
 
   /// 合并多份快照的直连候选；保持输入顺序（域名在前，CIDR 在后）。
@@ -43,7 +43,7 @@ struct BuiltinRuleCatalog {
   /// 供 ACL 编译的 GFWList 候选（issue #65）：可准确表达且未被遮蔽的规则
   /// （代理候选 + 未遮蔽例外），两种动作都参与编译。
   static func gfwlistRules(from snapshot: RuleSnapshot) -> [ProxyRule] {
-    snapshot.rules + snapshot.absorbed
+    snapshot.rules
   }
 }
 
@@ -89,8 +89,7 @@ actor BuiltinRuleSnapshots {
           case .gfwlist: kind = .gfwlist
           case .custom, .fixed: throw RuleSnapshotError.missing
           }
-          guard snapshot.metadata.source.kind == kind,
-            (snapshot.rules + snapshot.absorbed).allSatisfy({ $0.source.kind == kind })
+          guard snapshot.metadata.source.kind == kind
           else { throw RuleSnapshotError.corrupt(detail: "Unexpected rule source") }
           return snapshot
         })

@@ -42,12 +42,11 @@ final class RulesWorkflowCoverageTests: XCTestCase {
   }
 
   func testFixedProtectionExplainsSimpleHostsAndPreventsFalseLocalShadowing() async throws {
-    let source = RuleSourceIdentity(kind: .gfwlist, upstreamVersion: "v1", label: "gfwlist")
     let simple = ProxyRule(
-      action: .proxy, match: try RuleMatch(domainExact: "printer"), source: source)
-    let simpleSuffix = ProxyRule(action: .proxy, match: .domainSuffix("cn"), source: source)
+      action: .proxy, match: try RuleMatch(domainExact: "printer"))
+    let simpleSuffix = ProxyRule(action: .proxy, match: .domainSuffix("cn"))
     let localProxy = ProxyRule(
-      action: .proxy, match: try RuleMatch(domainExact: "device.local"), source: source)
+      action: .proxy, match: try RuleMatch(domainExact: "device.local"))
     let localDirect = CustomRule(action: .direct, match: try RuleMatch(domainExact: "device.local"))
     let nationalDirect = CustomRule(action: .direct, match: .domainSuffix("cn"))
     let workflow = RulesWorkflow(
@@ -77,8 +76,7 @@ final class RulesWorkflowCoverageTests: XCTestCase {
 
   func testFullyFixedProtectedProxyDoesNotShadowAnUnprotectedDirectSuffix() async throws {
     let direct = CustomRule(action: .direct, match: .domainSuffix("cn"))
-    let source = RuleSourceIdentity(kind: .gfwlist, upstreamVersion: "v1", label: "gfwlist")
-    let proxy = ProxyRule(action: .proxy, match: try RuleMatch(domainExact: "cn"), source: source)
+    let proxy = ProxyRule(action: .proxy, match: try RuleMatch(domainExact: "cn"))
     let workflow = RulesWorkflow(
       loadCustom: { [direct] },
       loadBuiltin: { requested in

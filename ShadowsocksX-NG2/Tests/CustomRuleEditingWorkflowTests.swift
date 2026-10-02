@@ -32,8 +32,7 @@ final class CustomRuleEditingWorkflowTests: XCTestCase {
     let original = CustomRule(
       action: .proxy, match: .domainSuffix("old.example"),
       source: RuleSourceIdentity(kind: .custom, upstreamVersion: "imported", label: "User import"))
-    let source = RuleSourceIdentity(kind: .gfwlist, upstreamVersion: "fixture", label: "GFWList")
-    let builtin = ProxyRule(action: .proxy, match: original.match, source: source)
+    let builtin = ProxyRule(action: .proxy, match: original.match)
     var saved = CustomRuleDocument(rules: [original], disabledIdentities: [original.identity])
     let workflow = RulesWorkflow(
       loadDocument: { saved },
@@ -128,8 +127,7 @@ final class CustomRuleEditingWorkflowTests: XCTestCase {
   }
 
   func testEquivalentBuiltinAndDisabledOrphanCanBeAddedWithoutEnabling() async throws {
-    let source = RuleSourceIdentity(kind: .gfwlist, upstreamVersion: "fixture", label: "GFWList")
-    let builtin = ProxyRule(action: .proxy, match: .domainSuffix("merge.example"), source: source)
+    let builtin = ProxyRule(action: .proxy, match: .domainSuffix("merge.example"))
     let orphan = RuleIdentity(action: .proxy, match: .domainExact("orphan.example"))
     let workflow = RulesWorkflow(
       loadDocument: {

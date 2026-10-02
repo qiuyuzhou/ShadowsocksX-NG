@@ -117,7 +117,7 @@ extension ProxyRuntimeControllerTests {
       RuntimeFileStore(fileURL: runtime.contract).loadDocument()?.aclRuntime?.summary, "direct")
   }
 
-  func testBatchDisableRestartsOnceAndRestoresAbsorbedChinaCandidate() async throws {
+  func testBatchDisableRestartsOnceWithoutRestoringOmittedChinaCandidate() async throws {
     let seeded = try makeSeededCatalog()
     let (store, _) = try makeCustomRuleStore()
     let settings = ProxySettings(
@@ -128,50 +128,22 @@ extension ProxyRuntimeControllerTests {
     try await controller.activate(seeded.server)
     let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
     let before = agent.unregisterCount
-    let cn = RuleIdentity(action: .direct, match: .domainSuffix("cn"))
+    let cnSuffix = RuleIdentity(action: .direct, match: .domainSuffix("cn"))
     let absent = RuleIdentity(action: .direct, match: .domainExact("absent.example"))
     let outcome = await controller.updateRuleDocument(
-      CustomRuleDocument(rules: [], disabledIdentities: [cn, absent]))
+      CustomRuleDocument(rules: [], disabledIdentities: [cnSuffix, absent]))
     XCTAssertEqual(outcome, .applied)
     XCTAssertEqual(agent.unregisterCount, before + 1)
     let content = try activeACLContent(runtimeStore)
     XCTAssertFalse(content.split(separator: "\n").contains("||cn"))
     let snapshot = try BuiltinRuleCatalog.loadGeolocationCN(from: AppArtifact.bundle)
-    let narrow = try XCTUnwrap(snapshot.absorbed.first)
-    XCTAssertTrue(content.contains(narrow.aclLine))
+    XCTAssertGreaterThan(snapshot.lossReport.absorbedCount, 0)
+    XCTAssertFalse(content.split(separator: "\n").contains("||baidu.cn"))
     let noOpBefore = agent.unregisterCount
     let unchanged = await controller.updateRuleDocument(
-      CustomRuleDocument(rules: [], disabledIdentities: [cn]))
+      CustomRuleDocument(rules: [], disabledIdentities: [cnSuffix]))
     XCTAssertEqual(unchanged, .runtimeUnchanged)
     XCTAssertEqual(agent.unregisterCount, noOpBefore, "Absent identities change only persistence")
-  }
-
-  func testDisablingGFWBlockersRestoresPreservedExpressibleException() async throws {
-    let seeded = try makeSeededCatalog()
-    let (store, _) = try makeCustomRuleStore()
-    let settings = ProxySettings(
-      listen: ActivationFixture.listen, preferredMode: .rule,
-      ruleDefaultAction: .directWhenUnmatched, agentEnabled: true)
-    let controller = makeControllerWithCustomRules(
-      store: store, settings: settings, proxyMode: .rule)
-    try await controller.activate(seeded.server)
-    let snapshot = try BuiltinRuleCatalog.loadGFWList(from: AppArtifact.bundle)
-    let exception = try XCTUnwrap(snapshot.absorbed.first)
-    let blockers = Set(
-      (snapshot.rules + snapshot.absorbed).filter {
-        $0.action == .proxy && RuleCoverage.domainCovers($0.match, exception.match)
-      }.map(\.identity))
-    XCTAssertFalse(blockers.isEmpty)
-    let before = agent.unregisterCount
-    let outcome = await controller.updateRuleDocument(
-      CustomRuleDocument(rules: [], disabledIdentities: blockers))
-    XCTAssertEqual(outcome, .applied)
-    XCTAssertEqual(agent.unregisterCount, before + 1)
-    let candidates = try await controller.ruleModeCandidateRules()
-    XCTAssertTrue(
-      candidates.contains {
-        $0.action == .direct && RuleCoverage.domainCovers($0.match, exception.match)
-      })
   }
 
   func testOffSaveUsesOwnedDocumentAndNewSessionRejectsCorruption() async throws {

@@ -6,20 +6,16 @@ import XCTest
 /// 自定义规则合并进 ACL（issue #66 AC3）：两种规则子模式按各自内置来源与
 /// 自定义规则合并；全局和直连模式不加载自定义规则。
 final class CustomRuleMergeTests: XCTestCase {
-  private let chinaSource = RuleSourceIdentity(
-    kind: .geolocationCN, upstreamVersion: "v1", label: "geolocation-cn")
-  private let gfwSource = RuleSourceIdentity(
-    kind: .gfwlist, upstreamVersion: "v1", label: "GFWList")
 
   private func custom(_ action: RuleAction, _ match: RuleMatch) -> CustomRule {
     CustomRule(action: action, match: match)
   }
 
-  func testACLIdentityDoesNotDependOnRuleOrSourceOrder() {
-    let first = ProxyRule(action: .direct, match: .domainSuffix("z.example"), source: chinaSource)
+  func testACLIdentityDoesNotDependOnRuleOrderOrDuplicates() {
+    let first = ProxyRule(action: .direct, match: .domainSuffix("z.example"))
     let equivalent = ProxyRule(
-      action: .direct, match: .domainSuffix("z.example"), source: gfwSource)
-    let second = ProxyRule(action: .proxy, match: .domainExact("a.example"), source: gfwSource)
+      action: .direct, match: .domainSuffix("z.example"))
+    let second = ProxyRule(action: .proxy, match: .domainExact("a.example"))
     let url = URL(fileURLWithPath: "/tmp/rules-order.acl")
     for action in RuleDefaultAction.allCases {
       let expected = ProxyACLDocument.rule(at: url, defaultAction: action, rules: [first, second])
@@ -35,9 +31,9 @@ final class CustomRuleMergeTests: XCTestCase {
   func testProxyWhenUnmatchedMergesChinaDirectAndCustomDirect() throws {
     let builtIn = [
       ProxyRule(
-        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"), source: chinaSource),
+        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn")),
       ProxyRule(
-        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24"), source: chinaSource),
+        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24")),
     ]
     let customRules = [
       custom(.direct, try RuleMatch(domainSuffix: "internal.example")),
@@ -68,7 +64,7 @@ final class CustomRuleMergeTests: XCTestCase {
   func testDirectWhenUnmatchedMergesGFWListAndCustomRules() throws {
     let builtIn = [
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: gfwSource)
+        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"))
     ]
     let customRules = [
       custom(.proxy, try RuleMatch(domainSuffix: "also-blocked.example")),
@@ -95,7 +91,7 @@ final class CustomRuleMergeTests: XCTestCase {
   func testShadowedCustomDirectIsRetainedAndExplained() throws {
     let builtIn = [
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: gfwSource)
+        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"))
     ]
     let customRules = [
       custom(.direct, try RuleMatch(domainExact: "sub.blocked.example"))
@@ -120,11 +116,11 @@ final class CustomRuleMergeTests: XCTestCase {
   func testOneModeShadowedRuleIsValidInTheOtherMode() throws {
     let gfwBuiltIn = [
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"), source: gfwSource)
+        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"))
     ]
     let chinaBuiltIn = [
       ProxyRule(
-        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"), source: chinaSource)
+        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"))
     ]
     let customRules = [
       custom(.direct, try RuleMatch(domainExact: "sub.blocked.example"))

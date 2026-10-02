@@ -161,17 +161,13 @@ final class GeolocationCNConverterTests: XCTestCase {
     XCTAssertFalse(matches.contains(.domainExact("exact.cn")))
     XCTAssertFalse(matches.contains(.domainSuffix("proxy.cn")))
     XCTAssertEqual(snapshot.lossReport.absorbedCount, 4)
-    XCTAssertTrue(
-      snapshot.absorbed.allSatisfy { $0.conflict.absorbedBy == .domainSuffix("cn") })
-    XCTAssertTrue(
-      snapshot.lossReport.notes.contains("synthesized-cn-suffix"))
+
   }
 
   func testDoesNotDuplicateCNSuffixWhenInputProvidesIt() throws {
     let snapshot = try convert("cn\nfoo.cn\nexample.com\n")
     let cnRules = snapshot.rules.filter { $0.match == .domainSuffix("cn") }
     XCTAssertEqual(cnRules.count, 1)
-    XCTAssertFalse(snapshot.lossReport.notes.contains("synthesized-cn-suffix"))
   }
 
   // MARK: - 去重与冲突
@@ -247,8 +243,86 @@ final class GeolocationCNConverterTests: XCTestCase {
 
   // MARK: - 快照存储
 
-  func testSnapshotStoreRoundTripAndVersionGuard() throws {
+}
+
+extension GeolocationCNConverterTests {
+  func testDisablingCNSuffixDoesNotRestoreOmittedOfflineRows() throws {
+    let snapshot = try convert("foo.cn\nexample.com\n")
+    let collection = RulesCollection.load(
+      custom: { [] },
+      builtin: { source in
+        source == .geolocationCN ? snapshot : rulesFixture(source)
+      })
+    let narrow = RuleIdentity(action: .direct, match: .domainSuffix("foo.cn"))
+    XCTAssertFalse(collection.rows.contains { $0.identity == narrow })
+    XCTAssertEqual(
+      try OfflineRuleMatcher.test(collection: collection, address: "foo.cn").outcome, .direct)
+    let disabled = collection.replacingUserDocument(
+      CustomRuleDocument(
+        rules: [], disabledIdentities: [RuleIdentity(action: .direct, match: .domainSuffix("cn"))]))
+    let result = try OfflineRuleMatcher.test(collection: disabled, address: "foo.cn")
+    XCTAssertEqual(result.outcome, .unmatched)
+    XCTAssertTrue(result.deciding.isEmpty)
+  }
+
+  func testSnapshotLoadRejectsOldVersionsAndAbnormalCounts() throws {
+    let snapshot = try convert((0..<100).map { "host\($0).example.com" }.joined(separator: "\n"))
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("snapshot.json")
+    let store = RuleSnapshotStore(fileURL: url)
+    let encoded = try RuleSnapshotStore.encode(snapshot)
+    let original = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    var old = original
+    old["schemaVersion"] = 1
+    try JSONSerialization.data(withJSONObject: old).write(to: url)
+    XCTAssertThrowsError(try store.load()) {
+      XCTAssertEqual($0 as? RuleSnapshotError, .schemaVersionMismatch(found: 1, expected: 2))
+    }
+    var obsolete = original
+    var metadata = try XCTUnwrap(obsolete["metadata"] as? [String: Any])
+    metadata["converterVersion"] = "1.0.0"
+    obsolete["metadata"] = metadata
+    try JSONSerialization.data(withJSONObject: obsolete).write(to: url)
+    XCTAssertThrowsError(try store.load()) {
+      XCTAssertEqual(
+        $0 as? RuleSnapshotError,
+        .converterVersionMismatch(found: "1.0.0", expected: "2.0.0"))
+    }
+    let rule = try XCTUnwrap(snapshot.rules.first)
+    for count in [0, 99, 100, 200_000, 200_001] {
+      try store.save(
+        RuleSnapshot(
+          metadata: snapshot.metadata,
+          rules: Array(repeating: rule, count: count)))
+      if (100...200_000).contains(count) {
+        XCTAssertEqual(try store.load().rules.count, count)
+      } else {
+        XCTAssertThrowsError(try store.load()) {
+          XCTAssertEqual(
+            $0 as? RuleSnapshotError,
+            .abnormalRuleCount(found: count, minimum: 100, maximum: 200_000))
+        }
+      }
+    }
+  }
+
+  func testSnapshotEncodingOmitsForensicsAndKeepsNumericReport() throws {
     let snapshot = try convert("example.com\nfoo.cn\n")
+    let data = try RuleSnapshotStore.encode(snapshot)
+    XCTAssertFalse(data.contains(10), "Snapshot JSON is compact")
+    let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    XCTAssertEqual(Set(json.keys), ["schemaVersion", "metadata", "rules", "lossReport"])
+    let report = try XCTUnwrap(json["lossReport"] as? [String: Any])
+    XCTAssertEqual(Set(report.keys), ["convertedCount", "absorbedCount", "skipped", "rejected"])
+    XCTAssertEqual(report["absorbedCount"] as? Int, 1)
+    let rules = try XCTUnwrap(json["rules"] as? [[String: Any]])
+    XCTAssertTrue(rules.allSatisfy { Set($0.keys) == ["action", "match"] })
+  }
+
+  func testSnapshotStoreRoundTripAndVersionGuard() throws {
+    let snapshot = try convert((0..<100).map { "host\($0).example.com" }.joined(separator: "\n"))
     let dir = FileManager.default.temporaryDirectory
       .appendingPathComponent("ssxng-rule-snapshot-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

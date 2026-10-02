@@ -183,18 +183,9 @@ final class GFWListConverterTests: XCTestCase {
     // 遮蔽的例外不写入无效 ACL 项；更宽代理规则保留。
     XCTAssertEqual(Set(proxyHosts(snapshot)), ["example.com", "gstatic.com"])
     XCTAssertEqual(directHosts(snapshot), ["unrelated.example.org"])
-    XCTAssertEqual(snapshot.lossReport.skipped["shadowedException"], 2)
+    XCTAssertNil(snapshot.lossReport.skipped["shadowedException"])
     XCTAssertEqual(snapshot.lossReport.absorbedCount, 2, "遮蔽例外计入吸收/遮蔽条目数")
-    let notes = snapshot.lossReport.notes.joined(separator: "\n")
-    XCTAssertTrue(notes.contains("@@||fonts.gstatic.com"), "逐项报告被遮蔽的例外")
-    XCTAssertTrue(notes.contains("@@||www.example.com"))
-    XCTAssertTrue(notes.contains("||gstatic.com") || notes.contains("||example.com"))
-    // 被遮蔽例外保留在 absorbed 供审计。
-    XCTAssertEqual(snapshot.absorbed.count, 2)
-    XCTAssertTrue(
-      snapshot.absorbed.allSatisfy {
-        $0.action == .direct && $0.conflict.notes.contains("shadowed-by-broader-proxy")
-      })
+
   }
 
   func testEqualMatchExceptionIsShadowedByProxy() throws {
@@ -205,7 +196,7 @@ final class GFWListConverterTests: XCTestCase {
       """)
     XCTAssertEqual(proxyHosts(snapshot), ["same.example"])
     XCTAssertTrue(directHosts(snapshot).isEmpty)
-    XCTAssertEqual(snapshot.lossReport.skipped["shadowedException"], 1)
+    XCTAssertEqual(snapshot.lossReport.absorbedCount, 1)
   }
 
   func testNarrowerProxyDoesNotShadowBroaderException() throws {
@@ -233,5 +224,28 @@ final class GFWListConverterTests: XCTestCase {
     XCTAssertEqual(snapshot.lossReport.skipped["wildcard"], 1)
     XCTAssertEqual(snapshot.lossReport.skipped["urlPrefix"], 1)
     XCTAssertEqual(snapshot.lossReport.skipped["regexp"], 1)
+  }
+}
+
+extension GFWListConverterTests {
+  func testDisablingBlockerDoesNotRestoreOmittedOfflineException() throws {
+    let snapshot = try convert("||example.com\n@@||safe.example.com\n")
+    let collection = RulesCollection.load(
+      custom: { [] },
+      builtin: { source in
+        source == .gfwlist ? snapshot : rulesFixture(source)
+      })
+    let exception = RuleIdentity(action: .direct, match: .domainSuffix("safe.example.com"))
+    XCTAssertFalse(collection.rows.contains { $0.identity == exception })
+    XCTAssertEqual(
+      try OfflineRuleMatcher.test(collection: collection, address: "safe.example.com").outcome,
+      .proxy)
+    let disabled = collection.replacingUserDocument(
+      CustomRuleDocument(
+        rules: [],
+        disabledIdentities: [RuleIdentity(action: .proxy, match: .domainSuffix("example.com"))]))
+    let result = try OfflineRuleMatcher.test(collection: disabled, address: "safe.example.com")
+    XCTAssertEqual(result.outcome, .unmatched)
+    XCTAssertTrue(result.deciding.isEmpty)
   }
 }

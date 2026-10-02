@@ -37,22 +37,16 @@ final class RuleAnalysisTests: XCTestCase {
       .domainSuffix("example.com"))
   }
 
-  func testAnalysisAndVersionsDoNotDependOnSourceOrCustomOrder() {
+  func testAnalysisAndVersionsDoNotDependOnDuplicateRulesOrCustomOrder() {
     let custom = [
       CustomRule(action: .direct, match: .domainSuffix("example.com")),
       CustomRule(action: .direct, match: .domainExact("a.example.com")),
       CustomRule(action: .proxy, match: .domainExact("a.example.com")),
     ]
-    let sources = [
-      RuleSourceIdentity(kind: .gfwlist, upstreamVersion: "test", label: "gfw"),
-      RuleSourceIdentity(kind: .geolocationCN, upstreamVersion: "test", label: "cn"),
-    ]
-    let builtIn = sources.map {
-      ProxyRule(action: .proxy, match: .domainSuffix("a.example.com"), source: $0)
-    }
+    let builtIn = [ProxyRule(action: .proxy, match: .domainSuffix("a.example.com"))]
     let expected = RuleAnalysis(rules: builtIn + custom.map(\.proxyRule))
     for order in [custom, Array(custom.reversed()), [custom[1], custom[2], custom[0]]] {
-      for sourceOrder in [builtIn, Array(builtIn.reversed())] {
+      for sourceOrder in [builtIn, builtIn + builtIn] {
         let actual = RuleAnalysis(rules: order.map(\.proxyRule) + sourceOrder)
         XCTAssertEqual(actual, expected)
         XCTAssertEqual(actual.contentVersion, expected.contentVersion)

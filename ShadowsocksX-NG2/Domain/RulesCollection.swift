@@ -1,6 +1,6 @@
 import Foundation
 
-/// Browsing includes preserved expressible candidates without changing runtime sources.
+/// Browsing includes all shipped rules and saved custom entries without changing runtime sources.
 struct RulesCollection: Sendable {
   let version: String
   let rows: [RulesRow]
@@ -83,10 +83,9 @@ private struct RulesCollectionInput: Sendable {
       case .gfwlist: expected = .gfwlist
       case .custom, .fixed: expected = .custom
       }
-      guard snapshot.metadata.source.kind == expected,
-        (snapshot.rules + snapshot.absorbed).allSatisfy({ $0.source.kind == expected })
+      guard snapshot.metadata.source.kind == expected
       else { throw RuleSnapshotError.corrupt(detail: "Unexpected rule source") }
-      let candidates = snapshot.rules + snapshot.absorbed
+      let candidates = snapshot.rules
       entries += candidates.map { RulesCandidate(rule: $0, source: source, customID: nil) }
       sources.append(
         RulesSourceSnapshot(
@@ -105,11 +104,10 @@ private struct RulesCollectionInput: Sendable {
   }
 
   private mutating func appendFixedPolicy() {
-    let fixedSource = RuleSourceIdentity(kind: .custom, upstreamVersion: "fixed", label: "fixed")
     let fixedMatches = RuleCoverage.fixedLocalMatches
     entries += fixedMatches.map {
       RulesCandidate(
-        rule: ProxyRule(action: .direct, match: $0, source: fixedSource), source: .fixed,
+        rule: ProxyRule(action: .direct, match: $0), source: .fixed,
         customID: nil)
     }
     sources.append(

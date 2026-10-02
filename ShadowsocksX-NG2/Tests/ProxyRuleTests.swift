@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 规则领域模型（issue #63）：动作、匹配条件、来源身份与冲突元数据独立于
+/// 规则领域模型（issue #63）：动作与匹配条件独立于
 /// PAC、ACL 文本和系统代理设置。
 final class ProxyRuleTests: XCTestCase {
   // MARK: - 动作与匹配
@@ -85,54 +85,32 @@ final class ProxyRuleTests: XCTestCase {
       [.geolocationCN, .chinaIPv4, .gfwlist, .custom])
   }
 
-  // MARK: - 规则与冲突元数据
+  // MARK: - 规则序列化
 
-  func testRuleCarriesActionMatchSourceAndConflictMetadata() throws {
-    let source = RuleSourceIdentity(kind: .geolocationCN, upstreamVersion: "v1", label: "geo-cn")
-    let rule = ProxyRule(
-      action: .direct,
-      match: try RuleMatch(domainSuffix: "example.com"),
-      source: source,
-      conflict: RuleConflictMetadata(
-        originalEntry: "domain:example.com",
-        absorbedBy: nil,
-        notes: []))
-
-    XCTAssertEqual(rule.action, .direct)
-    XCTAssertEqual(rule.match, .domainSuffix("example.com"))
-    XCTAssertEqual(rule.source.kind, .geolocationCN)
-    XCTAssertEqual(rule.conflict.originalEntry, "domain:example.com")
-    XCTAssertNil(rule.conflict.absorbedBy)
-    XCTAssertTrue(rule.conflict.notes.isEmpty)
-  }
-
-  func testConflictMetadataRecordsAbsorption() throws {
-    let metadata = RuleConflictMetadata(
-      originalEntry: "foo.cn",
-      absorbedBy: .domainSuffix("cn"),
-      notes: ["absorbed-by-cn-suffix"])
-    XCTAssertEqual(metadata.absorbedBy, .domainSuffix("cn"))
-    XCTAssertEqual(metadata.notes, ["absorbed-by-cn-suffix"])
+  func testRuleEncodesOnlyActionAndMatch() throws {
+    let rule = ProxyRule(action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
+    let data = try JSONEncoder().encode(rule)
+    let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    XCTAssertEqual(Set(json.keys), ["action", "match"])
+    XCTAssertEqual(try JSONDecoder().decode(ProxyRule.self, from: data), rule)
   }
 
   // MARK: - 规则集合规范化
 
   func testRuleSetDeduplicatesIdenticalRules() throws {
-    let source = RuleSourceIdentity(kind: .geolocationCN, upstreamVersion: "v1", label: "geo-cn")
     let first = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "example.com"), source: source)
+      action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
     let second = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "example.com"), source: source)
+      action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
     let set = RuleSet(rules: [first, second])
     XCTAssertEqual(set.rules.count, 1)
   }
 
   func testRuleSetRecordsCrossActionConflict() throws {
-    let source = RuleSourceIdentity(kind: .geolocationCN, upstreamVersion: "v1", label: "geo-cn")
     let direct = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "example.com"), source: source)
+      action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
     let proxy = ProxyRule(
-      action: .proxy, match: try RuleMatch(domainSuffix: "example.com"), source: source)
+      action: .proxy, match: try RuleMatch(domainSuffix: "example.com"))
     let set = RuleSet(rules: [direct, proxy])
     XCTAssertEqual(set.rules.count, 2, "不同动作的同匹配条件保留双方，冲突由元数据说明")
     XCTAssertEqual(set.conflicts.count, 1)
@@ -143,17 +121,16 @@ final class ProxyRuleTests: XCTestCase {
   // MARK: - .cn 后缀吸收
 
   func testCNSuffixAbsorbsSameActionIndependentCNDomains() throws {
-    let source = RuleSourceIdentity(kind: .geolocationCN, upstreamVersion: "v1", label: "geo-cn")
     let cnSuffix = ProxyRule(
-      action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"), source: source)
+      action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"))
     let covered = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "foo.cn"), source: source)
+      action: .direct, match: try RuleMatch(domainSuffix: "foo.cn"))
     let coveredExact = ProxyRule(
-      action: .direct, match: try RuleMatch(domainExact: "bar.cn"), source: source)
+      action: .direct, match: try RuleMatch(domainExact: "bar.cn"))
     let otherAction = ProxyRule(
-      action: .proxy, match: try RuleMatch(domainSuffix: "proxy.cn"), source: source)
+      action: .proxy, match: try RuleMatch(domainSuffix: "proxy.cn"))
     let unrelated = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "example.com"), source: source)
+      action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
 
     let absorbed = RuleCNabsorption.absorb(
       rules: [cnSuffix, covered, coveredExact, otherAction, unrelated])
@@ -165,17 +142,14 @@ final class ProxyRuleTests: XCTestCase {
     XCTAssertFalse(matches.contains(.domainSuffix("foo.cn")), "同动作 .cn 域名被吸收")
     XCTAssertFalse(matches.contains(.domainExact("bar.cn")), "同动作 .cn 完整域名被吸收")
 
-    let absorbedEntries = absorbed.absorbed
-    XCTAssertEqual(absorbedEntries.count, 2)
-    XCTAssertTrue(absorbedEntries.allSatisfy { $0.conflict.absorbedBy == .domainSuffix("cn") })
+    XCTAssertEqual(absorbed.absorbedCount, 2)
   }
 
   func testCNExactDoesNotAbsorbAnything() throws {
-    let source = RuleSourceIdentity(kind: .geolocationCN, upstreamVersion: "v1", label: "geo-cn")
     let cnExact = ProxyRule(
-      action: .direct, match: try RuleMatch(domainExact: "cn"), source: source)
+      action: .direct, match: try RuleMatch(domainExact: "cn"))
     let covered = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "foo.cn"), source: source)
+      action: .direct, match: try RuleMatch(domainSuffix: "foo.cn"))
     let result = RuleCNabsorption.absorb(rules: [cnExact, covered])
     XCTAssertEqual(result.rules.count, 2, "只有 .cn 后缀才能吸收，完整域名 cn 不吸收")
   }

@@ -117,7 +117,7 @@ for key in ("source", "upstreamReference", "inputDigest", "fetchedAt", "converte
 if not data.get("rules"):
     raise SystemExit("snapshot has no rules")
 print(f"snapshot ok: {len(data['rules'])} rules, "
-      f"shadowed={data.get('lossReport', {}).get('skipped', {}).get('shadowedException', 0)}")
+      f"shadowed={data.get('lossReport', {}).get('absorbedCount', 0)}")
 PY
 
 cp "${TMP}/snapshot.json" "${SNAPSHOT}"

@@ -6,7 +6,7 @@ import Foundation
 /// 转换器版本、许可证与归属。更新失败保留上一份有效快照。
 struct RuleSnapshotMetadata: Codable, Equatable, Sendable {
   /// 转换器版本；快照格式或转换语义变化时递增。
-  static let currentConverterVersion = "1.0.0"
+  static let currentConverterVersion = "2.0.0"
 
   let source: RuleSourceIdentity
   /// 上游仓库/产物标识（含固定 commit 或 release tag）。
@@ -42,7 +42,7 @@ struct RuleSnapshotMetadata: Codable, Equatable, Sendable {
 
 // MARK: - 转换损失报告
 
-/// 转换损失报告：已转换、已吸收、按类跳过与拒绝的计数和原因。
+/// 转换损失报告：已转换、已吸收、按类跳过与拒绝的分类计数。
 struct RuleConversionLossReport: Codable, Equatable, Sendable {
   /// 成功进入规则模型的条目数。
   var convertedCount: Int
@@ -52,21 +52,17 @@ struct RuleConversionLossReport: Codable, Equatable, Sendable {
   var skipped: [String: Int]
   /// 拒绝原因 → 计数。
   var rejected: [String: Int]
-  /// 逐类说明（审查用）。
-  var notes: [String]
 
   init(
     convertedCount: Int = 0,
     absorbedCount: Int = 0,
     skipped: [String: Int] = [:],
-    rejected: [String: Int] = [:],
-    notes: [String] = []
+    rejected: [String: Int] = [:]
   ) {
     self.convertedCount = convertedCount
     self.absorbedCount = absorbedCount
     self.skipped = skipped
     self.rejected = rejected
-    self.notes = notes
   }
 
   mutating func incrementSkipped(_ category: String, by count: Int = 1) {
@@ -80,28 +76,24 @@ struct RuleConversionLossReport: Codable, Equatable, Sendable {
 
 // MARK: - 规则快照
 
-/// 规范化规则快照：元数据 + 生效规则 + 被吸收条目 + 损失报告。
+/// 规范化规则快照：元数据 + 生效规则 + 纯计数损失报告。
 struct RuleSnapshot: Codable, Equatable, Sendable {
   /// 快照 schema 版本；加载时不匹配则失败。
-  static let currentSchemaVersion = 1
+  static let currentSchemaVersion = 2
 
   let schemaVersion: Int
   let metadata: RuleSnapshotMetadata
   let rules: [ProxyRule]
-  /// 被吸收的条目（保留审计，不进入运行时规则）。
-  let absorbed: [ProxyRule]
   let lossReport: RuleConversionLossReport
 
   init(
     metadata: RuleSnapshotMetadata,
     rules: [ProxyRule],
-    absorbed: [ProxyRule] = [],
     lossReport: RuleConversionLossReport = RuleConversionLossReport()
   ) {
     self.schemaVersion = Self.currentSchemaVersion
     self.metadata = metadata
     self.rules = rules
-    self.absorbed = absorbed
     self.lossReport = lossReport
   }
 
@@ -112,6 +104,7 @@ struct RuleSnapshot: Codable, Equatable, Sendable {
 
 enum RuleSnapshotError: Error, Equatable, Sendable {
   case missing
+  case abnormalRuleCount(found: Int, minimum: Int, maximum: Int)
   case corrupt(detail: String)
   case schemaVersionMismatch(found: Int, expected: Int)
   case converterVersionMismatch(found: String, expected: String)
@@ -147,12 +140,17 @@ struct RuleSnapshotStore {
         found: snapshot.metadata.converterVersion,
         expected: RuleSnapshotMetadata.currentConverterVersion)
     }
+    let maximum = snapshot.metadata.source.kind == .geolocationCN ? 200_000 : 50_000
+    guard (100...maximum).contains(snapshot.rules.count) else {
+      throw RuleSnapshotError.abnormalRuleCount(
+        found: snapshot.rules.count, minimum: 100, maximum: maximum)
+    }
     return snapshot
   }
 
   func save(_ snapshot: RuleSnapshot) throws {
     let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.outputFormatting = [.sortedKeys]
     encoder.dateEncodingStrategy = .iso8601
     let data = try encoder.encode(snapshot)
     try AtomicFileWriter.write(data, to: fileURL)
@@ -166,7 +164,7 @@ struct RuleSnapshotStore {
 
   static func encode(_ snapshot: RuleSnapshot) throws -> Data {
     let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.outputFormatting = [.sortedKeys]
     encoder.dateEncodingStrategy = .iso8601
     return try encoder.encode(snapshot)
   }

@@ -273,7 +273,7 @@ enum RuleSourceKind: String, Codable, CaseIterable, Equatable, Hashable, Sendabl
   case custom = "custom"
 }
 
-/// 规则来源身份：固定来源类别 + 上游版本 + 展示标签。冲突说明与快照元数据
+/// 规则来源身份：固定来源类别 + 上游版本 + 展示标签。自定义条目与快照元数据
 /// 共用此身份。
 struct RuleSourceIdentity: Codable, Equatable, Hashable, Sendable {
   let kind: RuleSourceKind
@@ -289,48 +289,19 @@ struct RuleSourceIdentity: Codable, Equatable, Hashable, Sendable {
   var id: String { kind.rawValue }
 }
 
-// MARK: - 冲突元数据
-
-/// 冲突/覆盖说明元数据：记录原始条目、被谁吸收以及审查笔记。用于转换损失
-/// 与冲突解释，不参与运行时匹配。
-struct RuleConflictMetadata: Codable, Equatable, Hashable, Sendable {
-  /// 转换前的原始条目文本（审计用）。
-  let originalEntry: String
-  /// 被哪条更宽规则吸收（如 `.cn` 后缀）；未吸收为 nil。
-  let absorbedBy: RuleMatch?
-  /// 审查笔记（吸收、遮蔽、跳过原因等）。
-  let notes: [String]
-
-  init(
-    originalEntry: String,
-    absorbedBy: RuleMatch? = nil,
-    notes: [String] = []
-  ) {
-    self.originalEntry = originalEntry
-    self.absorbedBy = absorbedBy
-    self.notes = notes
-  }
-}
-
 // MARK: - 规则
 
 /// 一条来源无关的代理规则。
 struct ProxyRule: Codable, Equatable, Hashable, Sendable {
   let action: RuleAction
   let match: RuleMatch
-  let source: RuleSourceIdentity
-  let conflict: RuleConflictMetadata
 
   init(
     action: RuleAction,
-    match: RuleMatch,
-    source: RuleSourceIdentity,
-    conflict: RuleConflictMetadata = RuleConflictMetadata(originalEntry: "")
+    match: RuleMatch
   ) {
     self.action = action
     self.match = match
-    self.source = source
-    self.conflict = conflict
   }
 
   var identity: RuleIdentity { RuleIdentity(action: action, match: match) }

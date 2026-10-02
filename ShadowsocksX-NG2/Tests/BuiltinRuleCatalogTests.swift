@@ -81,7 +81,7 @@ final class BuiltinRuleCatalogTests: XCTestCase {
       rules.contains { $0.match == .domainSuffix("cn") },
       "快照应含 .cn 后缀直连规则")
 
-    // 完整候选保留可恢复的独立 .cn 域名条目。
+    // 转换期已删除被 .cn 吸收的域名条目。
     let independentCN = rules.filter {
       switch $0.match {
       case .domainSuffix(let value): return value.hasSuffix(".cn") && value != "cn"
@@ -89,7 +89,7 @@ final class BuiltinRuleCatalogTests: XCTestCase {
       default: return false
       }
     }
-    XCTAssertFalse(independentCN.isEmpty, "候选保留被吸收的规则以便禁用宽规则后恢复")
+    XCTAssertTrue(independentCN.isEmpty, "快照不保留被吸收的规则")
   }
 
   /// china-ipv4 快照（issue #64）：从 bundle 或源码树加载，直连候选为 IPv4 CIDR。
@@ -151,10 +151,8 @@ final class BuiltinRuleCatalogTests: XCTestCase {
       }, "gfwlist 快照候选应为域名后缀")
 
     // 损失报告保留来源、摘要、许可证/归属与转换损失（含遮蔽例外）。
-    XCTAssertGreaterThanOrEqual(snapshot.lossReport.skipped["shadowedException"] ?? 0, 1)
-    XCTAssertFalse(snapshot.lossReport.notes.isEmpty)
-    XCTAssertEqual(snapshot.absorbed.count, snapshot.lossReport.skipped["shadowedException"] ?? 0)
-    XCTAssertEqual(snapshot.lossReport.absorbedCount, snapshot.absorbed.count)
+    XCTAssertGreaterThan(snapshot.lossReport.absorbedCount, 0)
+    XCTAssertNil(snapshot.lossReport.skipped["shadowedException"])
   }
 
   /// 合并投影（issue #64）：域名 + CIDR 直连候选一起进入 ACL 编译输入。

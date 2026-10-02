@@ -80,7 +80,6 @@ struct ChinaIPv4Converter {
       ruleCount: parsed.rules.count, previousRuleCount: previousRuleCount)
 
     report.convertedCount = parsed.rules.count
-    report.notes.append("china-ipv4-direct-candidates")
 
     let metadata = RuleSnapshotMetadata(
       source: source,
@@ -92,7 +91,6 @@ struct ChinaIPv4Converter {
     return RuleSnapshot(
       metadata: metadata,
       rules: parsed.rules,
-      absorbed: [],
       lossReport: report)
   }
 
@@ -115,9 +113,7 @@ struct ChinaIPv4Converter {
         rules.append(
           ProxyRule(
             action: .direct,
-            match: match,
-            source: source,
-            conflict: RuleConflictMetadata(originalEntry: line)))
+            match: match))
       } catch {
         rejectedCount += 1
         report.incrementRejected("invalidCIDR")

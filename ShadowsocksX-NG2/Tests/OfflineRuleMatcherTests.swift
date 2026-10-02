@@ -90,8 +90,7 @@ final class OfflineRuleMatcherTests: XCTestCase {
   }
 
   func testFixedPolicyWinsAndSourceMembershipsRemainComplete() throws {
-    let source = RuleSourceIdentity(kind: .gfwlist, upstreamVersion: "fixture", label: "gfw")
-    let proxy = ProxyRule(action: .proxy, match: .domainSuffix("local"), source: source)
+    let proxy = ProxyRule(action: .proxy, match: .domainSuffix("local"))
     let collection = RulesCollection.load(
       custom: { [] },
       builtin: {
@@ -110,11 +109,11 @@ final class OfflineRuleMatcherTests: XCTestCase {
     XCTAssertEqual(local.otherMatches.map(\.identity), [proxy.identity])
     let match = try RuleMatch(domainExact: "example.com")
     let custom = CustomRule(action: .proxy, match: match)
-    let duplicate = ProxyRule(action: .proxy, match: match, source: source)
+    let duplicate = ProxyRule(action: .proxy, match: match)
     let merged = RulesCollection.load(
       custom: { [custom] },
       builtin: {
-        rulesFixture($0, absorbed: $0 == .gfwlist ? [duplicate] : [])
+        rulesFixture($0, rules: $0 == .gfwlist ? [duplicate] : [])
       })
     let result = try OfflineRuleMatcher.test(collection: merged, address: "example.com")
     XCTAssertEqual(result.deciding.count, 1)

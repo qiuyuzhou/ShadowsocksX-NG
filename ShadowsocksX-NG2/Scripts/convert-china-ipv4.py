@@ -17,8 +17,8 @@ import json
 import sys
 from pathlib import Path
 
-CONVERTER_VERSION = "1.0.0"
-SCHEMA_VERSION = 1
+CONVERTER_VERSION = "2.0.0"
+SCHEMA_VERSION = 2
 
 MINIMUM_RULE_COUNT = 100
 MAXIMUM_RULE_COUNT = 50_000
@@ -40,6 +40,7 @@ def parse_lines(text: str) -> tuple[list[dict], int, int]:
         try:
             network = ipaddress.IPv4Network(line, strict=False)
         except ValueError:
+            print(f"invalidCIDR: {line}")
             rejected += 1
             continue
         normalized = f"{network.network_address}/{network.prefixlen}"
@@ -51,12 +52,6 @@ def parse_lines(text: str) -> tuple[list[dict], int, int]:
             {
                 "action": "direct",
                 "match": {"kind": "ipv4CIDR", "value": normalized},
-                "source": {},  # filled by caller
-                "conflict": {
-                    "originalEntry": line,
-                    "absorbedBy": None,
-                    "notes": [],
-                },
             }
         )
     return rules, duplicates, rejected
@@ -92,15 +87,11 @@ def build_snapshot(
                 f"(allowed {lower}..{upper})"
             )
 
-    for rule in rules:
-        rule["source"] = source
-
     report = {
         "convertedCount": rule_count,
         "absorbedCount": 0,
         "skipped": {"duplicate": duplicates} if duplicates else {},
         "rejected": {"invalidCIDR": rejected} if rejected else {},
-        "notes": ["china-ipv4-direct-candidates"],
     }
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -117,7 +108,6 @@ def build_snapshot(
             "attribution": attribution,
         },
         "rules": rules,
-        "absorbed": [],
         "lossReport": report,
     }
 
@@ -159,7 +149,7 @@ def main() -> int:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     tmp = args.out.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.write_text(json.dumps(snapshot, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")
     tmp.replace(args.out)
     loss = snapshot["lossReport"]
     print(

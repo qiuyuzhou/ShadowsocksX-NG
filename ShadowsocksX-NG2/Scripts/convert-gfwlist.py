@@ -22,8 +22,8 @@ import re
 import sys
 from pathlib import Path
 
-CONVERTER_VERSION = "1.0.0"
-SCHEMA_VERSION = 1
+CONVERTER_VERSION = "2.0.0"
+SCHEMA_VERSION = 2
 
 MINIMUM_RULE_COUNT = 100
 MAXIMUM_RULE_COUNT = 50_000
@@ -136,32 +136,24 @@ def split_shadowed(
         if blocker is None:
             kept_exceptions.append(exception)
         else:
-            marked = dict(exception)
-            marked["conflict"] = {
-                "originalEntry": exception["conflict"]["originalEntry"],
-                "absorbedBy": blocker["match"],
-                "notes": list(exception["conflict"]["notes"]) + ["shadowed-by-broader-proxy"],
-            }
-            shadowed.append((marked, blocker))
+            shadowed.append((exception, blocker))
     return proxy_rules, kept_exceptions, shadowed
 
 
-def make_rule(action: str, match: dict, original: str, source: dict) -> dict:
+def make_rule(action: str, match: dict) -> dict:
     return {
         "action": action,
         "match": match,
-        "source": source,
-        "conflict": {"originalEntry": original, "absorbedBy": None, "notes": []},
     }
 
 
-def convert_document(document: str, source: dict) -> tuple[list[dict], list[dict], dict]:
-    """Return (rules, absorbed, lossReport)."""
+def convert_document(document: str) -> tuple[list[dict], dict]:
+    """Return (rules, lossReport)."""
     skipped: dict[str, int] = {}
-    notes: list[str] = []
     proxy_rules: list[dict] = []
     exception_rules: list[dict] = []
     saw_code_line = False
+    originals: dict[tuple[str, str], str] = {}
 
     def bump(category: str) -> None:
         skipped[category] = skipped.get(category, 0) + 1
@@ -176,23 +168,21 @@ def convert_document(document: str, source: dict) -> tuple[list[dict], list[dict
         elif kind == "header":
             bump("header")
         elif kind == "domainProxy":
+            originals.setdefault(("proxy", entry["host"]), entry["original"])
             saw_code_line = True
             proxy_rules.append(
                 make_rule(
                     "proxy",
                     {"kind": "domainSuffix", "value": entry["host"]},
-                    entry["original"],
-                    source,
                 )
             )
         elif kind == "domainException":
+            originals.setdefault(("direct", entry["host"]), entry["original"])
             saw_code_line = True
             exception_rules.append(
                 make_rule(
                     "direct",
                     {"kind": "domainSuffix", "value": entry["host"]},
-                    entry["original"],
-                    source,
                 )
             )
         elif kind in {
@@ -207,7 +197,7 @@ def convert_document(document: str, source: dict) -> tuple[list[dict], list[dict
         }:
             saw_code_line = True
             bump(kind)
-            notes.append(f"unexpressible-{kind}: {entry['original']}")
+            print(f"unexpressible-{kind}: {entry['original']}")
         else:
             raise UnknownSyntax(entry.get("original", raw_line))
 
@@ -216,12 +206,11 @@ def convert_document(document: str, source: dict) -> tuple[list[dict], list[dict
 
     kept_proxy, kept_exceptions, shadowed = split_shadowed(proxy_rules, exception_rules)
     if shadowed:
-        skipped["shadowedException"] = len(shadowed)
         for exception, blocker in shadowed:
-            notes.append(
+            print(
                 "shadowed-exception: "
-                f"{exception['conflict']['originalEntry']} "
-                f"shadowed-by {blocker['conflict']['originalEntry']}"
+                f"{originals[('direct', exception['match']['value'])]} "
+                f"shadowed-by {originals[('proxy', blocker['match']['value'])]}"
             )
 
     rules = kept_proxy + kept_exceptions
@@ -241,9 +230,8 @@ def convert_document(document: str, source: dict) -> tuple[list[dict], list[dict
         "absorbedCount": len(shadowed),
         "skipped": skipped,
         "rejected": {},
-        "notes": notes,
     }
-    return rules, [item for item, _ in shadowed], report
+    return rules, report
 
 
 def build_snapshot(
@@ -254,7 +242,7 @@ def build_snapshot(
     attribution: str,
     previous_rule_count: int | None,
 ) -> dict:
-    rules, absorbed, report = convert_document(document, source)
+    rules, report = convert_document(document)
     rule_count = len(rules)
     if rule_count < MINIMUM_RULE_COUNT:
         raise SystemExit(f"abnormal rule count {rule_count} (min {MINIMUM_RULE_COUNT})")
@@ -284,7 +272,6 @@ def build_snapshot(
             "attribution": attribution,
         },
         "rules": rules,
-        "absorbed": absorbed,
         "lossReport": report,
     }
 
@@ -342,13 +329,13 @@ def main() -> int:
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     tmp = args.out.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.write_text(json.dumps(snapshot, separators=(",", ":"), sort_keys=True) + "\n", encoding="utf-8")
     tmp.replace(args.out)
     loss = snapshot["lossReport"]
     print(
         f"wrote {args.out}: {loss['convertedCount']} rules, "
         f"skipped={loss['skipped']}, "
-        f"shadowed={loss['skipped'].get('shadowedException', 0)}"
+        f"shadowed={loss['absorbedCount']}"
     )
     return 0
 
