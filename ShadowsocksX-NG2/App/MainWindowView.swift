@@ -42,6 +42,7 @@ struct MainWindowView: View {
   let diagnosticReportExporter: any DiagnosticReportExporter
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
 
+  @StateObject private var rulesWorkflow = RulesWorkflow()
   @StateObject private var homeServerList = HomeServerListState()
   @State private var selection: NodeID?
   /// 全局添加菜单打开的表单，以及诊断导出由窗口壳持有。
@@ -153,6 +154,10 @@ struct MainWindowView: View {
         }
         .disabled(workflow.subscriptions.isEmpty)
       }
+    case .rules:
+      Button(RulesCopy.text("刷新"), systemImage: "arrow.clockwise") {
+        Task { await rulesWorkflow.refresh() }
+      }.disabled(rulesWorkflow.snapshot.isLoading)
     case .diagnostics:
       Button("导出诊断…", systemImage: "square.and.arrow.up") {
         exportDiagnostics()
@@ -205,6 +210,8 @@ struct MainWindowView: View {
       WorkspaceSubscriptionsView(
         workflow: workflow,
         onNodesRemoved: clearSelectionIfInvalidated)
+    case .rules:
+      RulesView(workflow: rulesWorkflow)
     case .settings:
       SettingsView(
         workflow: settingsWorkflow, loginController: loginController,
@@ -231,6 +238,7 @@ extension WorkspaceDestination {
     case .home: "首页"
     case .servers: "服务器"
     case .subscriptions: "订阅"
+    case .rules: RulesCopy.text("代理规则")
     case .settings: "设置"
     case .diagnostics: "诊断"
     }
@@ -241,6 +249,7 @@ extension WorkspaceDestination {
     case .home: "house"
     case .servers: "server.rack"
     case .subscriptions: "arrow.triangle.2.circlepath"
+    case .rules: "list.bullet.rectangle"
     case .settings: "gearshape"
     case .diagnostics: "chart.bar"
     }

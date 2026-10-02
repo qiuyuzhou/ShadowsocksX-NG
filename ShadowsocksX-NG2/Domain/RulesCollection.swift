@@ -1,0 +1,160 @@
+import Foundation
+
+/// Browsing includes preserved expressible candidates without changing runtime sources.
+struct RulesCollection: Sendable {
+  let version: String
+  let rows: [RulesRow]
+  let sources: [RulesSourceSnapshot]
+  let issues: [RulesPageSnapshot.Issue]
+
+  static func load(
+    custom loadCustom: () throws -> [CustomRule],
+    builtin loadBuiltin: (RulesSource) throws -> RuleSnapshot
+  ) -> RulesCollection {
+    var input = RulesCollectionInput()
+    input.readCustom(loadCustom)
+    for source in [RulesSource.geolocationCN, .chinaIPv4, .gfwlist] {
+      input.readBuiltin(source, using: loadBuiltin)
+    }
+    return input.collection()
+  }
+}
+
+private struct RulesCandidate {
+  let rule: ProxyRule
+  let source: RulesSource
+  let customID: UUID?
+}
+
+private struct RulesCollectionInput {
+  var entries: [RulesCandidate] = []
+  var sources: [RulesSourceSnapshot] = []
+  var issues: [RulesPageSnapshot.Issue] = []
+  var metadataTokens: [String] = []
+
+  mutating func readCustom(_ loadCustom: () throws -> [CustomRule]) {
+    do {
+      let custom = try loadCustom()
+      let validation = CustomRuleValidator.validate(
+        custom: custom, defaultAction: .directWhenUnmatched)
+      guard validation.rejected.isEmpty else {
+        throw CustomRuleStoreError.corrupt(detail: "Invalid custom rule collection")
+      }
+      entries += custom.map { RulesCandidate(rule: $0.proxyRule, source: .custom, customID: $0.id) }
+      sources.append(
+        RulesSourceSnapshot(id: .custom, count: custom.count, metadata: nil, conversionReport: nil))
+    } catch {
+      issues.append(.userDocument(String(describing: error)))
+    }
+  }
+
+  mutating func readBuiltin(
+    _ source: RulesSource, using loadBuiltin: (RulesSource) throws -> RuleSnapshot
+  ) {
+    do {
+      let snapshot = try loadBuiltin(source)
+      let expected: RuleSourceKind
+      switch source {
+      case .geolocationCN: expected = .geolocationCN
+      case .chinaIPv4: expected = .chinaIPv4
+      case .gfwlist: expected = .gfwlist
+      case .custom, .fixed: expected = .custom
+      }
+      guard snapshot.metadata.source.kind == expected,
+        (snapshot.rules + snapshot.absorbed).allSatisfy({ $0.source.kind == expected })
+      else { throw RuleSnapshotError.corrupt(detail: "Unexpected rule source") }
+      let candidates = snapshot.rules + snapshot.absorbed
+      entries += candidates.map { RulesCandidate(rule: $0, source: source, customID: nil) }
+      sources.append(
+        RulesSourceSnapshot(
+          id: source, count: candidates.count,
+          metadata: snapshot.metadata, conversionReport: snapshot.lossReport))
+      // Metadata changes invalidate details even when rule content is unchanged.
+      let encoder = JSONEncoder()
+      encoder.outputFormatting = [.sortedKeys]
+      metadataTokens.append(
+        source.rawValue + ProxyACLDocument.digest(try encoder.encode(snapshot.metadata)))
+      metadataTokens.append(
+        ProxyACLDocument.digest(try encoder.encode(snapshot.lossReport)))
+    } catch {
+      issues.append(.builtin(source, String(describing: error)))
+    }
+  }
+
+  mutating func collection() -> RulesCollection {
+    let fixedSource = RuleSourceIdentity(kind: .custom, upstreamVersion: "fixed", label: "fixed")
+    let fixedMatches = RuleCoverage.fixedLocalMatches
+    entries += fixedMatches.map {
+      RulesCandidate(
+        rule: ProxyRule(action: .direct, match: $0, source: fixedSource), source: .fixed,
+        customID: nil)
+    }
+    sources.append(
+      RulesSourceSnapshot(
+        id: .fixed, count: fixedMatches.count + 1, metadata: nil, conversionReport: nil))
+    let grouped = Dictionary(grouping: entries, by: { $0.rule.identity })
+    let rules = grouped.values.compactMap { $0.first?.rule }
+    // Completely fixed-protected proxy candidates remain browsable but cannot
+    // cover or shadow another candidate in the effective collection.
+    let effective = rules.filter {
+      $0.action != .proxy || RuleCoverage.fixedLocalCoverage(of: $0.identity.match)?.extent != .full
+    }
+    let index = RulesOverlapIndex(rules: effective)
+    var rows = grouped.map { identity, entries in
+      row(identity: identity, entries: entries, index: index)
+    }
+    rows.append(
+      RulesRow(
+        id: .noDotHostname, identity: nil, content: "^[^.]+$", sources: [.fixed], customIDs: [],
+        relationships: [], fixedCoverage: nil))
+    rows.sort {
+      ($0.content, $0.action.rawValue, $0.identity?.contentToken ?? "")
+        < ($1.content, $1.action.rawValue, $1.identity?.contentToken ?? "")
+    }
+    let tokens =
+      rows.map { row in
+        (row.identity?.contentToken ?? "fixed:no-dot") + "|"
+          + row.sources.map(\.rawValue).sorted().joined(separator: ",")
+          + "|" + row.customIDs.map(\.uuidString).sorted().joined(separator: ",")
+      } + metadataTokens.sorted() + issues.map { String(describing: $0) }
+    return RulesCollection(
+      version: String(ProxyACLDocument.digest(tokens.sorted().joined(separator: "\n")).prefix(16)),
+      rows: rows, sources: sources, issues: issues)
+  }
+  private func row(
+    identity: RuleIdentity, entries: [RulesCandidate], index: RulesOverlapIndex
+  ) -> RulesRow {
+    let memberships = Set(entries.map { $0.source })
+    let representative = entries[0].rule
+    let overlapping = index.overlapping(identity.match)
+    var relationships =
+      memberships.contains(.fixed)
+      ? [] : RuleAnalysis(rules: overlapping, subjects: [representative]).relationships
+    let fixedCoverage =
+      memberships.contains(.fixed) ? nil : RuleCoverage.fixedLocalCoverage(of: identity.match)
+    if identity.action == .direct, let fixedCoverage {
+      relationships = relationships.compactMap { relationship in
+        guard relationship.kind == .shadowing else { return relationship }
+        guard fixedCoverage.extent == .partial else { return nil }
+        return RuleRelationship(
+          rule: identity, kind: .shadowing, extent: .partial,
+          covering: relationship.covering)
+      }
+    }
+    return RulesRow(
+      id: .rule(identity), identity: identity, content: identity.match.browsingContent,
+      sources: memberships, customIDs: Set(entries.compactMap { $0.customID }),
+      relationships: relationships, fixedCoverage: fixedCoverage)
+  }
+
+}
+
+extension RuleMatch {
+  var browsingContent: String {
+    switch self {
+    case .domainExact(let value), .domainSuffix(let value), .ipv4CIDR(let value),
+      .ipv6CIDR(let value):
+      value
+    }
+  }
+}

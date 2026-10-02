@@ -6,6 +6,7 @@ enum WorkspaceDestination: String, CaseIterable, Hashable, Identifiable, Sendabl
   case home
   case servers
   case subscriptions
+  case rules
   case settings
   case diagnostics
 

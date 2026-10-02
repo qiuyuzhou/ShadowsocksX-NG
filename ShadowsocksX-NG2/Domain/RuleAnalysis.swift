@@ -2,7 +2,7 @@ import Foundation
 
 /// Coverage is explanatory, never a persistence rejection or a routing priority.
 struct RuleRelationship: Equatable, Sendable {
-  enum Kind: Sendable { case absorption, shadowing }
+  enum Kind: Hashable, Sendable { case absorption, shadowing }
   enum Extent: Sendable { case full, partial }
   let rule: RuleIdentity
   let kind: Kind
@@ -49,5 +49,42 @@ struct RuleAnalysis: Equatable, Sendable {
           covering: covering)
       }
     }
+  }
+}
+
+/// Fixed policy includes a semantic simple-hostname condition, not an editable
+/// regex identity. Coverage keeps that condition separate from ordinary rules.
+struct FixedRuleCoverage: Equatable, Sendable {
+  let extent: RuleRelationship.Extent
+  let matches: [RuleMatch]
+  let includesSimpleHostname: Bool
+}
+
+extension RuleCoverage {
+  static let fixedLocalMatches: [RuleMatch] = {
+    FixedLocalProxyRanges.ipRanges.compactMap { value in
+      value.contains(":") ? try? RuleMatch(ipv6CIDR: value) : try? RuleMatch(ipv4CIDR: value)
+    } + [.domainSuffix("localhost"), .domainSuffix("local")]
+  }()
+
+  static func fixedLocalCoverage(of match: RuleMatch) -> FixedRuleCoverage? {
+    let matches = fixedLocalMatches.filter { intersects($0, match) }
+    let simple: Bool
+    let simpleIsFull: Bool
+    switch match {
+    case .domainExact(let value):
+      simple = !value.contains(".")
+      simpleIsFull = simple
+    case .domainSuffix(let value):
+      simple = !value.contains(".")
+      simpleIsFull = false
+    case .ipv4CIDR, .ipv6CIDR:
+      simple = false
+      simpleIsFull = false
+    }
+    guard simple || !matches.isEmpty else { return nil }
+    return FixedRuleCoverage(
+      extent: simpleIsFull || fullyCovered(match, by: matches) ? .full : .partial,
+      matches: matches, includesSimpleHostname: simple)
   }
 }
