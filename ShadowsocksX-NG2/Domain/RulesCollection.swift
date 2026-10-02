@@ -123,10 +123,11 @@ private struct RulesCollectionInput {
       RulesRow(
         id: .noDotHostname, identity: nil, content: "^[^.]+$", sources: [.fixed], customIDs: [],
         relationships: [], fixedCoverage: nil))
-    rows.sort {
-      ($0.content, $0.action.rawValue, $0.identity?.contentToken ?? "")
-        < ($1.content, $1.action.rawValue, $1.identity?.contentToken ?? "")
-    }
+    // Tuple fields are evaluated eagerly. Prepare reflection-based identity
+    // tokens once per row instead of rebuilding them on every sort comparison.
+    rows = rows.map { row in
+      (row: row, key: (row.content, row.action.rawValue, row.identity?.contentToken ?? ""))
+    }.sorted { $0.key < $1.key }.map(\.row)
     let tokens =
       rows.map { row in
         (row.identity?.contentToken ?? "fixed:no-dot") + "|"

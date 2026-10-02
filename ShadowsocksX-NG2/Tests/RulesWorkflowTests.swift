@@ -169,6 +169,13 @@ final class RulesWorkflowTests: XCTestCase {
     XCTAssertEqual(geo.count, 5379)
     XCTAssertEqual(geo.metadata?.source.upstreamVersion, "20260925234224")
     XCTAssertNotNil(geo.conversionReport)
+    let rows = workflow.snapshot.rows
+    XCTAssertEqual(
+      rows,
+      rows.reversed().sorted {
+        ($0.content, $0.action.rawValue, $0.identity?.contentToken ?? "")
+          < ($1.content, $1.action.rawValue, $1.identity?.contentToken ?? "")
+      })
     workflow.query(RulesQuery(source: .geolocationCN))
     XCTAssertTrue(workflow.snapshot.rows.contains { $0.content == "cn" })
     XCTAssertGreaterThan(workflow.snapshot.rows.count, 4241)
@@ -254,6 +261,27 @@ final class RulesWorkflowTests: XCTestCase {
     }
   }
 
+}
+
+extension RulesWorkflowTests {
+  func testCollectionSortOrdersEqualContentByActionThenMatchKind() throws {
+    let exact = try RuleMatch(domainExact: "same.example")
+    let suffix = try RuleMatch(domainSuffix: "same.example")
+    let rules = [
+      CustomRule(action: .proxy, match: suffix),
+      CustomRule(action: .direct, match: suffix),
+      CustomRule(action: .proxy, match: exact),
+      CustomRule(action: .direct, match: exact),
+    ]
+    let expected = [rules[3].identity, rules[1].identity, rules[2].identity, rules[0].identity]
+    for input in [rules, Array(rules.reversed())] {
+      let collection = RulesCollection.load(custom: { input }, builtin: { rulesFixture($0) })
+      XCTAssertTrue(collection.issues.isEmpty)
+      XCTAssertEqual(
+        collection.rows.filter { $0.content == "same.example" }.compactMap(\.identity), expected)
+      XCTAssertTrue(collection.rows.contains { $0.id == .noDotHostname && $0.isFixed })
+    }
+  }
 }
 
 func rulesFixture(
