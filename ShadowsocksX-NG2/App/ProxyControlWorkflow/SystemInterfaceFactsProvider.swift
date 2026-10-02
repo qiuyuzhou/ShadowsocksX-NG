@@ -175,7 +175,9 @@ final class SystemInterfaceFactsProvider: LocalInterfaceFactsReading {
       }
     }
     guard result != nil else { return nil }
-    return String(cString: buffer)
+    // inet_ntop 写入 null 结尾字符串且产物恒为 ASCII；先按终止符截断再解码，
+    // 校验失败分支不可达。
+    return String(bytes: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, encoding: .utf8)
   }
 
   /// IPv6 链路本地判定（fe80::/10；`IN6_IS_ADDR_LINKLOCAL` 宏未导入 Swift）。
