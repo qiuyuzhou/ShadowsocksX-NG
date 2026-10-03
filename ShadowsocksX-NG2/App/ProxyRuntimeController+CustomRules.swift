@@ -100,43 +100,37 @@ extension ProxyRuntimeController {
       return .runtimeUnchanged
     }
 
-    let preparation = runtimePreparationGeneration
     modeChangeGeneration += 1
-    let generation = modeChangeGeneration
-    let runtimeGeneration = flowGeneration + 1
+    var ticket = convergenceTicket()
+    let checks: ConvergenceTicket.Checks = [.flow, .mode, .preparation, .agentEnabled]
     let contract = try? PreparedRuntimeContract(nextDocument)
     lastDocument = nextDocument
     state = .starting
-    guard await execute(.run(nextDocument), document: nextDocument, preparedContract: contract)
-    else {
-      guard ruleDeploymentIsCurrent(preparation, generation, runtimeGeneration)
-      else {
-        return .runtimeChanged(rulesRestored: false)
-      }
-      return await restoreCustomRules(previousRules, snapshot: snapshot)
-    }
-
-    guard ruleDeploymentIsCurrent(preparation, generation, runtimeGeneration)
-    else {
+    let execution = await execute(
+      .run(nextDocument), document: nextDocument, preparedContract: contract)
+    ticket.flow = execution.flow
+    guard convergenceIsCurrent(ticket, checking: checks) else {
       return .runtimeChanged(rulesRestored: false)
     }
+    guard execution.succeeded else {
+      return await restoreCustomRules(previousRules, snapshot: snapshot, ticket: ticket)
+    }
+
     let healthy = await presentLaunchHealth(
       nextDocument,
       requiresReceipt: true,
       convergeProxyOnSuccess: false,
       preserveProxyOnFailure: true, preparedContract: contract)
-    guard ruleDeploymentIsCurrent(preparation, generation, runtimeGeneration)
-    else {
+    guard convergenceIsCurrent(ticket, checking: checks) else {
       return .runtimeChanged(rulesRestored: false)
     }
     guard healthy else {
-      return await restoreCustomRules(previousRules, snapshot: snapshot)
+      return await restoreCustomRules(previousRules, snapshot: snapshot, ticket: ticket)
     }
 
     lastDocument = nextDocument
     await convergeSystemProxy()
-    guard ruleDeploymentIsCurrent(preparation, generation, runtimeGeneration)
-    else {
+    guard convergenceIsCurrent(ticket, checking: checks) else {
       return .runtimeChanged(rulesRestored: false)
     }
     return .applied
@@ -152,13 +146,6 @@ extension ProxyRuntimeController {
     } catch {
       return .recoveryFailed(detail: String(describing: error), rulesRestored: false)
     }
-  }
-
-  private func ruleDeploymentIsCurrent(
-    _ preparation: Int, _ mode: Int, _ runtime: Int
-  ) -> Bool {
-    preparation == runtimePreparationGeneration && mode == modeChangeGeneration
-      && runtime == flowGeneration && settings.agentEnabled
   }
 
   /// 保存前校验（issue #66 AC2）：固定本地冲突与重复整批拒绝并返回可解释原因。
@@ -177,8 +164,10 @@ extension ProxyRuntimeController {
 
   private func restoreCustomRules(
     _ previousRules: CustomRuleDocument,
-    snapshot: ModeTransitionSnapshotForRules
+    snapshot: ModeTransitionSnapshotForRules,
+    ticket: ConvergenceTicket
   ) async -> CustomRuleUpdateOutcome {
+    var ticket = ticket
     var failures: [String] = []
     do {
       try ruleDocuments.save(previousRules)
@@ -195,19 +184,17 @@ extension ProxyRuntimeController {
     guard settings.agentEnabled else {
       return .runtimeChanged(rulesRestored: rulesRestored)
     }
-    let modeGeneration = modeChangeGeneration
-    let preparation = runtimePreparationGeneration
-    let runtimeGeneration = flowGeneration + 1
+    let checks: ConvergenceTicket.Checks = [.flow, .mode, .preparation, .agentEnabled]
     let contract = try? PreparedRuntimeContract(previousDocument)
     lastDocument = previousDocument
     state = .starting
-    let executed = await execute(
+    let execution = await execute(
       .run(previousDocument), document: previousDocument, preparedContract: contract)
-    guard ruleDeploymentIsCurrent(preparation, modeGeneration, runtimeGeneration)
-    else {
+    ticket.flow = execution.flow
+    guard convergenceIsCurrent(ticket, checking: checks) else {
       return .runtimeChanged(rulesRestored: rulesRestored)
     }
-    guard executed else {
+    guard execution.succeeded else {
       failures.append(String(describing: state))
       await holdSystemProxyIntent()
       return .recoveryFailed(detail: failures.joined(separator: "; "), rulesRestored: rulesRestored)
@@ -215,8 +202,7 @@ extension ProxyRuntimeController {
     let healthy = await presentLaunchHealth(
       previousDocument, requiresReceipt: true, convergeProxyOnSuccess: false,
       preparedContract: contract)
-    guard ruleDeploymentIsCurrent(preparation, modeGeneration, runtimeGeneration)
-    else {
+    guard convergenceIsCurrent(ticket, checking: checks) else {
       return .runtimeChanged(rulesRestored: rulesRestored)
     }
     if !healthy {

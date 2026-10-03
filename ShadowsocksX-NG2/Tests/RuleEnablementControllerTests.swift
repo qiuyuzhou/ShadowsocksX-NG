@@ -26,7 +26,7 @@ extension ProxyRuntimeControllerTests {
     await fulfillment(of: [started], timeout: 3)
     try FileManager.default.removeItem(at: runtimeStore.pidFileURL)
     let completed = await oldOperation.value
-    XCTAssertFalse(completed)
+    XCTAssertFalse(completed.succeeded)
     XCTAssertEqual(runtimeStore.loadDocument(), previous, "Stale stop must not delete the contract")
     loader.release.signal()
     await newMode.value

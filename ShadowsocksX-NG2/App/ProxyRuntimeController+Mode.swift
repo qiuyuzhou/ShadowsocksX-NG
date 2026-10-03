@@ -51,7 +51,7 @@ extension ProxyRuntimeController {
     settings = next
     proxyMode = mode
     modeChangeGeneration += 1
-    let generation = modeChangeGeneration
+    var ticket = convergenceTicket()
 
     guard settings.agentEnabled, state != .off,
       let currentDocument = lastDocument ?? runtimeFileStore.loadDocument()
@@ -68,10 +68,13 @@ extension ProxyRuntimeController {
     } catch {
       // 快照缺失/损坏：不静默退化，恢复旧模式与旧子选项。
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+      ticket.preparation = runtimePreparationGeneration
       await restoreModeTransition(
-        snapshot: snapshot.resolvingDocument(currentDocument), generation: generation)
+        snapshot: snapshot.resolvingDocument(currentDocument), ticket: ticket)
       return
     }
+    // 派生自身推进了派生代际：票据以派生后的当前值推进 preparation 分量。
+    ticket.preparation = runtimePreparationGeneration
     guard nextDocument.aclRuntime != currentDocument.aclRuntime else {
       guard settings.systemProxyEnabled else { return }
       state = .starting
@@ -80,8 +83,7 @@ extension ProxyRuntimeController {
     }
 
     await deployModeTransition(
-      nextDocument, snapshot: snapshot.resolvingDocument(currentDocument),
-      generation: generation, preparation: runtimePreparationGeneration)
+      nextDocument, snapshot: snapshot.resolvingDocument(currentDocument), ticket: ticket)
   }
 
   enum RulePreparationError: Error { case superseded }
@@ -167,23 +169,24 @@ extension ProxyRuntimeController {
   private func deployModeTransition(
     _ document: SslocalRuntimeDocument,
     snapshot: ModeTransitionSnapshot,
-    generation: Int, preparation: Int
+    ticket: ConvergenceTicket
   ) async {
-    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
       return
     }
     let contract = try? PreparedRuntimeContract(document)
     lastDocument = document
     state = .starting
-    guard await execute(.run(document), document: document, preparedContract: contract) else {
-      guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+    let execution = await execute(.run(document), document: document, preparedContract: contract)
+    guard execution.succeeded else {
+      guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
         return
       }
-      await restoreModeTransition(snapshot: snapshot, generation: generation)
+      await restoreModeTransition(snapshot: snapshot, ticket: ticket)
       return
     }
 
-    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
       return
     }
     let healthy = await presentLaunchHealth(
@@ -191,11 +194,11 @@ extension ProxyRuntimeController {
       requiresReceipt: true,
       convergeProxyOnSuccess: false,
       preserveProxyOnFailure: true, preparedContract: contract)
-    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
       return
     }
     guard healthy else {
-      await restoreModeTransition(snapshot: snapshot, generation: generation)
+      await restoreModeTransition(snapshot: snapshot, ticket: ticket)
       return
     }
 
@@ -205,9 +208,8 @@ extension ProxyRuntimeController {
 
   private func restoreModeTransition(
     snapshot: ModeTransitionSnapshot,
-    generation: Int
+    ticket: ConvergenceTicket
   ) async {
-    let preparation = runtimePreparationGeneration
     // 两个调用点都经 resolvingDocument 补齐文档；防御性解包失败即无事可做。
     guard let previousDocument = snapshot.document else { return }
     let restoredSettings = restoredSettings(for: snapshot)
@@ -218,7 +220,7 @@ extension ProxyRuntimeController {
       persistenceFailed = true
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
     }
-    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
       return
     }
     settings = restoredSettings
@@ -228,10 +230,10 @@ extension ProxyRuntimeController {
     let contract = try? PreparedRuntimeContract(previousDocument)
     guard
       await restoreRuntimeDocument(
-        previousDocument, generation: generation, preparedContract: contract)
+        previousDocument, ticket: ticket, preparedContract: contract)
     else { return }
 
-    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
       return
     }
     state = .starting
@@ -239,7 +241,7 @@ extension ProxyRuntimeController {
       previousDocument,
       requiresReceipt: true,
       convergeProxyOnSuccess: false, preparedContract: contract)
-    guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
       return
     }
     guard restored else {
@@ -267,7 +269,7 @@ extension ProxyRuntimeController {
   /// 代理并返回 false（健康检查由调用方继续）。
   private func restoreRuntimeDocument(
     _ previousDocument: SslocalRuntimeDocument,
-    generation: Int, preparedContract: PreparedRuntimeContract?
+    ticket: ConvergenceTicket, preparedContract: PreparedRuntimeContract?
   ) async -> Bool {
     let expectedDigest = preparedContract?.sha256 ?? previousDocument.deploymentSHA256
     let currentDocument = runtimeFileStore.loadDocument()
@@ -298,7 +300,7 @@ extension ProxyRuntimeController {
       if !previousInstanceIsRunning {
         guard
           await relaunchPreviousInstance(
-            wrapper: wrapper, previousDocument: previousDocument, generation: generation,
+            wrapper: wrapper, previousDocument: previousDocument, ticket: ticket,
             preparedContract: preparedContract)
         else { return false }
       }
@@ -310,9 +312,8 @@ extension ProxyRuntimeController {
   private func relaunchPreviousInstance(
     wrapper: WrapperProcessState,
     previousDocument: SslocalRuntimeDocument,
-    generation: Int, preparedContract: PreparedRuntimeContract?
+    ticket: ConvergenceTicket, preparedContract: PreparedRuntimeContract?
   ) async -> Bool {
-    let preparation = runtimePreparationGeneration
     switch wrapper {
     case .running(let pid):
       guard sendSignal(pid, SIGUSR1) == 0 else {
@@ -321,12 +322,11 @@ extension ProxyRuntimeController {
         return false
       }
     case .notRunning:
-      guard
-        await execute(
-          .run(previousDocument), document: previousDocument,
-          preparedContract: preparedContract)
-      else {
-        guard generation == modeChangeGeneration, preparation == runtimePreparationGeneration else {
+      let execution = await execute(
+        .run(previousDocument), document: previousDocument,
+        preparedContract: preparedContract)
+      guard execution.succeeded else {
+        guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
           return false
         }
         await holdSystemProxyIntent()

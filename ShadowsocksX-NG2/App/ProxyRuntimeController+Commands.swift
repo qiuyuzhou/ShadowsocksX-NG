@@ -228,9 +228,8 @@ extension ProxyRuntimeController {
     guard preparation == runtimePreparationGeneration else { return false }
     let document = contract.document
     lastDocument = document
-    guard await execute(.run(document), document: document, preparedContract: contract) else {
-      return false
-    }
+    let execution = await execute(.run(document), document: document, preparedContract: contract)
+    guard execution.succeeded else { return false }
     guard preparation == runtimePreparationGeneration else { return false }
     state = .starting
     return await presentLaunchHealth(
@@ -276,15 +275,26 @@ extension ProxyRuntimeController {
 // MARK: - 计划动作执行
 
 extension ProxyRuntimeController {
-  /// 按计划顺序执行动作；返回 false 表示中途失败、状态已呈现（后续动作与
-  /// 健康探测都不应继续）。
+  /// 把「运行定义档」意图推到运行时：计划动作 → 顺序执行。返回全部动作
+  /// 是否成功与本次占用的并发流代际。
   func execute(
     _ intent: RuntimeIntent, document: SslocalRuntimeDocument?,
     preparedContract: PreparedRuntimeContract? = nil
-  ) async -> Bool {
+  ) async -> RuntimeExecutionOutcome {
     cancelFirewallObservation()
     flowGeneration += 1
-    let generation = flowGeneration
+    let flow = flowGeneration
+    let succeeded = await performPlannedActions(
+      intent, document: document, preparedContract: preparedContract, flow: flow)
+    return RuntimeExecutionOutcome(flow: flow, succeeded: succeeded)
+  }
+
+  /// 按计划顺序执行动作；返回 false 表示中途失败、状态已呈现（后续动作与
+  /// 健康探测都不应继续）。
+  private func performPlannedActions(
+    _ intent: RuntimeIntent, document: SslocalRuntimeDocument?,
+    preparedContract: PreparedRuntimeContract?, flow: Int
+  ) async -> Bool {
     let preparation = runtimePreparationGeneration
     let contract: PreparedRuntimeContract?
     if case .run(let desired) = intent {
@@ -307,11 +317,11 @@ extension ProxyRuntimeController {
       RuntimeLog.emit(.contractUnchanged)
     }
     for action in actions {
-      guard generation == flowGeneration, preparation == runtimePreparationGeneration,
+      guard flow == flowGeneration, preparation == runtimePreparationGeneration,
         await perform(action, preparedContract: contract)
       else { return false }
     }
-    return generation == flowGeneration && preparation == runtimePreparationGeneration
+    return flow == flowGeneration && preparation == runtimePreparationGeneration
   }
 
   /// 执行单个动作；返回 false 表示应终止后续动作（状态已呈现）。
