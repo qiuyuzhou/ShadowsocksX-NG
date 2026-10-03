@@ -135,10 +135,11 @@ struct ServerFormFieldLimitsTests {
   @Test
   func pluginOptionsLimitCountsUTF8BytesOfTheWholeString() {
     let fields = Self.loadedFields()
-    fields.pluginOptionsText = String(
+    fields.pluginOptions.switchToRawText()
+    fields.pluginOptions.rawText = String(
       repeating: "a", count: ServerFormFields.pluginOptionsUTF8Limit)
     #expect(fields.validateForSubmit(), "恰好 65,536 字节达标")
-    fields.pluginOptionsText = String(
+    fields.pluginOptions.rawText = String(
       repeating: "a", count: ServerFormFields.pluginOptionsUTF8Limit + 1)
     #expect(!fields.validateForSubmit())
     #expect(
@@ -146,7 +147,7 @@ struct ServerFormFieldLimitsTests {
         == .tooManyBytes(limit: ServerFormFields.pluginOptionsUTF8Limit))
 
     // 多字节字符按字节计：21846 个「港」= 65,538 字节越界。
-    fields.pluginOptionsText = String(repeating: "港", count: 21_846)
+    fields.pluginOptions.rawText = String(repeating: "港", count: 21_846)
     #expect(!fields.validateForSubmit())
   }
 
@@ -154,7 +155,8 @@ struct ServerFormFieldLimitsTests {
   func hiddenOptionsDraftDoesNotBlockSaveWhenPluginIsNone() {
     let fields = Self.loadedFields()
     fields.pluginChoice = .none
-    fields.pluginOptionsText = Self.overLongOptions
+    fields.pluginOptions.switchToRawText()
+    fields.pluginOptions.rawText = Self.overLongOptions
     #expect(fields.validateForSubmit(), "插件「无」时隐藏参数草稿不阻塞保存")
   }
 

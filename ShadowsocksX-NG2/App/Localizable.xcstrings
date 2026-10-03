@@ -12,6 +12,61 @@
         }
       }
     },
+    "值": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Value"
+          }
+        }
+      }
+    },
+    "删除参数行": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Parameter Row"
+          }
+        }
+      }
+    },
+    "原始文本": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raw Text"
+          }
+        }
+      }
+    },
+    "参数列表": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Parameters"
+          }
+        }
+      }
+    },
+    "参数名": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Key"
+          }
+        }
+      }
+    },
     "名称最多 %lld 个字符": {
       "extractionState": "manual",
       "localizations": {
@@ -19,6 +74,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Name must be at most %lld characters"
+          }
+        }
+      }
+    },
+    "存在未完成的参数行：请补全参数名、清空该行或删除它": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An unfinished parameter row exists: complete its key, clear the row, or delete it"
           }
         }
       }
@@ -45,6 +111,17 @@
         }
       }
     },
+    "无值开关": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flag"
+          }
+        }
+      }
+    },
     "服务器地址最多 %lld 个字符": {
       "extractionState": "manual",
       "localizations": {
@@ -56,6 +133,39 @@
         }
       }
     },
+    "查看模式": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View Mode"
+          }
+        }
+      }
+    },
+    "添加参数": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Parameter"
+          }
+        }
+      }
+    },
+    "确认": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Confirm"
+          }
+        }
+      }
+    },
     "端口必须是 1–65535 的数字（最多 %lld 位）": {
       "extractionState": "manual",
       "localizations": {
@@ -63,6 +173,39 @@
           "stringUnit": {
             "state": "translated",
             "value": "Port must be a number from 1 to 65535 (at most %lld digits)"
+          }
+        }
+      }
+    },
+    "类型": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kind"
+          }
+        }
+      }
+    },
+    "编辑值…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit Value…"
+          }
+        }
+      }
+    },
+    "缺少参数名": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Missing key"
           }
         }
       }

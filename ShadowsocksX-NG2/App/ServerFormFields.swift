@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// 表单字段标识：字段级校验错误的挂靠位与首错定位序（表单栅格顺序）。
@@ -22,6 +23,8 @@ enum ServerFormFieldError: Equatable {
   case tooManyBytes(limit: Int)
   /// 端口草稿为空、含非十进制数字、超过五位或落在 1–65535 之外。
   case invalidPort
+  /// 参数列表存在未完成行（有值或开关形态却没有参数名）。
+  case unfinishedPluginOptionRow
 }
 
 /// 服务器表单草稿（UI 持有）：连接字段草稿状态与「字段 ↔ ServerEditForm/
@@ -51,10 +54,22 @@ final class ServerFormFields: ObservableObject {
     }
   }
   @Published var pluginChoice: PluginSelection = .none
-  @Published var pluginOptionsText = "" { didSet { clearError(.pluginOptions) } }
+  /// 插件参数会话草稿（issue #81）：行/模式/原文收在模块内，提交串取
+  /// `composedString`；编辑参数即清除参数字段错误，变更通知转发给本类
+  /// 观察者（视图只观察 ServerFormFields）。
+  let pluginOptions = PluginOptionsDraft()
+  private var pluginOptionsChanges: AnyCancellable?
   @Published var showPassword = false
   @Published private(set) var fieldErrors: [ServerFormField: ServerFormFieldError] = [:]
   @Published private var savedDraft: ServerEditDraft?
+
+  init() {
+    pluginOptionsChanges = pluginOptions.objectWillChange.sink { [weak self] _ in
+      guard let self else { return }
+      self.clearError(.pluginOptions)
+      self.objectWillChange.send()
+    }
+  }
 
   /// 变更检测按提交草稿比较；端口在草稿可解析时按数值比较（如前导零改写
   /// 不算变更），不可解析视为已变更，保证非法输入后保存入口仍可点击并在
@@ -90,9 +105,13 @@ final class ServerFormFields: ObservableObject {
       raw: password, measured: password,
       baseline: savedDraft?.password, limit: Self.passwordCharacterLimit)
     if pluginChoice != .none {
-      errors[.pluginOptions] = utf8LimitError(
-        raw: pluginOptionsText, baseline: savedDraft?.pluginOptions,
-        limit: Self.pluginOptionsUTF8Limit)
+      if pluginOptions.hasUnfinishedRows {
+        errors[.pluginOptions] = .unfinishedPluginOptionRow
+      } else if let options = pluginOptions.composedString {
+        errors[.pluginOptions] = utf8LimitError(
+          raw: options, baseline: savedDraft?.pluginOptions,
+          limit: Self.pluginOptionsUTF8Limit)
+      }
     }
     fieldErrors = errors
     return errors.isEmpty
@@ -130,17 +149,18 @@ final class ServerFormFields: ObservableObject {
     password = state.password
     remark = state.remark
     pluginChoice = state.plugin.selection
-    pluginOptionsText = state.plugin.options
+    pluginOptions.load(state.plugin.options)
     showPassword = false
     fieldErrors = [:]
     savedDraft = draft
   }
 
   /// 提交载荷：配置与凭据字段作为一个逻辑变更（story 12）。端口取自十进制
-  /// 草稿；草稿不能作为提交端口时为 nil——本 getter 仅在 `validateForSubmit()`
-  /// 通过后消费，无效端口不得悄悄回落到旧值（issue #81）。
+  /// 草稿、插件参数取自会话草稿拼装串；任一不能作为提交值（无效端口或
+  /// 未完成参数行）时为 nil——本 getter 仅在 `validateForSubmit()` 通过后
+  /// 消费，无效输入不得悄悄回落到旧值（issue #81）。
   var draft: ServerEditDraft? {
-    guard let port = submittablePort else { return nil }
+    guard let port = submittablePort, let options = pluginOptions.composedString else { return nil }
     return ServerEditDraft(
       address: address,
       port: port,
@@ -148,7 +168,7 @@ final class ServerFormFields: ObservableObject {
       password: password,
       remark: remark,
       plugin: pluginChoice,
-      pluginOptions: pluginOptionsText)
+      pluginOptions: options)
   }
 
   // MARK: - 校验实现
@@ -256,7 +276,7 @@ struct ServerFormFieldsGrid: View {
       column("插件") {
         ServerPluginSection(
           selection: $fields.pluginChoice,
-          optionsText: $fields.pluginOptionsText,
+          options: fields.pluginOptions,
           plugin: plugin,
           isEditable: isEditable,
           optionsError: fields.fieldErrors[.pluginOptions],
@@ -304,6 +324,8 @@ struct ServerFormFieldsGrid: View {
       return "插件参数最多 \(limit) 个字节"
     case .invalidPort:
       return "端口必须是 1–65535 的数字（最多 \(ServerFormFields.portDigitLimit) 位）"
+    case .unfinishedPluginOptionRow:
+      return ""
     }
   }
 }
