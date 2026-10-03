@@ -6,11 +6,12 @@ import XCTest
 /// 薄 I/O 缝 ②（spec #21 Testing Decisions）：以 stub sslocal 二进制驱动真实
 /// wrapper 可执行文件，验证启停协议次序、SIGTERM 链、崩溃恢复、文件清理与
 /// SIGUSR1 变更协议（D2/D5）。stub 经环境变量编排行为，全部等待有界。
-final class AgentLifecycleTests: XCTestCase {
+class AgentLifecycleTests: XCTestCase {
   var workDir: URL!
   var contractURL: URL!
   private var stubStateURL: URL!
   private var stubURL: URL!
+  private var wrappers: [Process] = []
 
   override func setUpWithError() throws {
     try super.setUpWithError()
@@ -20,12 +21,17 @@ final class AgentLifecycleTests: XCTestCase {
     contractURL = workDir.appendingPathComponent("sslocal-active.json")
     stubStateURL = workDir.appendingPathComponent("stub-state.log")
     stubURL = workDir.appendingPathComponent("stub-sslocal.sh")
+    try FileManager.default.createDirectory(
+      at: childPIDDirectory, withIntermediateDirectories: true)
     try writeStubScript()
   }
 
   override func tearDownWithError() throws {
-    try? FileManager.default.removeItem(at: workDir)
-    try super.tearDownWithError()
+    defer {
+      try? FileManager.default.removeItem(at: workDir)
+      try? super.tearDownWithError()
+    }
+    try cleanupWrappers()
   }
 
   // MARK: 夹具
@@ -43,10 +49,13 @@ final class AgentLifecycleTests: XCTestCase {
     // stub 记录调用参数与收到的信号；行为由 SSLOCAL_STUB_BEHAVIOR 编排。
     let script = """
       #!/bin/sh
-      echo "invoked: $*" >> "$SSLOCAL_STUB_STATE"
-      echo "dns-force-builtin: ${SS_SYSTEM_DNS_RESOLVER_FORCE_BUILTIN:-unset}" >> "$SSLOCAL_STUB_STATE"
+      child_pid_file="$SSLOCAL_STUB_PID_DIR/$$"
+      trap 'rm -f "$child_pid_file"' EXIT
       trap 'echo "SIGTERM" >> "$SSLOCAL_STUB_STATE"; exit 0' TERM
       trap 'echo "SIGUSR1" >> "$SSLOCAL_STUB_STATE"' USR1
+      echo "$$" > "$child_pid_file"
+      echo "dns-force-builtin: ${SS_SYSTEM_DNS_RESOLVER_FORCE_BUILTIN:-unset}" >> "$SSLOCAL_STUB_STATE"
+      echo "invoked: $*" >> "$SSLOCAL_STUB_STATE"
       case "$SSLOCAL_STUB_BEHAVIOR" in
         crash) exit 7 ;;
         exit0) exit 0 ;;
@@ -67,9 +76,11 @@ final class AgentLifecycleTests: XCTestCase {
     environment["SSXNG_SSLOCAL_PATH"] = stubURL.path
     environment["SSXNG_RUNTIME_DIR"] = workDir.path
     environment["SSLOCAL_STUB_STATE"] = stubStateURL.path
+    environment["SSLOCAL_STUB_PID_DIR"] = childPIDDirectory.path
     environment["SSLOCAL_STUB_BEHAVIOR"] = behavior
     process.environment = environment
     try process.run()
+    wrappers.append(process)
     return process
   }
 
@@ -89,8 +100,8 @@ final class AgentLifecycleTests: XCTestCase {
   func waitUntil(
     timeout: TimeInterval = 10, _ condition: () throws -> Bool
   ) throws -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+    let deadline = DispatchTime.now() + timeout
+    while DispatchTime.now() < deadline {
       if try condition() { return true }
       Thread.sleep(forTimeInterval: 0.05)
     }
@@ -99,11 +110,51 @@ final class AgentLifecycleTests: XCTestCase {
 
   /// 断言 wrapper 在超时内退出并返回退出码。
   func waitForExit(_ process: Process, timeout: TimeInterval = 10) throws -> Int32 {
-    try waitUntil(timeout: timeout) { !process.isRunning }
-    process.waitUntilExit()
+    guard try waitUntil(timeout: timeout, { !process.isRunning }) else {
+      throw LifecycleWaitError.exitTimedOut(process.processIdentifier)
+    }
     return process.terminationStatus
   }
 
+  private var childPIDDirectory: URL {
+    workDir.appendingPathComponent("child-pids", isDirectory: true)
+  }
+
+  /// 即使用例中途抛错，也先停止所有 wrapper，再清理仍存活的 stub。
+  func cleanupWrappers() throws {
+    let running = wrappers.filter(\.isRunning)
+    for process in running { kill(process.processIdentifier, SIGTERM) }
+    _ = try waitUntil(timeout: 12) { running.allSatisfy { !$0.isRunning } }
+
+    let childFiles = try FileManager.default.contentsOfDirectory(
+      at: childPIDDirectory, includingPropertiesForKeys: nil)
+    let childPIDs = childFiles.compactMap { Int32($0.lastPathComponent) }.filter { $0 > 0 }
+    for pid in childPIDs { kill(pid, SIGKILL) }
+    for process in running where process.isRunning {
+      kill(process.processIdentifier, SIGKILL)
+    }
+    guard
+      try waitUntil(
+        timeout: 2,
+        {
+          running.allSatisfy { !$0.isRunning } && childPIDs.allSatisfy { !self.pidAlive($0) }
+        })
+    else {
+      throw LifecycleWaitError.cleanupTimedOut
+    }
+  }
+
+  func agentLog() -> String {
+    (try? String(contentsOf: workDir.appendingPathComponent("agent.log"), encoding: .utf8)) ?? ""
+  }
+}
+
+private enum LifecycleWaitError: Error {
+  case exitTimedOut(Int32)
+  case cleanupTimedOut
+}
+
+final class AgentLifecycleCoreTests: AgentLifecycleTests {
   // MARK: 启动协议与 SIGTERM 链（D2）
 
   func testStartProtocolSpawnsSslocalWithAbsoluteConfigPathThenStopsOnSIGTERM() throws {
@@ -114,6 +165,9 @@ final class AgentLifecycleTests: XCTestCase {
       try waitUntil { self.stateLog().contains("invoked: -c \(self.contractURL.path)") },
       "wrapper 应以契约绝对路径调用 sslocal，实际：\(stateLog())")
     XCTAssertTrue(pidAlive(wrapper.processIdentifier), "sslocal 运行期间 wrapper 应保持常驻")
+
+    XCTAssertThrowsError(try waitForExit(wrapper, timeout: 0.01))
+    XCTAssertTrue(wrapper.isRunning, "等待超时应返回错误，不影响被测进程")
 
     kill(wrapper.processIdentifier, SIGTERM)
     let exitStatus = try waitForExit(wrapper)
@@ -213,6 +267,7 @@ final class AgentLifecycleTests: XCTestCase {
       ) ?? "")
     XCTAssertEqual(recordedPID, wrapper.processIdentifier, "pid 文件记录 wrapper 自身 pid")
 
+    XCTAssertTrue(try waitUntil { self.stateLog().contains("invoked:") })
     kill(wrapper.processIdentifier, SIGTERM)
     _ = try waitForExit(wrapper)
     XCTAssertFalse(

@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-extension AgentLifecycleTests {
+final class AgentLifecycleChangeProtocolTests: AgentLifecycleTests {
   // MARK: 变更协议（D5）
 
   func testSIGUSR1WithServerOnlyChangeIsForwardedToSslocal() throws {
@@ -72,6 +72,15 @@ extension AgentLifecycleTests {
       },
       "ACL 摘要变化应完整重启 sslocal；agent: \(agentLog())"
     )
+    // 再发送 server-only reload，让就绪检查完成后给出明确的拒绝信号。
+    let serverReload = ProxyRuntimeFixture.makeDocument(serverAddress: "198.51.100.9")
+      .replacingACL(.direct(at: runtimeStore.aclFileURL))
+    try writeContract(serverReload)
+    XCTAssertEqual(kill(wrapper.processIdentifier, SIGUSR1), 0)
+    XCTAssertTrue(
+      try waitUntil { self.agentLog().contains("reload deferred until listeners are ready") },
+      "未绑定监听的重启实例应拒绝发布回执并推迟重载")
+    XCTAssertFalse(stateLog().contains("SIGUSR1"), "未就绪时不能转发 server-only reload")
     XCTAssertNil(
       runtimeStore.readRuntimeReceipt(),
       "stub 未绑定代理端口时，不得为直连实例发布回执（旧 pid=\(previousProcessID)）")
@@ -79,7 +88,9 @@ extension AgentLifecycleTests {
     kill(wrapper.processIdentifier, SIGTERM)
     XCTAssertEqual(try waitForExit(wrapper), 0)
   }
+}
 
+final class AgentLifecycleStaleListenerTests: AgentLifecycleTests {
   func testACLReceiptIsNotPublishedWhenOnlyStaleListenersAreReachable() throws {
     let staleSocksListener = try TCPListenerFixture()
     let staleHTTPListener = try TCPListenerFixture()
@@ -99,12 +110,6 @@ extension AgentLifecycleTests {
     }
 
     let wrapper = try launchWrapper(behavior: "run")
-    defer {
-      if wrapper.isRunning {
-        kill(wrapper.processIdentifier, SIGTERM)
-        _ = try? waitForExit(wrapper)
-      }
-    }
 
     XCTAssertTrue(
       try waitUntil(timeout: 8) {
@@ -127,7 +132,9 @@ extension AgentLifecycleTests {
       runtimeStore.readRuntimeReceipt(),
       "候选没有绑定端口时，旧监听和 server-only reload 都不能发布直连回执")
   }
+}
 
+final class AgentLifecycleListenDeadlineTests: AgentLifecycleTests {
   // MARK: 监听建立判定（issue #38，D10）
 
   func testListenNotEstablishedWithinDeadlineIsLoggedAndSupervisionContinues() throws {
@@ -148,10 +155,6 @@ extension AgentLifecycleTests {
 
     kill(wrapper.processIdentifier, SIGTERM)
     XCTAssertEqual(try waitForExit(wrapper), 0, "后续显式停止链不受影响")
-  }
-
-  private func agentLog() -> String {
-    (try? String(contentsOf: workDir.appendingPathComponent("agent.log"), encoding: .utf8)) ?? ""
   }
 }
 

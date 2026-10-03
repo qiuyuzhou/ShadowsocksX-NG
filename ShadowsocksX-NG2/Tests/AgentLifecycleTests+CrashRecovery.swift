@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-extension AgentLifecycleTests {
+extension AgentLifecycleChangeProtocolTests {
   // MARK: 崩溃恢复（D2）
 
   func testSslocalCrashExitsNonZeroForKeepAliveReplay() throws {
@@ -19,8 +19,10 @@ extension AgentLifecycleTests {
     XCTAssertTrue(
       try waitUntil { self.stateLog().components(separatedBy: "invoked:").count >= 3 },
       "重放应再次拉起 sslocal")
-    kill(replay.processIdentifier, SIGTERM)
+    try cleanupWrappers()
+    XCTAssertFalse(replay.isRunning, "统一清理应停止重放实例")
     XCTAssertEqual(try waitForExit(replay), 0)
+    XCTAssertTrue(stateLog().contains("SIGTERM"), "统一清理应先走优雅停止链")
   }
 
   func testUnexpectedCleanChildExitAlsoCountsAsLoss() throws {
