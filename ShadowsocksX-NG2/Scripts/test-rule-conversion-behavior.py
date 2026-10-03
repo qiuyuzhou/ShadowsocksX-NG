@@ -56,6 +56,8 @@ def inputs():
                                  + [(2, f'geo{i}.example.net') for i in range(100)]),
         'china-ipv4': ('\n'.join(f'1.0.{i}.7/24' for i in range(100)) + '\n').encode(),
         'gfwlist': base64.b64encode(('||example.com\n@@||safe.example.com\n@@||other.example\n'
+                                    '|https://exact.example.net\n@@|https://direct.example.net\n'
+                                    '|https://path.example.net/\n'
                                     + '\n'.join(f'||gfw{i}.example.net' for i in range(100))).encode()),
     }
 
@@ -90,6 +92,9 @@ class ConversionBehaviorTests(unittest.TestCase):
                 digest_input = GFW.decode_autoproxy(raw.decode()).encode() if name == 'gfwlist' else raw
                 self.assertEqual(snapshot['metadata']['inputDigest'], hashlib.sha256(digest_input).hexdigest())
                 self.assertEqual(snapshot['lossReport']['convertedCount'], len(snapshot['rules']))
+                if name == 'gfwlist':
+                    for action, host in [('proxy', 'exact.example.net'), ('direct', 'direct.example.net')]:
+                        self.assertIn({'action': action, 'match': {'kind': 'domainExact', 'value': host}}, snapshot['rules'])
 
     def test_geosite_reads_published_typed_protobuf_and_selects_category(self):
         raw = geosite([(2, 'IGNORE.example')], 'OTHER') + geosite([(2, 'Example.COM'), (3, 'api.example.org'), (0, 'keyword'), (1, '^regexp')])
@@ -135,6 +140,57 @@ class ConversionBehaviorTests(unittest.TestCase):
                          [('proxy', 'sub.example.com'), ('direct', 'example.com'), ('direct', 'else.example')])
         self.assertEqual(report['absorbedCount'], 0)
         self.assertEqual(report['skipped'], {'header': 1, 'comment': 1, 'blank': 1})
+
+    def test_gfw_url_prefix_without_path_converts_to_exact_domain(self):
+        rules, report = GFW.convert_document(
+            '|https://Example.COM\n|http://example.com\n||example.com\n'
+            '@@|https://Safe.Example.ORG\n|https://port.example:8443\n')
+        self.assertEqual([(r['action'], r['match']) for r in rules], [
+            ('proxy', {'kind': 'domainExact', 'value': 'example.com'}),
+            ('proxy', {'kind': 'domainSuffix', 'value': 'example.com'}),
+            ('proxy', {'kind': 'domainExact', 'value': 'port.example'}),
+            ('direct', {'kind': 'domainExact', 'value': 'safe.example.org'}),
+        ])
+        self.assertEqual(report['convertedCount'], 4)
+        self.assertEqual(report['skipped'], {})
+
+    def test_gfw_url_prefix_with_conditions_or_invalid_host_stays_skipped(self):
+        patterns = [
+            'https://example.com/', 'https://example.com/path',
+            'https://*.example.com', 'https://exam*ple.com',
+            'https://1.2.3.4', 'https://999.2.3.4', 'https://[2001:db8::1]',
+            'https://localhost', 'https://bad..example', 'https://-bad.example',
+            'https://bad-.example', 'https://example.com?query',
+            'https://example.com#fragment', 'https://user@example.com',
+            'https://example.com:invalid', 'https://example.com:65536',
+            'https://example.com:', 'https://example.com$third-party',
+            'https://example.com|', 'https://', 'example.com',
+            'https://exa\tmple.com',
+        ]
+        for pattern in patterns:
+            for prefix in ['|', '@@|']:
+                with self.subTest(line=prefix + pattern):
+                    rules, report = GFW.convert_document(prefix + pattern + '\n||keep.example')
+                    self.assertEqual([r['match']['value'] for r in rules], ['keep.example'])
+                    self.assertEqual(report['skipped'], {'urlPrefix': 1})
+
+    def test_gfw_exact_proxy_only_shadows_same_exact_exception(self):
+        lines = ['|https://example.com', '@@|http://example.com',
+                 '@@|https://sub.example.com', '@@||example.com', '@@||sub.example.com']
+        for document in ['\n'.join(lines), '\n'.join(reversed(lines))]:
+            rules, report = GFW.convert_document(document)
+            self.assertEqual(report['absorbedCount'], 1)
+            self.assertEqual(len(rules), 4)
+            self.assertNotIn({'action': 'direct', 'match': {'kind': 'domainExact', 'value': 'example.com'}}, rules)
+
+    def test_gfw_suffix_proxy_shadows_exact_exception_and_reports_original(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            rules, report = GFW.convert_document(
+                '@@|https://safe.example.com\n||example.com\n|https://example.com')
+        self.assertEqual(report['absorbedCount'], 1)
+        self.assertEqual(len(rules), 2)
+        self.assertIn('@@|https://safe.example.com shadowed-by ||example.com', output.getvalue())
 
     def test_gfw_equal_and_broader_proxy_shadow_exception_in_any_order(self):
         for document in ['||example.com\n@@||example.com\n@@||safe.example.com',

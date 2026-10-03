@@ -2,8 +2,9 @@
 """Convert the official Base64 GFWList AutoProxy list into an NG2 rule snapshot
 (issue #65).
 
-Only rules that can be expressed losslessly as a target domain are converted.
-URL-path and protocol conditions are never expanded into whole-domain rules.
+Domain anchors become suffix matches. URL prefixes without a path and with a
+literal domain host become exact matches, discarding the scheme and port.
+Other URL conditions are reported as losses rather than expanded to domains.
 `@@` exceptions shadowed by a broader proxy rule are kept out of the ACL and
 reported item by item; the broader proxy rules stay. Unknown syntax, corrupt
 input, or abnormal shrinkage block the update and leave the previous snapshot.
@@ -21,6 +22,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 CONVERTER_VERSION = "2.0.0"
 SCHEMA_VERSION = 2
@@ -69,7 +71,7 @@ def parse_line(raw_line: str) -> dict:
     if pattern.startswith("||"):
         return parse_domain_pattern(pattern[2:], line, is_exception)
     if pattern.startswith("|"):
-        return {"kind": "urlPrefix", "original": line, "isException": is_exception}
+        return parse_url_prefix(pattern[1:], line, is_exception)
     if len(pattern) >= 3 and pattern.startswith("/") and pattern.endswith("/"):
         return {"kind": "regexp", "original": line, "isException": is_exception}
     if "*" in pattern:
@@ -79,6 +81,41 @@ def parse_line(raw_line: str) -> dict:
     if "." in pattern and DOMAIN_HOST_RE.fullmatch(pattern):
         return {"kind": "plainText", "original": line, "isException": is_exception}
     raise UnknownSyntax(line)
+
+
+def parse_url_prefix(url: str, original: str, is_exception: bool) -> dict:
+    skipped = {"kind": "urlPrefix", "original": original, "isException": is_exception}
+    # urlsplit tolerates whitespace and bare hosts; neither is a literal URL rule.
+    if any(char.isspace() for char in url) or not re.match(
+        r"^[A-Za-z][A-Za-z0-9+.-]*://", url
+    ):
+        return skipped
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname or ""
+        _ = parsed.port  # Validate numeric syntax and range before dropping it.
+    except ValueError:
+        return skipped
+    if parsed.path or "?" in url or "#" in url or parsed.username is not None:
+        return skipped
+    if (
+        parsed.netloc.endswith(":")
+        or not is_valid_domain_host(host)
+        or looks_like_ip(host)
+    ):
+        return skipped
+    labels = host.split(".")
+    if (
+        len(host) > 253
+        or not all(
+            re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
+            for label in labels
+        )
+        or not any(char.isalpha() for char in labels[-1])
+    ):
+        return skipped
+    kind = "exactDomainException" if is_exception else "exactDomainProxy"
+    return {"kind": kind, "host": host.lower(), "original": original}
 
 
 def parse_domain_pattern(host_part: str, original: str, is_exception: bool) -> dict:
@@ -119,7 +156,8 @@ def split_shadowed(
 ) -> tuple[list[dict], list[dict], list[tuple[dict, dict]]]:
     """Return (kept_proxy, kept_exceptions, shadowed_pairs).
 
-    A proxy rule covers an exception when its domain suffix is equal or broader.
+    A suffix proxy covers exact or suffix exceptions on that domain or subdomains.
+    An exact proxy only covers an exact exception on the same domain.
     sslocal matches domain proxy_list before bypass_list, so a covered exception
     would be an ineffective ACL entry.
     """
@@ -128,9 +166,11 @@ def split_shadowed(
     for exception in exception_rules:
         blocker = None
         for proxy in proxy_rules:
-            if domain_suffix_covers(
-                proxy["match"]["value"], exception["match"]["value"]
-            ):
+            broad, narrow = proxy["match"], exception["match"]
+            if (
+                broad["kind"] == "domainSuffix"
+                and domain_suffix_covers(broad["value"], narrow["value"])
+            ) or (broad == narrow):
                 blocker = proxy
                 break
         if blocker is None:
@@ -153,7 +193,10 @@ def convert_document(document: str) -> tuple[list[dict], dict]:
     proxy_rules: list[dict] = []
     exception_rules: list[dict] = []
     saw_code_line = False
-    originals: dict[tuple[str, str], str] = {}
+    originals: dict[tuple[str, str, str], str] = {}
+
+    def rule_key(rule: dict) -> tuple[str, str, str]:
+        return (rule["action"], rule["match"]["kind"], rule["match"]["value"])
 
     def bump(category: str) -> None:
         skipped[category] = skipped.get(category, 0) + 1
@@ -167,24 +210,15 @@ def convert_document(document: str) -> tuple[list[dict], dict]:
             bump("comment")
         elif kind == "header":
             bump("header")
-        elif kind == "domainProxy":
-            originals.setdefault(("proxy", entry["host"]), entry["original"])
+        elif kind in {"domainProxy", "domainException", "exactDomainProxy", "exactDomainException"}:
             saw_code_line = True
-            proxy_rules.append(
-                make_rule(
-                    "proxy",
-                    {"kind": "domainSuffix", "value": entry["host"]},
-                )
+            action = "direct" if kind.endswith("Exception") else "proxy"
+            match_kind = "domainExact" if kind.startswith("exact") else "domainSuffix"
+            rule = make_rule(
+                action, {"kind": match_kind, "value": entry["host"]}
             )
-        elif kind == "domainException":
-            originals.setdefault(("direct", entry["host"]), entry["original"])
-            saw_code_line = True
-            exception_rules.append(
-                make_rule(
-                    "direct",
-                    {"kind": "domainSuffix", "value": entry["host"]},
-                )
-            )
+            originals.setdefault(rule_key(rule), entry["original"])
+            (exception_rules if action == "direct" else proxy_rules).append(rule)
         elif kind in {
             "urlPrefix",
             "urlPath",
@@ -209,8 +243,8 @@ def convert_document(document: str) -> tuple[list[dict], dict]:
         for exception, blocker in shadowed:
             print(
                 "shadowed-exception: "
-                f"{originals[('direct', exception['match']['value'])]} "
-                f"shadowed-by {originals[('proxy', blocker['match']['value'])]}"
+                f"{originals[rule_key(exception)]} "
+                f"shadowed-by {originals[rule_key(blocker)]}"
             )
 
     rules = kept_proxy + kept_exceptions

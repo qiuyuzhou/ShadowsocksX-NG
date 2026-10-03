@@ -17,7 +17,7 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
 - `Vendor/<name>/manifest.json` — 外部二进制的固定供应链清单（tag + 资产 URL + 归档 SHA-256 + bundle 内位置 + 签名 identifier）；二进制本体与 `.fetched.sha256` 戳是构建缓存，不入库。
 - `Vendor/rules/geolocation-cn/` — 内置中国域名规则快照（issue #63）：`snapshot.json`（规范化规则 + 元数据 + 损失报告）、`manifest.json`（上游版本与快照 SHA-256）、`NOTICE`（许可证与归属）。普通构建只读本地快照，绝不抓取或转换。
 - `Vendor/rules/china-ipv4/` — 内置中国 IPv4 CIDR 直连候选快照（issue #64）：同上三件套，来源为 [gaoyifan/china-operator-ip](https://github.com/gaoyifan/china-operator-ip) `china.txt` 固定 commit。规则模式的 `proxy_all` ACL 同时编入中国域名与 IPv4 CIDR 直连候选。
-- `Vendor/rules/gfwlist/` — 内置 GFWList 代理候选快照（issue #65）：同上三件套，来源为 [gfwlist/gfwlist](https://github.com/gfwlist/gfwlist) 官方 Base64 AutoProxy `gfwlist.txt` 固定 commit。只转换可按目标域名无损表达的规则；「未匹配时直连」的 `bypass_all` ACL 编入这些代理候选。
+- `Vendor/rules/gfwlist/` — 内置 GFWList 代理候选快照（issue #65）：同上三件套，来源为 [gfwlist/gfwlist](https://github.com/gfwlist/gfwlist) 官方 Base64 AutoProxy `gfwlist.txt` 固定 commit。域名锚点转换为后缀匹配，满足条件的无路径 URL 前缀转换为精确域名匹配；「未匹配时直连」的 `bypass_all` ACL 编入这些代理候选。
 - `Scripts/` — 供应链脚本（见下节）与打包门槛断言；另有 `update-geolocation-cn.sh` / `update-china-ipv4.sh` / `update-gfwlist.sh`（显式维护动作，抓取固定版上游并转换）与 `verify-rule-snapshots.sh`（构建前离线校验快照完整性）。
 
 ## 外部二进制供应链
@@ -85,7 +85,7 @@ Scripts/packaging-gate.sh \
 
 - **geolocation-cn**（issue #63）：人工复验上游后运行 `Scripts/update-geolocation-cn.sh`，从固定版 [Loyalsoldier/domain-list-custom](https://github.com/Loyalsoldier/domain-list-custom) `geosite.dat` 解析 typed 条目并生成 `Vendor/rules/geolocation-cn/snapshot.json`。
 - **china-ipv4**（issue #64）：运行 `Scripts/update-china-ipv4.sh`，从固定版 [gaoyifan/china-operator-ip](https://github.com/gaoyifan/china-operator-ip) `china.txt` 规范化并去重 IPv4 CIDR，生成 `Vendor/rules/china-ipv4/snapshot.json`。
-- **gfwlist**（issue #65）：运行 `Scripts/update-gfwlist.sh`，从固定版 [gfwlist/gfwlist](https://github.com/gfwlist/gfwlist) `gfwlist.txt` 解码官方 Base64 AutoProxy 列表并生成 `Vendor/rules/gfwlist/snapshot.json`。只转换可按目标域名无损表达的 `||host` / `||host^` 规则；URL 路径、协议条件、通配符、正则、单标签前缀与 IP 字面量域名规则逐类计入损失报告，绝不扩大为整域名。被更宽代理规则遮蔽的 `@@` 例外不写入无效 ACL 项（sslocal 域名匹配 proxy_list 优先于 bypass_list），保留代理规则，遮蔽数只计入 `absorbedCount`；逐条取证输出到维护脚本 stdout。
+- **gfwlist**（issue #65）：运行 `Scripts/update-gfwlist.sh`，从固定版 [gfwlist/gfwlist](https://github.com/gfwlist/gfwlist) `gfwlist.txt` 解码官方 Base64 AutoProxy 列表并生成 `Vendor/rules/gfwlist/snapshot.json`。`||host` / `||host^` 转换为域名后缀匹配；`|scheme://host`（可含合法端口）在无路径、查询、fragment 或用户信息，且 host 为无通配符的合法域名时，提取 host 转换为精确域名匹配，忽略协议和端口。末尾 `/` 也视为路径。`@@` 保留直连动作。其他 URL 前缀、路径、通配符、正则、单标签前缀与 IP 字面量规则逐类计入损失报告。被代理规则完全覆盖的 `@@` 例外不写入无效 ACL 项（sslocal 域名匹配 proxy_list 优先于 bypass_list），保留代理规则，遮蔽数只计入 `absorbedCount`；逐条取证输出到维护脚本 stdout。
 
 快照使用 schema 2 / converter 2.0.0 的紧凑 JSON：每条规则只有 `action` 和 `match`，来源只在 `metadata.source`，转换报告只保留计数。被吸收的 `.cn` 条目与被遮蔽的 GFWList 例外不随快照分发，禁用宽规则后不再恢复；详见 [ADR-0024](../docs/adr/0024-snapshot-drops-absorbed-and-forensics.md)。旧版本快照拒载。
 

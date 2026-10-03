@@ -17,7 +17,7 @@ UPSTREAM_URL="https://raw.githubusercontent.com/gfwlist/gfwlist/${UPSTREAM_VERSI
 UPSTREAM_MIRROR_URL="https://cdn.jsdelivr.net/gh/gfwlist/gfwlist@${UPSTREAM_VERSION}/gfwlist.txt"
 UPSTREAM_SHA256="750d34564363075fafa12d8ab9739f269e2fbd2bf3c5f4ab8cfd859bfd3441df"
 LICENSE="LGPL-2.1"
-ATTRIBUTION="GFWList AutoProxy rules derived from gfwlist/gfwlist gfwlist.txt at commit ${UPSTREAM_VERSION}. Official Base64 AutoProxy 0.2.9 list. Only rules losslessly expressible as target domains are converted; URL-path, protocol, wildcard, and regex conditions are reported as losses and never expanded into whole-domain rules. List is candidate routing data, not a guarantee of reachability or completeness."
+ATTRIBUTION="GFWList AutoProxy rules derived from gfwlist/gfwlist gfwlist.txt at commit ${UPSTREAM_VERSION}. Official Base64 AutoProxy 0.2.9 list. Domain anchors become suffix matches. URL prefixes without a path, query, fragment or user information and with a literal domain host become exact matches, discarding scheme and any valid port. Other URL conditions, wildcard hosts, IP literals and regex rules are reported as losses. List is candidate routing data, not a guarantee of reachability or completeness."
 
 usage() {
   cat <<'EOF'
@@ -156,10 +156,11 @@ License: ${LICENSE}
 ${ATTRIBUTION}
 
 This list is candidate routing data. It is not a guarantee of network
-reachability, geographic ownership, or privacy. Rules that cannot be expressed
-losslessly as target domains (URL paths, protocol conditions, wildcards, regex)
-are counted and reported as conversion losses and are never expanded into
-whole-domain proxy rules. \`@@\` exceptions shadowed by a broader proxy rule are
+reachability, geographic ownership, or privacy. Domain anchors become suffix
+matches. Eligible URL prefixes become exact
+domain matches, discarding scheme and any valid port. Other URL conditions,
+wildcard hosts, IP literals and regex rules are counted as conversion losses.
+\`@@\` exceptions fully covered by a proxy rule are
 reported item by item and omitted from the generated ACL because sslocal would
 ignore them.
 EOF
