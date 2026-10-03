@@ -78,8 +78,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
       settingsRestore: RestoredProxySettings(
         settings: settings ?? ProxySettings(listen: ActivationFixture.listen),
         unreadableError: nil),
-      agent: agent,
-      probe: probe,
+      agent: agent, probe: probe,
       systemProxy: systemProxy,
       systemProxyHelper: systemProxyHelper,
       systemProxyNetworkChangeMonitor: networkMonitor,
@@ -89,6 +88,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
       firewallPollIntervalNanoseconds: 1_000_000,
       // 生产默认 15 秒健康窗；FakeProbe 结果确定，短窗口走同一超时呈现路径。
       launchHealthTimeoutSeconds: 0.05,
+      launchHealthRetryDelay: { try await Task.sleep(for: .milliseconds(1)) },
       systemProxyHealthPollIntervalNanoseconds: 20_000_000,
       helperRefreshDelayNanoseconds: 0,
       sendSignal: { _, _ in 0 },
@@ -305,4 +305,40 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertNil(summary.systemProxyDetail)
   }
 
+}
+
+/// Pause the first operation at its I/O seam; subsequent reads can finish normally.
+@MainActor
+final class ProxyControlOperationGate {
+  let started: XCTestExpectation
+  private var didPause = false
+  private var continuation: CheckedContinuation<Void, Never>?
+
+  init(started: XCTestExpectation) { self.started = started }
+
+  func wait() async {
+    guard !didPause else { return }
+    didPause = true
+    await withCheckedContinuation {
+      continuation = $0
+      started.fulfill()
+    }
+  }
+
+  func resume() {
+    continuation?.resume()
+    continuation = nil
+  }
+}
+
+extension ProxyControlWorkflowIntegrationTests {
+  func emitAndWaitForInspection(
+    _ change: SystemProxyNetworkChange, in composition: Composition
+  ) async {
+    XCTAssertTrue(networkMonitor.isObserving)
+    networkMonitor.emit(change)
+    let inspection = composition.controller.systemProxyObserver.systemProxyInspectionTask
+    XCTAssertNotNil(inspection, "被动事件应调度检查")
+    await inspection?.value
+  }
 }

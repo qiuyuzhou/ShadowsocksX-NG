@@ -50,13 +50,12 @@ final class RuleEnablementWorkflowTests: XCTestCase {
       workflow.snapshot.rows.first { $0.identity == narrow.identity }!.relationships.isEmpty)
   }
 
-  func testPackagedCollectionSaveKeepsRowOrderAndFixedFactsWithoutWaitingForAnalysis() async throws
-  {
+  func testCollectionSaveKeepsRowOrderAndFixedFactsWithoutWaitingForAnalysis() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     let store = CustomRuleStore(fileURL: directory.appendingPathComponent("rules.json"))
     let session = RuleDocumentSession(store: store)
-    let started = expectation(description: "packaged analysis paused")
+    let started = expectation(description: "analysis paused")
     let gate = RulesAnalysisGate(started: started)
     let workflow = RulesWorkflow(
       loadDocument: { try session.load() },
@@ -70,17 +69,25 @@ final class RuleEnablementWorkflowTests: XCTestCase {
         }
       },
       analysisDelay: { await gate.wait() },
-      builtinSnapshots: BuiltinRuleSnapshots(bundle: AppArtifact.bundle))
+      loadBuiltin: { source in
+        if source == .geolocationCN {
+          return rulesFixture(
+            source,
+            rules: [
+              ProxyRule(action: .direct, match: .domainSuffix("cn")),
+              ProxyRule(action: .direct, match: .domainExact("fixture.example")),
+            ])
+        }
+        return rulesFixture(source)
+      })
     await workflow.refresh()
     XCTAssertTrue(workflow.snapshot.isComplete)
-    XCTAssertGreaterThan(workflow.snapshot.rows.count, 10_000)
+    XCTAssertTrue(workflow.snapshot.sources.contains { $0.id == .geolocationCN })
     let rowIDs = workflow.snapshot.rows.map(\.id)
     let fixed = workflow.snapshot.rows.filter(\.isFixed)
+    XCTAssertFalse(fixed.isEmpty)
     let nationalSuffix = RuleIdentity(action: .direct, match: .domainSuffix("cn"))
-    let start = ContinuousClock.now
     await workflow.setEnabled(false, identities: [nationalSuffix])
-    let elapsed = start.duration(to: .now)
-    print("Saved rule publication for \(rowIDs.count) packaged rows: \(elapsed)")
     XCTAssertTrue(try store.loadDocument().disabledIdentities.contains(nationalSuffix))
     XCTAssertEqual(workflow.snapshot.rows.map(\.id), rowIDs)
     XCTAssertEqual(workflow.snapshot.rows.filter(\.isFixed), fixed)

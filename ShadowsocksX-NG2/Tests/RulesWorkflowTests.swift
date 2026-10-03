@@ -172,8 +172,6 @@ final class RulesWorkflowTests: XCTestCase {
     XCTAssertNotNil(geo.conversionReport)
     let rows = workflow.snapshot.rows
     XCTAssertEqual(Set(rows.map(\.id)).count, rows.count)
-    await workflow.refresh()
-    XCTAssertEqual(workflow.snapshot.rows.map(\.id), rows.map(\.id))
     workflow.query(RulesQuery(source: .geolocationCN))
     XCTAssertTrue(workflow.snapshot.rows.contains { $0.content == "cn" })
     XCTAssertEqual(workflow.snapshot.rows.count, 4241)

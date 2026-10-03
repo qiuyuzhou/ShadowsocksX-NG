@@ -30,13 +30,16 @@ final class SystemProxyObserver: ObservableObject {
   private(set) var systemProxyInitialApplyPending = false
   /// 读面：健康循环的收敛条件。
   private(set) var systemProxyWasUnavailable = false
-  private var systemProxyHealthTask: Task<Void, Never>?
+  /// Read-only task handle lets observers await cancellation completion.
+  private(set) var systemProxyHealthTask: Task<Void, Never>?
   private var systemProxyReadGeneration = 0
   /// 读面：观察机测试。
   private(set) var systemProxyObservationMode = SystemProxyObservationMode.stopped
   private var systemProxyCleanupRescanRequested = false
   private var systemProxyCleanupTask: Task<SystemProxyApplicationFacts, Never>?
   private var systemProxyInspectionScheduled = false
+  /// Last passive inspection; awaiting it observes event convergence without a timing guess.
+  private(set) var systemProxyInspectionTask: Task<Void, Never>?
 
   let systemProxy: SystemProxyControlling
   let systemProxyHelper: SystemProxyHelperServicing
@@ -568,7 +571,7 @@ extension SystemProxyObserver {
       guard isIntentEnabled() else { return }
       guard !systemProxyInspectionScheduled else { return }
       systemProxyInspectionScheduled = true
-      Task { @MainActor [weak self] in
+      systemProxyInspectionTask = Task { @MainActor [weak self] in
         await Task.yield()
         guard let self else { return }
         self.systemProxyInspectionScheduled = false

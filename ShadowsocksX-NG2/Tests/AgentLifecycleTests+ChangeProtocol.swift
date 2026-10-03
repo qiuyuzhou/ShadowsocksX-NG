@@ -112,9 +112,8 @@ final class AgentLifecycleStaleListenerTests: AgentLifecycleTests {
     let wrapper = try launchWrapper(behavior: "run")
 
     XCTAssertTrue(
-      try waitUntil(timeout: 8) {
-        self.agentLog().contains("listen not established within deadline")
-      }, "初次监听等待结束后，wrapper 应继续监管未就绪的 ACL 子进程")
+      try waitUntil { self.stateLog().contains("invoked:") },
+      "等待候选子进程启动后验证监听归属")
 
     let server = try XCTUnwrap(ProxyRuntimeFixture.makeDocument().servers.first)
     let serverReload = SslocalRuntimeDocument(
@@ -125,6 +124,7 @@ final class AgentLifecycleStaleListenerTests: AgentLifecycleTests {
     XCTAssertTrue(
       try waitUntil { self.agentLog().contains("reload deferred until listeners are ready") },
       "未就绪的直连实例应推迟 server-only reload")
+    XCTAssertFalse(stateLog().contains("SIGUSR1"), "旧监听不能让候选通过就绪门并转发重载")
     XCTAssertTrue(
       pidAlive(wrapper.processIdentifier),
       "候选 wrapper 应继续监管；agent log: " + agentLog() + "; child log: " + stateLog())

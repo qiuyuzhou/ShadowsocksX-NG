@@ -70,8 +70,7 @@ extension ProxyControlWorkflowIntegrationTests {
     _ = await composition.control.repairSystemProxy()
     XCTAssertEqual(systemProxy.repairedServices, [.init(locationID: "work", serviceID: "vpn")])
     XCTAssertEqual(composition.control.snapshot.systemProxyApplication, .applied)
-    networkMonitor.emit(.networkPath)
-    try await Task.sleep(nanoseconds: 60_000_000)
+    await emitAndWaitForInspection(.networkPath, in: composition)
     XCTAssertEqual(systemProxy.applied.count, 2, "被动事件不重写")
   }
 
@@ -94,13 +93,17 @@ extension ProxyControlWorkflowIntegrationTests {
     systemProxy.services[0] = SystemProxyServiceState(
       identifier: original.identifier, configuration: nil, name: original.name)
     _ = await composition.control.recheckSystemProxy()
-    systemProxy.beforeRepair = { try? await Task.sleep(nanoseconds: 100_000_000) }
+    let gate = ProxyControlOperationGate(started: expectation(description: "repair paused"))
+    defer { gate.resume() }
+    systemProxy.beforeRepair = { await gate.wait() }
     let first = Task { await composition.control.repairSystemProxy() }
-    try await waitForSnapshot(composition) { $0.systemProxyApplication == .repairing }
+    await fulfillment(of: [gate.started], timeout: 2)
+    XCTAssertEqual(composition.control.snapshot.systemProxyApplication, .repairing)
     XCTAssertEqual(
       composition.control.snapshot.systemProxyInspection.differences.map(\.name), ["Wi-Fi"])
     XCTAssertFalse(composition.control.snapshot.systemProxyInspection.canRepair)
     _ = await composition.control.repairSystemProxy()
+    gate.resume()
     _ = await first.value
     XCTAssertEqual(systemProxy.applied.count, 2)
   }
@@ -125,8 +128,7 @@ extension ProxyControlWorkflowIntegrationTests {
     try await waitForSnapshot(composition) { $0.systemProxyApplication == .paused }
     XCTAssertTrue(composition.control.snapshot.systemProxyIntentEnabled)
     XCTAssertEqual(systemProxy.clearCount, 1)
-    networkMonitor.emit(.networkPath)
-    try await Task.sleep(nanoseconds: 60_000_000)
+    await emitAndWaitForInspection(.networkPath, in: composition)
     XCTAssertEqual(systemProxy.clearCount, 1, "失效期间不循环重试")
     probe.setOutcomes([.reachable])
     try await waitForSnapshot(composition) { $0.systemProxyApplication == .applied }
@@ -138,9 +140,12 @@ extension ProxyControlWorkflowIntegrationTests {
     let composition = try await enabledSystemProxyComposition(probe: probe)
     probe.setOutcomes([.refused(detail: "stopped")])
     try await waitForSnapshot(composition) { $0.systemProxyApplication == .paused }
+    let healthObservation = composition.controller.systemProxyObserver.systemProxyHealthTask
+    XCTAssertNotNil(healthObservation)
     _ = await composition.control.setSystemProxyEnabled(false)
     probe.setOutcomes([.reachable])
-    try await Task.sleep(nanoseconds: 80_000_000)
+    await healthObservation?.value
+    XCTAssertFalse(networkMonitor.isObserving, "关闭意图后应停止观察与自动恢复")
     XCTAssertEqual(systemProxy.applied.count, 1)
     XCTAssertFalse(composition.control.snapshot.systemProxyIntentEnabled)
   }
@@ -251,8 +256,7 @@ extension ProxyControlWorkflowIntegrationTests {
     XCTAssertTrue(composition.control.snapshot.systemProxyIntentEnabled)
     XCTAssertTrue(composition.control.snapshot.systemProxyInspection.canRetryClear)
     XCTAssertFalse(composition.control.snapshot.systemProxyInspection.canRepair)
-    networkMonitor.emit(.networkConfiguration)
-    try await Task.sleep(nanoseconds: 80_000_000)
+    await emitAndWaitForInspection(.networkConfiguration, in: composition)
     XCTAssertEqual(systemProxy.clearCount, 1)
     systemProxy.clearError = nil
     _ = await composition.control.retrySystemProxyClear()
@@ -307,11 +311,14 @@ extension ProxyControlWorkflowIntegrationTests {
   func testPassiveReadCannotOverwriteHealthSuspension() async throws {
     let probe = ProxyRuntimeFixture.FakeProbe.reachable()
     let composition = try await enabledSystemProxyComposition(probe: probe)
-    systemProxy.beforeRead = { try? await Task.sleep(nanoseconds: 120_000_000) }
+    let gate = ProxyControlOperationGate(started: expectation(description: "read paused"))
+    defer { gate.resume() }
+    systemProxy.beforeRead = { await gate.wait() }
     let read = Task { await composition.control.recheckSystemProxy() }
-    try await Task.sleep(nanoseconds: 10_000_000)
+    await fulfillment(of: [gate.started], timeout: 2)
     probe.setOutcomes([.refused(detail: "stopped")])
     try await waitForSnapshot(composition) { $0.systemProxyApplication == .paused }
+    gate.resume()
     _ = await read.value
     XCTAssertEqual(composition.control.snapshot.systemProxyApplication, .paused)
     XCTAssertEqual(systemProxy.clearCount, 1)
@@ -321,11 +328,14 @@ extension ProxyControlWorkflowIntegrationTests {
     let probe = ProxyRuntimeFixture.FakeProbe.reachable()
     let composition = try await enabledSystemProxyComposition(probe: probe)
     systemProxy.clearError = SystemProxyError.commitFailed("busy")
-    systemProxy.beforeRead = { try? await Task.sleep(nanoseconds: 120_000_000) }
+    let gate = ProxyControlOperationGate(started: expectation(description: "read paused"))
+    defer { gate.resume() }
+    systemProxy.beforeRead = { await gate.wait() }
     let read = Task { await composition.control.recheckSystemProxy() }
-    try await Task.sleep(nanoseconds: 10_000_000)
+    await fulfillment(of: [gate.started], timeout: 2)
     probe.setOutcomes([.refused(detail: "stopped")])
     try await waitForSnapshot(composition) { $0.systemProxyApplication.isClearFailure }
+    gate.resume()
     _ = await read.value
     XCTAssertEqual(
       composition.control.snapshot.systemProxyApplication, .clearFailed(.operation(.commitFailed)))
@@ -338,10 +348,15 @@ extension ProxyControlWorkflowIntegrationTests {
     systemProxy.services[0] = SystemProxyServiceState(
       identifier: original.identifier, configuration: nil, name: original.name)
     _ = await composition.control.recheckSystemProxy()
-    systemProxy.beforeRead = { try? await Task.sleep(nanoseconds: 120_000_000) }
+    let gate = ProxyControlOperationGate(started: expectation(description: "read paused"))
+    defer { gate.resume() }
+    systemProxy.beforeRead = { await gate.wait() }
     let repair = Task { await composition.control.repairSystemProxy() }
-    try await waitForSnapshot(composition) { $0.systemProxyInspection.isBusy }
+    await fulfillment(of: [gate.started], timeout: 2)
+    XCTAssertTrue(composition.control.snapshot.systemProxyInspection.isBusy)
     let off = Task { await composition.control.setSystemProxyEnabled(false) }
+    try await waitForSnapshot(composition) { !$0.systemProxyIntentEnabled }
+    gate.resume()
     _ = await repair.value
     _ = await off.value
     XCTAssertEqual(systemProxy.applied.count, 1)
@@ -356,10 +371,15 @@ extension ProxyControlWorkflowIntegrationTests {
     systemProxy.services[0] = SystemProxyServiceState(
       identifier: original.identifier, configuration: nil, name: original.name)
     _ = await composition.control.recheckSystemProxy()
-    systemProxy.beforeRead = { try? await Task.sleep(nanoseconds: 120_000_000) }
+    let gate = ProxyControlOperationGate(started: expectation(description: "read paused"))
+    defer { gate.resume() }
+    systemProxy.beforeRead = { await gate.wait() }
     let repair = Task { await composition.control.repairSystemProxy() }
-    try await waitForSnapshot(composition) { $0.systemProxyInspection.isBusy }
+    await fulfillment(of: [gate.started], timeout: 2)
+    XCTAssertTrue(composition.control.snapshot.systemProxyInspection.isBusy)
     probe.setOutcomes([.refused(detail: "stopped")])
+    try await waitForSnapshot(composition) { $0.runtime.status != .running }
+    gate.resume()
     _ = await repair.value
     try await waitForSnapshot(composition) { $0.systemProxyApplication == .paused }
     XCTAssertEqual(systemProxy.applied.count, 1)

@@ -11,8 +11,8 @@ extension ProxyControlWorkflowIntegrationTests {
     _ = await composition.control.setSystemProxyEnabled(true)
     let writes = systemProxy.applied.count
     XCTAssertEqual(writes, 1)
-    networkMonitor.emit([.networkConfiguration, .proxyConfiguration, .networkPath])
-    try await Task.sleep(nanoseconds: 200_000_000)
+    await emitAndWaitForInspection(
+      [.networkConfiguration, .proxyConfiguration, .networkPath], in: composition)
     XCTAssertEqual(systemProxy.applied.count, writes)
     XCTAssertEqual(systemProxy.clearCount, 0)
   }
