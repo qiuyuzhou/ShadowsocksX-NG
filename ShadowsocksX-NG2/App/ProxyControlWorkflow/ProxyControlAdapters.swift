@@ -45,15 +45,14 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
     RuntimeListenFacts(listen: controller.listenSettings)
   }
 
-  /// 控制器与系统代理观察机的 `objectWillChange` 都是 willChange 语义；主队列
-  /// hop 落地时被发布的新值已可读，workflow 重观察不会读到半程状态。系统代理
-  /// 呈现事实的存储与发布在观察机上，其发布并入同一再发布链。
+  /// 控制器与系统代理观察机各持一条 didChange 事实通道（同一主队列轮内多次
+  /// 写合并为一次，冲洗晚于同步轮）：合并后交 workflow 整体重观察，不会读到
+  /// 半程状态。系统代理呈现事实的存储与发布在观察机上，其通道并入同一链。
   var changes: AnyPublisher<Void, Never> {
     Publishers.Merge(
-      controller.objectWillChange.map { _ in () },
-      controller.systemProxyObserver.objectWillChange.map { _ in () }
+      controller.factChanges.changes,
+      controller.systemProxyObserver.factChanges.changes
     )
-    .receive(on: DispatchQueue.main)
     .eraseToAnyPublisher()
   }
 

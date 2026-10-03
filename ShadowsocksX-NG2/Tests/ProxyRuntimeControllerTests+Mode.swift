@@ -113,7 +113,9 @@ final class ProxyRuntimeModeCommandTests: ProxyRuntimeControllerTests {
     let previousDocument = try XCTUnwrap(runtimeStore.loadDocument())
     let previousApplicationCount = systemProxy.applied.count
     var observedStates: [ProxyRuntimeController.AgentRunState] = []
-    let cancellable = controller.$state.sink { observedStates.append($0) }
+    let cancellable = controller.factChanges.changes.sink { @MainActor _ in
+      observedStates.append(controller.state)
+    }
     defer { cancellable.cancel() }
 
     agent.onRegister = { [runtimeStore, previousDocument] in

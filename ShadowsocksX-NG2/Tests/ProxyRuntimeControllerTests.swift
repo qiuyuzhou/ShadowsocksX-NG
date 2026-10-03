@@ -199,10 +199,14 @@ final class ProxyRuntimeControllerCoreTests: ProxyRuntimeControllerTests {
       probe: ProxyRuntimeFixture.FakeProbe.reachable(),
       settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
     var observed: NodeID?
-    let cancellable = controller.$activeTargetID.dropFirst().sink { observed = $0 }
+    let cancellable = controller.factChanges.changes.sink { @MainActor _ in
+      observed = controller.activeTargetID
+    }
     defer { cancellable.cancel() }
 
     try await controller.activate(seeded.server)
+    // 事实通道在主队列轮末冲洗：让排队的冲洗先于断言运行。
+    await Task.yield()
 
     XCTAssertEqual(controller.activeTargetID, seeded.server)
     XCTAssertEqual(observed, seeded.server, "agent 关闭路径的激活也要发布目标变更")

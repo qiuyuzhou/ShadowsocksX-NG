@@ -3,7 +3,9 @@ import SwiftUI
 
 @main
 struct ShadowsocksXNG2App: App {
-  @StateObject private var proxyController: ProxyRuntimeController
+  /// 进程期强持有（组合根装配一次）。body 不读它：事实发布经各 workflow 的
+  /// didChange 通道，不借 @StateObject 订阅控制器变化。
+  private let proxyController: ProxyRuntimeController
   @StateObject private var catalogWorkflow: CatalogWorkflow
   @StateObject private var proxyControl: ProxyControlWorkflow
   @StateObject private var loginController: LaunchAtLoginController
@@ -21,7 +23,7 @@ struct ShadowsocksXNG2App: App {
 
   init() {
     let composition = AppComposition.make()
-    _proxyController = StateObject(wrappedValue: composition.controller)
+    proxyController = composition.controller
     _catalogWorkflow = StateObject(wrappedValue: composition.catalogWorkflow)
     _proxyControl = StateObject(wrappedValue: composition.proxyControl)
     _loginController = StateObject(wrappedValue: composition.loginController)

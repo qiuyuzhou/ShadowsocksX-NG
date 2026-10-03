@@ -9,7 +9,7 @@ import Foundation
 /// 转发命令，健康循环保留在本体（循环体含运行时健康呈现）。GUI exit ends these
 /// observations without stopping the LaunchAgent or adding helper responsibilities.
 @MainActor
-final class ProxyRuntimeController: ObservableObject {
+final class ProxyRuntimeController {
   /// Agent（后台代理运行时）运行状态。系统代理结果不在此面呈现——它有
   /// 独立的 `SystemProxyControlState`。
   enum AgentRunState: Equatable {
@@ -29,18 +29,22 @@ final class ProxyRuntimeController: ObservableObject {
   /// Current configuration or operation result, independent of persisted intent.
   typealias SystemProxyControlState = SystemProxyApplicationFacts
 
-  @Published var state: AgentRunState = .off
-  @Published var settings: ProxySettings
+  var state: AgentRunState = .off { didSet { factChanges.markChanged() } }
+  var settings: ProxySettings { didSet { factChanges.markChanged() } }
   /// 当前活动目标（菜单栏状态摘要与级联只读呈现用，issue #31）。machine 是
-  /// 非发布值的普通结构体，代理关闭路径的激活动作不会触碰 state，菜单的
-  /// 「目标」行依赖这里的独立发布保持实时。
-  @Published var activeTargetID: NodeID?
+  /// 非通道值的普通结构体，代理关闭路径的激活动作不会触碰 state，菜单的
+  /// 「目标」行依赖此属性独立触发事实通道保持实时。
+  var activeTargetID: NodeID? { didSet { factChanges.markChanged() } }
   /// 最近一次激活预检在分组中跳过的服务器；仅记录 app 已知的本地阻塞原因。
-  @Published var skippedServers: [SkippedServer] = []
+  var skippedServers: [SkippedServer] = [] { didSet { factChanges.markChanged() } }
   /// 最近一次激活拒绝或目标清除的点名原因。独立于运行状态呈现：agent 可
   /// 能仍在监听，激活失败不代表运行时停止（issue #60）。
-  @Published var lastActivationFailure: ActivationFailure?
+  var lastActivationFailure: ActivationFailure? { didSet { factChanges.markChanged() } }
   var machine: ActivationStateMachine
+  /// 运行时事实变化通道（didChange 语义）：全部事实属性的 didSet 汇集于此，
+  /// 同一主队列轮内多次写合并为一次，冲洗晚于同步轮——重观察方读到的必是
+  /// 完整事实，不依赖 `objectWillChange` + 主队列跳的 willChange 时序。
+  let factChanges = CoalescedFactSignal()
 
   let catalogSnapshotReader: RuntimeCatalogSnapshotReading
   let activationFileStore: ActivationStateFileStore
@@ -52,7 +56,7 @@ final class ProxyRuntimeController: ObservableObject {
   var isUpdatingRules = false
   var ruleApplicationTask: Task<Void, Never>?
   var ruleApplicationGeneration = 0
-  @Published var ruleApplicationFailure: RuntimeFailureFacts?
+  var ruleApplicationFailure: RuntimeFailureFacts? { didSet { factChanges.markChanged() } }
   let customRuleStore: CustomRuleStore
   let ruleDocuments: RuleDocumentSession
   let ruleSnapshots: BuiltinRuleSnapshots
@@ -108,7 +112,7 @@ final class ProxyRuntimeController: ObservableObject {
   var lastDocument: SslocalRuntimeDocument?
   var firewallObservationTask: Task<Void, Never>?
 
-  @Published var proxyMode: ProxyMode
+  var proxyMode: ProxyMode { didSet { factChanges.markChanged() } }
 
   /// 规则模式子选项（issue #63）：从设置快照投影。
   var ruleDefaultAction: RuleDefaultAction { settings.ruleDefaultAction }

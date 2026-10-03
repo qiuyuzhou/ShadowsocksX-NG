@@ -101,8 +101,8 @@ protocol ProxyRuntimeAdapting: AnyObject {
   /// 已保存监听事实（issue #72）：命令地址候选过滤与命令生成的数据来源。
   var listenFacts: RuntimeListenFacts { get }
   /// 运行时事实变化通知：目录驱动、设置变更或运行时收敛导致事实变化后
-  /// 发值。生产实现带主队列 hop（willChange 语义 → didChange 读取）；
-  /// fake 同步发值。workflow 以此触发整体重观察。
+  /// 发值。生产实现合并控制器与观察机的 didChange 事实通道（同一主队列轮
+  /// 多次写合并为一次）；fake 同步发值。workflow 以此触发整体重观察。
   var changes: AnyPublisher<Void, Never> { get }
 
   /// 启动重同步（GUI 重启后的注册态重校验）。

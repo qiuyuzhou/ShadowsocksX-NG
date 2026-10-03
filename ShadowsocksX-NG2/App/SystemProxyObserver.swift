@@ -3,10 +3,11 @@ import Foundation
 /// 系统代理观察/修复策略机（ADR-0022 / issue #73）：收敛、挂起、意图保持、
 /// 修复、清理重试、helper 门禁与 cleanup-until-quiet 观察循环的唯一属主。
 /// 意图开关、出口可用性与期望配置由组合方以闭包注入，模块不反向依赖控制器；
-/// 呈现事实经自身 `objectWillChange` 由运行时 adapter 合入 workflow 再发布链。
+/// 呈现事实经自身事实通道（didChange 语义，每主队列轮合并）由运行时
+/// adapter 合入 workflow 再发布链。
 /// 底层只依赖 `SystemProxyControlling`、helper 注册缝与网络变化监视。
 @MainActor
-final class SystemProxyObserver: ObservableObject {
+final class SystemProxyObserver {
   enum SystemProxyObservationMode: Equatable {
     case stopped
     case enabled
@@ -14,10 +15,16 @@ final class SystemProxyObserver: ObservableObject {
   }
 
   /// Current configuration or operation result, independent of persisted intent.
-  @Published private(set) var systemProxyState: SystemProxyApplicationFacts = .idle
+  private(set) var systemProxyState: SystemProxyApplicationFacts = .idle {
+    didSet { factChanges.markChanged() }
+  }
   /// Approval remains actionable even after an off-intent clear failure.
-  @Published private(set) var systemProxyApprovalRequired = false
-  @Published private(set) var systemProxyInspection = SystemProxyInspectionFacts()
+  private(set) var systemProxyApprovalRequired = false { didSet { factChanges.markChanged() } }
+  private(set) var systemProxyInspection = SystemProxyInspectionFacts() {
+    didSet { factChanges.markChanged() }
+  }
+  /// 呈现事实变化通道（didChange 语义）：三个事实属性的 didSet 汇集于此。
+  let factChanges = CoalescedFactSignal()
 
   // 写面唯一入口是下方「意图命令」；private(set) 的读面仅开给健康循环体
   // 与观察机测试，其余实现细节一律 private。
