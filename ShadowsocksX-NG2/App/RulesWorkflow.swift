@@ -361,20 +361,26 @@ extension RulesWorkflow {
     return CustomRuleDeletion(customIDs: deletableSelection, version: ticket.version)
   }
 
-  func deleteCustomRules(_ confirmation: CustomRuleDeletion) async -> CustomRuleDeletionResult {
-    guard !snapshot.isCommitting else { return .unavailable(.busy) }
-    guard let ticket = intentTicket(), let old = ticket.document
-    else { return .unavailable(.incompleteCollection) }
-    guard confirmation.version == ticket.version,
+  /// 删除的事务门拒绝（忙碌/超期）与提交失败走同一条 commitFeedback 呈现，
+  /// 不另设返回词汇：确认手势的所有失败口径一致。
+  func deleteCustomRules(_ confirmation: CustomRuleDeletion) async {
+    guard !snapshot.isCommitting else {
+      publishFeedback(.busy, operation: .delete, changedCount: 0, page: snapshot)
+      return
+    }
+    guard let ticket = intentTicket(), let old = ticket.document,
       !confirmation.customIDs.isEmpty,
+      confirmation.version == ticket.version,
       confirmation.customIDs.isSubset(of: Set(old.rules.map(\.id)))
-    else { return .unavailable(.staleConfirmation) }
+    else {
+      publishFeedback(.superseded, operation: .delete, changedCount: 0, page: snapshot)
+      return
+    }
     let document = CustomRuleDocument(
       rules: old.rules.filter { !confirmation.customIDs.contains($0.id) },
       disabledIdentities: old.disabledIdentities)
-    return .committed(
-      await commit(
-        document, operation: .delete, changedCount: confirmation.customIDs.count))
+    _ = await commit(
+      document, operation: .delete, changedCount: confirmation.customIDs.count)
   }
 }
 

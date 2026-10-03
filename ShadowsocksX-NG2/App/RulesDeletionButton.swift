@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// A single confirmation captures custom UUIDs before starting the shared transaction.
+/// Gate rejections and commit failures surface through the workflow's commit
+/// feedback, not a local alert.
 struct RulesDeletionButton: View {
   @ObservedObject var workflow: RulesWorkflow
   @State private var confirmation: CustomRuleDeletion?
-  @State private var failure: CustomRuleDeletionResult.Failure?
 
   var body: some View {
     Button {
@@ -24,35 +25,15 @@ struct RulesDeletionButton: View {
     ) { captured in
       Button(RulesCopy.text("删除"), role: .destructive) {
         confirmation = nil
-        Task {
-          if case .unavailable(let reason) = await workflow.deleteCustomRules(captured) {
-            failure = reason
-          }
-        }
+        Task { await workflow.deleteCustomRules(captured) }
       }
       Button(RulesCopy.text("取消"), role: .cancel) { confirmation = nil }
     } message: { _ in
       Text(RulesCopy.text("只删除所选自定义条目。其他来源的规则和已有禁用记录将保留。"))
     }
-    .alert(
-      RulesCopy.text("无法更新规则"),
-      isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })
-    ) {
-      Button(RulesCopy.text("关闭")) { failure = nil }
-    } message: {
-      Text(RulesCopy.text(failureMessage))
-    }
   }
 
   private func countText(_ key: String, _ count: Int) -> String {
     String.localizedStringWithFormat(RulesCopy.text(key), Int64(count))
-  }
-
-  private var failureMessage: String {
-    switch failure {
-    case .staleConfirmation: "规则集合已变化，请重新确认删除。"
-    case .incompleteCollection: "集合不完整"
-    case .busy, nil: "正在更新规则…"
-    }
   }
 }

@@ -3,6 +3,7 @@ import Foundation
 // MARK: - 自定义规则更新结果
 
 /// The result of accepting and saving a rule document, independent of runtime.
+/// `busy`/`superseded` are transaction-gate rejections: no save was attempted.
 enum CustomRuleUpdateOutcome: Equatable, Sendable {
   /// 规则已保存；运行规则模式时应用。
   case saved
@@ -11,6 +12,8 @@ enum CustomRuleUpdateOutcome: Equatable, Sendable {
   /// 持久化失败：旧规则保持不变。
   case persistenceFailed
   case busy
+  /// 事务门拒绝：意图捕获后事实已前进（集合版本/完整性变化），本次更新未尝试保存。
+  case superseded
   case invalidDocument(detail: String)
 
   var isSuccess: Bool {
@@ -55,6 +58,7 @@ extension CustomRuleUpdateOutcome {
     case .saved: RulesCopy.text("已保存")
     case .persistenceFailed: RulesCopy.text("保存失败，规则未更改")
     case .busy: RulesCopy.text("正在更新规则…")
+    case .superseded: RulesCopy.text("规则集合已变化，操作未执行。")
     case .invalidDocument, .rejected: RulesCopy.text("无法更新规则")
     }
   }
@@ -69,7 +73,7 @@ extension CustomRuleUpdateOutcome {
 
   var nextStep: String? {
     switch self {
-    case .persistenceFailed, .busy: "请重试规则操作。"
+    case .persistenceFailed, .busy, .superseded: "请重试规则操作。"
     case .invalidDocument, .rejected: "请检查规则数据后再操作。"
     default: nil
     }

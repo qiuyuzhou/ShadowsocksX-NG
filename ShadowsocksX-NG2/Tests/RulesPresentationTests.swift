@@ -66,6 +66,10 @@ final class RulesPresentationTests: XCTestCase {
       CustomRuleUpdateOutcome.persistenceFailed.nextStep, RulesCopy.text("请重试规则操作。"))
     XCTAssertNil(CustomRuleUpdateOutcome.persistenceFailed.failureDetail)
     XCTAssertEqual(CustomRuleUpdateOutcome.busy.rulesMessage, RulesCopy.text("正在更新规则…"))
+    XCTAssertEqual(
+      CustomRuleUpdateOutcome.superseded.rulesMessage, RulesCopy.text("规则集合已变化，操作未执行。"))
+    XCTAssertEqual(CustomRuleUpdateOutcome.superseded.nextStep, RulesCopy.text("请重试规则操作。"))
+    XCTAssertNil(CustomRuleUpdateOutcome.superseded.failureDetail)
     let invalid = CustomRuleUpdateOutcome.invalidDocument(detail: "detail-1")
     XCTAssertEqual(invalid.rulesMessage, RulesCopy.text("无法更新规则"))
     XCTAssertEqual(invalid.failureDetail, "detail-1")

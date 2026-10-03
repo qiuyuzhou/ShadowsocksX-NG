@@ -29,8 +29,8 @@ final class CustomRuleDeletionWorkflowTests: XCTestCase {
     XCTAssertEqual(confirmation.customIDs, [custom.id, other.id])
     XCTAssertEqual(commits, 0, "Preparing and discarding a confirmation has no side effects")
     let oldVersion = workflow.snapshot.version
-    let result = await workflow.deleteCustomRules(confirmation)
-    XCTAssertEqual(result, .committed(.saved))
+    await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(workflow.snapshot.commitOutcome, .saved)
     XCTAssertEqual(commits, 1)
     XCTAssertTrue(saved.rules.isEmpty)
     XCTAssertEqual(saved.disabledIdentities, [custom.identity, orphan])
@@ -68,11 +68,11 @@ extension CustomRuleDeletionWorkflowTests {
     query.search = ""
     workflow.query(query)
     workflow.select(Set(workflow.snapshot.rows.map(\.id)))
-    let deleted = await workflow.deleteCustomRules(confirmation)
-    XCTAssertEqual(deleted, .committed(.saved))
+    await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(workflow.snapshot.commitOutcome, .saved)
     XCTAssertEqual(saved.rules.map(\.id), [hidden.id], "New selection cannot expand captured UUIDs")
-    let stale = await workflow.deleteCustomRules(confirmation)
-    XCTAssertEqual(stale, .unavailable(.staleConfirmation))
+    await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(workflow.snapshot.commitFeedback?.outcome, .superseded)
     XCTAssertEqual(commits, 1)
     workflow.select([])
     XCTAssertNil(workflow.prepareCustomRuleDeletion())
@@ -91,8 +91,8 @@ extension CustomRuleDeletionWorkflowTests {
     workflow.select(Set(workflow.snapshot.rows.map(\.id)))
     let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())
     await workflow.setEnabled(false, identities: [rule.identity])
-    let result = await workflow.deleteCustomRules(confirmation)
-    XCTAssertEqual(result, .unavailable(.staleConfirmation))
+    await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(workflow.snapshot.commitFeedback?.outcome, .superseded)
     XCTAssertEqual(commits, 1)
     XCTAssertEqual(workflow.deletableSelection, [rule.id])
   }
@@ -121,11 +121,11 @@ extension CustomRuleDeletionWorkflowTests {
     let pending = Task { await workflow.deleteCustomRules(confirmation) }
     await fulfillment(of: [started], timeout: 3)
     XCTAssertNil(workflow.prepareCustomRuleDeletion())
-    let repeated = await workflow.deleteCustomRules(confirmation)
-    XCTAssertEqual(repeated, .unavailable(.busy))
+    await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(workflow.snapshot.commitFeedback?.outcome, .busy)
     continuation?.resume()
-    let result = await pending.value
-    XCTAssertEqual(result, .committed(.persistenceFailed))
+    await pending.value
+    XCTAssertEqual(workflow.snapshot.commitOutcome, .persistenceFailed)
     XCTAssertEqual(commits, 1)
     XCTAssertEqual(workflow.snapshot.version, confirmation.version)
     XCTAssertEqual(workflow.prepareCustomRuleDeletion(), confirmation)
@@ -150,8 +150,8 @@ extension CustomRuleDeletionWorkflowTests {
     failed = true
     await workflow.refresh()
     XCTAssertNil(workflow.prepareCustomRuleDeletion())
-    let result = await workflow.deleteCustomRules(confirmation)
-    XCTAssertEqual(result, .unavailable(.incompleteCollection))
+    await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(workflow.snapshot.commitFeedback?.outcome, .superseded)
     XCTAssertEqual(commits, 0)
   }
 }

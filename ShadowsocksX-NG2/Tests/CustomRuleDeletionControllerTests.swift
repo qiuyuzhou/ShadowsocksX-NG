@@ -31,8 +31,8 @@ final class CustomRuleDeletionControllerTests: ProxyRuntimeControllerTests {
     await workflow.refresh()
     workflow.select(Set(workflow.snapshot.rows.map(\.id)))
     let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())
-    let result = await workflow.deleteCustomRules(confirmation)
-    XCTAssertEqual(result, .committed(.saved))
+    await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(workflow.snapshot.commitOutcome, .saved)
     await controller.ruleApplicationTask?.value
     XCTAssertEqual(
       try store.loadDocument(),
@@ -71,8 +71,8 @@ final class CustomRuleDeletionControllerTests: ProxyRuntimeControllerTests {
     workflow.select(Set(workflow.snapshot.rows.filter { !$0.customIDs.isEmpty }.map(\.id)))
     let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())
     let registrations = agent.registerCount
-    let result = await workflow.deleteCustomRules(confirmation)
-    XCTAssertEqual(result, .committed(.saved))
+    await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(workflow.snapshot.commitOutcome, .saved)
     await controller.ruleApplicationTask?.value
     XCTAssertEqual(agent.registerCount, registrations + 1)
     XCTAssertTrue(try store.load().isEmpty)
@@ -101,8 +101,8 @@ final class CustomRuleDeletionControllerTests: ProxyRuntimeControllerTests {
       workflow.select(Set(workflow.snapshot.rows.filter { !$0.customIDs.isEmpty }.map(\.id)))
       let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())
       let registrations = agent.registerCount
-      let result = await workflow.deleteCustomRules(confirmation)
-      XCTAssertEqual(result, .committed(.saved))
+      await workflow.deleteCustomRules(confirmation)
+      XCTAssertEqual(workflow.snapshot.commitOutcome, .saved)
       await controller.ruleApplicationTask?.value
       XCTAssertEqual(agent.registerCount, registrations)
       XCTAssertTrue(try store.load().isEmpty)
@@ -135,8 +135,8 @@ final class CustomRuleDeletionControllerTests: ProxyRuntimeControllerTests {
       try? runtimeStore.writeRuntimeReceipt(
         for: isRecovery ? requested : previousRuntime, processID: 42)
     }
-    let result = await workflow.deleteCustomRules(confirmation)
-    XCTAssertEqual(result, .committed(.saved))
+    await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(workflow.snapshot.commitOutcome, .saved)
     let saved = CustomRuleDocument(rules: [], disabledIdentities: [orphan])
     XCTAssertEqual(try store.loadDocument(), saved)
     await controller.ruleApplicationTask?.value
@@ -172,8 +172,8 @@ final class CustomRuleDeletionControllerTests: ProxyRuntimeControllerTests {
     try FileManager.default.moveItem(at: directory, to: backupDirectory)
     try Data("blocks parent directory".utf8).write(to: directory)
     let backup = backupDirectory.appendingPathComponent(store.fileURL.lastPathComponent)
-    let result = await workflow.deleteCustomRules(confirmation)
-    XCTAssertEqual(result, .committed(.persistenceFailed))
+    await workflow.deleteCustomRules(confirmation)
+    XCTAssertEqual(workflow.snapshot.commitOutcome, .persistenceFailed)
     XCTAssertEqual(controller.ruleDocuments.current, original)
     XCTAssertEqual(try Data(contentsOf: backup), originalData)
     XCTAssertEqual(workflow.snapshot.version, confirmation.version)
