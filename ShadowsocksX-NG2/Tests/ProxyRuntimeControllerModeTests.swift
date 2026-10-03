@@ -6,6 +6,10 @@ import XCTest
 /// starting a real runtime or touching host proxy settings.
 @MainActor
 final class ProxyRuntimeControllerModeTests: ProxyRuntimeControllerTests {
+  override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot)
+  }
+
   func testRuntimeFactsProjectControllerStateAtStableSeam() async {
     let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
 
@@ -307,6 +311,7 @@ final class CatalogRuntimeSnapshotIntegrationTests: XCTestCase {
         settings: ActivationFixture.listen, unreadableError: nil),
       settingsStore: InMemoryProxySettingsStore(),
       appBundle: AppArtifact.bundle,
+      ruleSnapshots: BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot),
       settingsRestore: RestoredProxySettings(
         settings: settings ?? ProxySettings(listen: ActivationFixture.listen),
         unreadableError: nil),

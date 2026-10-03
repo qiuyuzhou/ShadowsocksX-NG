@@ -40,6 +40,10 @@ extension ProxyRuntimeControllerTests {
 }
 
 final class CustomRuleControllerTests: ProxyRuntimeControllerTests {
+  override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot)
+  }
+
   /// 规则内容变化重编译 ACL 并按完整重启路径生效。
   func testUpdateCustomRulesRecompilesACLAndRestarts() async throws {
     let seeded = try makeSeededCatalog()

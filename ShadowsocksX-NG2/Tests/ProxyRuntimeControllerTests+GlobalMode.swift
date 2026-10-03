@@ -6,6 +6,10 @@ import XCTest
 /// 全局模式以 ACL 实现（issue #62）：proxy_all + 固定本地绕过；无活动服务器
 /// 时 agent 仍监听、系统代理保持待应用；ACL 变化完整重启并失败回滚。
 final class ProxyRuntimeGlobalModeTests: ProxyRuntimeControllerTests {
+  override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot)
+  }
+
   func testGlobalModeDeploysProxyAllACLAndProjectsSOCKSProxyWithFixedExceptions() async throws {
     let seeded = try makeSeededCatalog()
     let settingsStore = InMemoryProxySettingsStore()

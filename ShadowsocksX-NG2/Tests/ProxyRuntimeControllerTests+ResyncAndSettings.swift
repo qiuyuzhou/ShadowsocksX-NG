@@ -4,6 +4,10 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 final class ProxyRuntimeResyncAndSettingsTests: ProxyRuntimeControllerTests {
+  override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot)
+  }
+
   // MARK: GUI 重启重同步（D5）
 
   func testResyncWithRegisteredAgentAndMatchingContractSkipsRewrite() async throws {

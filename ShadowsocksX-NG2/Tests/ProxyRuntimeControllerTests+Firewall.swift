@@ -4,6 +4,10 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 final class ProxyRuntimeFirewallTests: ProxyRuntimeControllerTests {
+  override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot)
+  }
+
   func testLocalhostModeNeverQueriesApplicationFirewall() async throws {
     let seeded = try makeSeededCatalog()
     let firewall = ProxyRuntimeFixture.FakeFirewallChecker(.blocked)

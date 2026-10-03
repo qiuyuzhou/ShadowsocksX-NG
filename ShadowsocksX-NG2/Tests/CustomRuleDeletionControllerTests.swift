@@ -3,6 +3,20 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 final class CustomRuleDeletionControllerTests: ProxyRuntimeControllerTests {
+  override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(loader: { source in
+      // Keep the covering rule used by the unchanged-ACL deletion scenario.
+      if source == .geolocationCN {
+        return rulesFixture(
+          source,
+          rules: [
+            ProxyRule(action: .direct, match: .domainSuffix("cn"))
+          ])
+      }
+      return try ProxyRuntimeFixture.controlFlowRuleSnapshot(source)
+    })
+  }
+
   func testDeletionWhileOffPersistsBatchAndDisabledOrphansWithoutStarting() async throws {
     let (store, _) = try makeCustomRuleStore()
     let rules = [

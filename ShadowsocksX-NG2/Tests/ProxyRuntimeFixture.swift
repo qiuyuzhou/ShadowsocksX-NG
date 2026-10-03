@@ -344,7 +344,7 @@ extension ProxyRuntimeFixture {
         source,
         rules: [
           ProxyRule(action: .direct, match: .domainExact("direct.example")),
-          ProxyRule(action: .direct, match: .domainSuffix("internal.example")),
+          ProxyRule(action: .direct, match: .domainSuffix("fixture-direct.example")),
         ])
     case .chinaIPv4:
       return rulesFixture(

@@ -3,6 +3,10 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
+  override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot)
+  }
+
   func testRapidRuleSavesCoalesceIntoOneLatestACLDeployment() async throws {
     let seeded = try makeSeededCatalog()
     let (store, _) = try makeCustomRuleStore()
@@ -193,7 +197,8 @@ final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
       listen: ActivationFixture.listen, preferredMode: .rule,
       ruleDefaultAction: .proxyWhenUnmatched, agentEnabled: true)
     let controller = makeControllerWithCustomRules(
-      store: store, settings: settings, proxyMode: .rule)
+      store: store, settings: settings, proxyMode: .rule,
+      ruleSnapshots: BuiltinRuleSnapshots(bundle: AppArtifact.bundle))
     try await controller.activate(seeded.server)
     let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
     let before = agent.unregisterCount

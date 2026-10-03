@@ -179,6 +179,10 @@ class ProxyRuntimeControllerTests: XCTestCase {
 
 /// Concrete suite; the shared fixture must not contain inherited test methods.
 final class ProxyRuntimeControllerCoreTests: ProxyRuntimeControllerTests {
+  override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot)
+  }
+
   // MARK: Agent 开关与首次默认
 
   func testActivateWhileAgentOffPublishesActiveTargetIDWithoutDeploying() async throws {

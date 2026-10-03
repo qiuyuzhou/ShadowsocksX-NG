@@ -4,6 +4,10 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 final class ProxyRuntimeModeCommandTests: ProxyRuntimeControllerTests {
+  override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot)
+  }
+
   func testSetProxyModePersistsTheChoiceAndARestoreRestoresIt() async throws {
     let settingsStore = InMemoryProxySettingsStore()
     let controller = makeController(

@@ -5,6 +5,10 @@ import XCTest
 /// Verify the editor's public commands against the production commit adapter,
 /// using the existing hostless runtime and system-proxy fixtures.
 final class CustomRuleEditingControllerTests: ProxyRuntimeControllerTests {
+  override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot)
+  }
+
   func testEditorSaveWhileOffPersistsWithoutStartingRuntime() async throws {
     let (store, _) = try makeCustomRuleStore()
     let controller = makeControllerWithCustomRules(
