@@ -10,3 +10,8 @@
 - 生产代码读取 app bundle 内打包资源（规则快照、LaunchDaemon 清单等）时，走注入缝——控制器的 `appBundle` 参数（生产默认 `Bundle.main`），测试夹具注入 `AppArtifact.bundle`。
 
 背景与三处资源缝的由来见 [ADR-0021](../docs/adr/0021-hostless-unit-tests.md)。
+
+## Test framework
+
+- 新增测试默认用 Swift Testing（`import Testing`）；UI 测试与性能测试依赖 XCTest 专属 API（`XCUIApplication`、`measure` 计时），继续用 XCTest；存量 XCTest 用例不回迁。
+- 单测多 runner 并行执行：新夹具只占用进程私有资源——运行时分配端口、临时目录、UUID 后缀命名空间，不写共享路径与固定名。
