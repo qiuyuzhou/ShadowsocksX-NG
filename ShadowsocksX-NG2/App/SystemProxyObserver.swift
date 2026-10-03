@@ -39,6 +39,8 @@ final class SystemProxyObserver: ObservableObject {
   let appBundle: Bundle
   /// 注册清单漂移重注时，注销与重注的间隔（launchd 对节流中 job 的移除异步）。
   let helperRefreshDelayNanoseconds: UInt64
+  /// cleanup 每轮扫描后等待 SystemConfiguration 通知排空的静默窗。
+  let cleanupSettleNanoseconds: UInt64
   private let isIntentEnabled: @MainActor () -> Bool
   private let isExitAvailable: @MainActor () -> Bool
   private let desiredConfiguration: @MainActor () -> SystemProxyConfiguration?
@@ -51,6 +53,7 @@ final class SystemProxyObserver: ObservableObject {
     systemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitoring,
     appBundle: Bundle,
     helperRefreshDelayNanoseconds: UInt64,
+    cleanupSettleNanoseconds: UInt64 = 100_000_000,
     isIntentEnabled: @escaping @MainActor () -> Bool,
     isExitAvailable: @escaping @MainActor () -> Bool,
     desiredConfiguration: @escaping @MainActor () -> SystemProxyConfiguration?,
@@ -61,6 +64,7 @@ final class SystemProxyObserver: ObservableObject {
     self.systemProxyNetworkChangeMonitor = systemProxyNetworkChangeMonitor
     self.appBundle = appBundle
     self.helperRefreshDelayNanoseconds = helperRefreshDelayNanoseconds
+    self.cleanupSettleNanoseconds = cleanupSettleNanoseconds
     self.isIntentEnabled = isIntentEnabled
     self.isExitAvailable = isExitAvailable
     self.desiredConfiguration = desiredConfiguration
@@ -271,17 +275,24 @@ final class SystemProxyObserver: ObservableObject {
     updateSystemProxyActions()
   }
 
-  private func endSystemProxyOperation() {
-    systemProxyOperationInProgress = false
-    systemProxyInspection.isBusy = false
-    updateSystemProxyActions()
-  }
+  /// 进行中操作的等待队列：操作收尾时唤醒全部等待者，等待者再经既有二次
+  /// 门禁（begin 前的 guard）竞争下一轮；被取消的等待者照旧得到 false 中止。
+  private var operationWaiters: [CheckedContinuation<Void, Never>] = []
 
   private func waitForSystemProxyOperation() async -> Bool {
     while systemProxyOperationInProgress {
-      do { try await Task.sleep(nanoseconds: 10_000_000) } catch { return false }
+      await withCheckedContinuation { operationWaiters.append($0) }
     }
     return !Task.isCancelled
+  }
+
+  private func endSystemProxyOperation() {
+    systemProxyOperationInProgress = false
+    systemProxyInspection.isBusy = false
+    let waiters = operationWaiters
+    operationWaiters = []
+    for waiter in waiters { waiter.resume() }
+    updateSystemProxyActions()
   }
 }
 
@@ -420,7 +431,7 @@ extension SystemProxyObserver {
       outcome = await clearSystemProxyOutcome()
       // Let queued SystemConfiguration notifications reach the main actor. Any
       // location/service/proxy change during this cleanup starts another full scan.
-      try? await Task.sleep(nanoseconds: 100_000_000)
+      try? await Task.sleep(nanoseconds: cleanupSettleNanoseconds)
       await Task.yield()
     } while systemProxyCleanupRescanRequested && !outcome.hasOperationFailure
 
