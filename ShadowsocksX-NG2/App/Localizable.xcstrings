@@ -12,6 +12,61 @@
         }
       }
     },
+    "名称最多 %lld 个字符": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name must be at most %lld characters"
+          }
+        }
+      }
+    },
+    "密码最多 %lld 个字符": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Password must be at most %lld characters"
+          }
+        }
+      }
+    },
+    "插件参数最多 %lld 个字节": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugin options must be at most %lld bytes"
+          }
+        }
+      }
+    },
+    "服务器地址最多 %lld 个字符": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server address must be at most %lld characters"
+          }
+        }
+      }
+    },
+    "端口必须是 1–65535 的数字（最多 %lld 位）": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Port must be a number from 1 to 65535 (at most %lld digits)"
+          }
+        }
+      }
+    },
     "请输入服务器名称": {
       "extractionState": "manual",
       "localizations": {

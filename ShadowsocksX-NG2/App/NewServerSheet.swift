@@ -16,7 +16,7 @@ struct NewServerSheet: View {
   /// 端口 8388、加密 aes-256-gcm、插件「无」。
   @StateObject private var fields = ServerFormFields.newForm()
   @State private var isSubmitting = false
-  @FocusState private var nameFocused: Bool
+  @FocusState private var fieldFocus: ServerFormField?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
@@ -25,7 +25,7 @@ struct NewServerSheet: View {
 
       ServerFormFieldsGrid(
         fields: fields, plugin: pluginSection, isEditable: !isSubmitting,
-        nameFocus: $nameFocused)
+        fieldFocus: $fieldFocus)
 
       HStack {
         Spacer()
@@ -36,7 +36,7 @@ struct NewServerSheet: View {
     }
     .disabled(isSubmitting)
     .interactiveDismissDisabled(isSubmitting)
-    .defaultFocus($nameFocused, true)
+    .defaultFocus($fieldFocus, .name)
     .padding(20)
     .frame(minWidth: 520, minHeight: 400)
   }
@@ -55,11 +55,10 @@ struct NewServerSheet: View {
 
   private func create() {
     guard !isSubmitting else { return }
-    guard fields.validateName() else {
-      nameFocused = true
+    guard fields.validateForSubmit(), let draft = fields.draft else {
+      fieldFocus = fields.firstErrorField
       return
     }
-    let draft = fields.draft
     isSubmitting = true
     Task {
       defer { isSubmitting = false }

@@ -15,7 +15,7 @@ struct ServerDetailView: View {
   @StateObject private var fields = ServerFormFields()
   @State private var isSubmitting = false
   @State private var loadedServerID: NodeID?
-  @FocusState private var nameFocused: Bool
+  @FocusState private var fieldFocus: ServerFormField?
   // 分享/二维码状态由同 module 的 ServerDetailView+Share.swift 扩展驱动。
   @State var showQR = false
   @State var qrImage: NSImage?
@@ -110,7 +110,7 @@ struct ServerDetailView: View {
     }
     ServerFormFieldsGrid(
       fields: fields, plugin: formState?.plugin, isEditable: isEditable,
-      nameFocus: $nameFocused
+      fieldFocus: $fieldFocus
     )
     .padding(.top, 20)
 
@@ -178,12 +178,11 @@ struct ServerDetailView: View {
 
   private func save() {
     guard !isSubmitting, fields.hasChanges else { return }
-    guard fields.validateName() else {
-      nameFocused = true
+    guard fields.validateForSubmit(), let draft = fields.draft else {
+      fieldFocus = fields.firstErrorField
       return
     }
     let id = serverID
-    let draft = fields.draft
     isSubmitting = true
     Task {
       defer { isSubmitting = false }

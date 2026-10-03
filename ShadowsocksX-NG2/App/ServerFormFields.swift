@@ -1,5 +1,29 @@
 import SwiftUI
 
+/// 表单字段标识：字段级校验错误的挂靠位与首错定位序（表单栅格顺序）。
+enum ServerFormField: Hashable {
+  case name
+  case address
+  case port
+  case password
+  case pluginOptions
+
+  static let focusOrder: [ServerFormField] = [.name, .address, .port, .password, .pluginOptions]
+}
+
+/// 字段级校验错误（issue #81）：只携带字段、原因与上限，不回显字段内容；
+/// 文案归呈现层（`ServerFormFieldsGrid`）。
+enum ServerFormFieldError: Equatable {
+  /// 名称必填（原有规则并入统一校验入口）。
+  case missingName
+  /// 用户可见字符（Swift `Character`）超上限。
+  case tooManyCharacters(limit: Int)
+  /// UTF-8 字节超上限（插件参数按最终字符串的字节数计量）。
+  case tooManyBytes(limit: Int)
+  /// 端口草稿为空、含非十进制数字、超过五位或落在 1–65535 之外。
+  case invalidPort
+}
+
 /// 服务器表单草稿（UI 持有）：连接字段草稿状态与「字段 ↔ ServerEditForm/
 /// ServerEditDraft 命令」的映射只在此写一次；新建与编辑两个表单面各自
 /// `@StateObject` 持有一份，经 `load(from:)` 装载、`draft` 提交，第三个表单
@@ -7,39 +31,82 @@ import SwiftUI
 /// 与插件区 facts 由 caller 注入。
 @MainActor
 final class ServerFormFields: ObservableObject {
-  @Published var address = ""
-  @Published var port = 8388
+  /// 手动表单的产品输入上限（issue #81）：不宣称是 DNS、Shadowsocks 或
+  /// SIP003 协议的最大长度；导入、订阅刷新与既有保存数据不执行这些上限。
+  static let nameCharacterLimit = 128
+  static let addressCharacterLimit = 255
+  static let portDigitLimit = 5
+  static let passwordCharacterLimit = 1_024
+  static let pluginOptionsUTF8Limit = 65_536
+
+  @Published var address = "" { didSet { clearError(.address) } }
+  /// 端口十进制编辑草稿：提交前经 `validateForSubmit()` 验证，不用数值绑定
+  /// 以免转换失败时悄悄提交旧绑定值（issue #81）。
+  @Published var portText = "" { didSet { clearError(.port) } }
   @Published var encryptionMethod = ""
-  @Published var password = ""
+  @Published var password = "" { didSet { clearError(.password) } }
   @Published var remark = "" {
     didSet {
-      if !nameIsEmpty { hasNameError = false }
+      if !nameIsEmpty { clearError(.name) }
     }
   }
   @Published var pluginChoice: PluginSelection = .none
-  @Published var pluginOptionsText = ""
+  @Published var pluginOptionsText = "" { didSet { clearError(.pluginOptions) } }
   @Published var showPassword = false
-  @Published private(set) var hasNameError = false
+  @Published private(set) var fieldErrors: [ServerFormField: ServerFormFieldError] = [:]
   @Published private var savedDraft: ServerEditDraft?
 
+  /// 变更检测按提交草稿比较；端口在草稿可解析时按数值比较（如前导零改写
+  /// 不算变更），不可解析视为已变更，保证非法输入后保存入口仍可点击并在
+  /// 提交时得到行内错误，而不是按钮死锁。
   var hasChanges: Bool {
-    guard let savedDraft else { return false }
-    return draft != savedDraft
+    draft != savedDraft
   }
 
   private var nameIsEmpty: Bool {
     remark.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
-  /// 提交时才提示名称错误；后台仍独立执行完整校验。
-  func validateName() -> Bool {
-    hasNameError = nameIsEmpty
-    return !hasNameError
+  /// 提交前的全量校验（issue #81）：名称必填与五字段输入上限；与装载基线
+  /// 逐字相同的超限字段放行（未修改的历史超长值不阻塞其他变更保存）。
+  /// 错误逐字段发布，重新编辑对应字段即清除；首次装载不显示。
+  @discardableResult
+  func validateForSubmit() -> Bool {
+    var errors: [ServerFormField: ServerFormFieldError] = [:]
+    if nameIsEmpty {
+      errors[.name] = .missingName
+    } else {
+      errors[.name] = characterLimitError(
+        raw: remark, measured: remark.trimmingCharacters(in: .whitespacesAndNewlines),
+        baseline: savedDraft?.remark, limit: Self.nameCharacterLimit)
+    }
+    errors[.address] = characterLimitError(
+      raw: address, measured: address.trimmingCharacters(in: .whitespaces),
+      baseline: savedDraft?.address, limit: Self.addressCharacterLimit)
+    if submittablePort == nil {
+      errors[.port] = .invalidPort
+    }
+    errors[.password] = characterLimitError(
+      raw: password, measured: password,
+      baseline: savedDraft?.password, limit: Self.passwordCharacterLimit)
+    if pluginChoice != .none {
+      errors[.pluginOptions] = utf8LimitError(
+        raw: pluginOptionsText, baseline: savedDraft?.pluginOptions,
+        limit: Self.pluginOptionsUTF8Limit)
+    }
+    fieldErrors = errors
+    return errors.isEmpty
+  }
+
+  /// 首个待修正字段（首错定位用）；无错误时为 nil。
+  var firstErrorField: ServerFormField? {
+    ServerFormField.focusOrder.first { fieldErrors[$0] != nil }
   }
 
   /// 新建表单的默认字段：端口 8388、加密 aes-256-gcm、插件「无」。
   static func newForm() -> ServerFormFields {
     let fields = ServerFormFields()
+    fields.portText = "8388"
     fields.encryptionMethod = "aes-256-gcm"
     return fields
   }
@@ -58,20 +125,23 @@ final class ServerFormFields: ObservableObject {
   /// 明文显示。
   func load(from state: ServerEditForm) {
     address = state.address
-    port = state.port
+    portText = String(state.port)
     encryptionMethod = state.encryptionMethod
     password = state.password
     remark = state.remark
     pluginChoice = state.plugin.selection
     pluginOptionsText = state.plugin.options
     showPassword = false
-    hasNameError = false
+    fieldErrors = [:]
     savedDraft = draft
   }
 
-  /// 提交载荷：配置与凭据字段作为一个逻辑变更（story 12）。
-  var draft: ServerEditDraft {
-    ServerEditDraft(
+  /// 提交载荷：配置与凭据字段作为一个逻辑变更（story 12）。端口取自十进制
+  /// 草稿；草稿不能作为提交端口时为 nil——本 getter 仅在 `validateForSubmit()`
+  /// 通过后消费，无效端口不得悄悄回落到旧值（issue #81）。
+  var draft: ServerEditDraft? {
+    guard let port = submittablePort else { return nil }
+    return ServerEditDraft(
       address: address,
       port: port,
       encryptionMethod: encryptionMethod,
@@ -80,38 +150,74 @@ final class ServerFormFields: ObservableObject {
       plugin: pluginChoice,
       pluginOptions: pluginOptionsText)
   }
+
+  // MARK: - 校验实现
+
+  /// 端口草稿可否作为提交端口：非空、纯 ASCII 十进制数字、不超过五位且
+  /// 落在 1–65535。
+  private var submittablePort: Int? {
+    guard !portText.isEmpty, portText.count <= Self.portDigitLimit,
+      portText.allSatisfy { ("0"..."9").contains($0) },
+      let port = Int(portText)
+    else { return nil }
+    return (1...65_535).contains(port) ? port : nil
+  }
+
+  /// 字符上限：与基线逐字相同（未修改）的历史超长值放行；名称与地址按
+  /// 提交值（现行首尾空白处理后）计量，密码不 trim、不 Unicode 归一化。
+  private func characterLimitError(
+    raw: String, measured: String, baseline: String?, limit: Int
+  ) -> ServerFormFieldError? {
+    guard baseline == nil || raw != baseline else { return nil }
+    return measured.count > limit ? .tooManyCharacters(limit: limit) : nil
+  }
+
+  /// 插件参数字节上限：按最终参数字符串的 UTF-8 字节数计量（含分隔符与
+  /// 转义），与基线逐字相同的未修改值放行。
+  private func utf8LimitError(
+    raw: String, baseline: String?, limit: Int
+  ) -> ServerFormFieldError? {
+    guard baseline == nil || raw != baseline else { return nil }
+    return raw.utf8.count > limit ? .tooManyBytes(limit: limit) : nil
+  }
+
+  private func clearError(_ field: ServerFormField) {
+    guard fieldErrors[field] != nil else { return }
+    fieldErrors[field] = nil
+  }
 }
 
-/// 新建与编辑共享的名称优先表单；焦点由提交入口持有，校验失败时定位名称。
+/// 新建与编辑共享的名称优先表单；焦点由提交入口持有，校验失败时定位首个
+/// 待修正字段。
 struct ServerFormFieldsGrid: View {
   @ObservedObject var fields: ServerFormFields
   let plugin: PluginSectionState?
   let isEditable: Bool
-  let nameFocus: FocusState<Bool>.Binding
+  let fieldFocus: FocusState<ServerFormField?>.Binding
 
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
       column("名称") {
         TextField("名称", text: $fields.remark, prompt: Text("例如：香港服务器"))
           .textFieldStyle(.roundedBorder)
-          .focused(nameFocus)
+          .focused(fieldFocus, equals: .name)
           .disabled(!isEditable)
-        if fields.hasNameError {
-          Text("请输入服务器名称")
-            .font(.footnote)
-            .foregroundStyle(.red)
-        }
+        fieldErrorLabel(.name)
       }
       ServerEndpointLayout {
         column("服务器地址") {
           TextField("服务器地址", text: $fields.address)
             .textFieldStyle(.roundedBorder)
+            .focused(fieldFocus, equals: .address)
             .disabled(!isEditable)
+          fieldErrorLabel(.address)
         }
         column("端口") {
-          TextField("端口", value: $fields.port, format: .number.grouping(.never))
+          TextField("端口", text: $fields.portText)
             .textFieldStyle(.roundedBorder)
+            .focused(fieldFocus, equals: .port)
             .disabled(!isEditable)
+          fieldErrorLabel(.port)
         }
       }
       column("加密方式") {
@@ -134,6 +240,7 @@ struct ServerFormFieldsGrid: View {
           .textFieldStyle(.roundedBorder)
           .textContentType(nil)
           .autocorrectionDisabled()
+          .focused(fieldFocus, equals: .password)
           .disabled(!isEditable)
           Button {
             fields.showPassword.toggle()
@@ -144,13 +251,16 @@ struct ServerFormFieldsGrid: View {
           .help(fields.showPassword ? "隐藏密码" : "显示密码")
           .accessibilityLabel(fields.showPassword ? "隐藏密码" : "显示密码")
         }
+        fieldErrorLabel(.password)
       }
       column("插件") {
         ServerPluginSection(
           selection: $fields.pluginChoice,
           optionsText: $fields.pluginOptionsText,
           plugin: plugin,
-          isEditable: isEditable)
+          isEditable: isEditable,
+          optionsError: fields.fieldErrors[.pluginOptions],
+          optionsFocus: fieldFocus)
       }
     }
   }
@@ -165,6 +275,36 @@ struct ServerFormFieldsGrid: View {
       content()
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  /// 字段行内错误：只呈现字段、原因与上限，不回显字段内容（issue #81）。
+  @ViewBuilder
+  private func fieldErrorLabel(_ field: ServerFormField) -> some View {
+    if let error = fields.fieldErrors[field] {
+      Text(errorText(error, field: field))
+        .font(.footnote)
+        .foregroundStyle(.red)
+    }
+  }
+
+  private func errorText(_ error: ServerFormFieldError, field: ServerFormField)
+    -> LocalizedStringKey
+  {
+    switch error {
+    case .missingName:
+      return "请输入服务器名称"
+    case .tooManyCharacters(let limit):
+      switch field {
+      case .name: return "名称最多 \(limit) 个字符"
+      case .address: return "服务器地址最多 \(limit) 个字符"
+      case .password: return "密码最多 \(limit) 个字符"
+      case .port, .pluginOptions: return ""
+      }
+    case .tooManyBytes(let limit):
+      return "插件参数最多 \(limit) 个字节"
+    case .invalidPort:
+      return "端口必须是 1–65535 的数字（最多 \(ServerFormFields.portDigitLimit) 位）"
+    }
   }
 }
 

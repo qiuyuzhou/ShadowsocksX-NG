@@ -8,6 +8,9 @@ struct ServerPluginSection: View {
   @Binding var optionsText: String
   let plugin: PluginSectionState?
   let isEditable: Bool
+  /// 参数字段的行内校验错误（issue #81，如字节超限）。
+  let optionsError: ServerFormFieldError?
+  let optionsFocus: FocusState<ServerFormField?>.Binding
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -72,7 +75,13 @@ struct ServerPluginSection: View {
           prompt: Text("选择插件后填写参数（如 mode=websocket;host=…）")
         )
         .textFieldStyle(.roundedBorder)
+        .focused(optionsFocus, equals: .pluginOptions)
         .disabled(!isEditable)
+        if let optionsError {
+          Text(optionsErrorText(optionsError))
+            .font(.footnote)
+            .foregroundStyle(.red)
+        }
       }
     }
   }
@@ -92,6 +101,14 @@ struct ServerPluginSection: View {
           .font(.footnote)
           .foregroundStyle(.secondary)
       }
+    }
+  }
+
+  /// 参数错误文案：只呈现原因与上限，不回显参数内容。
+  private func optionsErrorText(_ error: ServerFormFieldError) -> LocalizedStringKey {
+    switch error {
+    case .tooManyBytes(let limit): return "插件参数最多 \(limit) 个字节"
+    case .missingName, .tooManyCharacters, .invalidPort: return ""
     }
   }
 }
