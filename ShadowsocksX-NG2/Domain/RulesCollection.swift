@@ -89,13 +89,7 @@ private struct RulesCollectionInput: Sendable {
   ) {
     do {
       let snapshot = try loadBuiltin(source)
-      let expected: RuleSourceKind
-      switch source {
-      case .geolocationCN: expected = .geolocationCN
-      case .chinaIPv4: expected = .chinaIPv4
-      case .gfwlist: expected = .gfwlist
-      case .custom, .fixed: expected = .custom
-      }
+      guard let expected = source.sourceKind else { throw RuleSnapshotError.missing }
       guard snapshot.metadata.source.kind == expected
       else { throw RuleSnapshotError.corrupt(detail: "Unexpected rule source") }
       let candidates = snapshot.rules

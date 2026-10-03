@@ -18,7 +18,7 @@ final class RuleEnablementWorkflowTests: XCTestCase {
         return RuleDocumentCommit(outcome: .saved, document: $0)
       },
       analysisDelay: { await gate.wait() },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.query(RulesQuery(source: .custom))
     let originalOrder = workflow.snapshot.rows.map(\.id)
@@ -69,7 +69,7 @@ final class RuleEnablementWorkflowTests: XCTestCase {
         }
       },
       analysisDelay: { await gate.wait() },
-      loadBuiltin: { source in
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { source in
         if source == .geolocationCN {
           return rulesFixture(
             source,
@@ -79,7 +79,7 @@ final class RuleEnablementWorkflowTests: XCTestCase {
             ])
         }
         return rulesFixture(source)
-      })
+      }))
     await workflow.refresh()
     XCTAssertTrue(workflow.snapshot.isComplete)
     XCTAssertTrue(workflow.snapshot.sources.contains { $0.id == .geolocationCN })
@@ -109,10 +109,10 @@ final class RuleEnablementWorkflowTests: XCTestCase {
         return CustomRuleDocument(rules: [rule])
       },
       commitDocument: { RuleDocumentCommit(outcome: .saved, document: $0) },
-      loadBuiltin: { source in
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { source in
         reads.recordSource()
         return rulesFixture(source)
-      })
+      }))
     await workflow.refresh()
     await workflow.setEnabled(false, identities: [rule.identity])
     XCTAssertEqual(reads.documentCount, 1)
@@ -147,7 +147,7 @@ final class RuleEnablementWorkflowTests: XCTestCase {
             outcome: .persistenceFailed, document: try? store.loadDocument())
         }
       },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     let pending = Task { await workflow.setEnabled(false, identities: [rule.identity]) }
     await fulfillment(of: [started], timeout: 3)
@@ -181,7 +181,7 @@ final class RuleEnablementWorkflowTests: XCTestCase {
         commits += 1
         return RuleDocumentCommit(outcome: .persistenceFailed, document: try? store.loadDocument())
       },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     let version = workflow.snapshot.version
     await workflow.setEnabled(false, identities: [rule.identity])

@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 import XCTest
 
 @testable import ShadowsocksX_NG2
@@ -253,5 +254,27 @@ private final class SharedRuleSourceLoader: @unchecked Sendable {
       throw RuleSnapshotError.missing
     }
     return rulesFixture(source)
+  }
+}
+
+@Test func builtinSnapshotsRejectNonBuiltinSources() async {
+  let snapshots = BuiltinRuleSnapshots(loader: { _ in rulesFixture(.custom) })
+  for source in [RulesSource.custom, .fixed] {
+    do {
+      _ = try await snapshots.load(source)
+      Issue.record("Non-builtin source must not load a snapshot")
+    } catch {
+      #expect(error as? RuleSnapshotError == .missing)
+    }
+  }
+}
+
+@Test func builtinSnapshotsRejectMismatchedMetadata() async {
+  let snapshots = BuiltinRuleSnapshots(loader: { _ in rulesFixture(.chinaIPv4) })
+  do {
+    _ = try await snapshots.load(.geolocationCN)
+    Issue.record("Mismatched source metadata must be rejected")
+  } catch {
+    #expect(error as? RuleSnapshotError == .corrupt(detail: "Unexpected rule source"))
   }
 }

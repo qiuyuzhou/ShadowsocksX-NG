@@ -19,7 +19,9 @@ struct BuiltinRuleCatalog {
     try loadSnapshot(named: "gfwlist", from: bundle)
   }
 
-  private static func loadSnapshot(named name: String, from bundle: Bundle) throws -> RuleSnapshot {
+  fileprivate static func loadSnapshot(named name: String, from bundle: Bundle) throws
+    -> RuleSnapshot
+  {
     // folder reference 保留 `rules/<source>/snapshot.json` 目录结构。
     guard
       let url = bundle.url(
@@ -62,12 +64,10 @@ actor BuiltinRuleSnapshots {
   init(bundle: Bundle = .main, loader: Loader? = nil) {
     self.loader =
       loader ?? { source in
-        switch source {
-        case .geolocationCN: try BuiltinRuleCatalog.loadGeolocationCN(from: bundle)
-        case .chinaIPv4: try BuiltinRuleCatalog.loadChinaIPv4(from: bundle)
-        case .gfwlist: try BuiltinRuleCatalog.loadGFWList(from: bundle)
-        case .fixed, .custom: throw RuleSnapshotError.missing
+        guard let kind = source.sourceKind, kind != .custom else {
+          throw RuleSnapshotError.missing
         }
+        return try BuiltinRuleCatalog.loadSnapshot(named: kind.rawValue, from: bundle)
       }
   }
 
@@ -82,12 +82,8 @@ actor BuiltinRuleSnapshots {
         id: UUID(),
         task: Task.detached(priority: .userInitiated) {
           let snapshot = try loader(source)
-          let kind: RuleSourceKind
-          switch source {
-          case .geolocationCN: kind = .geolocationCN
-          case .chinaIPv4: kind = .chinaIPv4
-          case .gfwlist: kind = .gfwlist
-          case .custom, .fixed: throw RuleSnapshotError.missing
+          guard let kind = source.sourceKind, kind != .custom else {
+            throw RuleSnapshotError.missing
           }
           guard snapshot.metadata.source.kind == kind
           else { throw RuleSnapshotError.corrupt(detail: "Unexpected rule source") }

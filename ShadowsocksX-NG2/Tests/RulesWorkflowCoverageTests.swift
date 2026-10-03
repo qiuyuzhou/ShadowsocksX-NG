@@ -10,7 +10,8 @@ final class RulesWorkflowCoverageTests: XCTestCase {
     let duplicate = CustomRule(
       action: .direct, match: try RuleMatch(domainExact: "www.example.com"))
     let workflow = RulesWorkflow(
-      loadCustom: { [broad, narrow, duplicate] }, loadBuiltin: { rulesFixture($0) })
+      loadCustom: { [broad, narrow, duplicate] },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.query(RulesQuery(action: .direct, source: .custom))
     let broadRow = try XCTUnwrap(workflow.snapshot.rows.first { $0.identity == broad.identity })
@@ -30,7 +31,8 @@ final class RulesWorkflowCoverageTests: XCTestCase {
     let lower = CustomRule(action: .direct, match: try RuleMatch(ipv4CIDR: "8.8.8.0/25"))
     let upper = CustomRule(action: .direct, match: try RuleMatch(ipv4CIDR: "8.8.8.128/25"))
     let workflow = RulesWorkflow(
-      loadCustom: { [proxy, lower, upper] }, loadBuiltin: { rulesFixture($0) })
+      loadCustom: { [proxy, lower, upper] },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.query(RulesQuery(action: .proxy, source: .custom))
     let row = try XCTUnwrap(workflow.snapshot.rows.first)
@@ -51,10 +53,10 @@ final class RulesWorkflowCoverageTests: XCTestCase {
     let nationalDirect = CustomRule(action: .direct, match: .domainSuffix("cn"))
     let workflow = RulesWorkflow(
       loadCustom: { [localDirect, nationalDirect] },
-      loadBuiltin: { requested in
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { requested in
         rulesFixture(
           requested, rules: requested == .gfwlist ? [simple, simpleSuffix, localProxy] : [])
-      })
+      }))
     await workflow.refresh()
     workflow.query(RulesQuery(source: .gfwlist))
     let simpleRow = try XCTUnwrap(workflow.snapshot.rows.first { $0.identity == simple.identity })
@@ -79,9 +81,9 @@ final class RulesWorkflowCoverageTests: XCTestCase {
     let proxy = ProxyRule(action: .proxy, match: try RuleMatch(domainExact: "cn"))
     let workflow = RulesWorkflow(
       loadCustom: { [direct] },
-      loadBuiltin: { requested in
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { requested in
         rulesFixture(requested, rules: requested == .gfwlist ? [proxy] : [])
-      })
+      }))
     await workflow.refresh()
     workflow.query(RulesQuery(source: .custom))
     let row = try XCTUnwrap(workflow.snapshot.rows.first)

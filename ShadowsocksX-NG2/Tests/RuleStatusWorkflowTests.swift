@@ -18,7 +18,7 @@ final class RuleStatusWorkflowTests: XCTestCase {
         return RuleDocumentCommit(outcome: .saved, document: nil)
       },
       feedbackDelay: { XCTFail("An incomplete collection must not start the success timer") },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     let rows = workflow.snapshot.rows
     await workflow.setEnabled(false, identities: [rule.identity])
@@ -46,7 +46,7 @@ final class RuleStatusWorkflowTests: XCTestCase {
         saveFixture(document, to: store, outcome: .saved)
       },
       feedbackDelay: { await clock.wait() },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     let fixed = try XCTUnwrap(workflow.snapshot.rows.first { $0.isFixed }?.identity)
     await workflow.setEnabled(true, identities: [disabled.identity, enabled.identity, fixed])
@@ -80,7 +80,7 @@ final class RuleStatusWorkflowTests: XCTestCase {
         await gate.wait()
         return saveFixture(document, to: store, outcome: .saved)
       },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     let pending = Task { await workflow.setEnabled(false, identities: [rule.identity]) }
     await fulfillment(of: [reloadStarted], timeout: 3)
@@ -121,7 +121,7 @@ final class RuleStatusWorkflowTests: XCTestCase {
         await clock.wait()
         timerReturned.fulfill()
       },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     await workflow.setEnabled(false, identities: [rule.identity])
     await fulfillment(of: [timerStarted], timeout: 3)

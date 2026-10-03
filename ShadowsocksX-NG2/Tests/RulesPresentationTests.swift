@@ -6,7 +6,8 @@ import XCTest
 final class RulesPresentationTests: XCTestCase {
   func testReportIsAnExplicitSnapshotUnaffectedByQueryOrRefresh() async throws {
     let loader = ReportFixtureLoader()
-    let workflow = RulesWorkflow(loadCustom: { [] }, loadBuiltin: { loader.load($0) })
+    let workflow = RulesWorkflow(
+      loadCustom: { [] }, builtinSnapshots: BuiltinRuleSnapshots(loader: { loader.load($0) }))
     await workflow.refresh()
     XCTAssertTrue(workflow.openSourceReport(.gfwlist))
     let opened = try XCTUnwrap(workflow.reportSource)
@@ -26,7 +27,8 @@ final class RulesPresentationTests: XCTestCase {
     let narrow = CustomRule(action: .direct, match: try RuleMatch(domainExact: "a.example.com"))
     let independent = CustomRule(action: .direct, match: try RuleMatch(domainExact: "other.net"))
     let workflow = RulesWorkflow(
-      loadCustom: { [broad, narrow, independent] }, loadBuiltin: { rulesFixture($0) })
+      loadCustom: { [broad, narrow, independent] },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     XCTAssertNil(workflow.selectedRelationshipRow)
     workflow.select([.rule(narrow.identity)])
@@ -45,7 +47,8 @@ final class RulesPresentationTests: XCTestCase {
     let narrow = CustomRule(action: .direct, match: try RuleMatch(domainExact: "a.example.net"))
     let local = CustomRule(action: .direct, match: try RuleMatch(domainExact: "device.local"))
     let workflow = RulesWorkflow(
-      loadCustom: { [broad, narrow, local] }, loadBuiltin: { rulesFixture($0) })
+      loadCustom: { [broad, narrow, local] },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.select([.rule(narrow.identity)])
     let absorbed = try XCTUnwrap(workflow.selectedRelationshipRow)

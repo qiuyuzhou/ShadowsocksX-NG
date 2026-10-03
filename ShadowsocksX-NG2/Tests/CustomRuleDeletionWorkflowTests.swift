@@ -21,7 +21,9 @@ final class CustomRuleDeletionWorkflowTests: XCTestCase {
         saved = $0
         return RuleDocumentCommit(outcome: .saved, document: saved)
       },
-      loadBuiltin: { rulesFixture($0, rules: $0 == .gfwlist ? [builtin] : []) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: {
+        rulesFixture($0, rules: $0 == .gfwlist ? [builtin] : [])
+      }))
     await workflow.refresh()
     workflow.select(Set(workflow.snapshot.rows.map(\.id)))
     XCTAssertEqual(workflow.deletableSelection, [custom.id, other.id])
@@ -57,7 +59,7 @@ extension CustomRuleDeletionWorkflowTests {
         commits += 1
         saved = $0
         return RuleDocumentCommit(outcome: .saved, document: saved)
-      }, loadBuiltin: { rulesFixture($0) })
+      }, builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.select(Set(workflow.snapshot.rows.map(\.id)))
     var query = workflow.snapshot.query
@@ -86,7 +88,7 @@ extension CustomRuleDeletionWorkflowTests {
       commitDocument: {
         commits += 1
         return RuleDocumentCommit(outcome: .saved, document: $0)
-      }, loadBuiltin: { rulesFixture($0) })
+      }, builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.select(Set(workflow.snapshot.rows.map(\.id)))
     let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())
@@ -114,7 +116,7 @@ extension CustomRuleDeletionWorkflowTests {
           started.fulfill()
         }
         return RuleDocumentCommit(outcome: .persistenceFailed, document: original)
-      }, loadBuiltin: { rulesFixture($0) })
+      }, builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.select(Set(workflow.snapshot.rows.map(\.id)))
     let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())
@@ -143,7 +145,7 @@ extension CustomRuleDeletionWorkflowTests {
       commitDocument: {
         commits += 1
         return RuleDocumentCommit(outcome: .saved, document: $0)
-      }, loadBuiltin: { rulesFixture($0) })
+      }, builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.select(Set(workflow.snapshot.rows.map(\.id)))
     let confirmation = try XCTUnwrap(workflow.prepareCustomRuleDeletion())

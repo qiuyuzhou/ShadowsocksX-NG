@@ -31,15 +31,7 @@ final class RulesWorkflow: ObservableObject {
     analysisDelay: @escaping @Sendable () async throws -> Void = {
       try await Task.sleep(for: .milliseconds(150))
     },
-    builtinSnapshots: BuiltinRuleSnapshots? = nil,
-    loadBuiltin: @escaping @Sendable (RulesSource) throws -> RuleSnapshot = { source in
-      switch source {
-      case .geolocationCN: try BuiltinRuleCatalog.loadGeolocationCN()
-      case .chinaIPv4: try BuiltinRuleCatalog.loadChinaIPv4()
-      case .gfwlist: try BuiltinRuleCatalog.loadGFWList()
-      case .custom, .fixed: throw RuleSnapshotError.missing
-      }
-    }
+    builtinSnapshots: BuiltinRuleSnapshots = BuiltinRuleSnapshots()
   ) {
     if let loadDocument {
       self.loadDocument = loadDocument
@@ -52,7 +44,7 @@ final class RulesWorkflow: ObservableObject {
     self.feedbackDelay = feedbackDelay
     self.analysisDelay = analysisDelay
     self.loadCustom = loadCustom ?? { try CustomRuleStore().load() }
-    self.builtinSnapshots = builtinSnapshots ?? BuiltinRuleSnapshots(loader: loadBuiltin)
+    self.builtinSnapshots = builtinSnapshots
   }
 
   func refresh(retryFailedSources: Bool = false) async {

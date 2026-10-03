@@ -5,7 +5,8 @@ import XCTest
 @MainActor
 final class RulesWorkflowPublicationTests: XCTestCase {
   func testNativeControlsWritingTheSameQueryDoNotRepublishThePage() async {
-    let workflow = RulesWorkflow(loadCustom: { [] }, loadBuiltin: { rulesFixture($0) })
+    let workflow = RulesWorkflow(
+      loadCustom: { [] }, builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.query(RulesQuery(source: .gfwlist))
     var changes = 0
@@ -16,7 +17,8 @@ final class RulesWorkflowPublicationTests: XCTestCase {
   }
 
   func testNativeControlsWritingTheSameVisibleSelectionDoNotRepublishThePage() async {
-    let workflow = RulesWorkflow(loadCustom: { [] }, loadBuiltin: { rulesFixture($0) })
+    let workflow = RulesWorkflow(
+      loadCustom: { [] }, builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.select([.noDotHostname])
     var changes = 0

@@ -8,7 +8,7 @@ final class CustomRuleEditingWorkflowTests: XCTestCase {
     let workflow = RulesWorkflow(
       loadDocument: { CustomRuleDocument(rules: []) },
       commitDocument: { RuleDocumentCommit(outcome: .saved, document: $0) },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     let version = workflow.snapshot.version
     var draft = try XCTUnwrap(workflow.makeCustomRuleDraft())
@@ -40,7 +40,9 @@ final class CustomRuleEditingWorkflowTests: XCTestCase {
         saved = $0
         return RuleDocumentCommit(outcome: .saved, document: saved)
       },
-      loadBuiltin: { rulesFixture($0, rules: $0 == .gfwlist ? [builtin] : []) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: {
+        rulesFixture($0, rules: $0 == .gfwlist ? [builtin] : [])
+      }))
     await workflow.refresh()
     var draft = try XCTUnwrap(workflow.makeCustomRuleDraft(editing: original.id))
     let unchanged = await workflow.previewCustomRule(draft)
@@ -71,7 +73,7 @@ final class CustomRuleEditingWorkflowTests: XCTestCase {
     let workflow = RulesWorkflow(
       loadDocument: { CustomRuleDocument(rules: []) },
       commitDocument: { RuleDocumentCommit(outcome: .saved, document: $0) },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     var draft = try XCTUnwrap(workflow.makeCustomRuleDraft())
     draft.kind = .cidr
@@ -100,7 +102,7 @@ final class CustomRuleEditingWorkflowTests: XCTestCase {
         commits += 1
         return RuleDocumentCommit(outcome: .saved, document: $0)
       },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     var draft = try XCTUnwrap(workflow.makeCustomRuleDraft())
     draft.kind = .ipAddress
@@ -134,7 +136,9 @@ final class CustomRuleEditingWorkflowTests: XCTestCase {
         CustomRuleDocument(rules: [], disabledIdentities: [builtin.identity, orphan])
       },
       commitDocument: { RuleDocumentCommit(outcome: .saved, document: $0) },
-      loadBuiltin: { rulesFixture($0, rules: $0 == .gfwlist ? [builtin] : []) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: {
+        rulesFixture($0, rules: $0 == .gfwlist ? [builtin] : [])
+      }))
     await workflow.refresh()
     var draft = try XCTUnwrap(workflow.makeCustomRuleDraft())
     draft.content = ".MERGE.Example"
@@ -163,7 +167,7 @@ final class CustomRuleEditingWorkflowTests: XCTestCase {
     let workflow = RulesWorkflow(
       loadDocument: { CustomRuleDocument(rules: []) },
       commitDocument: { RuleDocumentCommit(outcome: .saved, document: $0) },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     var draft = try XCTUnwrap(workflow.makeCustomRuleDraft())
     draft.action = .direct
@@ -200,7 +204,7 @@ final class CustomRuleEditingWorkflowTests: XCTestCase {
     let workflow = RulesWorkflow(
       loadDocument: { CustomRuleDocument(rules: [broad, proxy]) },
       commitDocument: { RuleDocumentCommit(outcome: .saved, document: $0) },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     var draft = try XCTUnwrap(workflow.makeCustomRuleDraft())
     draft.kind = .domainExact
@@ -239,7 +243,7 @@ final class CustomRuleEditingWorkflowTests: XCTestCase {
         commits += 1
         return RuleDocumentCommit(outcome: .saved, document: $0)
       },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     var discarded = try XCTUnwrap(workflow.makeCustomRuleDraft(editing: rule.id))
     discarded.content = "discarded.example"
@@ -274,7 +278,7 @@ extension CustomRuleEditingWorkflowTests {
         }
         return RuleDocumentCommit(outcome: .persistenceFailed, document: original)
       },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     let version = workflow.snapshot.version
     var draft = try XCTUnwrap(workflow.makeCustomRuleDraft())
@@ -304,7 +308,7 @@ extension CustomRuleEditingWorkflowTests {
     let workflow = RulesWorkflow(
       loadDocument: { original },
       commitDocument: { RuleDocumentCommit(outcome: outcome, document: $0) },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     XCTAssertNil(workflow.makeCustomRuleDraft())
     await workflow.refresh()
     var draft = try XCTUnwrap(workflow.makeCustomRuleDraft(editing: rule.id))
@@ -319,7 +323,7 @@ extension CustomRuleEditingWorkflowTests {
     let incomplete = RulesWorkflow(
       loadDocument: { throw CustomRuleStoreError.corrupt(detail: "fixture error") },
       commitDocument: { RuleDocumentCommit(outcome: .saved, document: $0) },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await incomplete.refresh()
     XCTAssertNil(incomplete.makeCustomRuleDraft())
     let refused = await incomplete.saveCustomRule(draft)
@@ -339,7 +343,7 @@ extension CustomRuleEditingWorkflowTests {
         commits += 1
         return RuleDocumentCommit(outcome: .saved, document: $0)
       },
-      loadBuiltin: { rulesFixture($0) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     var draft = try XCTUnwrap(workflow.makeCustomRuleDraft(editing: original.id))
     draft.kind = .cidr

@@ -6,7 +6,8 @@ import XCTest
 final class OfflineRulesWorkflowTests: XCTestCase {
   func testAddressTestUsesCompleteSavedCollectionDespiteBrowsingFilters() async throws {
     let rule = CustomRule(action: .proxy, match: try RuleMatch(domainSuffix: "example.com"))
-    let workflow = RulesWorkflow(loadCustom: { [rule] }, loadBuiltin: { rulesFixture($0) })
+    let workflow = RulesWorkflow(
+      loadCustom: { [rule] }, builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.query(RulesQuery(search: "hidden", action: .direct, source: .chinaIPv4))
     XCTAssertTrue(workflow.snapshot.rows.isEmpty)
@@ -19,7 +20,8 @@ final class OfflineRulesWorkflowTests: XCTestCase {
     XCTAssertTrue(result.domainWithoutDNS)
   }
   func testInvalidAndIncompleteCollectionsExposeOperationErrors() async throws {
-    let workflow = RulesWorkflow(loadCustom: { [] }, loadBuiltin: { rulesFixture($0) })
+    let workflow = RulesWorkflow(
+      loadCustom: { [] }, builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     workflow.setTestTarget("example.com")
     await workflow.testAddress()
     XCTAssertEqual(workflow.snapshot.addressTest.failure, .incompleteCollection)
@@ -29,7 +31,8 @@ final class OfflineRulesWorkflowTests: XCTestCase {
     XCTAssertEqual(workflow.snapshot.addressTest.failure, .invalidTarget)
     XCTAssertNil(workflow.snapshot.addressTest.result)
     let incomplete = RulesWorkflow(
-      loadCustom: { [] }, loadBuiltin: { _ in throw RuleSnapshotError.missing })
+      loadCustom: { [] },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { _ in throw RuleSnapshotError.missing }))
     await incomplete.refresh()
     incomplete.setTestTarget("localhost")
     await incomplete.testAddress()
@@ -44,7 +47,8 @@ final class OfflineRulesWorkflowTests: XCTestCase {
     let proxy = CustomRule(action: .proxy, match: try RuleMatch(domainExact: "example.com"))
     try store.save([proxy])
     let workflow = RulesWorkflow(
-      loadCustom: { try store.load() }, loadBuiltin: { rulesFixture($0) })
+      loadCustom: { try store.load() },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.setTestTarget("example.com")
     await workflow.testAddress()
@@ -66,7 +70,8 @@ final class OfflineRulesWorkflowTests: XCTestCase {
 
   func testClearingTargetOrStartingRefreshPreventsLateTestPublication() async throws {
     let rule = CustomRule(action: .proxy, match: try RuleMatch(domainSuffix: "example.com"))
-    let workflow = RulesWorkflow(loadCustom: { [rule] }, loadBuiltin: { rulesFixture($0) })
+    let workflow = RulesWorkflow(
+      loadCustom: { [rule] }, builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.setTestTarget("example.com")
     await workflow.testAddress()
@@ -102,7 +107,8 @@ final class OfflineRulesWorkflowTests: XCTestCase {
       CustomRule(action: .proxy, match: try RuleMatch(domainExact: "proxy.example")),
       CustomRule(action: .direct, match: try RuleMatch(domainExact: "direct.example")),
     ]
-    let workflow = RulesWorkflow(loadCustom: { rules }, loadBuiltin: { rulesFixture($0) })
+    let workflow = RulesWorkflow(
+      loadCustom: { rules }, builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     for mode in [ProxyModeKind.rule, .global, .direct] {
       for defaultAction in RuleDefaultAction.allCases {

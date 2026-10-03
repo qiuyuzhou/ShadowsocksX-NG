@@ -27,14 +27,14 @@ final class RulesWorkflowTests: XCTestCase {
             outcome: .persistenceFailed, document: try? store.loadDocument())
         }
       },
-      loadBuiltin: { source in
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { source in
         guard source == .gfwlist else { return rulesFixture(source) }
         return rulesFixture(
           source,
           rules: [
             ProxyRule(action: .proxy, match: broad.match)
           ])
-      })
+      }))
     await workflow.refresh()
     let version = workflow.snapshot.version
     let covered = try XCTUnwrap(workflow.snapshot.rows.first { $0.identity == narrow.identity })
@@ -72,7 +72,9 @@ final class RulesWorkflowTests: XCTestCase {
       rules: [ProxyRule(action: .direct, match: match)])
     let workflow = RulesWorkflow(
       loadCustom: { [custom] },
-      loadBuiltin: { source in source == .geolocationCN ? snapshot : rulesFixture(source) })
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { source in
+        source == .geolocationCN ? snapshot : rulesFixture(source)
+      }))
     await workflow.refresh()
     workflow.query(RulesQuery(search: "EXAMPLE", action: .direct, source: .geolocationCN))
     let row = try XCTUnwrap(workflow.snapshot.rows.first)
@@ -85,9 +87,9 @@ final class RulesWorkflowTests: XCTestCase {
   func testWrongBuiltinSourceIsAnIncompleteCollectionRatherThanMislabeledRules() async {
     let workflow = RulesWorkflow(
       loadCustom: { [] },
-      loadBuiltin: { _ in
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { _ in
         rulesFixture(.geolocationCN)
-      })
+      }))
     await workflow.refresh()
     XCTAssertFalse(workflow.snapshot.isComplete)
     XCTAssertEqual(workflow.snapshot.issues.count, 2)
@@ -97,7 +99,8 @@ final class RulesWorkflowTests: XCTestCase {
     let direct = CustomRule(action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
     let proxy = CustomRule(action: .proxy, match: try RuleMatch(domainExact: "outside.net"))
     let workflow = RulesWorkflow(
-      loadCustom: { [direct, proxy] }, loadBuiltin: { rulesFixture($0) })
+      loadCustom: { [direct, proxy] },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.select([.rule(direct.identity), .rule(proxy.identity), .noDotHostname])
     workflow.query(RulesQuery(search: "EXAMPLE", action: .direct, source: .custom))
@@ -114,7 +117,8 @@ final class RulesWorkflowTests: XCTestCase {
       CustomRule(action: .proxy, match: try RuleMatch(domainExact: "z.net")),
       CustomRule(action: .direct, match: try RuleMatch(domainExact: "a.net")),
     ]
-    let workflow = RulesWorkflow(loadCustom: { entries }, loadBuiltin: { rulesFixture($0) })
+    let workflow = RulesWorkflow(
+      loadCustom: { entries }, builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     let version = workflow.snapshot.version
     workflow.query(RulesQuery(source: .custom))
@@ -134,10 +138,10 @@ final class RulesWorkflowTests: XCTestCase {
   func testCorruptUserDocumentAndMissingBuiltinStayDistinctFromEmptySearch() async {
     let workflow = RulesWorkflow(
       loadCustom: { throw CustomRuleStoreError.corrupt(detail: "fixture") },
-      loadBuiltin: { source in
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { source in
         if source == .chinaIPv4 { throw RuleSnapshotError.missing }
         return rulesFixture(source)
-      })
+      }))
     await workflow.refresh()
     XCTAssertFalse(workflow.snapshot.isComplete)
     XCTAssertEqual(
@@ -154,14 +158,7 @@ final class RulesWorkflowTests: XCTestCase {
     let bundle = AppArtifact.bundle
     let workflow = RulesWorkflow(
       loadCustom: { [] },
-      loadBuiltin: { source in
-        switch source {
-        case .geolocationCN: try BuiltinRuleCatalog.loadGeolocationCN(from: bundle)
-        case .chinaIPv4: try BuiltinRuleCatalog.loadChinaIPv4(from: bundle)
-        case .gfwlist: try BuiltinRuleCatalog.loadGFWList(from: bundle)
-        case .custom, .fixed: throw RuleSnapshotError.missing
-        }
-      })
+      builtinSnapshots: BuiltinRuleSnapshots(bundle: bundle))
     await workflow.refresh()
     XCTAssertTrue(workflow.snapshot.isComplete, "\(workflow.snapshot.issues)")
     XCTAssertEqual(workflow.snapshot.sources.count, 5)
@@ -185,7 +182,8 @@ final class RulesWorkflowTests: XCTestCase {
     let new = CustomRule(action: .proxy, match: try RuleMatch(domainExact: "new.net"))
     try store.save([old])
     let workflow = RulesWorkflow(
-      loadCustom: { try store.load() }, loadBuiltin: { rulesFixture($0) })
+      loadCustom: { try store.load() },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     workflow.query(RulesQuery(source: .custom))
     workflow.select([.rule(old.identity)])
@@ -215,7 +213,8 @@ final class RulesWorkflowTests: XCTestCase {
     let firstRead = XCTestExpectation(description: "first read")
     let barrier = RulesReadBarrier(firstRead: firstRead)
     let workflow = RulesWorkflow(
-      loadCustom: { try barrier.read() }, loadBuiltin: { rulesFixture($0) })
+      loadCustom: { try barrier.read() },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     let older = Task { await workflow.refresh() }
     await fulfillment(of: [firstRead], timeout: 3)
     defer { barrier.release.signal() }
@@ -237,8 +236,12 @@ extension RulesWorkflowTests {
   func testCandidatePermutationKeepsVersionAndCoverageWhilePreservingInputOrder() async throws {
     let broad = CustomRule(action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
     let narrow = CustomRule(action: .proxy, match: try RuleMatch(domainExact: "www.example.com"))
-    let forward = RulesWorkflow(loadCustom: { [broad, narrow] }, loadBuiltin: { rulesFixture($0) })
-    let reverse = RulesWorkflow(loadCustom: { [narrow, broad] }, loadBuiltin: { rulesFixture($0) })
+    let forward = RulesWorkflow(
+      loadCustom: { [broad, narrow] },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
+    let reverse = RulesWorkflow(
+      loadCustom: { [narrow, broad] },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await forward.refresh()
     await reverse.refresh()
     XCTAssertEqual(forward.snapshot.version, reverse.snapshot.version)
@@ -255,7 +258,8 @@ extension RulesWorkflowTests {
     let exact = CustomRule(action: .direct, match: try RuleMatch(domainExact: "example.com"))
     let suffix = CustomRule(action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
     let workflow = RulesWorkflow(
-      loadCustom: { [suffix, exact] }, loadBuiltin: { rulesFixture($0) })
+      loadCustom: { [suffix, exact] },
+      builtinSnapshots: BuiltinRuleSnapshots(loader: { rulesFixture($0) }))
     await workflow.refresh()
     let version = workflow.snapshot.version
     let identities = workflow.snapshot.rows.map(\.identity)
@@ -292,12 +296,8 @@ extension RulesWorkflowTests {
 func rulesFixture(
   _ source: RulesSource, rules: [ProxyRule] = []
 ) -> RuleSnapshot {
-  let kind: RuleSourceKind
-  switch source {
-  case .geolocationCN: kind = .geolocationCN
-  case .chinaIPv4: kind = .chinaIPv4
-  case .gfwlist: kind = .gfwlist
-  case .custom, .fixed: kind = .custom
+  guard let kind = source.sourceKind else {
+    preconditionFailure("Fixed policy has no rule snapshot")
   }
   return RuleSnapshot(
     metadata: RuleSnapshotMetadata(

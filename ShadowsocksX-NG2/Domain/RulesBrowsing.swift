@@ -11,6 +11,17 @@ struct RulesQuery: Equatable, Sendable {
 enum RulesSource: String, CaseIterable, Identifiable, Sendable {
   case custom, geolocationCN, chinaIPv4, gfwlist, fixed
   var id: Self { self }
+
+  /// Fixed policy has no snapshot metadata kind.
+  var sourceKind: RuleSourceKind? {
+    switch self {
+    case .custom: .custom
+    case .geolocationCN: .geolocationCN
+    case .chinaIPv4: .chinaIPv4
+    case .gfwlist: .gfwlist
+    case .fixed: nil
+    }
+  }
 }
 
 struct RulesSourceSnapshot: Equatable, Identifiable, Sendable {
