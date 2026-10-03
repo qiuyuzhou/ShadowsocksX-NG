@@ -24,8 +24,9 @@ private enum WorkspaceSheet: String, Identifiable {
 /// 窗口原生呈现）；订阅/诊断的页级动作经 .toolbar 桥接进窗口工具栏右端
 /// （票 #56/#58 的槽位仅呈现位置变化），设置的表单级提交动作在其视图内容
 /// 顶部（见 SettingsView）。路由状态仍由 WorkspaceRoute 持有；代理状态卡的
-/// 状态与摘要只来自代理控制工作流的整体 snapshot（issue #47），与状态菜单
-/// 使用同一口径；服务器分区的活动目标标记同源（snapshot.activeTarget）。
+/// 状态、摘要与配色政策全部经 StatusCardModel 从代理控制工作流的整体
+/// snapshot 派生（issue #47，与状态菜单同口径），本壳只挂 StatusCardView；
+/// 服务器分区的活动目标标记同源（snapshot.activeTarget）。
 struct MainWindowView: View {
   @ObservedObject var rulesWorkflow: RulesWorkflow
   @ObservedObject var route: WorkspaceRoute
@@ -266,7 +267,7 @@ extension WorkspaceDestination {
   }
 }
 
-// MARK: - 侧栏与底部代理状态卡（同文件扩展，保持 private 访问）
+// MARK: - 侧栏（同文件扩展，保持 private 访问）
 
 extension MainWindowView {
   // MARK: - 侧栏
@@ -293,7 +294,7 @@ extension MainWindowView {
       }
     }
     .safeAreaInset(edge: .top, spacing: 4) { identityHeader }
-    .safeAreaInset(edge: .bottom, spacing: 4) { statusCard }
+    .safeAreaInset(edge: .bottom, spacing: 4) { StatusCardView(control: control) }
   }
 
   private var identityHeader: some View {
@@ -345,125 +346,6 @@ extension MainWindowView {
 
   private var serverLeafCount: Int {
     workflow.tree.serverLeafCount
-  }
-
-  // MARK: - 底部代理状态卡
-
-  /// 底部状态卡（issue #60）：分别呈现 agent 运行状态、系统代理实际应用、
-  /// 活动目标与模式；所有状态均来自同一 snapshot。
-  private var statusCard: some View {
-    let summary = StatusMenuModel.summary(from: control.snapshot)
-    let targetDisplay = targetPresentation(for: summary)
-    return VStack(alignment: .leading, spacing: 7) {
-      statusRow("后台代理", value: summary.status, color: runtimeStatusColor)
-      if let detail = summary.detail {
-        statusDetail(detail, color: runtimeDetailColor)
-      }
-      statusRow(
-        "系统代理设置", value: summary.systemProxyStateLabel, color: systemProxyStatusColor)
-      if let systemProxyDetail = summary.systemProxyDetail {
-        statusDetail(systemProxyDetail, color: .red)
-      }
-
-      Text(targetDisplay.text)
-        .font(.footnote.weight(.medium))
-        .lineLimit(1)
-        .truncationMode(.middle)
-        .help(targetDisplay.help)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("活动目标：\(targetDisplay.text)")
-
-      HStack(spacing: 0) {
-        Text("模式：")
-          .foregroundStyle(.secondary)
-        Text(control.snapshot.proxyMode.label)
-        if control.snapshot.proxyMode == .rule {
-          Text("·")
-          Text(control.snapshot.ruleDefaultAction.label)
-        }
-      }
-      .font(.caption)
-      .accessibilityElement(children: .combine)
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(12)
-    .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    .overlay(
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
-        .strokeBorder(.quaternary)
-    )
-    .padding(.horizontal, 12)
-    .padding(.top, 8)
-    .padding(.bottom, 12)
-  }
-
-  private func statusRow(_ label: String, value: String, color: Color) -> some View {
-    HStack(spacing: 4) {
-      Text("\(label)：")
-        .foregroundStyle(.secondary)
-      Text(value)
-        .fontWeight(.semibold)
-        .foregroundStyle(color)
-    }
-    .font(.footnote)
-    .lineLimit(1)
-    .accessibilityElement(children: .combine)
-  }
-
-  private func statusDetail(_ detail: String, color: Color) -> some View {
-    Text(detail)
-      .font(.caption)
-      .foregroundStyle(color)
-      .lineLimit(2)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .help(detail)
-  }
-
-  private func targetPresentation(for summary: StatusMenuModel.Summary) -> (
-    text: String, help: String
-  ) {
-    if let targetPath = summary.targetPath {
-      return (targetPath, "活动目标：\(targetPath)")
-    }
-    if control.snapshot.proxyMode == .direct {
-      return ("直连模式（无需服务器）", "直连模式无需选择活动目标")
-    }
-    return ("未激活", "未设置活动目标；在首页或服务器目录中激活")
-  }
-
-  private var runtimeStatusColor: Color {
-    switch control.snapshot.runtime.status {
-    case .running:
-      .green
-    case .starting:
-      .secondary
-    case .off:
-      .secondary
-    case .firewallBlocked, .requiresApproval:
-      .orange
-    case .launchFailed, .serviceFailed:
-      .red
-    }
-  }
-
-  private var runtimeDetailColor: Color {
-    if control.snapshot.runtime.failure != nil {
-      return runtimeStatusColor
-    }
-    return control.snapshot.activationFailure == nil ? .secondary : .red
-  }
-
-  private var systemProxyStatusColor: Color {
-    switch control.snapshot.systemProxyApplication {
-    case .idle:
-      .secondary
-    case .pending, .changed, .applying, .repairing, .paused:
-      .orange
-    case .applied:
-      .green
-    case .failed, .repairFailed, .clearFailed, .unreadable:
-      .red
-    }
   }
 
 }
