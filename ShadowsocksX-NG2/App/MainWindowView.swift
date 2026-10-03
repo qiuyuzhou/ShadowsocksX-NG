@@ -463,3 +463,40 @@ extension MainWindowView {
   }
 
 }
+
+// MARK: - 首页 destination 包装壳
+
+/// 首页 destination 的包装视图：承载旧版导入主动弹窗与共享错误弹窗挂载
+/// （票 #53/#54），行为委托给 HomeView。@State 生命周期绑定在 home 分支上：
+/// 离开首页即重置，回到首页时按 legacyImportState 重新判断是否主动弹窗。
+private struct WorkspaceHomeView: View {
+  @ObservedObject var workflow: CatalogWorkflow
+  @ObservedObject var control: ProxyControlWorkflow
+  let serverList: HomeServerListState
+  let clipboard: any TextClipboard
+  let onManageServers: () -> Void
+  @StateObject private var errors = ErrorAlertPresenter()
+
+  @State private var showLegacyImportSheet = false
+  @State private var didOfferLegacyImport = false
+
+  var body: some View {
+    HomeView(
+      workflow: workflow,
+      control: control,
+      serverList: serverList,
+      clipboard: clipboard,
+      onManageServers: onManageServers,
+      errors: errors
+    )
+    .sheet(isPresented: $showLegacyImportSheet) {
+      LegacyImportSheet(workflow: workflow)
+    }
+    .onAppear {
+      guard !didOfferLegacyImport, workflow.legacyImportState.shouldOffer else { return }
+      didOfferLegacyImport = true
+      showLegacyImportSheet = true
+    }
+    .presentingErrors(errors)
+  }
+}
