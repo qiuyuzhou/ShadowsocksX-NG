@@ -21,24 +21,27 @@ private enum WorkspaceSheet: String, Identifiable {
 /// 主窗口外壳（地图 #52，票 #53）：NavigationSplitView 侧栏承载五项导航与
 /// 底部常驻代理状态卡；详情区按 route destination 承载各分区视图。分区名即
 /// 窗口标题（navigationTitle 绑定 route destination，ADR 0016 的 scene 版
-/// 窗口原生呈现）；订阅/诊断的页级动作经 .toolbar 桥接进窗口工具栏右端
-/// （票 #56/#58 的槽位仅呈现位置变化），设置的表单级提交动作在其视图内容
-/// 顶部（见 SettingsView）。路由状态仍由 WorkspaceRoute 持有；代理状态卡的
+/// 窗口原生呈现）；页级动作由各分区视图自挂 toolbar（呈现于窗口工具栏右
+/// 端，与服务器分区同法，票 #56/#58 的槽位仅呈现位置），设置的表单级提交
+/// 动作在其视图内容顶部（见 SettingsView）。路由状态仍由 WorkspaceRoute
+/// 持有；代理状态卡的
 /// 状态、摘要与配色政策全部经 StatusCardModel 从代理控制工作流的整体
 /// snapshot 派生（issue #47，与状态菜单同口径），本壳只挂 StatusCardView；
 /// 服务器分区的活动目标标记同源（snapshot.activeTarget）。
 struct MainWindowView: View {
-  @ObservedObject var rulesWorkflow: RulesWorkflow
+  /// 纯转发的分区工作流与控制器：壳 body 不读它们（分区视图自行观察），
+  /// 用 let 转发，壳不重复订阅它们的发布。
+  let rulesWorkflow: RulesWorkflow
   @ObservedObject var route: WorkspaceRoute
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
-  @ObservedObject var diagnostics: DiagnosticsWorkflow
-  @ObservedObject var settingsWorkflow: SettingsWorkflow
-  @ObservedObject var loginController: LaunchAtLoginController
-  @ObservedObject var silentLaunch: SilentLaunchController
+  let diagnostics: DiagnosticsWorkflow
+  let settingsWorkflow: SettingsWorkflow
+  let loginController: LaunchAtLoginController
+  let silentLaunch: SilentLaunchController
   /// 目录树折叠状态：组合根持有的长寿命对象，跨 destination 切换存续；服务器
   /// 侧栏使用（见 CatalogExpansionState）；首页独立保存浏览状态。
-  @ObservedObject var expansion: CatalogExpansionState
+  let expansion: CatalogExpansionState
   let clipboard: any TextClipboard
   let diagnosticReportExporter: any DiagnosticReportExporter
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
@@ -54,10 +57,8 @@ struct MainWindowView: View {
   /// 初值须与 WorkspaceRoute 的初始 destination 对齐，否则首帧侧栏无高亮行。
   @State private var sidebarSelection: WorkspaceDestination? = WorkspaceRoute.initialDestination
   @State private var selection: NodeID?
-  @State private var ruleDraft: CustomRuleDraft?
-  /// 全局添加菜单打开的表单，以及诊断导出由窗口壳持有。
+  /// 全局添加菜单打开的表单由窗口壳持有。
   @State private var presentedWorkspaceSheet: WorkspaceSheet?
-  @State private var exportedDiagnosticsPath: String?
   @StateObject private var shellActionErrors = ErrorAlertPresenter()
 
   var body: some View {
@@ -77,11 +78,6 @@ struct MainWindowView: View {
     }
     .navigationTitle(route.destination.label)
     .frame(minWidth: 920, minHeight: 580)
-    .toolbar {
-      ToolbarItemGroup(placement: .primaryAction) {
-        destinationActions
-      }
-    }
     .sheet(item: $presentedWorkspaceSheet) { sheet in
       switch sheet {
       case .importURL:
@@ -96,26 +92,10 @@ struct MainWindowView: View {
         AddSubscriptionSheet(workflow: workflow, errors: shellActionErrors)
       }
     }
-    .sheet(item: $ruleDraft) { draft in
-      CustomRuleEditorSheet(workflow: rulesWorkflow, draft: draft)
-    }
-    .onChange(of: route.destination) { _, destination in
-      if destination != .rules { ruleDraft = nil }
-    }
     .presentingErrors(shellActionErrors)
-    .alert(
-      "诊断已导出",
-      isPresented: Binding(
-        get: { exportedDiagnosticsPath != nil },
-        set: { if !$0 { exportedDiagnosticsPath = nil } })
-    ) {
-      Button("好", role: .cancel) {}
-    } message: {
-      Text(exportedDiagnosticsPath ?? "")
-    }
   }
 
-  // MARK: - 分区动作槽位
+  // MARK: - 全局添加菜单
 
   private var addMenu: some View {
     Menu {
@@ -140,57 +120,6 @@ struct MainWindowView: View {
   private func presentWorkspaceSheet(_ sheet: WorkspaceSheet) {
     route.navigate(to: sheet.destination)
     presentedWorkspaceSheet = sheet
-  }
-
-  /// 分区动作（票 #53/#56/#57）：页级动作随 destination 切换，经工具栏桥接
-  /// 出现在窗口工具栏右端；首页/服务器无页级动作。例外：设置的保存/恢复
-  /// 默认是表单级提交动作，由 SettingsView 内容顶部行承载（动作与表单同置，
-  /// 工具栏呈现效果差）。sheet/alert 呈现状态仍由壳持有，本处只负责动作的
-  /// 呈现。
-  @ViewBuilder
-  private var destinationActions: some View {
-    switch route.destination {
-    case .subscriptions:
-      HStack(spacing: 8) {
-        if !workflow.refreshingSubscriptionIDs.isEmpty {
-          ProgressView()
-            .controlSize(.small)
-        }
-        Button("更新全部", systemImage: "arrow.triangle.2.circlepath") {
-          Task { await workflow.refreshAllSubscriptions() }
-        }
-        .disabled(workflow.subscriptions.isEmpty)
-      }
-    case .rules:
-      Button(RulesCopy.text("新增规则"), systemImage: "plus") {
-        ruleDraft = rulesWorkflow.makeCustomRuleDraft()
-      }.disabled(!rulesWorkflow.snapshot.isComplete)
-    case .diagnostics:
-      Button("导出诊断…", systemImage: "square.and.arrow.up") {
-        exportDiagnostics()
-      }
-    case .home, .servers, .settings:
-      EmptyView()
-    }
-  }
-
-  /// 诊断导出（票 #58）：沿用 DiagnosticReportExportAction 既有入口；文件写
-  /// 入成功后才登记导出完成事件。
-  private func exportDiagnostics() {
-    switch DiagnosticReportExportAction(
-      diagnostics: diagnostics, exporter: diagnosticReportExporter
-    ).perform()
-    {
-    case .preparationFailed(let failure):
-      shellActionErrors.present(failure)
-    case .cancelled:
-      break
-    case .saved(let url):
-      diagnostics.noteExportCompleted()
-      exportedDiagnosticsPath = url.path
-    case .exportFailed(let failure):
-      shellActionErrors.present(failure)
-    }
   }
 
   // MARK: - 分区承载
@@ -220,9 +149,7 @@ struct MainWindowView: View {
         workflow: workflow,
         onNodesRemoved: clearSelectionIfInvalidated)
     case .rules:
-      RulesView(
-        workflow: rulesWorkflow,
-        onEditRule: { ruleDraft = rulesWorkflow.makeCustomRuleDraft(editing: $0) })
+      RulesView(workflow: rulesWorkflow)
     case .settings:
       SettingsView(
         workflow: settingsWorkflow, loginController: loginController,
@@ -232,7 +159,8 @@ struct MainWindowView: View {
     case .diagnostics:
       DiagnosticsView(
         diagnostics: diagnostics,
-        clipboard: clipboard)
+        clipboard: clipboard,
+        exporter: diagnosticReportExporter)
     }
   }
 

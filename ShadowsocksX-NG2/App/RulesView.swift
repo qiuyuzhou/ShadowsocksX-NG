@@ -4,7 +4,9 @@ import SwiftUI
 struct RulesView: View {
   @ObservedObject var workflow: RulesWorkflow
   @Environment(\.openWindow) private var openWindow
-  var onEditRule: (UUID) -> Void
+  /// 规则编辑草稿与编辑 sheet 由本页自持：@State 生命周期绑定在 rules
+  /// destination 分支上，离开分区即丢弃（与壳级清稿等价）。
+  @State private var ruleDraft: CustomRuleDraft?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -44,6 +46,17 @@ struct RulesView: View {
     }
     .task {
       if workflow.snapshot.version.isEmpty { await workflow.refresh() }
+    }
+    .toolbar {
+      ToolbarItem(placement: .primaryAction) {
+        Button(RulesCopy.text("新增规则"), systemImage: "plus") {
+          ruleDraft = workflow.makeCustomRuleDraft()
+        }
+        .disabled(!workflow.snapshot.isComplete)
+      }
+    }
+    .sheet(item: $ruleDraft) { draft in
+      CustomRuleEditorSheet(workflow: workflow, draft: draft)
     }
   }
 
@@ -149,10 +162,12 @@ struct RulesView: View {
         .width(min: 80, ideal: 110)
       TableColumn("") { row in
         if let id = row.customIDs.first {
-          Button(RulesCopy.text("编辑规则"), systemImage: "pencil") { onEditRule(id) }
-            .labelStyle(.iconOnly)
-            .help(RulesCopy.text("编辑规则"))
-            .disabled(!workflow.snapshot.isComplete)
+          Button(RulesCopy.text("编辑规则"), systemImage: "pencil") {
+            ruleDraft = workflow.makeCustomRuleDraft(editing: id)
+          }
+          .labelStyle(.iconOnly)
+          .help(RulesCopy.text("编辑规则"))
+          .disabled(!workflow.snapshot.isComplete)
         }
       }.width(30)
     }.frame(minWidth: 0, maxWidth: .infinity)

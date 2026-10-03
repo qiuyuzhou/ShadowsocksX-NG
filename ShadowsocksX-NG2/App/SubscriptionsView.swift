@@ -2,9 +2,10 @@ import SwiftUI
 
 /// 订阅分区（spec #21 D11，issue #35/#41，地图 #52 票 #56）：每订阅一张卡片
 /// （图标 + 名称 + 「HTTPS 订阅地址已隐藏」+ 状态徽标 + 更新/重试 + 「…」菜单 +
-/// 三列元数据 + 脱敏说明行），失败卡警告色描边。添加订阅通过窗口工具栏全局
-/// 「添加」菜单进入，更新全部仍在本页工具栏。卡片数据来自订阅 projection
-/// （非敏感）；结构化刷新状态在呈现层本地化（story 42）。
+/// 三列元数据 + 脱敏说明行），失败卡警告色描边。添加订阅通过窗口壳侧栏的
+/// 「添加」菜单进入；「更新全部」由本页自挂工具栏（呈现于窗口工具栏右端，
+/// 与服务器分区同法）。卡片数据来自订阅 projection（非敏感）；结构化刷新
+/// 状态在呈现层本地化（story 42）。
 struct SubscriptionsView: View {
   @ObservedObject var workflow: CatalogWorkflow
   /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
@@ -62,6 +63,20 @@ struct SubscriptionsView: View {
       )
     }
     .presentingErrors(errors)
+    .toolbar {
+      ToolbarItem(placement: .primaryAction) {
+        HStack(spacing: 8) {
+          if !workflow.refreshingSubscriptionIDs.isEmpty {
+            ProgressView()
+              .controlSize(.small)
+          }
+          Button("更新全部", systemImage: "arrow.triangle.2.circlepath") {
+            Task { await workflow.refreshAllSubscriptions() }
+          }
+          .disabled(workflow.subscriptions.isEmpty)
+        }
+      }
+    }
   }
 
   private func commitDelete() {
