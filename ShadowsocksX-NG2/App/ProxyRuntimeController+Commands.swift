@@ -57,13 +57,7 @@ extension ProxyRuntimeController {
     }
     var next = settings
     next.agentEnabled = enabled
-    do {
-      try settingsStore.save(next)
-    } catch {
-      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-      state = .serviceFailed(.persistence)
-      return
-    }
+    guard persistSettings(next) else { return }
     settings = next
     if enabled {
       await convergeAgent()
@@ -103,13 +97,7 @@ extension ProxyRuntimeController {
     guard enabled != settings.systemProxyEnabled else { return }
     var next = settings
     next.systemProxyEnabled = enabled
-    do {
-      try settingsStore.save(next)
-    } catch {
-      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-      state = .serviceFailed(.persistence)
-      return
-    }
+    guard persistSettings(next) else { return }
     settings = next
     if enabled {
       systemProxyInitialApplyPending = true
@@ -139,14 +127,7 @@ extension ProxyRuntimeController {
       return
     }
     let catalog = catalogSnapshotReader.catalogSnapshot
-    switch reexpand(in: catalog) {
-    case .deployed(let configuration):
-      await deploy(configuration.document)
-    case .clearedAndStopped(let failure):
-      await handleCleared(failure)
-    case nil:
-      await deployListeningWithoutTarget()
-    }
+    await convergeToReexpanded(catalog)
     systemProxyStartupInProgress = false
     if settings.systemProxyEnabled {
       lastDesiredSystemProxyConfiguration = desiredSystemProxyConfiguration
@@ -162,15 +143,7 @@ extension ProxyRuntimeController {
   /// Agent 意图开启的收敛：注册态不是事实来源，意图才是——未注册也会注册，
   /// 已注册则重校验目标并部署。偏好重置后也走此路径，把运行时收敛到出厂设置。
   func convergeAgent() async {
-    let catalog = catalogSnapshotReader.catalogSnapshot
-    switch reexpand(in: catalog) {
-    case .deployed(let configuration):
-      await deploy(configuration.document)
-    case .clearedAndStopped(let failure):
-      await handleCleared(failure)
-    case nil:
-      await deployListeningWithoutTarget()
-    }
+    await convergeToReexpanded(catalogSnapshotReader.catalogSnapshot)
   }
 
   /// Agent 意图关闭的收敛（issue #71）：只停止本地监听，不做系统代理清理。
@@ -203,38 +176,41 @@ extension ProxyRuntimeController {
     await deploy(document)
   }
 
-  /// 把「运行定义档」意图推到运行时：计划动作 → 顺序执行 → 端点健康呈现。
+  /// 把「运行定义档」意图推到运行时：派生文档 → 收敛脊柱 apply（幂等跳过、
+  /// 计划执行、健康门）。
   @discardableResult
-  func deploy(_ sourceDocument: SslocalRuntimeDocument) async -> Bool {
+  func deploy(_ sourceDocument: SslocalRuntimeDocument) async -> ConvergenceResult {
     if listenSettingsUnreadable || settingsUnreadable {
       await refuseDeployForUnreadableListenSettings()
-      return false
+      return .failed
     }
     let contract: PreparedRuntimeContract
     do {
       contract = try PreparedRuntimeContract(await runtimeDocument(sourceDocument, for: proxyMode))
     } catch RulePreparationError.superseded {
-      return false
+      return .superseded
     } catch {
       // 规则快照缺失/损坏：不静默退化成全局（issue #63 AC4）。
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
       state = .serviceFailed(.runtimeFile)
-      return false
+      return .failed
     }
     return await deployPrepared(contract, preparation: runtimePreparationGeneration)
   }
 
-  func deployPrepared(_ contract: PreparedRuntimeContract, preparation: Int) async -> Bool {
-    guard preparation == runtimePreparationGeneration else { return false }
+  @discardableResult
+  func deployPrepared(
+    _ contract: PreparedRuntimeContract, preparation: Int
+  ) async -> ConvergenceResult {
+    guard preparation == runtimePreparationGeneration else { return .superseded }
     let document = contract.document
     var ticket = convergenceTicket()
-    let result = await apply(
+    return await apply(
       document, ticket: &ticket, checking: [.preparation],
       requiresReceipt: document.aclRuntime != nil,
       convergeProxyOnSuccess: true,
       preserveProxyOnFailure: false,
       proxyTail: .none, rollback: nil)
-    return result != .failed
   }
 
   /// D8「任何路径不静默改端口」：监听设置不可读时以占位出厂端口部署等于

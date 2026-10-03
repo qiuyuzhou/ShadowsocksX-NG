@@ -61,9 +61,10 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
     "MainApp.swift",
     "CatalogCommitCoordinator.swift",
     "ProxyRuntimeController.swift",
-    // 控制器按命令面/设置与目录同步/系统代理门禁/事实投影分文件（同属运行时适配器）。
+    // 控制器按命令面/设置与目录同步/收敛脊柱/系统代理门禁/事实投影分文件（同属运行时适配器）。
     "ProxyRuntimeController+Commands.swift",
     "ProxyRuntimeController+SettingsSync.swift",
+    "ProxyRuntimeController+Convergence.swift",
     "ProxyRuntimeController+SystemProxyGate.swift",
     "ProxyRuntimeController+Facts.swift",
     "SystemProxyHelperService.swift",

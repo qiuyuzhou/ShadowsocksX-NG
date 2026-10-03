@@ -41,13 +41,7 @@ extension ProxyRuntimeController {
     var next = settings
     next.preferredMode = mode.kind
     next.ruleDefaultAction = ruleDefaultAction
-    do {
-      try settingsStore.save(next)
-    } catch {
-      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-      state = .serviceFailed(.persistence)
-      return
-    }
+    guard persistSettings(next) else { return }
     settings = next
     proxyMode = mode
     modeChangeGeneration += 1
