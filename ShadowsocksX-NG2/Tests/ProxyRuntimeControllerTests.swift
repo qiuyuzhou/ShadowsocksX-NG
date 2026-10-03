@@ -102,6 +102,11 @@ class ProxyRuntimeControllerTests: XCTestCase {
     return (catalog, server)
   }
 
+  /// Subclasses can choose small rule inputs without changing packaged-data suites.
+  func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(bundle: AppArtifact.bundle)
+  }
+
   func makeController(
     probe: EndpointProbing,
     agentStatus: LaunchAgentStatus = .notRegistered,
@@ -153,7 +158,7 @@ class ProxyRuntimeControllerTests: XCTestCase {
       customRuleStore: customRuleStore
         ?? CustomRuleStore(fileURL: runtime.directory.appendingPathComponent("custom-rules.json")),
       appBundle: AppArtifact.bundle,
-      ruleSnapshots: ruleSnapshots,
+      ruleSnapshots: ruleSnapshots ?? makeDefaultRuleSnapshots(),
       settingsRestore: restored,
       agent: agent,
       probe: probe,

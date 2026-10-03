@@ -6,6 +6,10 @@ import XCTest
 /// Agent 开关与系统代理开关的拆分语义（issue #60）：与既有开关用例同文件
 /// 追加（Xcode 测试扫描限制），扩展持有独立用例组。
 final class ProxyRuntimeAgentAndSystemProxyTests: ProxyRuntimeControllerTests {
+  override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
+    BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot)
+  }
+
   func testEnableWithoutActiveTargetDeploysEmptyServerListening() async throws {
     _ = try makeSeededCatalog()
     let controller = makeController(

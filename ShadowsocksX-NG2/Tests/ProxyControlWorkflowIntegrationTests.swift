@@ -74,7 +74,7 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
       settingsStore: settingsStore ?? InMemoryProxySettingsStore(),
       appBundle: AppArtifact.bundle,
       // Keep real ACL compilation; corpus coverage belongs to the packaged-rule tests.
-      ruleSnapshots: BuiltinRuleSnapshots(loader: Self.controlFlowRuleSnapshot),
+      ruleSnapshots: BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot),
       settingsRestore: RestoredProxySettings(
         settings: settings ?? ProxySettings(listen: ActivationFixture.listen),
         unreadableError: nil),
@@ -305,35 +305,4 @@ final class ProxyControlWorkflowIntegrationTests: XCTestCase {
     XCTAssertNil(summary.systemProxyDetail)
   }
 
-}
-
-extension ProxyControlWorkflowIntegrationTests {
-  fileprivate nonisolated static func controlFlowRuleSnapshot(_ source: RulesSource) throws
-    -> RuleSnapshot
-  {
-    switch source {
-    case .geolocationCN:
-      return rulesFixture(
-        source,
-        rules: [
-          ProxyRule(action: .direct, match: .domainExact("direct.example")),
-          ProxyRule(action: .direct, match: .domainSuffix("internal.example")),
-        ])
-    case .chinaIPv4:
-      return rulesFixture(
-        source,
-        rules: [
-          ProxyRule(action: .direct, match: .ipv4CIDR("1.0.0.0/24"))
-        ])
-    case .gfwlist:
-      return rulesFixture(
-        source,
-        rules: [
-          ProxyRule(action: .proxy, match: .domainSuffix("proxy.example")),
-          ProxyRule(action: .direct, match: .domainExact("safe.proxy.example")),
-        ])
-    case .custom, .fixed:
-      throw RuleSnapshotError.missing
-    }
-  }
 }
