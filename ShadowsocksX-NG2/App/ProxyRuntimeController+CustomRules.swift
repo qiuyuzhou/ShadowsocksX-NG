@@ -65,8 +65,7 @@ extension ProxyRuntimeController {
           Set(RuleCoverage.fixedLocalMatches.map { RuleIdentity(action: .direct, match: $0) }))
     else { return .invalidDocument(detail: "Fixed local policy cannot be disabled") }
     let previous: CustomRuleDocument
-    let snapshot = ModeTransitionSnapshotForRules(
-      document: lastDocument ?? runtimeFileStore.loadDocument(), state: state)
+    let stateAtCapture = state
     do {
       previous = try ruleDocuments.load()
       try ruleDocuments.save(document)
@@ -74,19 +73,24 @@ extension ProxyRuntimeController {
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
       return .persistenceFailed
     }
-    return await deployCustomRuleChange(previousRules: previous, snapshot: snapshot)
+    return await deployCustomRuleChange(previousRules: previous, stateAtCapture: stateAtCapture)
   }
 
   /// 规则内容变化后重编译 ACL；非规则模式的 ACL 不含自定义规则，无变化即不重启。
   private func deployCustomRuleChange(
     previousRules: CustomRuleDocument,
-    snapshot: ModeTransitionSnapshotForRules
+    stateAtCapture: AgentRunState
   ) async -> CustomRuleUpdateOutcome {
     guard proxyMode == .rule, settings.agentEnabled, state != .off,
       let currentDocument = lastDocument ?? runtimeFileStore.loadDocument()
     else {
       return .saved
     }
+    let plan = RollbackPlan(
+      document: currentDocument, state: stateAtCapture,
+      payload: .customRules(previousRules),
+      systemProxyIntentAtCapture: settings.systemProxyEnabled,
+      convergeProxyOnIntentChange: false)
 
     let nextDocument: SslocalRuntimeDocument
     do {
@@ -103,37 +107,25 @@ extension ProxyRuntimeController {
     modeChangeGeneration += 1
     var ticket = convergenceTicket()
     let checks: ConvergenceTicket.Checks = [.flow, .mode, .preparation, .agentEnabled]
-    let contract = try? PreparedRuntimeContract(nextDocument)
-    lastDocument = nextDocument
-    state = .starting
-    let execution = await execute(
-      .run(nextDocument), document: nextDocument, preparedContract: contract)
-    ticket.flow = execution.flow
-    guard convergenceIsCurrent(ticket, checking: checks) else {
-      return .runtimeChanged(rulesRestored: false)
-    }
-    guard execution.succeeded else {
-      return await restoreCustomRules(previousRules, snapshot: snapshot, ticket: ticket)
-    }
-
-    let healthy = await presentLaunchHealth(
-      nextDocument,
+    let result = await apply(
+      nextDocument, ticket: &ticket, checking: checks,
       requiresReceipt: true,
       convergeProxyOnSuccess: false,
-      preserveProxyOnFailure: true, preparedContract: contract)
-    guard convergenceIsCurrent(ticket, checking: checks) else {
+      preserveProxyOnFailure: true,
+      proxyTail: .converge, rollback: plan)
+    switch result {
+    case .unchanged:
+      return .runtimeUnchanged
+    case .superseded:
       return .runtimeChanged(rulesRestored: false)
+    case .failed:
+      return await restoreRules(plan, ticket: &ticket, checking: checks)
+    case .applied:
+      guard convergenceIsCurrent(ticket, checking: checks) else {
+        return .runtimeChanged(rulesRestored: false)
+      }
+      return .applied
     }
-    guard healthy else {
-      return await restoreCustomRules(previousRules, snapshot: snapshot, ticket: ticket)
-    }
-
-    lastDocument = nextDocument
-    await convergeSystemProxy()
-    guard convergenceIsCurrent(ticket, checking: checks) else {
-      return .runtimeChanged(rulesRestored: false)
-    }
-    return .applied
   }
 
   private func restoreRulesAfterPreparationFailure(
@@ -162,63 +154,23 @@ extension ProxyRuntimeController {
     return (accepted, hardRejected)
   }
 
-  private func restoreCustomRules(
-    _ previousRules: CustomRuleDocument,
-    snapshot: ModeTransitionSnapshotForRules,
-    ticket: ConvergenceTicket
+  /// 规则提交的失败回滚：整体恢复旧规则与旧运行时，按恢复报告映射结果。
+  private func restoreRules(
+    _ plan: RollbackPlan, ticket: inout ConvergenceTicket,
+    checking: ConvergenceTicket.Checks
   ) async -> CustomRuleUpdateOutcome {
-    var ticket = ticket
+    let report = await restore(plan, ticket: &ticket, checking: checking)
+    guard report.runtimeHealthy != nil else {
+      return .runtimeChanged(rulesRestored: report.payloadFailureDescription == nil)
+    }
     var failures: [String] = []
-    do {
-      try ruleDocuments.save(previousRules)
-    } catch {
-      failures.append(String(describing: error))
-      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-    }
-    let rulesRestored = failures.isEmpty
-    guard let previousDocument = snapshot.document else {
-      return failures.isEmpty
-        ? .rolledBack
-        : .recoveryFailed(detail: failures.joined(separator: "; "), rulesRestored: rulesRestored)
-    }
-    guard settings.agentEnabled else {
-      return .runtimeChanged(rulesRestored: rulesRestored)
-    }
-    let checks: ConvergenceTicket.Checks = [.flow, .mode, .preparation, .agentEnabled]
-    let contract = try? PreparedRuntimeContract(previousDocument)
-    lastDocument = previousDocument
-    state = .starting
-    let execution = await execute(
-      .run(previousDocument), document: previousDocument, preparedContract: contract)
-    ticket.flow = execution.flow
-    guard convergenceIsCurrent(ticket, checking: checks) else {
-      return .runtimeChanged(rulesRestored: rulesRestored)
-    }
-    guard execution.succeeded else {
-      failures.append(String(describing: state))
-      await holdSystemProxyIntent()
-      return .recoveryFailed(detail: failures.joined(separator: "; "), rulesRestored: rulesRestored)
-    }
-    let healthy = await presentLaunchHealth(
-      previousDocument, requiresReceipt: true, convergeProxyOnSuccess: false,
-      preparedContract: contract)
-    guard convergenceIsCurrent(ticket, checking: checks) else {
-      return .runtimeChanged(rulesRestored: rulesRestored)
-    }
-    if !healthy {
-      failures.append(String(describing: state))
-      await holdSystemProxyIntent()
-    } else {
-      state = snapshot.state
-    }
+    if let description = report.payloadFailureDescription { failures.append(description) }
+    if report.runtimeHealthy == false { failures.append(String(describing: state)) }
     return failures.isEmpty
       ? .rolledBack
-      : .recoveryFailed(detail: failures.joined(separator: "; "), rulesRestored: rulesRestored)
-  }
-
-  private struct ModeTransitionSnapshotForRules {
-    let document: SslocalRuntimeDocument?
-    let state: AgentRunState
+      : .recoveryFailed(
+        detail: failures.joined(separator: "; "),
+        rulesRestored: report.payloadFailureDescription == nil)
   }
 
   /// 自定义规则安全摘要（issue #66 AC5）：数量 + 内容版本，不含原始域名。

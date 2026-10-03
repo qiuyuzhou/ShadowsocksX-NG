@@ -227,13 +227,14 @@ extension ProxyRuntimeController {
   func deployPrepared(_ contract: PreparedRuntimeContract, preparation: Int) async -> Bool {
     guard preparation == runtimePreparationGeneration else { return false }
     let document = contract.document
-    lastDocument = document
-    let execution = await execute(.run(document), document: document, preparedContract: contract)
-    guard execution.succeeded else { return false }
-    guard preparation == runtimePreparationGeneration else { return false }
-    state = .starting
-    return await presentLaunchHealth(
-      document, requiresReceipt: document.aclRuntime != nil, preparedContract: contract)
+    var ticket = convergenceTicket()
+    let result = await apply(
+      document, ticket: &ticket, checking: [.preparation],
+      requiresReceipt: document.aclRuntime != nil,
+      convergeProxyOnSuccess: true,
+      preserveProxyOnFailure: false,
+      proxyTail: .none, rollback: nil)
+    return result != .failed
   }
 
   /// D8「任何路径不静默改端口」：监听设置不可读时以占位出厂端口部署等于

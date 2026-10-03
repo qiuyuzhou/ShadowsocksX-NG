@@ -171,168 +171,43 @@ extension ProxyRuntimeController {
     snapshot: ModeTransitionSnapshot,
     ticket: ConvergenceTicket
   ) async {
-    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
-      return
-    }
-    let contract = try? PreparedRuntimeContract(document)
-    lastDocument = document
-    state = .starting
-    let execution = await execute(.run(document), document: document, preparedContract: contract)
-    guard execution.succeeded else {
-      guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
-        return
-      }
-      await restoreModeTransition(snapshot: snapshot, ticket: ticket)
-      return
-    }
-
-    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
-      return
-    }
-    let healthy = await presentLaunchHealth(
-      document,
+    var ticket = ticket
+    // 两个调用点都经 resolvingDocument 补齐文档；防御性解包失败即无事可做。
+    guard let rollbackDocument = snapshot.document else { return }
+    let plan = RollbackPlan(
+      document: rollbackDocument, state: snapshot.state,
+      payload: .modeTransition(
+        mode: snapshot.mode, ruleDefaultAction: snapshot.settings.ruleDefaultAction),
+      systemProxyIntentAtCapture: snapshot.settings.systemProxyEnabled,
+      convergeProxyOnIntentChange: true)
+    let result = await apply(
+      document, ticket: &ticket, checking: [.mode, .preparation],
       requiresReceipt: true,
       convergeProxyOnSuccess: false,
-      preserveProxyOnFailure: true, preparedContract: contract)
-    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
-      return
-    }
-    guard healthy else {
+      preserveProxyOnFailure: true,
+      proxyTail: .forceApply, rollback: plan)
+    if case .failed = result {
       await restoreModeTransition(snapshot: snapshot, ticket: ticket)
-      return
     }
-
-    lastDocument = document
-    await convergeSystemProxy(forceApply: true)
   }
 
+  /// mode 切换的失败回滚：按快照整体恢复；载荷持久化失败以 serviceFailed
+  /// 呈现（仅在旧运行时恢复到健康时）。
   private func restoreModeTransition(
     snapshot: ModeTransitionSnapshot,
     ticket: ConvergenceTicket
   ) async {
-    // 两个调用点都经 resolvingDocument 补齐文档；防御性解包失败即无事可做。
+    var ticket = ticket
     guard let previousDocument = snapshot.document else { return }
-    let restoredSettings = restoredSettings(for: snapshot)
-    var persistenceFailed = false
-    do {
-      try settingsStore.save(restoredSettings)
-    } catch {
-      persistenceFailed = true
-      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+    let plan = RollbackPlan(
+      document: previousDocument, state: snapshot.state,
+      payload: .modeTransition(
+        mode: snapshot.mode, ruleDefaultAction: snapshot.settings.ruleDefaultAction),
+      systemProxyIntentAtCapture: snapshot.settings.systemProxyEnabled,
+      convergeProxyOnIntentChange: true)
+    let report = await restore(plan, ticket: &ticket, checking: [.mode, .preparation])
+    if report.runtimeHealthy == true, report.payloadFailureDescription != nil {
+      state = .serviceFailed(.persistence)
     }
-    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
-      return
-    }
-    settings = restoredSettings
-    proxyMode = snapshot.mode
-    lastDocument = previousDocument
-
-    let contract = try? PreparedRuntimeContract(previousDocument)
-    guard
-      await restoreRuntimeDocument(
-        previousDocument, ticket: ticket, preparedContract: contract)
-    else { return }
-
-    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
-      return
-    }
-    state = .starting
-    let restored = await presentLaunchHealth(
-      previousDocument,
-      requiresReceipt: true,
-      convergeProxyOnSuccess: false, preparedContract: contract)
-    guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
-      return
-    }
-    guard restored else {
-      await holdSystemProxyIntent()
-      return
-    }
-
-    if settings.systemProxyEnabled != snapshot.settings.systemProxyEnabled {
-      await convergeSystemProxy(forceApply: true)
-    } else {
-      state = snapshot.state
-    }
-    if persistenceFailed { state = .serviceFailed(.persistence) }
-  }
-
-  /// 按快照还原偏好（模式与子选项回退，其余字段保留当前值）。
-  private func restoredSettings(for snapshot: ModeTransitionSnapshot) -> ProxySettings {
-    var restored = settings
-    restored.preferredMode = snapshot.mode.kind
-    restored.ruleDefaultAction = snapshot.settings.ruleDefaultAction
-    return restored
-  }
-
-  /// 把运行时文件与包装进程恢复到旧文档；文件写入或进程拉起失败即撤下系统
-  /// 代理并返回 false（健康检查由调用方继续）。
-  private func restoreRuntimeDocument(
-    _ previousDocument: SslocalRuntimeDocument,
-    ticket: ConvergenceTicket, preparedContract: PreparedRuntimeContract?
-  ) async -> Bool {
-    let expectedDigest = preparedContract?.sha256 ?? previousDocument.deploymentSHA256
-    let currentDocument = runtimeFileStore.loadDocument()
-    let receipt = runtimeFileStore.readRuntimeReceipt()
-    let wrapper = wrapperState()
-    let previousInstanceIsRunning: Bool
-    switch wrapper {
-    case .running(let pid):
-      previousInstanceIsRunning =
-        receipt?.processID == pid && receipt?.contractSHA256 == expectedDigest
-    case .notRunning:
-      previousInstanceIsRunning = false
-    }
-    if currentDocument != previousDocument || !previousInstanceIsRunning {
-      if currentDocument != previousDocument {
-        do {
-          if let preparedContract {
-            try runtimeFileStore.write(preparedContract)
-          } else {
-            try runtimeFileStore.write(previousDocument)
-          }
-        } catch {
-          state = .serviceFailed(.runtimeFile)
-          await holdSystemProxyIntent()
-          return false
-        }
-      }
-      if !previousInstanceIsRunning {
-        guard
-          await relaunchPreviousInstance(
-            wrapper: wrapper, previousDocument: previousDocument, ticket: ticket,
-            preparedContract: preparedContract)
-        else { return false }
-      }
-    }
-    return true
-  }
-
-  /// 旧实例未在运行时按需拉起：在跑的 wrapper 用 SIGUSR1 唤醒重读，否则重新执行。
-  private func relaunchPreviousInstance(
-    wrapper: WrapperProcessState,
-    previousDocument: SslocalRuntimeDocument,
-    ticket: ConvergenceTicket, preparedContract: PreparedRuntimeContract?
-  ) async -> Bool {
-    switch wrapper {
-    case .running(let pid):
-      guard sendSignal(pid, SIGUSR1) == 0 else {
-        state = .serviceFailed(.agent)
-        await holdSystemProxyIntent()
-        return false
-      }
-    case .notRunning:
-      let execution = await execute(
-        .run(previousDocument), document: previousDocument,
-        preparedContract: preparedContract)
-      guard execution.succeeded else {
-        guard convergenceIsCurrent(ticket, checking: [.mode, .preparation]) else {
-          return false
-        }
-        await holdSystemProxyIntent()
-        return false
-      }
-    }
-    return true
   }
 }
