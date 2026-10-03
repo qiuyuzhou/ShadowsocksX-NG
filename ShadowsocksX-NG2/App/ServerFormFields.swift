@@ -132,6 +132,8 @@ struct ServerFormFieldsGrid: View {
             }
           }
           .textFieldStyle(.roundedBorder)
+          .textContentType(nil)
+          .autocorrectionDisabled()
           .disabled(!isEditable)
           Button {
             fields.showPassword.toggle()
