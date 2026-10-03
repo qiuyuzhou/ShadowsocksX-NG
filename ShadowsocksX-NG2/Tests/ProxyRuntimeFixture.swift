@@ -248,6 +248,76 @@ enum ProxyRuntimeFixture {
       return outcome
     }
   }
+
+  /// 可暂停探测替身：arm 后的下一次探测挂起在信号量上，直到测试放行——
+  /// 在启动健康门的 await 窗口内确定性插入交错命令（探测运行在 detached
+  /// 线程，不占主 actor）。放行后恢复直通。
+  final class BlockingProbe: EndpointProbing, @unchecked Sendable {
+    private let lock = NSLock()
+    private var gate: DispatchSemaphore?
+    private var started: XCTestExpectation?
+
+    func arm(started: XCTestExpectation) {
+      lock.lock()
+      defer { lock.unlock() }
+      precondition(gate == nil, "上一次 arm 尚未 release")
+      gate = DispatchSemaphore(value: 0)
+      self.started = started
+    }
+
+    func release() {
+      lock.lock()
+      let gate = self.gate
+      self.gate = nil
+      self.started = nil
+      lock.unlock()
+      gate?.signal()
+    }
+
+    func probe(host: String, port: Int, timeout: TimeInterval) -> EndpointHealthProbe.Outcome {
+      lock.lock()
+      let gate = self.gate
+      let started = self.started
+      lock.unlock()
+      if let gate {
+        started?.fulfill()
+        gate.wait()
+      }
+      return .reachable
+    }
+  }
+
+  /// 按调用序返回预设结果、并可在第 N 次调用处挂起的防火墙检查替身：
+  /// 钉住「轮询 await 恢复后代际已推进时不得再写状态」的回归。
+  final class BlockingFirewallChecker: FirewallStatusChecking, @unchecked Sendable {
+    private let lock = NSLock()
+    private var callCount = 0
+    private let outcomes: [FirewallBlockStatus]
+    private let blockOnCall: Int
+    private let started: XCTestExpectation
+    private let gate = DispatchSemaphore(value: 0)
+
+    init(outcomes: [FirewallBlockStatus], blockOnCall: Int, started: XCTestExpectation) {
+      precondition(!outcomes.isEmpty)
+      self.outcomes = outcomes
+      self.blockOnCall = blockOnCall
+      self.started = started
+    }
+
+    func release() { gate.signal() }
+
+    func status(for executableURL: URL) -> FirewallBlockStatus {
+      lock.lock()
+      callCount += 1
+      let call = callCount
+      lock.unlock()
+      if call == blockOnCall {
+        started.fulfill()
+        gate.wait()
+      }
+      return outcomes[min(call, outcomes.count) - 1]
+    }
+  }
 }
 
 final class InMemoryProxySettingsStore: ProxySettingsStoring {

@@ -206,18 +206,15 @@ extension ProxyRuntimeController {
       state = .serviceFailed(.runtimeFile)
       return .failed
     }
-    return await deployPrepared(contract, preparation: runtimePreparationGeneration)
+    return await deployPrepared(contract)
   }
 
   @discardableResult
-  func deployPrepared(
-    _ contract: PreparedRuntimeContract, preparation: Int
-  ) async -> ConvergenceResult {
-    guard preparation == runtimePreparationGeneration else { return .superseded }
+  func deployPrepared(_ contract: PreparedRuntimeContract) async -> ConvergenceResult {
     let document = contract.document
     var ticket = convergenceTicket()
     return await apply(
-      document, ticket: &ticket, checking: [.preparation],
+      document, ticket: &ticket,
       requiresReceipt: document.aclRuntime != nil,
       convergeProxyOnSuccess: true,
       preserveProxyOnFailure: false,

@@ -240,7 +240,11 @@ extension ProxyRuntimeController {
     let generation = flowGeneration
     let outcome = await launchHealthAttempt(
       document, expectedDigest: document.aclRuntime != nil ? document.deploymentSHA256 : nil)
-    guard !Task.isCancelled, generation == flowGeneration, settings.systemProxyEnabled else {
+    // await 恢复后重查意图与代际：agent 已被关闭或已有新 execute 时，
+    // 失败呈现与系统代理挂起都归属新的意图状态，本任务不得再改写。
+    guard !Task.isCancelled, generation == flowGeneration, settings.systemProxyEnabled,
+      settings.agentEnabled
+    else {
       return
     }
     switch outcome {

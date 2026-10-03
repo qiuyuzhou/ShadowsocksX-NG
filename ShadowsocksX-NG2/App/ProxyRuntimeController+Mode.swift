@@ -162,7 +162,7 @@ extension ProxyRuntimeController {
       systemProxyIntentAtCapture: snapshot.settings.systemProxyEnabled,
       convergeProxyOnIntentChange: true)
     let result = await apply(
-      document, ticket: &ticket, checking: [.mode, .preparation],
+      document, ticket: &ticket,
       requiresReceipt: true,
       convergeProxyOnSuccess: false,
       preserveProxyOnFailure: true,
@@ -186,7 +186,7 @@ extension ProxyRuntimeController {
         mode: snapshot.mode, ruleDefaultAction: snapshot.settings.ruleDefaultAction),
       systemProxyIntentAtCapture: snapshot.settings.systemProxyEnabled,
       convergeProxyOnIntentChange: true)
-    let report = await restore(plan, ticket: &ticket, checking: [.mode, .preparation])
+    let report = await restore(plan, ticket: &ticket)
     if report.runtimeHealthy == true, report.payloadFailureDescription != nil {
       state = .serviceFailed(.persistence)
     }

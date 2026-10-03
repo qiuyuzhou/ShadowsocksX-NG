@@ -114,9 +114,8 @@ extension ProxyRuntimeController {
     }
     modeChangeGeneration += 1
     var ticket = convergenceTicket()
-    let checks: ConvergenceTicket.Checks = [.flow, .mode, .preparation, .agentEnabled]
     let result = await apply(
-      nextDocument, ticket: &ticket, checking: checks,
+      nextDocument, ticket: &ticket,
       requiresReceipt: true, convergeProxyOnSuccess: false,
       preserveProxyOnFailure: true, proxyTail: .converge, rollback: plan)
     switch result {
@@ -126,8 +125,8 @@ extension ProxyRuntimeController {
       break
     case .failed:
       let failure = ProxyRuntimeFacts(state: state).failure ?? .service(.runtimeFile)
-      _ = await restore(plan, ticket: &ticket, checking: checks)
-      if convergenceIsCurrent(ticket, checking: checks), revision == ruleDocuments.revision {
+      _ = await restore(plan, ticket: &ticket)
+      if convergenceIsCurrent(ticket), revision == ruleDocuments.revision {
         ruleApplicationFailure = failure
       }
     }

@@ -41,6 +41,9 @@ extension ProxyRuntimeController {
         try? await Task.sleep(nanoseconds: interval)
         guard !Task.isCancelled, let self, generation == flowGeneration else { return }
         if let blocked = await blockedFirewallExecutable() {
+          // await 恢复后代际可能已被 execute 推进（含取消本任务的 stop 路径）：
+          // 过期的防火墙事实不得盖到最新状态呈现上。
+          guard generation == flowGeneration else { return }
           presentFirewallBlocked(blocked)
           firewallObservationTask = nil
           return

@@ -11,26 +11,17 @@ struct RuntimeExecutionOutcome {
 }
 
 /// 收敛票据:运行时收敛操作的代际快照。入口捕获三个并发代际,之后每步
-/// 推进用它判定「从入口到现在,并发流 / 模式切换 / 运行时派生是否前进了」;
-/// 被更新提交或新意图取代的旧收敛不得再变更运行时状态或写契约。
+/// 推进用它判定「从入口到现在,并发流 / 模式切换 / 运行时派生是否前进了,
+/// 会话内 agent 意图是否仍开启」;被更新提交或新意图取代的旧收敛不得再
+/// 变更运行时状态或写契约。
 ///
-/// 各路径校验的代际子集不同:mode 切换的 mode 代际在派生前捕获、派生
-/// 代际在派生后推进(派生自身会推进它);rules 部署四个事实全查(含
-/// 会话内 agent 意图);目录 / 启动路径只查派生代际。
+/// 四项失效事实由票据恒全查,不随调用路径增减——「什么会使一次收敛失效」
+/// 是票据的固有语义(逐路径手选子集曾让 agent 关闭在 mode 切换的健康门
+/// await 窗口内被误分类为失败并触发复活性的 restore)。各路径只负责捕获
+/// 与推进时机:flow 分量在 execute 后以实际占用值推进,mode 切换路径在
+/// 派生后推进 preparation 分量(派生自身会推进它),rules 部署在推进 mode
+/// 代际之后捕获。
 struct ConvergenceTicket: Equatable {
-  /// 票据时效校验覆盖的代际事实子集。
-  struct Checks: OptionSet {
-    let rawValue: Int
-    /// 并发流代际:任何后续 execute 都使票据失效。
-    static let flow = Checks(rawValue: 1 << 0)
-    /// 模式切换代际。
-    static let mode = Checks(rawValue: 1 << 1)
-    /// 运行时文档派生代际。
-    static let preparation = Checks(rawValue: 1 << 2)
-    /// 会话内 agent 意图仍开启。
-    static let agentEnabled = Checks(rawValue: 1 << 3)
-  }
-
   /// 并发流代际;每次 execute 之后由调用方以实际占用值推进。
   var flow: Int
   /// 模式切换代际;捕获后不再变化。
@@ -47,18 +38,12 @@ extension ProxyRuntimeController {
       preparation: runtimePreparationGeneration)
   }
 
-  /// 票据是否仍代表当前收敛:`checking` 列出的代际事实全部未前进。
-  func convergenceIsCurrent(
-    _ ticket: ConvergenceTicket, checking: ConvergenceTicket.Checks
-  ) -> Bool {
-    var current = true
-    if checking.contains(.flow) { current = current && ticket.flow == flowGeneration }
-    if checking.contains(.mode) { current = current && ticket.mode == modeChangeGeneration }
-    if checking.contains(.preparation) {
-      current = current && ticket.preparation == runtimePreparationGeneration
-    }
-    if checking.contains(.agentEnabled) { current = current && settings.agentEnabled }
-    return current
+  /// 票据是否仍代表当前收敛:并发流 / 模式切换 / 派生三个代际均未前进,
+  /// 且会话内 agent 意图仍开启。
+  func convergenceIsCurrent(_ ticket: ConvergenceTicket) -> Bool {
+    ticket.flow == flowGeneration && ticket.mode == modeChangeGeneration
+      && ticket.preparation == runtimePreparationGeneration
+      && settings.agentEnabled
   }
 
   /// 派生文档对当前运行时是否无事可做（CONTEXT.md「有效值未变的提交不做
@@ -146,7 +131,6 @@ extension ProxyRuntimeController {
   func apply(
     _ document: SslocalRuntimeDocument,
     ticket: inout ConvergenceTicket,
-    checking: ConvergenceTicket.Checks,
     requiresReceipt: Bool,
     convergeProxyOnSuccess: Bool,
     preserveProxyOnFailure: Bool,
@@ -159,19 +143,19 @@ extension ProxyRuntimeController {
       ruleApplicationFailure = nil
       return .unchanged
     }
-    guard convergenceIsCurrent(ticket, checking: checking) else { return .superseded }
+    guard convergenceIsCurrent(ticket) else { return .superseded }
     lastDocument = document
     state = .starting
     let execution = await execute(.run(document), document: document, preparedContract: contract)
     ticket.flow = execution.flow
-    guard convergenceIsCurrent(ticket, checking: checking) else { return .superseded }
+    guard convergenceIsCurrent(ticket) else { return .superseded }
     guard execution.succeeded else { return .failed }
     let healthy = await presentLaunchHealth(
       document,
       requiresReceipt: requiresReceipt,
       convergeProxyOnSuccess: convergeProxyOnSuccess,
       preserveProxyOnFailure: preserveProxyOnFailure, preparedContract: contract)
-    guard convergenceIsCurrent(ticket, checking: checking) else { return .superseded }
+    guard convergenceIsCurrent(ticket) else { return .superseded }
     guard healthy else { return .failed }
     lastDocument = document
     ruleApplicationFailure = nil
@@ -183,14 +167,16 @@ extension ProxyRuntimeController {
     return .applied
   }
 
-  /// 按回滚计划整体恢复：重持久化载荷 → 计划执行拉回旧文档（含按需拉起，
-  /// 由计划层对注销/信号/注册的裁决保证与旧 restore 例程等价）→ 启动健康
-  /// 门。载荷持久化失败不阻断文档恢复；文档恢复失败或健康不过即撤下系统
+  /// 按回滚计划整体恢复:先查时效(票据含会话内 agent 意图)再动任何事实——
+  /// 被取代或 agent 已被用户关闭的回滚不得把旧载荷写回持久层、也不得把
+  /// 旧文档重新拉起;随后重持久化载荷 → 计划执行拉回旧文档(含按需拉起,
+  /// 由计划层对注销/信号/注册的裁决保证与旧 restore 例程等价)→ 启动健康
+  /// 门。载荷持久化失败不阻断文档恢复;文档恢复失败或健康不过即撤下系统
   /// 代理意图。
-  func restore(
-    _ plan: RollbackPlan, ticket: inout ConvergenceTicket,
-    checking: ConvergenceTicket.Checks
-  ) async -> RestoreReport {
+  func restore(_ plan: RollbackPlan, ticket: inout ConvergenceTicket) async -> RestoreReport {
+    guard convergenceIsCurrent(ticket) else {
+      return RestoreReport(payloadFailureDescription: nil, runtimeHealthy: nil)
+    }
     var payloadFailureDescription: String?
     var restoredSettingsForMemory: ProxySettings?
     var restoredMode: ProxyMode?
@@ -215,8 +201,6 @@ extension ProxyRuntimeController {
       RestoreReport(
         payloadFailureDescription: payloadFailureDescription, runtimeHealthy: healthy)
     }
-    if checking.contains(.agentEnabled), !settings.agentEnabled { return report(nil) }
-    guard convergenceIsCurrent(ticket, checking: checking) else { return report(nil) }
     if let restoredSettingsForMemory { settings = restoredSettingsForMemory }
     if let restoredMode { proxyMode = restoredMode }
     lastDocument = plan.document
@@ -225,7 +209,7 @@ extension ProxyRuntimeController {
     let execution = await execute(
       .run(plan.document), document: plan.document, preparedContract: contract)
     ticket.flow = execution.flow
-    guard convergenceIsCurrent(ticket, checking: checking) else { return report(nil) }
+    guard convergenceIsCurrent(ticket) else { return report(nil) }
     guard execution.succeeded else {
       await systemProxyObserver.holdSystemProxyIntent()
       return report(false)
@@ -233,7 +217,7 @@ extension ProxyRuntimeController {
     let healthy = await presentLaunchHealth(
       plan.document, requiresReceipt: true, convergeProxyOnSuccess: false,
       preparedContract: contract)
-    guard convergenceIsCurrent(ticket, checking: checking) else { return report(nil) }
+    guard convergenceIsCurrent(ticket) else { return report(nil) }
     if healthy {
       if plan.convergeProxyOnIntentChange,
         settings.systemProxyEnabled != plan.systemProxyIntentAtCapture

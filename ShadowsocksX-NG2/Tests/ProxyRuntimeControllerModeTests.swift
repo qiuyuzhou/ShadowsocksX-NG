@@ -20,6 +20,191 @@ extension ProxyRuntimeControllerTests {
       ProxyRuntimeFacts(status: .running, isOn: true),
       "默认 agent 意图开启：重同步后无目标也进入空列表监听")
   }
+}
+
+// MARK: - 收敛票据全事实检查（候选①：agent 关闭不得被任何 await 窗口内的
+// 旧收敛复活；restore 先查时效再动持久层）
+
+@MainActor
+extension ProxyRuntimeControllerTests {
+  /// agent-off 落在 mode 切换的健康门 await 窗口内：票据查全四事实 →
+  /// superseded，不触发 restore 重注册，用户的 mode 意图保留在持久层与内存。
+  func testAgentOffDuringModeTransitionHealthGateSupersedesWithoutRestore() async throws {
+    let seeded = try makeSeededCatalog()
+    let probe = ProxyRuntimeFixture.BlockingProbe()
+    let started = expectation(description: "mode transition health probe paused")
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: probe,
+      settingsStore: settingsStore,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, preferredMode: .global,
+        agentEnabled: true, systemProxyEnabled: true),
+      proxyMode: .global)
+    try await controller.activate(seeded.server)
+    XCTAssertEqual(controller.state, .running)
+
+    probe.arm(started: started)
+    let modeSwitch = Task { await controller.setProxyMode(.direct) }
+    await fulfillment(of: [started], timeout: 3)
+    await controller.setAgentEnabled(false)
+    XCTAssertEqual(controller.state, .off)
+    let registrationsAfterStop = agent.registerCount
+    probe.release()
+    await modeSwitch.value
+
+    XCTAssertEqual(
+      agent.registerCount, registrationsAfterStop, "被取代的切换不得经 restore 重注册 agent")
+    XCTAssertEqual(controller.state, .off)
+    XCTAssertFalse(controller.settings.agentEnabled)
+    XCTAssertEqual(controller.settings.preferredMode, ProxyModeKind.direct, "切换意图保留在内存")
+    XCTAssertEqual(settingsStore.saved?.preferredMode, ProxyModeKind.direct, "切换意图保留在持久层")
+    XCTAssertEqual(settingsStore.saved?.agentEnabled, false)
+    XCTAssertNil(controller.lastDocument)
+  }
+
+  /// agent-off 落在 mode→rule 的派生窗口内：派生缝 preparationIsCurrent
+  /// 恒查 agent 意图与并发流，派生即弃权，apply 根本不会启动。
+  func testAgentOffDuringModeRuleDerivationSupersedesDeployment() async throws {
+    let seeded = try makeSeededCatalog()
+    let started = expectation(description: "rule snapshot load paused")
+    let release = DispatchSemaphore(value: 0)
+    defer { release.signal() }
+    let loader = BuiltinRuleSnapshots(loader: { source -> RuleSnapshot in
+      if source == .geolocationCN {
+        started.fulfill()
+        release.wait()
+      }
+      return rulesFixture(source)
+    })
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true),
+      proxyMode: .global,
+      ruleSnapshots: loader)
+    try await controller.activate(seeded.server)
+
+    let modeSwitch = Task { await controller.setProxyMode(.rule) }
+    await fulfillment(of: [started], timeout: 3)
+    await controller.setAgentEnabled(false)
+    XCTAssertEqual(controller.state, .off)
+    let registrationsAfterStop = agent.registerCount
+    release.signal()
+    await modeSwitch.value
+
+    XCTAssertEqual(agent.registerCount, registrationsAfterStop, "派生被取代后不得部署")
+    XCTAssertEqual(controller.state, .off)
+    XCTAssertNil(controller.lastDocument)
+    XCTAssertFalse(controller.settings.agentEnabled)
+    XCTAssertEqual(controller.settings.preferredMode, ProxyModeKind.rule, "切换意图保留")
+  }
+
+  /// restore 的时效门禁先于任何事实变更：agent 意图关闭或票据过期时弃权——
+  /// 不执行计划、不重注册，回滚载荷不得写回持久层（否则会静默撤销用户的
+  /// mode 意图）。
+  func testRestoreSkipsPayloadPersistenceWhenAgentOffOrSuperseded() async throws {
+    let seeded = try makeSeededCatalog()
+    let settingsStore = InMemoryProxySettingsStore()
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      settingsStore: settingsStore,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true),
+      proxyMode: .global)
+    try await controller.activate(seeded.server)
+    let document = try XCTUnwrap(controller.lastDocument)
+
+    // (a) agent 意图已关闭：门禁弃权。
+    await controller.setAgentEnabled(false)
+    let registrationsAfterStop = agent.registerCount
+    var offTicket = controller.convergenceTicket()
+    let offReport = await controller.restore(
+      RollbackPlan(
+        document: document, state: .running,
+        payload: .modeTransition(mode: .rule, ruleDefaultAction: .proxyWhenUnmatched),
+        systemProxyIntentAtCapture: false, convergeProxyOnIntentChange: false),
+      ticket: &offTicket)
+    XCTAssertNil(offReport.runtimeHealthy)
+    XCTAssertNil(offReport.payloadFailureDescription)
+    XCTAssertEqual(agent.registerCount, registrationsAfterStop, "弃权的回滚不得拉起旧运行时")
+    XCTAssertEqual(settingsStore.saved?.preferredMode, ProxyModeKind.global, "旧载荷未写回持久层")
+    XCTAssertFalse(settingsStore.saved?.agentEnabled ?? true)
+    XCTAssertEqual(controller.state, .off)
+
+    // (b) 票据过期（mode 代际已前进）：同样弃权且不写回。
+    await controller.setAgentEnabled(true)
+    await controller.setProxyMode(.direct)
+    XCTAssertEqual(controller.state, .running)
+    let staleTicket = controller.convergenceTicket()
+    await controller.setProxyMode(.rule)
+    XCTAssertEqual(controller.state, .running)
+    let registrationsBeforeRestore = agent.registerCount
+    var ticket = staleTicket
+    let staleReport = await controller.restore(
+      RollbackPlan(
+        document: try XCTUnwrap(controller.lastDocument), state: .running,
+        payload: .modeTransition(mode: .global, ruleDefaultAction: .proxyWhenUnmatched),
+        systemProxyIntentAtCapture: false, convergeProxyOnIntentChange: false),
+      ticket: &ticket)
+    XCTAssertNil(staleReport.runtimeHealthy)
+    XCTAssertEqual(agent.registerCount, registrationsBeforeRestore)
+    XCTAssertEqual(settingsStore.saved?.preferredMode, ProxyModeKind.rule, "过期回滚不得改写持久层")
+  }
+
+  /// agent-off 落在目录部署（deployPrepared 路径）的健康门窗口内：结果必须是
+  /// superseded（而非误分类的 failed），运行时保持 off、lastDocument 不复活。
+  func testAgentOffDuringDeploymentHealthGateSupersedesDeployment() async throws {
+    let seeded = try makeSeededCatalog()
+    let probe = ProxyRuntimeFixture.BlockingProbe()
+    let started = expectation(description: "deployment health probe paused")
+    let controller = makeController(
+      probe: probe,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true),
+      proxyMode: .global)
+    try await controller.activate(seeded.server)
+    XCTAssertEqual(controller.state, .running)
+
+    probe.arm(started: started)
+    let deployment = Task {
+      await controller.deploy(SslocalRuntimeDocument(servers: [], listen: ActivationFixture.listen))
+    }
+    await fulfillment(of: [started], timeout: 3)
+    await controller.setAgentEnabled(false)
+    XCTAssertEqual(controller.state, .off)
+    let registrationsAfterStop = agent.registerCount
+    probe.release()
+    let result = await deployment.value
+
+    XCTAssertEqual(result, .superseded)
+    XCTAssertEqual(controller.state, .off)
+    XCTAssertEqual(agent.registerCount, registrationsAfterStop)
+    XCTAssertNil(controller.lastDocument)
+  }
+
+  /// 防火墙轮询在 await 恢复后代际已推进（含取消本任务的 stop 路径）时，
+  /// 不得把过期的 .firewallBlocked 盖到最新状态呈现上。
+  func testFirewallPollDoesNotWriteAfterExecutionSupersedesIt() async throws {
+    let seeded = try makeSeededCatalog()
+    let started = expectation(description: "firewall poll awaiting checker")
+    let checker = ProxyRuntimeFixture.BlockingFirewallChecker(
+      outcomes: [.permitted, .blocked], blockOnCall: 2, started: started)
+    let controller = makeController(
+      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
+      listen: SslocalListenSettings(listenerMode: .allIPv4Interfaces),
+      firewallChecker: checker)
+    try await controller.activate(seeded.server)
+    XCTAssertEqual(controller.state, .running, "首次防火墙检查通过后进入运行态并武装轮询")
+
+    await fulfillment(of: [started], timeout: 3)
+    await controller.setAgentEnabled(false)
+    XCTAssertEqual(controller.state, .off)
+    checker.release()
+    try await Task.sleep(nanoseconds: 50_000_000)
+
+    XCTAssertEqual(controller.state, .off, "被取代的轮询不得改写状态")
+  }
 
 }
 
