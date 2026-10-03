@@ -94,6 +94,8 @@ final class ProxyRuntimeController: ObservableObject {
   let appBundle: Bundle
   let firewallPollIntervalNanoseconds: UInt64
   let launchHealthTimeoutSeconds: TimeInterval
+  let launchHealthRetryDelay: () async throws -> Void
+  let ruleApplicationDelay: () async throws -> Void
   /// 注册清单漂移重注时，注销与重注的间隔（launchd 对节流中 job 的移除异步）。
   let systemProxyHealthPollIntervalNanoseconds: UInt64
   let helperRefreshDelayNanoseconds: UInt64
@@ -135,6 +137,12 @@ final class ProxyRuntimeController: ObservableObject {
     firewallExecutableURLs: [URL]? = nil,
     firewallPollIntervalNanoseconds: UInt64 = 2_000_000_000,
     launchHealthTimeoutSeconds: TimeInterval = 15,
+    launchHealthRetryDelay: @escaping () async throws -> Void = {
+      try await Task.sleep(for: .milliseconds(200))
+    },
+    ruleApplicationDelay: @escaping () async throws -> Void = {
+      try await Task.sleep(for: .milliseconds(150))
+    },
     systemProxyHealthPollIntervalNanoseconds: UInt64 = 2_000_000_000,
     helperRefreshDelayNanoseconds: UInt64 = 15_000_000_000,
     sendSignal: @escaping @Sendable (Int32, Int32) -> Int32 = { kill($0, $1) },
@@ -170,6 +178,8 @@ final class ProxyRuntimeController: ObservableObject {
     self.firewallExecutableURLs = firewallExecutableURLs ?? Self.defaultFirewallExecutableURLs
     self.firewallPollIntervalNanoseconds = firewallPollIntervalNanoseconds
     self.launchHealthTimeoutSeconds = launchHealthTimeoutSeconds
+    self.launchHealthRetryDelay = launchHealthRetryDelay
+    self.ruleApplicationDelay = ruleApplicationDelay
     self.systemProxyHealthPollIntervalNanoseconds = systemProxyHealthPollIntervalNanoseconds
     self.helperRefreshDelayNanoseconds = helperRefreshDelayNanoseconds
     self.sendSignal = sendSignal

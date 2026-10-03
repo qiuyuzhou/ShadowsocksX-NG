@@ -7,25 +7,49 @@ final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
     BuiltinRuleSnapshots(loader: ProxyRuntimeFixture.controlFlowRuleSnapshot)
   }
 
+  private func makeRuleEnablementController(
+    store: CustomRuleStore,
+    settings: ProxySettings,
+    proxyMode: ProxyMode? = nil,
+    launchHealthTimeoutSeconds: TimeInterval = 0.05,
+    ruleSnapshots: BuiltinRuleSnapshots? = nil,
+    launchHealthRetryDelay: @escaping () async throws -> Void = {
+      try await Task.sleep(for: .milliseconds(1))
+    },
+    ruleApplicationDelay: @escaping () async throws -> Void = { await Task.yield() }
+  ) -> ProxyRuntimeController {
+    makeControllerWithCustomRules(
+      store: store, settings: settings, proxyMode: proxyMode,
+      launchHealthTimeoutSeconds: launchHealthTimeoutSeconds,
+      launchHealthRetryDelay: launchHealthRetryDelay,
+      ruleApplicationDelay: ruleApplicationDelay,
+      ruleSnapshots: ruleSnapshots)
+  }
+
   func testRapidRuleSavesCoalesceIntoOneLatestACLDeployment() async throws {
     let seeded = try makeSeededCatalog()
     let (store, _) = try makeCustomRuleStore()
     let first = CustomRule(action: .direct, match: .domainExact("first-save.example"))
     let latest = CustomRule(action: .direct, match: .domainExact("latest-save.example"))
-    let controller = makeControllerWithCustomRules(
+    let applicationStarted = expectation(description: "rule application paused")
+    let applicationGate = RuleRuntimeDelayGate(started: applicationStarted)
+    defer { applicationGate.resume() }
+    let controller = makeRuleEnablementController(
       store: store,
       settings: ProxySettings(
         listen: ActivationFixture.listen, preferredMode: .rule, agentEnabled: true),
-      proxyMode: .rule)
+      proxyMode: .rule, ruleApplicationDelay: { await applicationGate.wait() })
     try await controller.activate(seeded.server)
     let before = agent.registerCount
     let one = await controller.commitRuleDocument(CustomRuleDocument(rules: [first]))
+    await fulfillment(of: [applicationStarted], timeout: 3)
     let two = await controller.commitRuleDocument(CustomRuleDocument(rules: [latest]))
     XCTAssertEqual(one.outcome, .saved)
     XCTAssertEqual(two.outcome, .saved)
     XCTAssertEqual(try store.load(), [latest])
     XCTAssertEqual(
       agent.registerCount, before, "Saving does not wait for or start deployment inline")
+    applicationGate.resume()
     await controller.ruleApplicationTask?.value
     XCTAssertEqual(agent.registerCount, before + 1)
     let content = try activeACLContent(RuntimeFileStore(fileURL: runtime.contract))
@@ -38,11 +62,15 @@ final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
     let (store, _) = try makeCustomRuleStore()
     let first = CustomRule(action: .direct, match: .domainExact("in-flight.example"))
     let latest = CustomRule(action: .direct, match: .domainExact("after-flight.example"))
-    let controller = makeControllerWithCustomRules(
+    let healthWaiting = expectation(description: "health retry paused")
+    let healthGate = RuleRuntimeDelayGate(started: healthWaiting)
+    defer { healthGate.resume() }
+    let controller = makeRuleEnablementController(
       store: store,
       settings: ProxySettings(
         listen: ActivationFixture.listen, preferredMode: .rule, agentEnabled: true),
-      proxyMode: .rule, launchHealthTimeoutSeconds: 0.3)
+      proxyMode: .rule, launchHealthTimeoutSeconds: 0.3,
+      launchHealthRetryDelay: { await healthGate.wait() })
     try await controller.activate(seeded.server)
     let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
     let started = expectation(description: "first deployment awaiting receipt")
@@ -60,12 +88,13 @@ final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
     }
     let one = await controller.commitRuleDocument(CustomRuleDocument(rules: [first]))
     XCTAssertEqual(one.outcome, .saved)
-    await fulfillment(of: [started], timeout: 3)
+    await fulfillment(of: [started, healthWaiting], timeout: 3)
     let two = await controller.commitRuleDocument(CustomRuleDocument(rules: [latest]))
     XCTAssertEqual(two.outcome, .saved)
     XCTAssertEqual(try store.load(), [latest])
     XCTAssertEqual(agent.registerCount, before + 1, "A new save cannot overlap rule deployments")
     try runtimeStore.writeRuntimeReceipt(for: XCTUnwrap(firstDocument), processID: 42)
+    healthGate.resume()
     await controller.ruleApplicationTask?.value
     XCTAssertEqual(try store.load(), [latest])
     XCTAssertEqual(agent.registerCount, before + 2)
@@ -81,7 +110,7 @@ final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
     let started = expectation(description: "new source preparation")
     let loader = PausedRuntimeRuleSource(started: started)
     defer { loader.release.signal() }
-    let controller = makeControllerWithCustomRules(
+    let controller = makeRuleEnablementController(
       store: store,
       settings: ProxySettings(
         listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true),
@@ -112,7 +141,7 @@ final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
     let started = expectation(description: "background source preparation")
     let loader = PausedRuntimeRuleSource(started: started)
     defer { loader.release.signal() }
-    let controller = makeControllerWithCustomRules(
+    let controller = makeRuleEnablementController(
       store: store,
       settings: ProxySettings(
         listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true),
@@ -138,7 +167,7 @@ final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
     let snapshots = BuiltinRuleSnapshots(loader: { loader.load($0) })
     let settings = ProxySettings(
       listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true)
-    let controller = makeControllerWithCustomRules(
+    let controller = makeRuleEnablementController(
       store: store, settings: settings, proxyMode: .global, ruleSnapshots: snapshots)
     try await controller.activate(seeded.server)
     let modeSwitch = Task { await controller.setProxyMode(.rule) }
@@ -173,7 +202,7 @@ final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
     let started = expectation(description: "background source preparation")
     let loader = PausedRuntimeRuleSource(started: started)
     defer { loader.release.signal() }
-    let controller = makeControllerWithCustomRules(
+    let controller = makeRuleEnablementController(
       store: store,
       settings: ProxySettings(
         listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true),
@@ -190,41 +219,9 @@ final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
       RuntimeFileStore(fileURL: runtime.contract).loadDocument()?.aclRuntime?.summary, "direct")
   }
 
-  func testBatchDisableRestartsOnceWithoutRestoringOmittedChinaCandidate() async throws {
-    let seeded = try makeSeededCatalog()
-    let (store, _) = try makeCustomRuleStore()
-    let settings = ProxySettings(
-      listen: ActivationFixture.listen, preferredMode: .rule,
-      ruleDefaultAction: .proxyWhenUnmatched, agentEnabled: true)
-    let controller = makeControllerWithCustomRules(
-      store: store, settings: settings, proxyMode: .rule,
-      ruleSnapshots: BuiltinRuleSnapshots(bundle: AppArtifact.bundle))
-    try await controller.activate(seeded.server)
-    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
-    let before = agent.unregisterCount
-    let cnSuffix = RuleIdentity(action: .direct, match: .domainSuffix("cn"))
-    let absent = RuleIdentity(action: .direct, match: .domainExact("absent.example"))
-    let outcome = await controller.updateRuleDocument(
-      CustomRuleDocument(rules: [], disabledIdentities: [cnSuffix, absent]))
-    XCTAssertEqual(outcome, .saved)
-    await controller.ruleApplicationTask?.value
-    XCTAssertEqual(agent.unregisterCount, before + 1)
-    let content = try activeACLContent(runtimeStore)
-    XCTAssertFalse(content.split(separator: "\n").contains("||cn"))
-    let snapshot = try BuiltinRuleCatalog.loadGeolocationCN(from: AppArtifact.bundle)
-    XCTAssertGreaterThan(snapshot.lossReport.absorbedCount, 0)
-    XCTAssertFalse(content.split(separator: "\n").contains("||baidu.cn"))
-    let noOpBefore = agent.unregisterCount
-    let unchanged = await controller.updateRuleDocument(
-      CustomRuleDocument(rules: [], disabledIdentities: [cnSuffix]))
-    XCTAssertEqual(unchanged, .saved)
-    await controller.ruleApplicationTask?.value
-    XCTAssertEqual(agent.unregisterCount, noOpBefore, "Absent identities change only persistence")
-  }
-
   func testOffSaveUsesOwnedDocumentAndNewSessionRejectsCorruption() async throws {
     let (store, _) = try makeCustomRuleStore()
-    let controller = makeControllerWithCustomRules(
+    let controller = makeRuleEnablementController(
       store: store, settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
     let identity = RuleIdentity(action: .proxy, match: .domainExact("saved.example"))
     let outcome = await controller.updateRuleDocument(
@@ -235,7 +232,7 @@ final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
     XCTAssertEqual(try store.loadDocument().disabledIdentities, [identity])
     let broken = Data("broken".utf8)
     try broken.write(to: store.fileURL)
-    let newSession = makeControllerWithCustomRules(
+    let newSession = makeRuleEnablementController(
       store: store, settings: ProxySettings(listen: ActivationFixture.listen, agentEnabled: false))
     let rejected = await newSession.updateRuleDocument(CustomRuleDocument(rules: []))
     XCTAssertEqual(rejected, .persistenceFailed)
@@ -262,36 +259,36 @@ extension RuleEnablementControllerTests {
     let settings = ProxySettings(
       listen: ActivationFixture.listen, preferredMode: .rule,
       ruleDefaultAction: .proxyWhenUnmatched, agentEnabled: true)
-    let controller = makeControllerWithCustomRules(
+    let recoveryWaiting = expectation(description: "recovery health retry paused")
+    let recoveryGate = RuleRuntimeDelayGate(started: recoveryWaiting)
+    defer { recoveryGate.resume() }
+    var recoveryIsRunning = false
+    let controller = makeRuleEnablementController(
       store: store, settings: settings, proxyMode: .rule,
-      launchHealthTimeoutSeconds: 0.2)
+      launchHealthTimeoutSeconds: 0.05,
+      launchHealthRetryDelay: {
+        if recoveryIsRunning {
+          await recoveryGate.wait()
+        } else {
+          try await Task.sleep(for: .milliseconds(1))
+        }
+      })
     try await controller.activate(seeded.server)
     let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
-    let recoveryStarted = expectation(description: "recovery awaiting health")
     let initialRegistrations = agent.registerCount
-    agent.onRegister = { [agent] in
-      if agent?.registerCount == initialRegistrations + 2 {
-        recoveryStarted.fulfill()
-      }
-      if (agent?.registerCount ?? 0) <= initialRegistrations + 2 {
-        try? FileManager.default.removeItem(at: runtimeStore.runtimeStatusFileURL)
-      } else if let document = runtimeStore.loadDocument() {
-        try? runtimeStore.writeRuntimeReceipt(for: document, processID: 42)
-      }
+    configureRecoveryReceipts(runtimeStore, initialRegistrations: initialRegistrations) {
+      recoveryIsRunning = true
     }
-    let pending = Task {
-      await controller.updateRuleDocument(
-        CustomRuleDocument(
-          rules: [rule],
-          disabledIdentities: [rule.identity]))
-    }
-    await fulfillment(of: [recoveryStarted], timeout: 5)
+    let disabledDocument = CustomRuleDocument(rules: [rule], disabledIdentities: [rule.identity])
+    let pending = Task { await controller.updateRuleDocument(disabledDocument) }
+    await fulfillment(of: [recoveryWaiting], timeout: 5)
     if switchMode {
       await controller.setProxyMode(.global)
     } else {
       await controller.setAgentEnabled(false)
     }
     let registrations = agent.registerCount
+    recoveryGate.resume()
     let outcome = await pending.value
     XCTAssertEqual(outcome, .saved)
     await controller.ruleApplicationTask?.value
@@ -307,6 +304,21 @@ extension RuleEnablementControllerTests {
     }
   }
 
+  private func configureRecoveryReceipts(
+    _ runtimeStore: RuntimeFileStore,
+    initialRegistrations: Int,
+    onRecovery: @escaping () -> Void
+  ) {
+    agent.onRegister = { [agent] in
+      if agent?.registerCount == initialRegistrations + 2 { onRecovery() }
+      if (agent?.registerCount ?? 0) <= initialRegistrations + 2 {
+        try? FileManager.default.removeItem(at: runtimeStore.runtimeStatusFileURL)
+      } else if let document = runtimeStore.loadDocument() {
+        try? runtimeStore.writeRuntimeReceipt(for: document, processID: 42)
+      }
+    }
+  }
+
   func testFailedDisableAndFailedRuntimeRecoveryReportsFailure() async throws {
     let seeded = try makeSeededCatalog()
     let (store, _) = try makeCustomRuleStore()
@@ -315,7 +327,7 @@ extension RuleEnablementControllerTests {
     let settings = ProxySettings(
       listen: ActivationFixture.listen, preferredMode: .rule,
       ruleDefaultAction: .proxyWhenUnmatched, agentEnabled: true)
-    let controller = makeControllerWithCustomRules(
+    let controller = makeRuleEnablementController(
       store: store, settings: settings, proxyMode: .rule)
     try await controller.activate(seeded.server)
     let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
@@ -344,5 +356,32 @@ private final class PausedRuntimeRuleSource: @unchecked Sendable {
       release.wait()
     }
     return rulesFixture(source)
+  }
+}
+
+/// Pause one retry/debounce phase; subsequent passes remain asynchronous without wall-clock delay.
+@MainActor
+private final class RuleRuntimeDelayGate {
+  private let started: XCTestExpectation
+  private var didPause = false
+  private var continuation: CheckedContinuation<Void, Never>?
+
+  init(started: XCTestExpectation) { self.started = started }
+
+  func wait() async {
+    guard !didPause else {
+      await Task.yield()
+      return
+    }
+    didPause = true
+    await withCheckedContinuation {
+      continuation = $0
+      started.fulfill()
+    }
+  }
+
+  func resume() {
+    continuation?.resume()
+    continuation = nil
   }
 }

@@ -120,7 +120,7 @@ extension ProxyRuntimeController {
       defer { self.ruleApplicationTask = nil }
       while !Task.isCancelled {
         let generation = self.ruleApplicationGeneration
-        do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+        do { try await self.ruleApplicationDelay() } catch { return }
         guard generation == self.ruleApplicationGeneration else { continue }
         await self.applySavedRuleDocument()
         if generation == self.ruleApplicationGeneration { return }

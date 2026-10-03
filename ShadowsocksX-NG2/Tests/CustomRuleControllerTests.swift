@@ -19,6 +19,12 @@ extension ProxyRuntimeControllerTests {
     settings: ProxySettings? = nil,
     proxyMode: ProxyMode? = nil,
     launchHealthTimeoutSeconds: TimeInterval = 0.05,
+    launchHealthRetryDelay: @escaping () async throws -> Void = {
+      try await Task.sleep(for: .milliseconds(200))
+    },
+    ruleApplicationDelay: @escaping () async throws -> Void = {
+      try await Task.sleep(for: .milliseconds(150))
+    },
     ruleSnapshots: BuiltinRuleSnapshots? = nil
   ) -> ProxyRuntimeController {
     makeController(
@@ -28,6 +34,8 @@ extension ProxyRuntimeControllerTests {
         ?? ProxySettings(listen: ActivationFixture.listen, agentEnabled: true),
       proxyMode: proxyMode,
       launchHealthTimeoutSeconds: launchHealthTimeoutSeconds,
+      launchHealthRetryDelay: launchHealthRetryDelay,
+      ruleApplicationDelay: ruleApplicationDelay,
       customRuleStore: store, ruleSnapshots: ruleSnapshots)
   }
 

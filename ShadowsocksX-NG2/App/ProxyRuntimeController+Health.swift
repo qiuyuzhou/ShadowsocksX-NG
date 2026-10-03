@@ -65,7 +65,7 @@ extension ProxyRuntimeController {
       case .agentLost:
         return await reportAgentLost(preserveProxyOnFailure: preserveProxyOnFailure)
       }
-      try? await Task.sleep(nanoseconds: 200_000_000)
+      try? await launchHealthRetryDelay()
     }
     return await reportLaunchHealthTimeout(
       LaunchHealthTimeout(
