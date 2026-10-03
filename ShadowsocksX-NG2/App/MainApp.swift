@@ -166,7 +166,6 @@ private struct AppComposition {
       route: workspaceRoute,
       workflow: catalogWorkflow,
       control: proxyControl,
-      proxyController: controller,
       diagnostics: diagnosticsWorkflow,
       settingsWorkflow: settingsWorkflow,
       loginController: loginController,

@@ -25,13 +25,12 @@ private enum WorkspaceSheet: String, Identifiable {
 /// （票 #56/#58 的槽位仅呈现位置变化），设置的表单级提交动作在其视图内容
 /// 顶部（见 SettingsView）。路由状态仍由 WorkspaceRoute 持有；代理状态卡的
 /// 状态与摘要只来自代理控制工作流的整体 snapshot（issue #47），与状态菜单
-/// 使用同一口径。
+/// 使用同一口径；服务器分区的活动目标标记同源（snapshot.activeTarget）。
 struct MainWindowView: View {
   @ObservedObject var rulesWorkflow: RulesWorkflow
   @ObservedObject var route: WorkspaceRoute
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
-  @ObservedObject var proxyController: ProxyRuntimeController
   @ObservedObject var diagnostics: DiagnosticsWorkflow
   @ObservedObject var settingsWorkflow: SettingsWorkflow
   @ObservedObject var loginController: LaunchAtLoginController
@@ -215,7 +214,7 @@ struct MainWindowView: View {
     case .servers:
       ServersView(
         workflow: workflow,
-        activeTargetID: proxyController.activeTargetID,
+        activeTargetID: control.snapshot.activeTarget?.id,
         selection: $selection,
         expansion: expansion,
         clipboard: clipboard,

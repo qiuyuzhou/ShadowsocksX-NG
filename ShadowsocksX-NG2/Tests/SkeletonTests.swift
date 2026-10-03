@@ -44,8 +44,9 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
     XCTAssertTrue(
       violations.isEmpty,
       """
-      UI 源文件不得引用目录工作流实现协作者或原始目录/凭据存储类型；
-      经 CatalogWorkflow 的 UI-facing interface 表达（issue #49）：
+      UI 源文件不得引用代理控制器、目录工作流实现协作者或原始目录/凭据存储类型；
+      经 CatalogWorkflow/ProxyControlWorkflow 的 UI-facing interface 表达
+      （issue #49；控制器依赖由主窗口壳与服务器分区清零后固化为守卫）：
       \(violations.joined(separator: "\n"))
       """)
   }
@@ -60,17 +61,18 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
   private static let exemptedFiles: Set<String> = [
     "MainApp.swift",
     "CatalogCommitCoordinator.swift",
-    "ProxyRuntimeController.swift",
-    // 控制器按命令面/设置与目录同步/收敛脊柱/系统代理门禁/事实投影分文件（同属运行时适配器）。
-    "ProxyRuntimeController+Commands.swift",
-    "ProxyRuntimeController+SettingsSync.swift",
-    "ProxyRuntimeController+Convergence.swift",
-    "ProxyRuntimeController+SystemProxyGate.swift",
-    "ProxyRuntimeController+Facts.swift",
+    // 运行时 facts 投影：适配器侧把控制器状态映射为 typed facts，非 UI 表面。
+    "ProxyRuntimeFacts.swift",
     "SystemProxyHelperService.swift",
     "LaunchAgentService.swift",
     "LoginAtLoginService.swift",
     "FirewallStatusChecker.swift",
+  ]
+
+  /// 豁免前缀：控制器家族（本体与按命令面/收敛脊柱/系统代理门禁等分的各文件）
+  /// 同属运行时适配器，合法接触代理控制器类型。
+  private static let exemptedFilePrefixes: Set<String> = [
+    "ProxyRuntimeController"
   ]
 
   /// 豁免目录：workflow module 实现（含被测的目录工作流自身）。
@@ -83,6 +85,7 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
 
   private static func makeForbiddenPatterns() -> [(label: String, regex: NSRegularExpression)] {
     let typeTokens = [
+      "ProxyRuntimeController",
       "CatalogWorkflowDependencies", "CatalogCommitCoordinator", "CatalogFileStore",
       "ConfigurationCatalog", "CatalogEntry", "CommittedCatalogSnapshot",
       "CredentialStoring", "KeychainCredentialStore", "CredentialWriteJournal",
@@ -118,7 +121,11 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
     var result: [URL] = []
     for case let url as URL in enumerator {
       let name = url.lastPathComponent
-      guard name.hasSuffix(".swift"), !exemptedFiles.contains(name) else { continue }
+      guard
+        name.hasSuffix(".swift"),
+        !exemptedFiles.contains(name),
+        !exemptedFilePrefixes.contains(where: { name.hasPrefix($0) })
+      else { continue }
       let relativePath = url.path.replacingOccurrences(of: directory.path + "/", with: "")
       guard !exemptedDirectories.contains(where: { relativePath.hasPrefix("\($0)/") })
       else { continue }

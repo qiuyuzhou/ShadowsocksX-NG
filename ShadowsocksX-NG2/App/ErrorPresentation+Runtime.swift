@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - 运行时失败事实的呈现（RuntimeFailureFacts / AgentRunState / 系统代理应用态）
+// MARK: - 运行时失败事实的呈现（RuntimeFailureFacts / 系统代理应用态）
 
 extension AppPresentation {
   static func message(for failure: RuntimeFailureFacts) -> String {
@@ -13,19 +13,6 @@ extension AppPresentation {
     case .activation(let error): return activation(error)
     case .requiresApproval: return "请在系统设置的登录项中允许代理后台服务"
     case .systemProxy(let facts): return systemProxyFailure(facts)
-    }
-  }
-
-  static func message(for state: ProxyRuntimeController.AgentRunState) -> String {
-    switch state {
-    case .off: return "代理未运行"
-    case .starting: return "代理正在启动"
-    case .running: return "代理运行中"
-    case .firewallBlocked(let facts):
-      return message(for: RuntimeFailureFacts.firewallBlocked(facts))
-    case .launchFailed(let facts): return message(for: RuntimeFailureFacts.launch(facts))
-    case .requiresApproval: return message(for: RuntimeFailureFacts.requiresApproval)
-    case .serviceFailed(let facts): return message(for: RuntimeFailureFacts.service(facts))
     }
   }
 

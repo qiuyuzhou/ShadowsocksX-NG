@@ -55,24 +55,6 @@ final class AppPresentationTests: XCTestCase {
   }
 
   func testRuntimeAndSettingsFactsUseCentralPresentation() {
-    let runtimeStates: [ProxyRuntimeController.AgentRunState] = [
-      .firewallBlocked(FirewallBlockedFacts(executableName: "sslocal")),
-      .launchFailed(
-        .localEndpoint(endpoint: "SOCKS", host: "127.0.0.1", port: 11086, cause: .refused)),
-      .launchFailed(.missingRuntimeDocument),
-      .launchFailed(.unreadableSettings),
-      .serviceFailed(.runtimeFile),
-      .serviceFailed(.agent),
-      .serviceFailed(.missingDocument),
-      .serviceFailed(.persistence),
-      .serviceFailed(.unknown),
-    ]
-
-    for state in runtimeStates {
-      let message = AppPresentation.message(for: state)
-      XCTAssertFalse(message.isEmpty, "每个 runtime fact 都应有呈现：\(state)")
-    }
-
     // 系统代理应用状态（issue #60）：独立状态面同样走中央呈现。
     let systemProxyApplications: [SystemProxyApplicationFacts] = [
       .idle,
@@ -90,6 +72,15 @@ final class AppPresentationTests: XCTestCase {
 
     let runtimeFailures: [RuntimeFailureFacts] = [
       .firewallBlocked(FirewallBlockedFacts(executableName: "sslocal")),
+      .launch(
+        .localEndpoint(endpoint: "SOCKS", host: "127.0.0.1", port: 11086, cause: .refused)),
+      .launch(.missingRuntimeDocument),
+      .launch(.unreadableSettings),
+      .service(.runtimeFile),
+      .service(.agent),
+      .service(.missingDocument),
+      .service(.persistence),
+      .service(.unknown),
       .requiresApproval,
     ]
     for failure in runtimeFailures {

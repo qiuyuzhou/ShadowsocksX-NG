@@ -38,7 +38,8 @@ extension ProxyRuntimeControllerTests {
       return
     }
     XCTAssertEqual(facts.executableName, "sslocal")
-    XCTAssertTrue(AppPresentation.message(for: controller.state).contains("允许传入连接"))
+    XCTAssertTrue(
+      AppPresentation.message(for: RuntimeFailureFacts.firewallBlocked(facts)).contains("允许传入连接"))
     XCTAssertEqual(firewall.checkedURLs.map(\.lastPathComponent), ["sslocal"])
     XCTAssertEqual(
       controller.effectiveRuntimeListenFacts?.listenerMode,
@@ -66,7 +67,8 @@ extension ProxyRuntimeControllerTests {
       return
     }
     XCTAssertEqual(facts.executableName, "sslocal")
-    XCTAssertTrue(AppPresentation.message(for: controller.state).contains("允许传入连接"))
+    XCTAssertTrue(
+      AppPresentation.message(for: RuntimeFailureFacts.firewallBlocked(facts)).contains("允许传入连接"))
     XCTAssertGreaterThanOrEqual(firewall.checkedURLs.count, 2)
   }
 }

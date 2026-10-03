@@ -79,7 +79,8 @@ final class UnreadableListenSettingsTests: XCTestCase {
       return XCTFail("应呈现启动失败，实际 \(controller.state)")
     }
     XCTAssertTrue(
-      AppPresentation.message(for: controller.state).contains("配置无法读取"),
+      AppPresentation.message(for: RuntimeFailureFacts.launch(.unreadableSettings))
+        .contains("配置无法读取"),
       "失败必须点名监听设置不可读：\(controller.state)")
     XCTAssertEqual(agent.registerCount, 0, "占位出厂端口不得部署")
     XCTAssertFalse(FileManager.default.fileExists(atPath: runtime.contract.path))
@@ -103,7 +104,8 @@ final class UnreadableListenSettingsTests: XCTestCase {
       return XCTFail("应呈现启动失败，实际 \(controller.state)")
     }
     XCTAssertTrue(
-      AppPresentation.message(for: controller.state).contains("配置无法读取"),
+      AppPresentation.message(for: RuntimeFailureFacts.launch(.unreadableSettings))
+        .contains("配置无法读取"),
       "必须点名监听设置不可读：\(controller.state)")
     XCTAssertEqual(
       agent.unregisterCount, 1, "存续的上一会话 agent 必须停下，不得以占位端口重部署")
