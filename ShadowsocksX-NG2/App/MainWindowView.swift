@@ -340,10 +340,7 @@ extension MainWindowView {
   }
 
   private var serverLeafCount: Int {
-    func leaves(_ nodes: [CatalogTreeNode]) -> Int {
-      nodes.reduce(0) { $0 + ($1.isGroup ? leaves($1.childNodes) : 1) }
-    }
-    return leaves(workflow.tree.roots)
+    workflow.tree.serverLeafCount
   }
 
   // MARK: - 底部代理状态卡

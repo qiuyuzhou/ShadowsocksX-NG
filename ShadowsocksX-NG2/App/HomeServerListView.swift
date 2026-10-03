@@ -192,7 +192,7 @@ struct TargetTreeCard: View {
 
 private struct HomeServerListRow: View {
   @Environment(\.controlActiveState) private var controlActiveState
-  let row: HomeServerTreeRow
+  let row: CatalogTreeRow
   let eligibility: ActivationEligibility?
   let isSelected: Bool
   let isActive: Bool

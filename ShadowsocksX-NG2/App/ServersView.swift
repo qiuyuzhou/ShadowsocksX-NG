@@ -91,7 +91,7 @@ struct ServersView: View {
 
   private var serverSidebar: some View {
     List(selection: $selection) {
-      ForEach(visibleRows) { row in
+      ForEach(workflow.tree.visibleRows(collapsed: expansion.collapsedGroupIDs)) { row in
         treeRow(row)
       }
     }
@@ -111,21 +111,6 @@ struct ServersView: View {
       rootDropHovering = hovering
     }
     .toolbar { toolbarContent }
-  }
-
-  /// 折叠投影后的可见行（深度优先）：收起分组的子树不出现，其余保持目录序。
-  private var visibleRows: [CatalogTreeRow] {
-    var rows: [CatalogTreeRow] = []
-    func walk(_ nodes: [CatalogTreeNode], depth: Int) {
-      for node in nodes {
-        rows.append(CatalogTreeRow(node: node, depth: depth))
-        if node.isGroup, !expansion.isCollapsed(node.id) {
-          walk(node.childNodes, depth: depth + 1)
-        }
-      }
-    }
-    walk(workflow.tree.roots, depth: 0)
-    return rows
   }
 
   private func treeRow(_ row: CatalogTreeRow) -> some View {
@@ -353,12 +338,4 @@ extension ServersView {
 private struct MoveContext: Identifiable {
   let nodeID: NodeID
   var id: NodeID { nodeID }
-}
-
-/// 侧栏树的可见行投影：节点 + 呈现深度；身份即节点身份（折叠只影响可见集合，
-/// 不影响行身份与选中）。
-private struct CatalogTreeRow: Identifiable {
-  let node: CatalogTreeNode
-  let depth: Int
-  var id: NodeID { node.id }
 }

@@ -61,6 +61,15 @@ extension CatalogTreeNode {
   }
 }
 
+/// 侧栏树的可见行投影：节点 + 呈现深度；身份即节点身份（折叠只影响可见
+/// 集合，不影响行身份与选中）。服务器管理侧栏与首页目标树共用同一类型，
+/// 折叠集合由各自的浏览状态 owner 给出。
+struct CatalogTreeRow: Identifiable {
+  let node: CatalogTreeNode
+  let depth: Int
+  var id: NodeID { node.id }
+}
+
 /// 目录树快照：侧栏、活动目标级联、移动目的地与删除确认共用的同一份
 /// 非敏感 projection；UI 不再持有原始目录副本（issue #41）。
 struct CatalogTreeSnapshot: Equatable {
@@ -94,6 +103,32 @@ struct CatalogTreeSnapshot: Equatable {
   /// 全树已知无效服务器总数（诊断计数）。
   var invalidServerCount: Int {
     roots.reduce(0) { $0 + $1.subtreeInvalidServerCount }
+  }
+}
+
+extension CatalogTreeSnapshot {
+  /// 折叠投影后的可见行（深度优先）：收起分组的子树不出现，其余保持目录
+  /// 序。行序与深度是纯树事实；折叠集合由调用方按自己的持久化策略持有。
+  func visibleRows(collapsed: Set<NodeID>) -> [CatalogTreeRow] {
+    var rows: [CatalogTreeRow] = []
+    func walk(_ nodes: [CatalogTreeNode], depth: Int) {
+      for node in nodes {
+        rows.append(CatalogTreeRow(node: node, depth: depth))
+        if node.isGroup, !collapsed.contains(node.id) {
+          walk(node.childNodes, depth: depth + 1)
+        }
+      }
+    }
+    walk(roots, depth: 0)
+    return rows
+  }
+
+  /// 全树服务器叶子数（工作区侧栏角标）。
+  var serverLeafCount: Int {
+    func leaves(_ nodes: [CatalogTreeNode]) -> Int {
+      nodes.reduce(0) { $0 + ($1.isGroup ? leaves($1.childNodes) : 1) }
+    }
+    return leaves(roots)
   }
 }
 

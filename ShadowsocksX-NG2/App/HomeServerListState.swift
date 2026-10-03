@@ -1,12 +1,6 @@
 import Combine
 import Foundation
 
-struct HomeServerTreeRow: Identifiable {
-  let node: CatalogTreeNode
-  let depth: Int
-  var id: NodeID { node.id }
-}
-
 /// 首页独立的浏览状态。选择与折叠不改变目录或运行时活动目标。
 @MainActor
 final class HomeServerListState: ObservableObject {
@@ -34,18 +28,9 @@ final class HomeServerListState: ObservableObject {
     }
   }
 
-  var visibleRows: [HomeServerTreeRow] {
-    var rows: [HomeServerTreeRow] = []
-    func walk(_ nodes: [CatalogTreeNode], depth: Int) {
-      for node in nodes {
-        rows.append(HomeServerTreeRow(node: node, depth: depth))
-        if node.isGroup, !collapsedGroupIDs.contains(node.id) {
-          walk(node.childNodes, depth: depth + 1)
-        }
-      }
-    }
-    walk(tree.roots, depth: 0)
-    return rows
+  /// 可见行投影委托树快照；折叠集合由本状态的持久化策略持有。
+  var visibleRows: [CatalogTreeRow] {
+    tree.visibleRows(collapsed: collapsedGroupIDs)
   }
 
   func update(tree: CatalogTreeSnapshot, activeTargetID: NodeID?) {
