@@ -3,6 +3,8 @@ import Foundation
 
 /// File reads and collection preparation run outside the UI actor; queries use
 /// the prepared collection and do not rebuild semantic analysis on each keypress.
+/// Operations that await capture a `RulesIntentTicket` at entry and recheck it
+/// once after every await.
 @MainActor
 final class RulesWorkflow: ObservableObject {
   @Published private(set) var snapshot = RulesPageSnapshot()
@@ -13,7 +15,6 @@ final class RulesWorkflow: ObservableObject {
   private let commitDocument: (@MainActor (CustomRuleDocument) async -> RuleDocumentCommit)?
   private var collection: RulesCollection?
   private var refreshGeneration = 0
-  private var testGeneration = 0
   private let feedbackDelay: @Sendable () async throws -> Void
   private var feedbackTask: Task<Void, Never>?
   private(set) var analysisTask: Task<Void, Never>?
@@ -105,13 +106,10 @@ final class RulesWorkflow: ObservableObject {
   }
 
   func setEnabled(_ enabled: Bool, identities: Set<RuleIdentity>) async {
-    guard snapshot.isComplete, !snapshot.isCommitting,
-      commitDocument != nil
-    else { return }
+    guard let ticket = intentTicket(), let old = ticket.document else { return }
     let allowed = Set(snapshot.rows.filter { !$0.isFixed }.compactMap(\.identity))
     let targets = identities.intersection(allowed)
     guard !targets.isEmpty else { return }
-    guard let old = collection?.userDocument else { return }
     var disabled = old.disabledIdentities
     let changedCount =
       enabled
@@ -214,20 +212,20 @@ final class RulesWorkflow: ObservableObject {
       snapshot.addressTest.failure = .incompleteCollection
       return
     }
-    let generation = testGeneration
-    let target = snapshot.addressTest.target
+    let ticket = RulesIntentTicket(collection: collection)
     snapshot.addressTest.isTesting = true
+    // 捕获整份测试状态：任何失效（目标编辑回原值、新测试进入、刷新/提交
+    // 重置）都会改动它，迟到的结果不得发布。
+    let intent = snapshot.addressTest
     let result = await Task.detached(priority: .userInitiated) {
       do {
         return Result<OfflineRuleMatcher.Result, OfflineRuleMatcher.Failure>.success(
-          try OfflineRuleMatcher.test(collection: collection, address: target))
+          try OfflineRuleMatcher.test(collection: collection, address: intent.target))
       } catch {
         return .failure(error as? OfflineRuleMatcher.Failure ?? .invalidTarget)
       }
     }.value
-    guard generation == testGeneration, snapshot.isComplete,
-      snapshot.version == collection.version
-    else { return }
+    guard snapshot.addressTest == intent, intentTicketIsCurrent(ticket) else { return }
     snapshot.addressTest.isTesting = false
     switch result {
     case .success(let result): snapshot.addressTest.result = result
@@ -236,7 +234,6 @@ final class RulesWorkflow: ObservableObject {
   }
 
   private func invalidateAddressTest() {
-    testGeneration += 1
     snapshot.addressTest = RulesAddressTest(target: snapshot.addressTest.target)
   }
 
@@ -289,31 +286,59 @@ final class RulesWorkflow: ObservableObject {
   }
 }
 
+/// 规则意图票据：一次规则操作意图在入口捕获的事实快照。改写意图（草稿/
+/// 预览/保存/启停/删除）经 `intentTicket()` 入口捕获——页完整、无进行中
+/// 事务、提交缝在场且用户文档已加载；只读意图（地址测试）直接以已加载
+/// 集合构造。每个 await 之后用 `intentTicketIsCurrent` 一查：页不再完整
+/// （刷新落地带来 issues、事务或加载开始）或集合版本前进（刷新/提交落地），
+/// 本次意图超期——按调用方口径退出，不得发布结果或提交文档。
+struct RulesIntentTicket {
+  /// 捕获时刻的集合；版本与页版本在写入点同步前进（分析置换除外）。
+  let collection: RulesCollection
+  var version: String { collection.version }
+  /// 捕获时刻的用户文档（改写入口保证非空；浏览态集合可为空）。
+  var document: CustomRuleDocument? { collection.userDocument }
+}
+
+extension RulesWorkflow {
+  /// 改写意图的入口捕获；nil = 此刻不容许改写（页不完整 / 事务进行中 /
+  /// 提交缝缺失 / 用户文档未加载）。
+  func intentTicket() -> RulesIntentTicket? {
+    guard commitDocument != nil, snapshot.isComplete, !snapshot.isCommitting,
+      let collection, collection.userDocument != nil
+    else { return nil }
+    return RulesIntentTicket(collection: collection)
+  }
+
+  /// 任何意图 await 后的一查：页仍完整且集合版本未前进。
+  func intentTicketIsCurrent(_ ticket: RulesIntentTicket) -> Bool {
+    snapshot.isComplete && ticket.version == snapshot.version
+  }
+}
+
 extension RulesWorkflow {
   func makeCustomRuleDraft(editing id: UUID? = nil) -> CustomRuleDraft? {
-    guard snapshot.isComplete, commitDocument != nil, let document = collection?.userDocument
-    else { return nil }
+    guard let ticket = intentTicket(), let document = ticket.document else { return nil }
     if let id {
       guard let rule = document.rules.first(where: { $0.id == id }) else { return nil }
       return CustomRuleDraft(
-        id: id, editingID: id, version: snapshot.version,
+        id: id, editingID: id, version: ticket.version,
         kind: rule.identity.match.editingKind, content: rule.identity.match.editingContent,
         action: rule.action)
     }
-    return CustomRuleDraft(id: UUID(), editingID: nil, version: snapshot.version)
+    return CustomRuleDraft(id: UUID(), editingID: nil, version: ticket.version)
   }
 
   func previewCustomRule(_ draft: CustomRuleDraft) async -> CustomRulePreview {
     guard !snapshot.isCommitting else { return CustomRulePreview(failure: .busy) }
-    guard snapshot.isComplete, let collection, collection.userDocument != nil
-    else { return CustomRulePreview(failure: .incompleteCollection) }
-    guard draft.version == snapshot.version else { return CustomRulePreview(failure: .staleDraft) }
+    guard let ticket = intentTicket() else {
+      return CustomRulePreview(failure: .incompleteCollection)
+    }
+    guard draft.version == ticket.version else { return CustomRulePreview(failure: .staleDraft) }
     let prepared = await Task.detached(priority: .userInitiated) {
-      collection.previewCustomRule(draft)
+      ticket.collection.previewCustomRule(draft)
     }.value
-    guard !snapshot.isCommitting else { return CustomRulePreview(failure: .busy) }
-    guard snapshot.isComplete else { return CustomRulePreview(failure: .incompleteCollection) }
-    guard snapshot.version == draft.version else { return CustomRulePreview(failure: .staleDraft) }
+    guard intentTicketIsCurrent(ticket) else { return CustomRulePreview(failure: .staleDraft) }
     return prepared
   }
 
@@ -332,17 +357,15 @@ extension RulesWorkflow {
   }
 
   func prepareCustomRuleDeletion() -> CustomRuleDeletion? {
-    guard snapshot.isComplete, !snapshot.isCommitting, commitDocument != nil,
-      !deletableSelection.isEmpty
-    else { return nil }
-    return CustomRuleDeletion(customIDs: deletableSelection, version: snapshot.version)
+    guard let ticket = intentTicket(), !deletableSelection.isEmpty else { return nil }
+    return CustomRuleDeletion(customIDs: deletableSelection, version: ticket.version)
   }
 
   func deleteCustomRules(_ confirmation: CustomRuleDeletion) async -> CustomRuleDeletionResult {
     guard !snapshot.isCommitting else { return .unavailable(.busy) }
-    guard snapshot.isComplete, commitDocument != nil, let old = collection?.userDocument
+    guard let ticket = intentTicket(), let old = ticket.document
     else { return .unavailable(.incompleteCollection) }
-    guard confirmation.version == snapshot.version,
+    guard confirmation.version == ticket.version,
       !confirmation.customIDs.isEmpty,
       confirmation.customIDs.isSubset(of: Set(old.rules.map(\.id)))
     else { return .unavailable(.staleConfirmation) }
