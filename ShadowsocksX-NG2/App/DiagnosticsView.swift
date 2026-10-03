@@ -8,7 +8,8 @@ import SwiftUI
 /// 的唯一 UI-facing seam）；本视图只负责生命周期触发、呈现与复制动作。
 struct DiagnosticsView: View {
   @ObservedObject var diagnostics: DiagnosticsWorkflow
-  let errors: ErrorAlertPresenter
+  /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
+  @StateObject private var errors = ErrorAlertPresenter()
   let clipboard: any TextClipboard
 
   enum LogSource: String, CaseIterable, Identifiable {
@@ -49,6 +50,7 @@ struct DiagnosticsView: View {
       .padding(.bottom, 36)
     }
     .task { await diagnostics.readWhileActive() }
+    .presentingErrors(errors)
   }
 
   // MARK: - 状态摘要

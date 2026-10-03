@@ -7,7 +7,8 @@ import SwiftUI
 /// （非敏感）；结构化刷新状态在呈现层本地化（story 42）。
 struct SubscriptionsView: View {
   @ObservedObject var workflow: CatalogWorkflow
-  let errors: ErrorAlertPresenter
+  /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
+  @StateObject private var errors = ErrorAlertPresenter()
   /// 删除完成后回调（被删身份集合；主窗口据此清除失效选择）。
   let onNodesRemoved: (Set<NodeID>) -> Void
 
@@ -60,6 +61,7 @@ struct SubscriptionsView: View {
         "将移除订阅源、固定分组与全部远端成员；若代理正走此订阅，代理会停止。此操作不可撤销。"
       )
     }
+    .presentingErrors(errors)
   }
 
   private func commitDelete() {

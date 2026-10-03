@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// 主窗口各 destination 的包装视图（票 #53/#54）：负责每个分区的共享
-/// alert/sheet 生命周期，行为委托给既有分区视图。
+/// 首页 destination 的包装视图：承载旧版导入主动弹窗与共享错误弹窗挂载
+/// （票 #53/#54），行为委托给 HomeView。订阅/诊断分区自持错误弹窗（与
+/// ServersView 同法），不再需要包装。
 
 struct WorkspaceHomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
@@ -31,37 +32,6 @@ struct WorkspaceHomeView: View {
       didOfferLegacyImport = true
       showLegacyImportSheet = true
     }
-    .presentingErrors(errors)
-  }
-}
-
-struct WorkspaceSubscriptionsView: View {
-  @ObservedObject var workflow: CatalogWorkflow
-  let onNodesRemoved: (Set<NodeID>) -> Void
-  @StateObject private var errors = ErrorAlertPresenter()
-
-  var body: some View {
-    SubscriptionsView(
-      workflow: workflow,
-      errors: errors,
-      onNodesRemoved: onNodesRemoved
-    )
-    .presentingErrors(errors)
-  }
-}
-
-struct WorkspaceDiagnosticsView: View {
-  @ObservedObject var diagnostics: DiagnosticsWorkflow
-  let clipboard: any TextClipboard
-  @StateObject private var errors = ErrorAlertPresenter()
-
-  var body: some View {
-    // 导出诊断动作在窗口工具栏（票 #58）；本包装只承载复制错误呈现。
-    DiagnosticsView(
-      diagnostics: diagnostics,
-      errors: errors,
-      clipboard: clipboard
-    )
     .presentingErrors(errors)
   }
 }

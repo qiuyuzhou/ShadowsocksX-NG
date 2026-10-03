@@ -211,7 +211,7 @@ struct MainWindowView: View {
         clipboard: clipboard,
         configurationGroupFileExporter: configurationGroupFileExporter)
     case .subscriptions:
-      WorkspaceSubscriptionsView(
+      SubscriptionsView(
         workflow: workflow,
         onNodesRemoved: clearSelectionIfInvalidated)
     case .rules:
@@ -225,7 +225,7 @@ struct MainWindowView: View {
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     case .diagnostics:
-      WorkspaceDiagnosticsView(
+      DiagnosticsView(
         diagnostics: diagnostics,
         clipboard: clipboard)
     }
