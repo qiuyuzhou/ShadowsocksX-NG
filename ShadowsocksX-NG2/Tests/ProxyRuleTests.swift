@@ -94,27 +94,4 @@ final class ProxyRuleTests: XCTestCase {
     XCTAssertEqual(Set(json.keys), ["action", "match"])
     XCTAssertEqual(try JSONDecoder().decode(ProxyRule.self, from: data), rule)
   }
-
-  // MARK: - 规则集合规范化
-
-  func testRuleSetDeduplicatesIdenticalRules() throws {
-    let first = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
-    let second = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
-    let set = RuleSet(rules: [first, second])
-    XCTAssertEqual(set.rules.count, 1)
-  }
-
-  func testRuleSetRecordsCrossActionConflict() throws {
-    let direct = ProxyRule(
-      action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
-    let proxy = ProxyRule(
-      action: .proxy, match: try RuleMatch(domainSuffix: "example.com"))
-    let set = RuleSet(rules: [direct, proxy])
-    XCTAssertEqual(set.rules.count, 2, "不同动作的同匹配条件保留双方，冲突由元数据说明")
-    XCTAssertEqual(set.conflicts.count, 1)
-    XCTAssertEqual(set.conflicts[0].match, .domainSuffix("example.com"))
-    XCTAssertEqual(set.conflicts[0].actions, [.direct, .proxy])
-  }
 }

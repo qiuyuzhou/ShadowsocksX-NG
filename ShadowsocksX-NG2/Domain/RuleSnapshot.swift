@@ -96,8 +96,6 @@ struct RuleSnapshot: Codable, Equatable, Sendable {
     self.rules = rules
     self.lossReport = lossReport
   }
-
-  var ruleSet: RuleSet { RuleSet(rules: rules) }
 }
 
 // MARK: - 快照加载

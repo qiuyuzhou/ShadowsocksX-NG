@@ -88,14 +88,6 @@ extension ProxyRuntimeController {
     return RuleDocumentCommit(outcome: outcome, document: ruleDocuments.current ?? previous)
   }
 
-  func updateCustomRules(_ rules: [CustomRule]) async -> CustomRuleUpdateOutcome {
-    do {
-      let previous = try ruleDocuments.load()
-      return await updateRuleDocument(
-        CustomRuleDocument(rules: rules, disabledIdentities: previous.disabledIdentities))
-    } catch { return .persistenceFailed }
-  }
-
   func updateRuleDocument(_ document: CustomRuleDocument) async -> CustomRuleUpdateOutcome {
     guard !isUpdatingRules else { return .busy }
     isUpdatingRules = true

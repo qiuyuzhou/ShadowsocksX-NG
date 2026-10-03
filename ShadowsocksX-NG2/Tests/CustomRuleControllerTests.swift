@@ -55,7 +55,7 @@ extension ProxyRuntimeControllerTests {
 
     let rule = CustomRule(
       action: .direct, match: try RuleMatch(domainSuffix: "internal.example"))
-    let outcome = await controller.updateCustomRules([rule])
+    let outcome = await controller.commitRuleDocument(CustomRuleDocument(rules: [rule])).outcome
 
     XCTAssertEqual(outcome, .saved)
     await controller.ruleApplicationTask?.value
@@ -83,7 +83,7 @@ extension ProxyRuntimeControllerTests {
       CustomRule(action: .proxy, match: .domainExact("a.order.example")),
       CustomRule(action: .direct, match: .domainExact("a.order.example")),
     ]
-    let first = await controller.updateCustomRules(rules)
+    let first = await controller.commitRuleDocument(CustomRuleDocument(rules: rules)).outcome
     XCTAssertEqual(first, .saved)
     await controller.ruleApplicationTask?.value
     XCTAssertEqual(try store.load(), rules, "保存保留用户 UUID 和全部意图")
@@ -100,7 +100,8 @@ extension ProxyRuntimeControllerTests {
     let unregisterBefore = agent.unregisterCount
     let summary = controller.readCustomRuleSummary()
     let reversed = Array(rules.reversed())
-    let reordered = await controller.updateCustomRules(reversed)
+    let reordered = await controller.commitRuleDocument(CustomRuleDocument(rules: reversed))
+      .outcome
     XCTAssertEqual(reordered, .saved)
     await controller.ruleApplicationTask?.value
     XCTAssertEqual(try store.load(), reversed)
@@ -131,7 +132,9 @@ extension ProxyRuntimeControllerTests {
 
     let conflicting = CustomRule(
       action: .proxy, match: try RuleMatch(ipv4CIDR: "127.0.0.0/8"))
-    let outcome = await controller.updateCustomRules([existing, conflicting])
+    let outcome = await controller.commitRuleDocument(
+      CustomRuleDocument(rules: [existing, conflicting])
+    ).outcome
 
     guard case .rejected(let rejected) = outcome else {
       return XCTFail("应拒绝固定本地冲突，实际 \(outcome)")
@@ -208,7 +211,7 @@ extension ProxyRuntimeControllerTests {
 
     let rule = CustomRule(
       action: .direct, match: try RuleMatch(domainSuffix: "internal.example"))
-    let outcome = await controller.updateCustomRules([rule])
+    let outcome = await controller.commitRuleDocument(CustomRuleDocument(rules: [rule])).outcome
 
     XCTAssertEqual(outcome, .saved)
     await controller.ruleApplicationTask?.value
