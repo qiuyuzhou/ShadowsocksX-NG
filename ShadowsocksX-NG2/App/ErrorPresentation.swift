@@ -60,7 +60,7 @@ extension AppPresentation {
     case let error as LegacyImportError:
       return legacyImport(error)
     case let error as SystemProxyError:
-      return systemProxy(error)
+      return systemProxy(SystemProxyOperationFailure(error))
     case let error as TextClipboardFailure:
       return textClipboard(error)
     case let error as DiagnosticReportFailure:
@@ -302,24 +302,6 @@ extension AppPresentation {
     case .alreadyCompleted: return "Legacy 配置已经导入；如需再次导入，请明确选择再次导入"
     case .malformedSnapshot: return "Legacy 快照无效"
     case .commitFailed: return "Legacy 导入未完成，2.0 写入未完成"
-    }
-  }
-
-  // swiftlint:disable:next cyclomatic_complexity
-  private static func systemProxy(_ error: SystemProxyError) -> String {
-    switch error {
-    case .preferencesUnavailable: return "系统网络配置不可用"
-    case .preferencesBusy: return "系统网络配置正被其他设置操作占用"
-    case .noCurrentNetworkSet: return "没有当前网络位置"
-    case .noNetworkLocations: return "没有可检查的网络位置"
-    case .noProxyServices: return "当前网络位置没有可写入的网络服务"
-    case .unreadableService: return "无法读取网络服务的代理配置"
-    case .invalidStoredConfiguration: return "保存的系统代理配置无效"
-    case .cannotWriteService: return "无法写入网络服务的代理配置"
-    case .commitFailed: return "系统代理提交失败"
-    case .applyFailed: return "系统代理应用失败"
-    case .invalidRequest: return "系统代理助手收到了无效请求"
-    case .helperUnavailable: return "系统代理助手不可用；请确认已在登录项中允许"
     }
   }
 

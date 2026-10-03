@@ -58,8 +58,10 @@ extension AppPresentation {
     }
   }
 
+  // 系统代理操作失败的唯一文案映射（ErrorPresentation 的 SystemProxyError
+  // 分支经 SystemProxyOperationFailure(error) 桥接到这里）。
   // swiftlint:disable:next cyclomatic_complexity
-  private static func systemProxy(_ failure: SystemProxyOperationFailure) -> String {
+  static func systemProxy(_ failure: SystemProxyOperationFailure) -> String {
     switch failure {
     case .preferencesUnavailable: return "系统网络配置不可用"
     case .preferencesBusy: return "系统网络配置正被其他设置操作占用"

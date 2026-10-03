@@ -111,6 +111,27 @@ enum SystemProxyOperationFailure: Equatable, Sendable {
   case helperUnavailable
 }
 
+extension SystemProxyOperationFailure {
+  /// `SystemProxyError` 的呈现类别投影：稳定事实只保留操作类别；Domain 错误
+  /// 的关联值（排查细节）不出现在运行时事实里。
+  init(_ error: SystemProxyError) {
+    switch error {
+    case .preferencesUnavailable: self = .preferencesUnavailable
+    case .preferencesBusy: self = .preferencesBusy
+    case .noCurrentNetworkSet: self = .noCurrentNetworkSet
+    case .noNetworkLocations: self = .noNetworkLocations
+    case .noProxyServices: self = .noProxyServices
+    case .unreadableService: self = .unreadableService
+    case .invalidStoredConfiguration: self = .invalidStoredConfiguration
+    case .cannotWriteService: self = .cannotWriteService
+    case .commitFailed: self = .commitFailed
+    case .applyFailed: self = .applyFailed
+    case .invalidRequest: self = .invalidRequest
+    case .helperUnavailable: self = .helperUnavailable
+    }
+  }
+}
+
 enum SystemProxyFailureFacts: Equatable, Sendable {
   case operation(SystemProxyOperationFailure)
   case mode(ProxyModeError)

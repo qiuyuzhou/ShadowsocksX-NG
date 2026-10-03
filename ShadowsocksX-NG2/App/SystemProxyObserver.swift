@@ -472,32 +472,11 @@ extension SystemProxyObserver {
 extension SystemProxyObserver {
   private func systemProxyFacts(for error: Error) -> SystemProxyFailureFacts {
     if let error = error as? SystemProxyError {
-      return Self.systemProxyFacts(for: error)
+      return .operation(SystemProxyOperationFailure(error))
     }
     if let error = error as? ProxyModeError {
       return .mode(error)
     }
     return .unknown
-  }
-
-  // 显式映射保持与错误族一一对应；错误带关联值，无法用字典键穷举。
-  // swiftlint:disable:next cyclomatic_complexity
-  private static func systemProxyFacts(
-    for error: SystemProxyError
-  ) -> SystemProxyFailureFacts {
-    switch error {
-    case .preferencesUnavailable: return .operation(.preferencesUnavailable)
-    case .preferencesBusy: return .operation(.preferencesBusy)
-    case .noCurrentNetworkSet: return .operation(.noCurrentNetworkSet)
-    case .noProxyServices: return .operation(.noProxyServices)
-    case .unreadableService: return .operation(.unreadableService)
-    case .invalidStoredConfiguration: return .operation(.invalidStoredConfiguration)
-    case .cannotWriteService: return .operation(.cannotWriteService)
-    case .commitFailed: return .operation(.commitFailed)
-    case .applyFailed: return .operation(.applyFailed)
-    case .noNetworkLocations: return .operation(.noNetworkLocations)
-    case .invalidRequest: return .operation(.invalidRequest)
-    case .helperUnavailable: return .operation(.helperUnavailable)
-    }
   }
 }
