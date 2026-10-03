@@ -52,7 +52,7 @@ class SnapshotConverterTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             rules, report = gfw.convert_document(
-                "||Example.COM^\n@@||Safe.Example.COM^\n@@||other.example\n|https://path.example/\n")
+                "||Example.COM^\n@@||Safe.Example.COM^\n@@||other.example\n|https://path.example/a\n")
         snapshot = {"schemaVersion": gfw.SCHEMA_VERSION, "rules": rules, "lossReport": report}
         self.assert_slim(snapshot)
         self.assertEqual(report["absorbedCount"], 1)

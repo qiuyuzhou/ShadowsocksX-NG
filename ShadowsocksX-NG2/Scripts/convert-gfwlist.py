@@ -2,7 +2,7 @@
 """Convert the official Base64 GFWList AutoProxy list into an NG2 rule snapshot
 (issue #65).
 
-Domain anchors become suffix matches. URL prefixes without a path and with a
+Domain anchors become suffix matches. URL prefixes with an empty or root path and a
 literal domain host become exact matches, discarding the scheme and port.
 Other URL conditions are reported as losses rather than expanded to domains.
 `@@` exceptions shadowed by a broader proxy rule are kept out of the ACL and
@@ -96,7 +96,7 @@ def parse_url_prefix(url: str, original: str, is_exception: bool) -> dict:
         _ = parsed.port  # Validate numeric syntax and range before dropping it.
     except ValueError:
         return skipped
-    if parsed.path or "?" in url or "#" in url or parsed.username is not None:
+    if parsed.path not in {"", "/"} or "?" in url or "#" in url or parsed.username is not None:
         return skipped
     if (
         parsed.netloc.endswith(":")

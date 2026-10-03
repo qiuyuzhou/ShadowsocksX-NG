@@ -57,7 +57,7 @@ def inputs():
         'china-ipv4': ('\n'.join(f'1.0.{i}.7/24' for i in range(100)) + '\n').encode(),
         'gfwlist': base64.b64encode(('||example.com\n@@||safe.example.com\n@@||other.example\n'
                                     '|https://exact.example.net\n@@|https://direct.example.net\n'
-                                    '|https://path.example.net/\n'
+                                    '|https://root.example.net/\n|https://path.example.net/a\n'
                                     + '\n'.join(f'||gfw{i}.example.net' for i in range(100))).encode()),
     }
 
@@ -93,7 +93,7 @@ class ConversionBehaviorTests(unittest.TestCase):
                 self.assertEqual(snapshot['metadata']['inputDigest'], hashlib.sha256(digest_input).hexdigest())
                 self.assertEqual(snapshot['lossReport']['convertedCount'], len(snapshot['rules']))
                 if name == 'gfwlist':
-                    for action, host in [('proxy', 'exact.example.net'), ('direct', 'direct.example.net')]:
+                    for action, host in [('proxy', 'exact.example.net'), ('direct', 'direct.example.net'), ('proxy', 'root.example.net')]:
                         self.assertIn({'action': action, 'match': {'kind': 'domainExact', 'value': host}}, snapshot['rules'])
 
     def test_geosite_reads_published_typed_protobuf_and_selects_category(self):
@@ -156,7 +156,7 @@ class ConversionBehaviorTests(unittest.TestCase):
 
     def test_gfw_url_prefix_with_conditions_or_invalid_host_stays_skipped(self):
         patterns = [
-            'https://example.com/', 'https://example.com/path',
+            'https://example.com/path', 'https://example.com//',
             'https://*.example.com', 'https://exam*ple.com',
             'https://1.2.3.4', 'https://999.2.3.4', 'https://[2001:db8::1]',
             'https://localhost', 'https://bad..example', 'https://-bad.example',
@@ -173,6 +173,17 @@ class ConversionBehaviorTests(unittest.TestCase):
                     rules, report = GFW.convert_document(prefix + pattern + '\n||keep.example')
                     self.assertEqual([r['match']['value'] for r in rules], ['keep.example'])
                     self.assertEqual(report['skipped'], {'urlPrefix': 1})
+
+    def test_gfw_url_prefix_root_path_converts_and_deduplicates(self):
+        rules, report = GFW.convert_document(
+            '|https://Example.COM/\n|http://example.com\n'
+            '@@|https://safe.example.org/\n@@|http://safe.example.org\n')
+        self.assertEqual(rules, [
+            {'action': 'proxy', 'match': {'kind': 'domainExact', 'value': 'example.com'}},
+            {'action': 'direct', 'match': {'kind': 'domainExact', 'value': 'safe.example.org'}},
+        ])
+        self.assertEqual(report['convertedCount'], 2)
+        self.assertEqual(report['skipped'], {})
 
     def test_gfw_exact_proxy_only_shadows_same_exact_exception(self):
         lines = ['|https://example.com', '@@|http://example.com',
