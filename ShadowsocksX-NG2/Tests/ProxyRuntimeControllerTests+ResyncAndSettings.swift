@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-extension ProxyRuntimeControllerTests {
+final class ProxyRuntimeResyncAndSettingsTests: ProxyRuntimeControllerTests {
   // MARK: GUI 重启重同步（D5）
 
   func testResyncWithRegisteredAgentAndMatchingContractSkipsRewrite() async throws {

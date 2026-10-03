@@ -37,6 +37,9 @@ extension ProxyRuntimeControllerTests {
     return String(bytes: data, encoding: .utf8) ?? ""
   }
 
+}
+
+final class CustomRuleControllerTests: ProxyRuntimeControllerTests {
   /// 规则内容变化重编译 ACL 并按完整重启路径生效。
   func testUpdateCustomRulesRecompilesACLAndRestarts() async throws {
     let seeded = try makeSeededCatalog()

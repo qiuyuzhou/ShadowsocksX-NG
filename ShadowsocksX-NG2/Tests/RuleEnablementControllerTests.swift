@@ -2,7 +2,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-extension ProxyRuntimeControllerTests {
+final class RuleEnablementControllerTests: ProxyRuntimeControllerTests {
   func testRapidRuleSavesCoalesceIntoOneLatestACLDeployment() async throws {
     let seeded = try makeSeededCatalog()
     let (store, _) = try makeCustomRuleStore()
@@ -38,7 +38,7 @@ extension ProxyRuntimeControllerTests {
       store: store,
       settings: ProxySettings(
         listen: ActivationFixture.listen, preferredMode: .rule, agentEnabled: true),
-      proxyMode: .rule, launchHealthTimeoutSeconds: 2)
+      proxyMode: .rule, launchHealthTimeoutSeconds: 0.3)
     try await controller.activate(seeded.server)
     let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
     let started = expectation(description: "first deployment awaiting receipt")
@@ -238,6 +238,9 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(agent.registerCount, 0)
   }
 
+}
+
+extension RuleEnablementControllerTests {
   func testAgentOffDuringRecoveryCannotBeOverwrittenByOldRuleTransaction() async throws {
     try await interruptRuleRecovery(switchMode: false)
   }
@@ -256,7 +259,7 @@ extension ProxyRuntimeControllerTests {
       ruleDefaultAction: .proxyWhenUnmatched, agentEnabled: true)
     let controller = makeControllerWithCustomRules(
       store: store, settings: settings, proxyMode: .rule,
-      launchHealthTimeoutSeconds: 1)
+      launchHealthTimeoutSeconds: 0.2)
     try await controller.activate(seeded.server)
     let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
     let recoveryStarted = expectation(description: "recovery awaiting health")

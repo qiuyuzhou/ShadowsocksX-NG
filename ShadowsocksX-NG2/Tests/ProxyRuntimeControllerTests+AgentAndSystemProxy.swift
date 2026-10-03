@@ -5,7 +5,7 @@ import XCTest
 
 /// Agent 开关与系统代理开关的拆分语义（issue #60）：与既有开关用例同文件
 /// 追加（Xcode 测试扫描限制），扩展持有独立用例组。
-extension ProxyRuntimeControllerTests {
+final class ProxyRuntimeAgentAndSystemProxyTests: ProxyRuntimeControllerTests {
   func testEnableWithoutActiveTargetDeploysEmptyServerListening() async throws {
     _ = try makeSeededCatalog()
     let controller = makeController(
@@ -195,6 +195,9 @@ extension ProxyRuntimeControllerTests {
   }
   /// 关闭 agent 的级联（issue #71）：系统代理意图仍开启时一并持久化为关闭，
   /// 先请求清理、再停止监听；之后重启 agent 不会恢复系统代理意图。
+}
+
+extension ProxyRuntimeAgentAndSystemProxyTests {
   func testAgentOffClearsSystemProxyBeforeStoppingListeningAndCascadesIntentOff() async throws {
     let seeded = try makeSeededCatalog()
     let settingsStore = InMemoryProxySettingsStore()
@@ -450,7 +453,7 @@ extension ProxyRuntimeControllerTests {
   }
 }
 
-extension ProxyRuntimeControllerTests {
+extension ProxyRuntimeAgentAndSystemProxyTests {
   /// 意图已开启时的开启命令是失败态的显式重试入口（issue #60）：无需先关再开。
   func testAgentEnableCommandRetriesConvergenceWhileIntentAlreadyOn() async throws {
     let seeded = try makeSeededCatalog()

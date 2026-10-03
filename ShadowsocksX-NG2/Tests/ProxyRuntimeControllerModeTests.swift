@@ -5,7 +5,7 @@ import XCTest
 /// Mode restoration and commands share the Domain availability policy without
 /// starting a real runtime or touching host proxy settings.
 @MainActor
-extension ProxyRuntimeControllerTests {
+final class ProxyRuntimeControllerModeTests: ProxyRuntimeControllerTests {
   func testRuntimeFactsProjectControllerStateAtStableSeam() async {
     let controller = makeController(probe: ProxyRuntimeFixture.FakeProbe.reachable())
 
@@ -26,7 +26,7 @@ extension ProxyRuntimeControllerTests {
 // 旧收敛复活；restore 先查时效再动持久层）
 
 @MainActor
-extension ProxyRuntimeControllerTests {
+extension ProxyRuntimeControllerModeTests {
   /// agent-off 落在 mode 切换的健康门 await 窗口内：票据查全四事实 →
   /// superseded，不触发 restore 重注册，用户的 mode 意图保留在持久层与内存。
   func testAgentOffDuringModeTransitionHealthGateSupersedesWithoutRestore() async throws {

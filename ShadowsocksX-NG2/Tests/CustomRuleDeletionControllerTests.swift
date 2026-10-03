@@ -2,7 +2,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-extension ProxyRuntimeControllerTests {
+final class CustomRuleDeletionControllerTests: ProxyRuntimeControllerTests {
   func testDeletionWhileOffPersistsBatchAndDisabledOrphansWithoutStarting() async throws {
     let (store, _) = try makeCustomRuleStore()
     let rules = [

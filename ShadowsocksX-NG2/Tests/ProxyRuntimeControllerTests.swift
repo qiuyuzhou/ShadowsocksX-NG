@@ -7,7 +7,7 @@ import XCTest
 /// agent 开关与系统代理开关的独立语义、目录重展开消费与 GUI 重同步重合（不
 /// 触真实 SMAppService/launchd/SystemConfiguration）。
 @MainActor
-final class ProxyRuntimeControllerTests: XCTestCase {
+class ProxyRuntimeControllerTests: XCTestCase {
   var runtime: ProxyRuntimeFixture.TemporaryRuntime!
   var catalogFileURL: URL!
   var activationFileURL: URL!
@@ -24,6 +24,10 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     private(set) var records: [(pid: Int32, signal: Int32)] = []
     /// SIGUSR1 送达后模拟 wrapper 热重载刷新回执。
     var reloadReceipt: (() -> Void)?
+    /// wrapper 进程存活位：生产中注销 LaunchAgent 后 wrapper 随 launchd 停止
+    /// 消亡，pid 文件留存至 deleteRuntimeFiles、死亡靠 kill(_, 0) 探测；
+    /// 重注册即拉起新进程。不置死则停止协议会空等退出超时上限。
+    private var wrapperAlive = true
 
     var signalsSent: [(pid: Int32, signal: Int32)] {
       lock.lock()
@@ -37,6 +41,20 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       lock.unlock()
     }
 
+    /// 注销 LaunchAgent：对应 wrapper 进程消亡。
+    func terminateWrapper() {
+      lock.lock()
+      wrapperAlive = false
+      lock.unlock()
+    }
+
+    /// 重新注册：拉起新 wrapper 进程。
+    func relaunchWrapper() {
+      lock.lock()
+      wrapperAlive = true
+      lock.unlock()
+    }
+
     func send(_ pid: Int32, _ signal: Int32) -> Int32 {
       record(pid, signal)
       if signal == SIGUSR1 {
@@ -45,7 +63,10 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       // kill(_, 0) 判活语义：只对夹具约定的存活 pid（42 与本测试进程）报告
       // 在跑；陈旧残留 pid 返回 ESRCH，停止协议才不必空等退出超时上限。
       if signal == 0 {
-        return pid == 42 || pid == ProcessInfo.processInfo.processIdentifier
+        lock.lock()
+        let alive = wrapperAlive
+        lock.unlock()
+        return (pid == 42 && alive) || pid == ProcessInfo.processInfo.processIdentifier
           ? 0 : Int32(ESRCH)
       }
       return 0
@@ -63,6 +84,8 @@ final class ProxyRuntimeControllerTests: XCTestCase {
     systemProxyHelper = ProxyRuntimeFixture.FakeSystemProxyHelperService()
     systemProxyNetworkChangeMonitor = ProxyRuntimeFixture.FakeSystemProxyNetworkChangeMonitor()
     signals = SignalRecorder()
+    // 注销即 wrapper 消亡：停止协议的退出等待据 kill(_, 0) 放行，不空等超时。
+    agent.onUnregister = { [weak self] in self?.signals?.terminateWrapper() }
   }
 
   override func tearDown() async throws {
@@ -102,7 +125,9 @@ final class ProxyRuntimeControllerTests: XCTestCase {
   ) -> ProxyRuntimeController {
     agent.setStatus(agentStatus)
     let runtimeFileStore = RuntimeFileStore(fileURL: runtime.contract)
-    agent.onRegister = { [runtimeFileStore] in
+    agent.onRegister = { [runtimeFileStore, signals] in
+      // 重注册＝拉起新 wrapper 进程（注销时已随 LaunchAgent 置死）。
+      signals?.relaunchWrapper()
       guard let document = runtimeFileStore.loadDocument() else { return }
       try? runtimeFileStore.writeRuntimeReceipt(for: document, processID: 42)
     }
@@ -145,6 +170,10 @@ final class ProxyRuntimeControllerTests: XCTestCase {
       processIsAlive: processIsAlive)
   }
 
+}
+
+/// Concrete suite; the shared fixture must not contain inherited test methods.
+final class ProxyRuntimeControllerCoreTests: ProxyRuntimeControllerTests {
   // MARK: Agent 开关与首次默认
 
   func testActivateWhileAgentOffPublishesActiveTargetIDWithoutDeploying() async throws {

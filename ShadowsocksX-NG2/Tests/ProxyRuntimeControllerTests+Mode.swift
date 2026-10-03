@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-extension ProxyRuntimeControllerTests {
+final class ProxyRuntimeModeCommandTests: ProxyRuntimeControllerTests {
   func testSetProxyModePersistsTheChoiceAndARestoreRestoresIt() async throws {
     let settingsStore = InMemoryProxySettingsStore()
     let controller = makeController(
