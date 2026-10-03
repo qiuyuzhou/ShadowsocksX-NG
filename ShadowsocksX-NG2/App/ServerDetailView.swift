@@ -15,14 +15,9 @@ struct ServerDetailView: View {
   let errors: ErrorAlertPresenter
   let clipboard: any TextClipboard
 
-  @State private var address = ""
-  @State private var port = 8388
-  @State private var encryptionMethod = ""
-  @State private var password = ""
-  @State private var remark = ""
-  @State private var pluginChoice: PluginSelection = .none
-  @State private var pluginOptionsText = ""
-  @State private var showPassword = false
+  /// 连接字段草稿由共享 module 持有（与新建表单同一 interface），经显式
+  /// 编辑命令装载（凭据明文仅在编辑动作中出现）。
+  @StateObject private var fields = ServerFormFields()
   // 分享/二维码状态由同 module 的 ServerDetailView+Share.swift 扩展驱动。
   @State var showQR = false
   @State var qrImage: NSImage?
@@ -37,15 +32,6 @@ struct ServerDetailView: View {
 
   private var node: CatalogTreeNode? {
     workflow.tree.node(withID: serverID)
-  }
-
-  /// 当前 sslocal 能力目录；目录中既有的未知方法原样追加显示，便于用户修复。
-  private var methodChoices: [String] {
-    var choices = EncryptionMethodCatalog.supported.sorted()
-    if !encryptionMethod.isEmpty && !choices.contains(encryptionMethod) {
-      choices.append(encryptionMethod)
-    }
-    return choices
   }
 
   var body: some View {
@@ -123,66 +109,9 @@ struct ServerDetailView: View {
         .foregroundStyle(.secondary)
         .padding(.top, 16)
     }
-    Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 18) {
-      GridRow {
-        column("服务器地址") {
-          TextField("服务器地址", text: $address)
-            .textFieldStyle(.roundedBorder)
-            .disabled(!isEditable)
-        }
-        column("端口") {
-          TextField("端口", value: $port, format: .number.grouping(.never))
-            .textFieldStyle(.roundedBorder)
-            .disabled(!isEditable)
-        }
-      }
-      GridRow {
-        column("加密方式") {
-          Picker("加密方式", selection: $encryptionMethod) {
-            ForEach(methodChoices, id: \.self) { Text($0).tag($0) }
-          }
-          .disabled(!isEditable)
-        }
-        column("备注") {
-          TextField("备注", text: $remark)
-            .textFieldStyle(.roundedBorder)
-            .disabled(!isEditable)
-        }
-      }
-      GridRow {
-        column("密码") {
-          HStack(spacing: 8) {
-            Group {
-              if showPassword {
-                TextField("密码", text: $password)
-              } else {
-                SecureField("密码", text: $password)
-              }
-            }
-            .textFieldStyle(.roundedBorder)
-            .disabled(!isEditable)
-            Button {
-              showPassword.toggle()
-            } label: {
-              Image(systemName: showPassword ? "eye.slash" : "eye")
-            }
-            .buttonStyle(.borderless)
-            .help(showPassword ? "隐藏密码" : "显示密码")
-          }
-        }
-        .gridCellColumns(2)
-      }
-      GridRow {
-        column("受管理插件与参数") {
-          ServerPluginSection(
-            selection: $pluginChoice,
-            optionsText: $pluginOptionsText,
-            plugin: formState?.plugin,
-            isEditable: isEditable)
-        }
-        .gridCellColumns(2)
-      }
-    }
+    ServerFormFieldsGrid(
+      fields: fields, plugin: formState?.plugin, isEditable: isEditable
+    )
     .padding(.top, 20)
 
     shareSection
@@ -241,44 +170,16 @@ struct ServerDetailView: View {
 
   private func loadForm() {
     guard let state = formState else { return }
-    address = state.address
-    port = state.port
-    encryptionMethod = state.encryptionMethod
-    password = state.password
-    remark = state.remark
-    pluginChoice = state.plugin.selection
-    pluginOptionsText = state.plugin.options
-    showPassword = false
+    fields.load(from: state)
   }
 
   private func save() {
     Task {
       do {
-        try await workflow.updateServer(
-          serverID,
-          draft: ServerEditDraft(
-            address: address,
-            port: port,
-            encryptionMethod: encryptionMethod,
-            password: password,
-            remark: remark,
-            plugin: pluginChoice,
-            pluginOptions: pluginOptionsText))
+        try await workflow.updateServer(serverID, draft: fields.draft)
       } catch {
         errors.present(error)
       }
     }
-  }
-
-  private func column<Content: View>(
-    _ label: String, @ViewBuilder content: () -> Content
-  ) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text(label)
-        .font(.callout.weight(.medium))
-        .foregroundStyle(.secondary)
-      content()
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
