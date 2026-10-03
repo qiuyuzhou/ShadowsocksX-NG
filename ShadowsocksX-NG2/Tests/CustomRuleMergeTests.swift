@@ -145,7 +145,7 @@ final class CustomRuleMergeTests: XCTestCase {
       custom(.direct, try RuleMatch(domainSuffix: "internal.example")),
       custom(.proxy, try RuleMatch(ipv4CIDR: "203.0.113.0/24")),
     ]
-    // 全局模式的 runtimeDocument 路径不调用 ruleModeCandidateRules；此处
+    // 全局模式的 runtimeDocument 路径不加载自定义规则集合；此处
     // 验证全局 ACL 文档本身不含自定义痕迹。
     let acl = ProxyACLDocument.global(
       at: URL(fileURLWithPath: "/tmp/ssxng-test/sslocal-active.acl"))

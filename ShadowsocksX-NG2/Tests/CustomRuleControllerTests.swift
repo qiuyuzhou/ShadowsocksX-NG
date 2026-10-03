@@ -85,7 +85,10 @@ extension ProxyRuntimeControllerTests {
     let first = await controller.updateCustomRules(rules)
     XCTAssertEqual(first, .applied)
     XCTAssertEqual(try store.load(), rules, "保存保留用户 UUID 和全部意图")
-    let validation = try await controller.ruleModeValidation()
+    // 遮蔽关系由领域层验证器判定（与运行时部署无关的纯函数）。
+    let validation = RuleRuntimeCompiler.validation(
+      document: CustomRuleDocument(rules: rules, disabledIdentities: []),
+      builtIn: [], defaultAction: .directWhenUnmatched)
     XCTAssertTrue(
       validation.relationships.contains {
         $0.rule == rules[2].identity && $0.kind == .shadowing && $0.extent == .full
@@ -101,7 +104,9 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(try activeACLContent(runtimeStore), before)
     XCTAssertEqual(agent.unregisterCount, unregisterBefore)
     XCTAssertEqual(controller.readCustomRuleSummary(), summary)
-    let repeatedValidation = try await controller.ruleModeValidation()
+    let repeatedValidation = RuleRuntimeCompiler.validation(
+      document: CustomRuleDocument(rules: reversed, disabledIdentities: []),
+      builtIn: [], defaultAction: .directWhenUnmatched)
     XCTAssertEqual(repeatedValidation, validation)
   }
 

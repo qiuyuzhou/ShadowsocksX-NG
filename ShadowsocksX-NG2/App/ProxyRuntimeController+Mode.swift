@@ -147,19 +147,6 @@ extension ProxyRuntimeController {
     }
   }
 
-  func ruleModeCandidateRules() async throws -> [ProxyRule] {
-    try await ruleModeValidation().accepted
-  }
-
-  func ruleModeValidation() async throws -> CustomRuleValidationResult {
-    let document = try ruleDocuments.load()
-    let action = settings.ruleDefaultAction
-    let builtIn = try await runtimeBuiltinRules(action)
-    return await Task.detached(priority: .userInitiated) {
-      RuleRuntimeCompiler.validation(document: document, builtIn: builtIn, defaultAction: action)
-    }.value
-  }
-
   private func deployModeTransition(
     _ document: SslocalRuntimeDocument,
     snapshot: ModeTransitionSnapshot,
