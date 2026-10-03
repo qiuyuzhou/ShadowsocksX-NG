@@ -108,7 +108,11 @@ targets:
       properties: {}
     scheme:
       testTargets:
-        - ShadowsocksX-NG2Tests
+        # 单测多 runner 并行执行：夹具均为进程私有资源（运行时空闲端口、
+        # UUID 后缀的 UserDefaults suite 与 Keychain service、匿名 XPC
+        # listener、临时目录），跨 runner 无共享状态。
+        - name: ShadowsocksX-NG2Tests
+          parallelizable: true
     dependencies:
       # 代理运行时 wrapper（BundleProgram，spec #21 D2）：以独立可执行文件装入
       # Contents/MacOS，由 LaunchAgent plist 以 bundle 相对路径引用。
