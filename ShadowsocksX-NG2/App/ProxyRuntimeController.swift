@@ -4,7 +4,9 @@ import Foundation
 /// persist independent intentions. System proxy writes use the privileged helper;
 /// current configuration is observed read-only and differs from write outcomes.
 /// Health/exit loss suspends system proxy settings, real recovery reapplies, and
-/// passive network events only inspect (ADR-0022 / issue #73). GUI exit ends these
+/// passive network events only inspect (ADR-0022 / issue #73)——该观察/修复策略机
+/// 独立在 `SystemProxyObserver`：控制器注入意图/出口/期望配置三个事实闭包并
+/// 转发命令，健康循环保留在本体（循环体含运行时健康呈现）。GUI exit ends these
 /// observations without stopping the LaunchAgent or adding helper responsibilities.
 @MainActor
 final class ProxyRuntimeController: ObservableObject {
@@ -27,25 +29,7 @@ final class ProxyRuntimeController: ObservableObject {
   /// Current configuration or operation result, independent of persisted intent.
   typealias SystemProxyControlState = SystemProxyApplicationFacts
 
-  enum SystemProxyObservationMode: Equatable {
-    case stopped
-    case enabled
-    case cleanup
-  }
-
   @Published var state: AgentRunState = .off
-  @Published var systemProxyState: SystemProxyControlState = .idle
-  /// Approval remains actionable even after an off-intent clear failure.
-  @Published var systemProxyApprovalRequired = false
-  @Published var systemProxyInspection = SystemProxyInspectionFacts()
-  var lastDesiredSystemProxyConfiguration: SystemProxyConfiguration?
-  var knownSystemProxyServices: Set<SystemProxyServiceIdentifier> = []
-  var systemProxyOperationInProgress = false
-  var systemProxyStartupInProgress = false
-  var systemProxyInitialApplyPending = false
-  var systemProxyWasUnavailable = false
-  var systemProxyHealthTask: Task<Void, Never>?
-  var systemProxyReadGeneration = 0
   @Published var settings: ProxySettings
   /// 当前活动目标（菜单栏状态摘要与级联只读呈现用，issue #31）。machine 是
   /// 非发布值的普通结构体，代理关闭路径的激活动作不会触碰 state，菜单的
@@ -80,6 +64,25 @@ final class ProxyRuntimeController: ObservableObject {
   let systemProxy: SystemProxyControlling
   let systemProxyHelper: SystemProxyHelperServicing
   let systemProxyNetworkChangeMonitor: SystemProxyNetworkChangeMonitoring
+  /// 系统代理观察/修复策略机（ADR-0022）：呈现事实的存储与发布点，详情见
+  /// 模块文档。惰性构造：事实闭包需捕获控制器，而闭包成形必须晚于自身
+  /// 全部存储属性的初始化（首次访问发生在 init 之后）。
+  lazy var systemProxyObserver: SystemProxyObserver = SystemProxyObserver(
+    systemProxy: systemProxy,
+    systemProxyHelper: systemProxyHelper,
+    systemProxyNetworkChangeMonitor: systemProxyNetworkChangeMonitor,
+    appBundle: appBundle,
+    helperRefreshDelayNanoseconds: helperRefreshDelayNanoseconds,
+    isIntentEnabled: { [weak self] in self?.settings.systemProxyEnabled ?? false },
+    isExitAvailable: { [weak self] in self?.systemProxyExitAvailable ?? false },
+    desiredConfiguration: { [weak self] in
+      guard let self else { return nil }
+      return self.desiredSystemProxyConfiguration
+    },
+    startSystemProxyHealthObservation: { [weak self] in
+      guard let self else { return }
+      self.startSystemProxyHealthObservation()
+    })
   let firewallChecker: FirewallStatusChecking
   let firewallExecutableURLs: [URL]
   /// 宿主 app bundle 缝（生产为 Bundle.main）：内置规则快照与 LaunchDaemon
@@ -99,10 +102,6 @@ final class ProxyRuntimeController: ObservableObject {
   var modeChangeGeneration = 0
   var lastDocument: SslocalRuntimeDocument?
   var firewallObservationTask: Task<Void, Never>?
-  var systemProxyObservationMode = SystemProxyObservationMode.stopped
-  var systemProxyCleanupRescanRequested = false
-  var systemProxyCleanupTask: Task<SystemProxyControlState, Never>?
-  var systemProxyInspectionScheduled = false
 
   @Published var proxyMode: ProxyMode
 

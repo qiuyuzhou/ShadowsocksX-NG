@@ -61,14 +61,14 @@ extension ProxyRuntimeController {
     settings = next
     if enabled {
       await convergeAgent()
-      if settings.systemProxyEnabled { startEnabledSystemProxyObservation() }
+      if settings.systemProxyEnabled { systemProxyObserver.startEnabledSystemProxyObservation() }
     } else {
       let cleanupOutcome = await cascadeSystemProxyOffForAgentOff()
       await stopAgent()
       if let cleanupOutcome, cleanupOutcome.hasOperationFailure {
-        systemProxyState = cleanupOutcome
+        systemProxyObserver.systemProxyState = cleanupOutcome
       }
-      updateSystemProxyActions()
+      systemProxyObserver.updateSystemProxyActions()
     }
   }
 
@@ -87,7 +87,7 @@ extension ProxyRuntimeController {
     }
     settings = cascade
     // 持久化的 on→off 迁移才触发清理；先清后停本地监听。
-    return await clearAndStopSystemProxyObservation()
+    return await systemProxyObserver.clearAndStopSystemProxyObservation()
   }
 
   /// 系统代理开关（issue #71）：先持久化意图。开启时经 helper 注册门禁收敛
@@ -100,41 +100,46 @@ extension ProxyRuntimeController {
     guard persistSettings(next) else { return }
     settings = next
     if enabled {
-      systemProxyInitialApplyPending = true
-      systemProxyWasUnavailable = false
-      await convergeSystemProxy()
-      startEnabledSystemProxyObservation()
+      systemProxyObserver.systemProxyInitialApplyPending = true
+      systemProxyObserver.systemProxyWasUnavailable = false
+      await systemProxyObserver.convergeSystemProxy()
+      systemProxyObserver.startEnabledSystemProxyObservation()
     } else {
-      systemProxyApprovalRequired = false
-      systemProxyInitialApplyPending = false
-      systemProxyReadGeneration += 1
-      systemProxyState = await clearAndStopSystemProxyObservation()
-      updateSystemProxyActions()
+      systemProxyObserver.systemProxyApprovalRequired = false
+      systemProxyObserver.systemProxyInitialApplyPending = false
+      systemProxyObserver.systemProxyReadGeneration += 1
+      systemProxyObserver.systemProxyState =
+        await systemProxyObserver.clearAndStopSystemProxyObservation()
+      systemProxyObserver.updateSystemProxyActions()
     }
   }
 
   /// GUI startup restores the Agent. Healthy proxy intent only inspects; unhealthy
   /// proxy intent suspends; disabled intent never writes SystemConfiguration.
   func resyncOnLaunch() async {
-    systemProxyStartupInProgress = true
+    systemProxyObserver.systemProxyStartupInProgress = true
     guard settings.agentEnabled else {
       await stopAgent()
-      systemProxyStartupInProgress = false
+      systemProxyObserver.systemProxyStartupInProgress = false
       if settings.systemProxyEnabled {
-        await suspendSystemProxy()
-        startEnabledSystemProxyObservation()
+        await systemProxyObserver.suspendSystemProxy()
+        systemProxyObserver.startEnabledSystemProxyObservation()
       }
       return
     }
     let catalog = catalogSnapshotReader.catalogSnapshot
     await convergeToReexpanded(catalog)
-    systemProxyStartupInProgress = false
+    systemProxyObserver.systemProxyStartupInProgress = false
     if settings.systemProxyEnabled {
-      lastDesiredSystemProxyConfiguration = desiredSystemProxyConfiguration
-      if systemProxyExitAvailable { await recheckSystemProxy() } else { await suspendSystemProxy() }
-      startEnabledSystemProxyObservation()
+      systemProxyObserver.lastDesiredSystemProxyConfiguration = desiredSystemProxyConfiguration
+      if systemProxyExitAvailable {
+        await systemProxyObserver.recheckSystemProxy()
+      } else {
+        await systemProxyObserver.suspendSystemProxy()
+      }
+      systemProxyObserver.startEnabledSystemProxyObservation()
     } else {
-      systemProxyState = .idle
+      systemProxyObserver.systemProxyState = .idle
     }
   }
 
@@ -151,19 +156,21 @@ extension ProxyRuntimeController {
   /// 启 + agent 关闭」组合保持待应用（不静默清理，也无需网络观察）。
   func stopAgent() async {
     systemProxyNetworkChangeMonitor.stop()
-    systemProxyHealthTask?.cancel()
-    systemProxyHealthTask = nil
-    systemProxyObservationMode = .stopped
+    systemProxyObserver.systemProxyHealthTask?.cancel()
+    systemProxyObserver.systemProxyHealthTask = nil
+    systemProxyObserver.systemProxyObservationMode = .stopped
     _ = await execute(.stop, document: nil)
     state = .off
     lastDocument = nil
     skippedServers = []
     lastActivationFailure = nil
     if settings.systemProxyEnabled {
-      systemProxyState = .pending
+      systemProxyObserver.systemProxyState = .pending
     } else {
-      if !systemProxyState.hasOperationFailure { systemProxyState = .idle }
-      updateSystemProxyActions()
+      if !systemProxyState.hasOperationFailure {
+        systemProxyObserver.systemProxyState = .idle
+      }
+      systemProxyObserver.updateSystemProxyActions()
     }
   }
 
@@ -221,7 +228,7 @@ extension ProxyRuntimeController {
     lastDocument = nil
     skippedServers = []
     state = .launchFailed(.unreadableSettings)
-    await holdSystemProxyIntent()
+    await systemProxyObserver.holdSystemProxyIntent()
   }
 
   /// 活动目标失效（issue #60）：清除并持久化 nil，点名原因独立呈现；agent
@@ -237,7 +244,7 @@ extension ProxyRuntimeController {
     }
     lastActivationFailure = failure
     skippedServers = []
-    await holdSystemProxyIntent()
+    await systemProxyObserver.holdSystemProxyIntent()
     if settings.agentEnabled {
       await deployListeningWithoutTarget()
     } else {

@@ -174,8 +174,8 @@ extension ProxyRuntimeController {
     guard healthy else { return .failed }
     lastDocument = document
     switch proxyTail {
-    case .forceApply: await convergeSystemProxy(forceApply: true)
-    case .converge: await convergeSystemProxy()
+    case .forceApply: await systemProxyObserver.convergeSystemProxy(forceApply: true)
+    case .converge: await systemProxyObserver.convergeSystemProxy()
     case .none: break
     }
     return .applied
@@ -230,7 +230,7 @@ extension ProxyRuntimeController {
     ticket.flow = execution.flow
     guard convergenceIsCurrent(ticket, checking: checking) else { return report(nil) }
     guard execution.succeeded else {
-      await holdSystemProxyIntent()
+      await systemProxyObserver.holdSystemProxyIntent()
       return report(false)
     }
     let healthy = await presentLaunchHealth(
@@ -241,12 +241,12 @@ extension ProxyRuntimeController {
       if plan.convergeProxyOnIntentChange,
         settings.systemProxyEnabled != plan.systemProxyIntentAtCapture
       {
-        await convergeSystemProxy(forceApply: true)
+        await systemProxyObserver.convergeSystemProxy(forceApply: true)
       } else {
         state = plan.state
       }
     } else {
-      await holdSystemProxyIntent()
+      await systemProxyObserver.holdSystemProxyIntent()
     }
     return report(healthy)
   }

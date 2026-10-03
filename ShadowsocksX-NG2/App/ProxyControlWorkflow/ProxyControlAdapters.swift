@@ -1,9 +1,10 @@
 import Combine
 import Foundation
 
-/// 生产运行时 adapter（issue #47）：现有 `ProxyRuntimeController` 的唯一
-/// 包装，由应用组合根接线。只把控制器既有能力与观察投影到 workflow 缝上，
-/// 不复制状态机、generation、健康门禁与系统代理生命周期语义。
+/// 生产运行时 adapter（issue #47）：现有 `ProxyRuntimeController` 与其系统代理
+/// 观察机（`SystemProxyObserver`，ADR-0022 策略机）的唯一包装，由应用组合根
+/// 接线。只把既有能力与观察投影到 workflow 缝上，不复制状态机、generation、
+/// 健康门禁与系统代理生命周期语义。
 @MainActor
 final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
   private let controller: ProxyRuntimeController
@@ -44,13 +45,16 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
     RuntimeListenFacts(listen: controller.listenSettings)
   }
 
-  /// 控制器的 `objectWillChange` 是 willChange 语义；主队列 hop 落地时被
-  /// 发布的新值已可读，workflow 重观察不会读到半程状态。
+  /// 控制器与系统代理观察机的 `objectWillChange` 都是 willChange 语义；主队列
+  /// hop 落地时被发布的新值已可读，workflow 重观察不会读到半程状态。系统代理
+  /// 呈现事实的存储与发布在观察机上，其发布并入同一再发布链。
   var changes: AnyPublisher<Void, Never> {
-    controller.objectWillChange
-      .map { _ in () }
-      .receive(on: DispatchQueue.main)
-      .eraseToAnyPublisher()
+    Publishers.Merge(
+      controller.objectWillChange.map { _ in () },
+      controller.systemProxyObserver.objectWillChange.map { _ in () }
+    )
+    .receive(on: DispatchQueue.main)
+    .eraseToAnyPublisher()
   }
 
   func resyncOnLaunch() async {
@@ -66,12 +70,14 @@ final class ControllerProxyRuntimeAdapter: ProxyRuntimeAdapting {
   }
 
   func openSystemProxyHelperApproval() async {
-    await controller.openSystemProxyHelperApproval()
+    await controller.systemProxyObserver.openSystemProxyHelperApproval()
   }
 
-  func repairSystemProxy() async { await controller.repairSystemProxy() }
-  func retrySystemProxyClear() async { await controller.retrySystemProxyClear() }
-  func recheckSystemProxy() async { await controller.recheckSystemProxy() }
+  func repairSystemProxy() async { await controller.systemProxyObserver.repairSystemProxy() }
+  func retrySystemProxyClear() async {
+    await controller.systemProxyObserver.retrySystemProxyClear()
+  }
+  func recheckSystemProxy() async { await controller.systemProxyObserver.recheckSystemProxy() }
 
   func setProxyMode(_ mode: ProxyMode) async {
     await controller.setProxyMode(mode)

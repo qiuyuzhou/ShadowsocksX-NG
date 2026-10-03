@@ -122,7 +122,7 @@ extension ProxyRuntimeController {
     if let receipt, !receiptIsCurrentAndLive(receipt) {
       return await reportAgentLost(preserveProxyOnFailure: preserveProxyOnFailure)
     }
-    if convergeProxyOnSuccess { await convergeSystemProxy() }
+    if convergeProxyOnSuccess { await systemProxyObserver.convergeSystemProxy() }
     return true
   }
 
@@ -136,14 +136,14 @@ extension ProxyRuntimeController {
   private func reportAgentLost(preserveProxyOnFailure: Bool) async -> Bool {
     guard !preserveProxyOnFailure else { return false }
     state = .serviceFailed(.agent)
-    await holdSystemProxyIntent()
+    await systemProxyObserver.holdSystemProxyIntent()
     return false
   }
 
   private func reportRuntimeFileFailure(preserveProxyOnFailure: Bool) async -> Bool {
     guard !preserveProxyOnFailure else { return false }
     state = .serviceFailed(.runtimeFile)
-    await holdSystemProxyIntent()
+    await systemProxyObserver.holdSystemProxyIntent()
     return false
   }
 
@@ -163,7 +163,7 @@ extension ProxyRuntimeController {
       state = .launchFailed(
         .localEndpoint(endpoint: "SOCKS", host: "127.0.0.1", port: 0, cause: .unknown))
     }
-    await holdSystemProxyIntent()
+    await systemProxyObserver.holdSystemProxyIntent()
     return false
   }
 
@@ -214,19 +214,22 @@ extension ProxyRuntimeController {
 extension ProxyRuntimeController {
   /// Uses the existing local endpoint/receipt health seam while the GUI is alive.
   /// Network path availability is deliberately absent from this decision.
+  /// 任务柄持有在观察机上（cleanup 与停止路径都要取消它）；循环体留在本体，
+  /// 因为它同时承担运行时健康呈现，系统代理反应转发给观察机。
   func startSystemProxyHealthObservation() {
-    guard systemProxyHealthTask == nil else { return }
+    guard systemProxyObserver.systemProxyHealthTask == nil else { return }
     let interval = systemProxyHealthPollIntervalNanoseconds
-    systemProxyHealthTask = Task { @MainActor [weak self] in
+    systemProxyObserver.systemProxyHealthTask = Task { @MainActor [weak self] in
       while !Task.isCancelled {
         try? await Task.sleep(nanoseconds: interval)
         guard !Task.isCancelled, let self,
           settings.systemProxyEnabled || systemProxyState.hasOperationFailure
         else { return }
-        refreshSystemProxyApproval()
-        updateSystemProxyActions()
+        systemProxyObserver.refreshSystemProxyApproval()
+        systemProxyObserver.updateSystemProxyActions()
         guard settings.systemProxyEnabled, state != .starting,
-          !systemProxyStartupInProgress, settings.agentEnabled, let document = lastDocument
+          !systemProxyObserver.systemProxyStartupInProgress, settings.agentEnabled,
+          let document = lastDocument
         else { continue }
         await inspectSystemProxyRuntimeHealth(document)
       }
@@ -242,22 +245,22 @@ extension ProxyRuntimeController {
     }
     switch outcome {
     case .ready:
-      let wasUnavailable = systemProxyWasUnavailable
+      let wasUnavailable = systemProxyObserver.systemProxyWasUnavailable
       switch state {
       case .running, .firewallBlocked: break
       default: await presentFirewallStatus(for: document)
       }
       if !systemProxyExitAvailable {
-        await suspendSystemProxy()
-      } else if wasUnavailable || systemProxyInitialApplyPending {
-        await convergeSystemProxy()
+        await systemProxyObserver.suspendSystemProxy()
+      } else if wasUnavailable || systemProxyObserver.systemProxyInitialApplyPending {
+        await systemProxyObserver.convergeSystemProxy()
       }
     case .agentLost:
       state = .serviceFailed(.agent)
-      await suspendSystemProxy()
+      await systemProxyObserver.suspendSystemProxy()
     case .retry(let failure):
       if let failure { presentEndpointFailure(failure) } else { state = .serviceFailed(.agent) }
-      await suspendSystemProxy()
+      await systemProxyObserver.suspendSystemProxy()
     }
   }
 }

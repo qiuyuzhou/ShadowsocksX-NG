@@ -295,7 +295,7 @@ extension ProxyRuntimeControllerTests {
 
     // 批准路径：打开登录项设置并重试收敛；批准达成后 applied。
     systemProxyHelper.setStatus(.approved)
-    await controller.openSystemProxyHelperApproval()
+    await controller.systemProxyObserver.openSystemProxyHelperApproval()
 
     XCTAssertEqual(controller.systemProxyState, .applied)
     XCTAssertFalse(controller.systemProxyApprovalRequired)
@@ -517,14 +517,14 @@ extension ProxyRuntimeControllerTests {
     let unregisterCountAfterEnable = systemProxyHelper.unregisterCount
 
     // 指纹一致：后续收敛不注销重注。
-    await controller.convergeSystemProxy()
+    await controller.systemProxyObserver.convergeSystemProxy()
     XCTAssertEqual(systemProxyHelper.registerCount, registerCountAfterEnable, "指纹一致不重注")
     XCTAssertEqual(systemProxyHelper.unregisterCount, unregisterCountAfterEnable)
     XCTAssertEqual(controller.systemProxyState, .applied)
 
     // 指纹漂移（模拟 app 更新改了清单）：注销重注一次并更新指纹。
     defaults.set("drifted-stamp", forKey: stampKey)
-    await controller.convergeSystemProxy()
+    await controller.systemProxyObserver.convergeSystemProxy()
     XCTAssertEqual(systemProxyHelper.unregisterCount, unregisterCountAfterEnable + 1, "漂移触发重注")
     XCTAssertEqual(systemProxyHelper.registerCount, registerCountAfterEnable + 1)
     XCTAssertEqual(defaults.string(forKey: stampKey), stampAfterRegister, "重注后记录当前清单指纹")

@@ -11,6 +11,22 @@ extension ProxyRuntimeController {
   /// 系统代理开关意图（持久化事实；开关 UI 的绑定来源，issue #60）。
   var systemProxyIntentEnabled: Bool { settings.systemProxyEnabled }
 
+  /// 系统代理观察机的呈现事实门面：存储与发布在 `SystemProxyObserver`，
+  /// 此处只读投影供既有测试与诊断面沿用原名。
+  var systemProxyState: SystemProxyApplicationFacts { systemProxyObserver.systemProxyState }
+  var systemProxyApprovalRequired: Bool { systemProxyObserver.systemProxyApprovalRequired }
+  var systemProxyInspection: SystemProxyInspectionFacts {
+    systemProxyObserver.systemProxyInspection
+  }
+
+  /// Desired system proxy configuration：当前保存设置要求的代理值（ADR-0022）。
+  /// 观察机经 init 闭包读取同一事实源。
+  var desiredSystemProxyConfiguration: SystemProxyConfiguration? {
+    guard let document = lastDocument else { return nil }
+    return try? proxyMode.systemProxyConfiguration(
+      for: document, exceptions: settings.proxyExceptionList)
+  }
+
   /// Stable app-facing projection for status-menu presentation. The menu does
   /// not depend on this controller's nested state representation.
   var runtimeFacts: ProxyRuntimeFacts {
