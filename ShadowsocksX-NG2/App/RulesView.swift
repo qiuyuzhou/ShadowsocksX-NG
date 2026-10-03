@@ -4,7 +4,6 @@ import SwiftUI
 struct RulesView: View {
   @ObservedObject var workflow: RulesWorkflow
   @Environment(\.openWindow) private var openWindow
-  var onShowRuntime: () -> Void
   var onEditRule: (UUID) -> Void
 
   var body: some View {
@@ -31,7 +30,7 @@ struct RulesView: View {
             filters
             HStack {
               RulesDeletionButton(workflow: workflow)
-              RulesOperationStatusView(workflow: workflow, onShowRuntime: onShowRuntime)
+              RulesOperationStatusView(workflow: workflow)
             }
           }.padding()
           ruleTable.overlay { emptyState }
@@ -114,15 +113,6 @@ struct RulesView: View {
         Text(RulesCopy.text("全部状态")).tag(Optional<Bool>.none)
         Text(RulesCopy.text("已启用")).tag(Optional(true))
         Text(RulesCopy.text("已禁用")).tag(Optional(false))
-      }.labelsHidden().fixedSize()
-      Picker(
-        RulesCopy.text("匹配内容"),
-        selection: Binding(
-          get: { workflow.snapshot.query.sort },
-          set: { value in updateQuery { $0.sort = value } })
-      ) {
-        Text("A → Z").tag(RulesQuery.Sort.ascending)
-        Text("Z → A").tag(RulesQuery.Sort.descending)
       }.labelsHidden().fixedSize()
     }
   }

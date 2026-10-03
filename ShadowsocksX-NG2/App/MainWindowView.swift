@@ -94,7 +94,7 @@ struct MainWindowView: View {
       }
     }
     .sheet(item: $ruleDraft) { draft in
-      CustomRuleEditorSheet(workflow: rulesWorkflow, draft: draft) { route.navigate(to: .home) }
+      CustomRuleEditorSheet(workflow: rulesWorkflow, draft: draft)
     }
     .onChange(of: route.destination) { _, destination in
       if destination != .rules { ruleDraft = nil }
@@ -216,7 +216,7 @@ struct MainWindowView: View {
         onNodesRemoved: clearSelectionIfInvalidated)
     case .rules:
       RulesView(
-        workflow: rulesWorkflow, onShowRuntime: { route.navigate(to: .home) },
+        workflow: rulesWorkflow,
         onEditRule: { ruleDraft = rulesWorkflow.makeCustomRuleDraft(editing: $0) })
     case .settings:
       SettingsView(

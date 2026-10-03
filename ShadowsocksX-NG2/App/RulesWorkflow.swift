@@ -16,6 +16,9 @@ final class RulesWorkflow: ObservableObject {
   private var testGeneration = 0
   private let feedbackDelay: @Sendable () async throws -> Void
   private var feedbackTask: Task<Void, Never>?
+  private(set) var analysisTask: Task<Void, Never>?
+  private var analysisGeneration = 0
+  private let analysisDelay: @Sendable () async throws -> Void
 
   init(
     loadCustom: (@Sendable () throws -> [CustomRule])? = nil,
@@ -23,6 +26,9 @@ final class RulesWorkflow: ObservableObject {
     commitDocument: (@MainActor (CustomRuleDocument) async -> RuleDocumentCommit)? = nil,
     feedbackDelay: @escaping @Sendable () async throws -> Void = {
       try await Task.sleep(for: .seconds(3))
+    },
+    analysisDelay: @escaping @Sendable () async throws -> Void = {
+      try await Task.sleep(for: .milliseconds(150))
     },
     builtinSnapshots: BuiltinRuleSnapshots? = nil,
     loadBuiltin: @escaping @Sendable (RulesSource) throws -> RuleSnapshot = { source in
@@ -43,6 +49,7 @@ final class RulesWorkflow: ObservableObject {
     }
     self.commitDocument = commitDocument
     self.feedbackDelay = feedbackDelay
+    self.analysisDelay = analysisDelay
     self.loadCustom = loadCustom ?? { try CustomRuleStore().load() }
     self.builtinSnapshots = builtinSnapshots ?? BuiltinRuleSnapshots(loader: loadBuiltin)
   }
@@ -56,6 +63,7 @@ final class RulesWorkflow: ObservableObject {
   }
 
   private func refreshCollection(retryFailedSources: Bool) async {
+    analysisGeneration += 1
     refreshGeneration += 1
     let generation = refreshGeneration
     invalidateAddressTest()
@@ -127,21 +135,47 @@ final class RulesWorkflow: ObservableObject {
     if let document = result.document, let previous = collection,
       document != previous.userDocument
     {
-      let updated = await Task.detached(priority: .userInitiated) {
-        previous.replacingUserDocument(document)
-      }.value
+      let updated = previous.replacingUserDocument(document, analyzing: false)
       collection = updated
       next = snapshot
       next.version = updated.version
       next.sources = updated.sources
       next.issues = updated.issues
       next = applyingQuery(to: next)
+      scheduleAnalysis()
     } else if result.document == nil {
       next.issues = [.userDocument("Saved rule document is unavailable")]
     }
     next.isCommitting = false
     publishFeedback(result.outcome, operation: operation, changedCount: changedCount, page: next)
     return result.outcome
+  }
+
+  /// Saved facts stay interactive while explanatory relationships catch up.
+  /// One worker coalesces saves and never publishes analysis for an older version.
+  private func scheduleAnalysis() {
+    analysisGeneration += 1
+    guard analysisTask == nil else { return }
+    analysisTask = Task { [weak self] in
+      guard let self else { return }
+      defer { self.analysisTask = nil }
+      while !Task.isCancelled {
+        let generation = self.analysisGeneration
+        do { try await self.analysisDelay() } catch { return }
+        guard generation == self.analysisGeneration else { continue }
+        guard !self.snapshot.isLoading, let captured = self.collection,
+          let document = captured.userDocument
+        else { return }
+        let updated = await Task.detached(priority: .userInitiated) {
+          captured.replacingUserDocument(document)
+        }.value
+        guard generation == self.analysisGeneration else { continue }
+        guard self.collection?.version == captured.version else { return }
+        self.collection = updated
+        self.snapshot = self.applyingQuery(to: self.snapshot)
+        return
+      }
+    }
   }
 
   func dismissFeedback() {
@@ -241,14 +275,13 @@ final class RulesWorkflow: ObservableObject {
     guard let collection else { return page }
     let query = page.query
     let search = query.search.lowercased()
-    var rows = collection.rows.filter { row in
+    let rows = collection.rows.filter { row in
       (query.action == nil || row.action == query.action)
         && (query.source.map { row.sources.contains($0) } ?? true)
         && (query.enabled.map { row.isEnabled == $0 } ?? true)
         && (row.hasCurrentSource || (query.source == nil && query.enabled == false))
         && (search.isEmpty || row.content.lowercased().contains(search))
     }
-    if query.sort == .descending { rows.reverse() }
     var next = page
     next.rows = rows
     next.selection.formIntersection(Set(rows.map(\.id)))

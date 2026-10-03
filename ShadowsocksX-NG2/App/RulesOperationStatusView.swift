@@ -3,7 +3,6 @@ import SwiftUI
 /// A reserved toolbar row keeps feedback from resizing or replacing the rule table.
 struct RulesOperationStatusView: View {
   @ObservedObject var workflow: RulesWorkflow
-  var onShowRuntime: () -> Void
   @State private var showsDetails = false
 
   var body: some View {
@@ -33,9 +32,6 @@ struct RulesOperationStatusView: View {
         .help(feedback.summary)
         if !feedback.outcome.isSuccess {
           detailsButton
-          if feedback.outcome.needsRuntimeInspection {
-            Button(RulesCopy.text("查看运行状态"), action: onShowRuntime)
-          }
           Button(RulesCopy.text("关闭"), systemImage: "xmark") {
             workflow.dismissFeedback()
           }.labelStyle(.iconOnly)
@@ -122,13 +118,7 @@ extension RulesCommitFeedback {
       count = String.localizedStringWithFormat(
         RulesCopy.text("已删除 %lld 条自定义规则"), Int64(changedCount))
     }
-    let application: String
-    switch outcome {
-    case .applied: application = "已应用"
-    case .runtimeUnchanged: application = "无需重新应用"
-    default: application = "运行规则模式时应用"
-    }
-    return count + " · " + RulesCopy.text(application)
+    return count + " · " + RulesCopy.text("已保存")
   }
 }
 
@@ -136,30 +126,14 @@ extension CustomRuleUpdateOutcome {
   var rulesMessage: String {
     switch self {
     case .saved: RulesCopy.text("已保存")
-    case .applied: RulesCopy.text("已应用")
-    case .runtimeUnchanged: RulesCopy.text("无需重新应用")
     case .persistenceFailed: RulesCopy.text("保存失败，规则未更改")
-    case .rolledBack: RulesCopy.text("应用失败，已恢复原规则")
-    case .recoveryFailed: RulesCopy.text("恢复失败，请检查运行状态")
-    case .runtimeChanged: RulesCopy.text("运行状态已变化，请检查当前状态")
     case .busy: RulesCopy.text("正在更新规则…")
     case .invalidDocument, .rejected: RulesCopy.text("无法更新规则")
     }
   }
 
-  var needsRuntimeInspection: Bool {
-    switch self {
-    case .recoveryFailed, .runtimeChanged: true
-    default: false
-    }
-  }
-
   var failureDetail: String? {
     switch self {
-    case .recoveryFailed(let detail, let rulesRestored):
-      RulesCopy.text(rulesRestored ? "已恢复原规则" : "已保存") + "\n" + detail
-    case .runtimeChanged(let rulesRestored):
-      RulesCopy.text(rulesRestored ? "已恢复原规则" : "已保存")
     case .invalidDocument(let detail): detail
     case .rejected(let rejected): rejected.map(\.explanation).joined(separator: "\n")
     default: nil
@@ -168,8 +142,7 @@ extension CustomRuleUpdateOutcome {
 
   var nextStep: String? {
     switch self {
-    case .persistenceFailed, .rolledBack, .busy: "请重试规则操作。"
-    case .recoveryFailed, .runtimeChanged: "请在首页检查当前代理运行状态。"
+    case .persistenceFailed, .busy: "请重试规则操作。"
     case .invalidDocument, .rejected: "请检查规则数据后再操作。"
     default: nil
     }

@@ -39,14 +39,16 @@ extension ProxyRuntimeControllerTests {
     draft.content = "new-rule.example"
     draft.action = .direct
     let added = await workflow.saveCustomRule(draft)
-    XCTAssertEqual(added, .committed(.applied))
+    XCTAssertEqual(added, .committed(.saved))
+    await controller.ruleApplicationTask?.value
     XCTAssertEqual(agent.registerCount, registrations + 1)
     let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
     XCTAssertTrue(try activeACLContent(runtimeStore).contains("||new-rule.example"))
     var edited = try XCTUnwrap(workflow.makeCustomRuleDraft(editing: draft.id))
     edited.content = "edited-rule.example"
     let saved = await workflow.saveCustomRule(edited)
-    XCTAssertEqual(saved, .committed(.applied))
+    XCTAssertEqual(saved, .committed(.saved))
+    await controller.ruleApplicationTask?.value
     XCTAssertEqual(agent.registerCount, registrations + 2)
     XCTAssertEqual(try store.load().map(\.id), [draft.id])
     XCTAssertFalse(try activeACLContent(runtimeStore).contains("||new-rule.example"))
@@ -54,7 +56,7 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(workflow.snapshot.commitFeedback?.operation, .edit)
   }
 
-  func testEditorFailedDeploymentKeepsDraftAndRestoresSavedSnapshotAndACL() async throws {
+  func testEditorFailedDeploymentKeepsSavedEditAndRestoresOnlyACL() async throws {
     let seeded = try makeSeededCatalog()
     let (store, _) = try makeCustomRuleStore()
     let existing = CustomRule(action: .direct, match: .domainSuffix("kept.example"))
@@ -81,17 +83,19 @@ extension ProxyRuntimeControllerTests {
     var draft = try XCTUnwrap(workflow.makeCustomRuleDraft(editing: existing.id))
     draft.content = "new-rule.example"
     let result = await workflow.saveCustomRule(draft)
-    XCTAssertEqual(result, .committed(.rolledBack))
-    XCTAssertEqual(try store.load(), [existing])
-    XCTAssertEqual(workflow.snapshot.version, version)
+    XCTAssertEqual(result, .committed(.saved))
+    await controller.ruleApplicationTask?.value
+    XCTAssertEqual(try store.load().first?.id, existing.id)
+    XCTAssertEqual(try store.load().first?.match, .domainSuffix("new-rule.example"))
+    XCTAssertNotEqual(workflow.snapshot.version, version)
     XCTAssertEqual(
       workflow.snapshot.rows.first { $0.customIDs.contains(existing.id) }?.identity,
-      existing.identity)
+      RuleIdentity(action: .direct, match: .domainSuffix("new-rule.example")))
     XCTAssertEqual(runtimeStore.loadDocument(), originalRuntime)
     XCTAssertEqual(controller.state, .running)
     let preview = await workflow.previewCustomRule(draft)
-    XCTAssertNil(preview.failure, "The user may retry the same draft after a complete rollback")
-    XCTAssertEqual(preview.displayContent, "new-rule.example")
+    XCTAssertEqual(preview.failure, .staleDraft)
+    XCTAssertNotNil(controller.runtimeFacts.failure)
   }
 
   private func editingWorkflow(_ controller: ProxyRuntimeController) -> RulesWorkflow {

@@ -79,7 +79,8 @@ struct CustomRuleDocument: Codable, Equatable, Sendable {
     try values.encode(Self.currentSchemaVersion, forKey: .schemaVersion)
     try values.encode(rules, forKey: .rules)
     try values.encode(
-      disabledIdentities.sorted { $0.contentToken < $1.contentToken }, forKey: .disabledIdentities)
+      disabledIdentities.map { ($0, $0.contentToken) }.sorted { $0.1 < $1.1 }.map(\.0),
+      forKey: .disabledIdentities)
   }
 }
 

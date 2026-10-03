@@ -30,7 +30,11 @@ extension ProxyRuntimeController {
   /// Stable app-facing projection for status-menu presentation. The menu does
   /// not depend on this controller's nested state representation.
   var runtimeFacts: ProxyRuntimeFacts {
-    ProxyRuntimeFacts(state: state)
+    let facts = ProxyRuntimeFacts(state: state)
+    return ProxyRuntimeFacts(
+      status: facts.status, isOn: facts.isOn,
+      failure: facts.failure
+        ?? (proxyMode == .rule && settings.agentEnabled ? ruleApplicationFailure : nil))
   }
 
   static var defaultFirewallExecutableURLs: [URL] {

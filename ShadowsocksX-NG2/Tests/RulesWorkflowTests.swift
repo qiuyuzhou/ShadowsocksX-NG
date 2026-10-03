@@ -47,6 +47,7 @@ final class RulesWorkflowTests: XCTestCase {
     let disabled = try XCTUnwrap(workflow.snapshot.rows.first { $0.identity == broad.identity })
     XCTAssertFalse(disabled.isEnabled)
     XCTAssertEqual(disabled.sources, [.custom, .gfwlist])
+    await workflow.analysisTask?.value
     XCTAssertTrue(
       workflow.snapshot.rows.first { $0.identity == narrow.identity }!.relationships.isEmpty)
     workflow.setTestTarget("safe.example.com")
@@ -108,7 +109,7 @@ final class RulesWorkflowTests: XCTestCase {
     XCTAssertTrue(workflow.snapshot.isComplete)
   }
 
-  func testSortingAndNavigationPreserveVersionAndSessionQuery() async throws {
+  func testStableInputOrderAndNavigationPreserveVersionAndSessionQuery() async throws {
     let entries = [
       CustomRule(action: .proxy, match: try RuleMatch(domainExact: "z.net")),
       CustomRule(action: .direct, match: try RuleMatch(domainExact: "a.net")),
@@ -116,7 +117,7 @@ final class RulesWorkflowTests: XCTestCase {
     let workflow = RulesWorkflow(loadCustom: { entries }, loadBuiltin: { rulesFixture($0) })
     await workflow.refresh()
     let version = workflow.snapshot.version
-    workflow.query(RulesQuery(source: .custom, sort: .descending))
+    workflow.query(RulesQuery(source: .custom))
     workflow.select([.rule(entries[0].identity)])
     let route = WorkspaceRoute()
     route.navigate(to: .rules)
@@ -170,12 +171,9 @@ final class RulesWorkflowTests: XCTestCase {
     XCTAssertEqual(geo.metadata?.source.upstreamVersion, "20260925234224")
     XCTAssertNotNil(geo.conversionReport)
     let rows = workflow.snapshot.rows
-    XCTAssertEqual(
-      rows,
-      rows.reversed().sorted {
-        ($0.content, $0.action.rawValue, $0.identity?.contentToken ?? "")
-          < ($1.content, $1.action.rawValue, $1.identity?.contentToken ?? "")
-      })
+    XCTAssertEqual(Set(rows.map(\.id)).count, rows.count)
+    await workflow.refresh()
+    XCTAssertEqual(workflow.snapshot.rows.map(\.id), rows.map(\.id))
     workflow.query(RulesQuery(source: .geolocationCN))
     XCTAssertTrue(workflow.snapshot.rows.contains { $0.content == "cn" })
     XCTAssertEqual(workflow.snapshot.rows.count, 4241)
@@ -235,7 +233,10 @@ final class RulesWorkflowTests: XCTestCase {
     XCTAssertFalse(workflow.snapshot.isLoading)
   }
 
-  func testCandidatePermutationKeepsVersionRowsAndCoverageStable() async throws {
+}
+
+extension RulesWorkflowTests {
+  func testCandidatePermutationKeepsVersionAndCoverageWhilePreservingInputOrder() async throws {
     let broad = CustomRule(action: .direct, match: try RuleMatch(domainSuffix: "example.com"))
     let narrow = CustomRule(action: .proxy, match: try RuleMatch(domainExact: "www.example.com"))
     let forward = RulesWorkflow(loadCustom: { [broad, narrow] }, loadBuiltin: { rulesFixture($0) })
@@ -243,7 +244,13 @@ final class RulesWorkflowTests: XCTestCase {
     await forward.refresh()
     await reverse.refresh()
     XCTAssertEqual(forward.snapshot.version, reverse.snapshot.version)
-    XCTAssertEqual(forward.snapshot.rows, reverse.snapshot.rows)
+    XCTAssertEqual(
+      Dictionary(uniqueKeysWithValues: forward.snapshot.rows.map { ($0.id, $0) }),
+      Dictionary(uniqueKeysWithValues: reverse.snapshot.rows.map { ($0.id, $0) }))
+    XCTAssertEqual(
+      forward.snapshot.rows.prefix(2).compactMap(\.identity), [broad.identity, narrow.identity])
+    XCTAssertEqual(
+      reverse.snapshot.rows.prefix(2).compactMap(\.identity), [narrow.identity, broad.identity])
   }
 
   func testSameNamedExactAndSuffixHaveStableVersionsAcrossRefreshes() async throws {
@@ -264,7 +271,7 @@ final class RulesWorkflowTests: XCTestCase {
 }
 
 extension RulesWorkflowTests {
-  func testCollectionSortOrdersEqualContentByActionThenMatchKind() throws {
+  func testCollectionPreservesInputOrderForEqualContentWithDistinctActionsAndMatches() throws {
     let exact = try RuleMatch(domainExact: "same.example")
     let suffix = try RuleMatch(domainSuffix: "same.example")
     let rules = [
@@ -273,12 +280,12 @@ extension RulesWorkflowTests {
       CustomRule(action: .proxy, match: exact),
       CustomRule(action: .direct, match: exact),
     ]
-    let expected = [rules[3].identity, rules[1].identity, rules[2].identity, rules[0].identity]
     for input in [rules, Array(rules.reversed())] {
       let collection = RulesCollection.load(custom: { input }, builtin: { rulesFixture($0) })
       XCTAssertTrue(collection.issues.isEmpty)
       XCTAssertEqual(
-        collection.rows.filter { $0.content == "same.example" }.compactMap(\.identity), expected)
+        collection.rows.filter { $0.content == "same.example" }.compactMap(\.identity),
+        input.map(\.identity))
       XCTAssertTrue(collection.rows.contains { $0.id == .noDotHostname && $0.isFixed })
     }
   }

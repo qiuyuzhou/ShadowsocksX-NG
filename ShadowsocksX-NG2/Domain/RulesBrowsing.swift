@@ -2,11 +2,9 @@ import Foundation
 
 /// Session browsing state belongs to the workflow, so navigation never discards it.
 struct RulesQuery: Equatable, Sendable {
-  enum Sort: String, CaseIterable, Sendable { case ascending, descending }
   var search = ""
   var action: RuleAction?
   var source: RulesSource?
-  var sort: Sort = .ascending
   var enabled: Bool?
 }
 

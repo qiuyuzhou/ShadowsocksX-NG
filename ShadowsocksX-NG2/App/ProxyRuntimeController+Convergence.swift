@@ -156,6 +156,7 @@ extension ProxyRuntimeController {
     let contract = try? PreparedRuntimeContract(document)
     if convergencePlanIsEmpty(document, preparedContract: contract) {
       RuntimeLog.emit(.contractUnchanged)
+      ruleApplicationFailure = nil
       return .unchanged
     }
     guard convergenceIsCurrent(ticket, checking: checking) else { return .superseded }
@@ -173,6 +174,7 @@ extension ProxyRuntimeController {
     guard convergenceIsCurrent(ticket, checking: checking) else { return .superseded }
     guard healthy else { return .failed }
     lastDocument = document
+    ruleApplicationFailure = nil
     switch proxyTail {
     case .forceApply: await systemProxyObserver.convergeSystemProxy(forceApply: true)
     case .converge: await systemProxyObserver.convergeSystemProxy()
@@ -206,13 +208,8 @@ extension ProxyRuntimeController {
       }
       restoredSettingsForMemory = restored
       restoredMode = mode
-    case .customRules(let document):
-      do {
-        try ruleDocuments.save(document)
-      } catch {
-        payloadFailureDescription = String(describing: error)
-        RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-      }
+    case .runtimeOnly:
+      break
     }
     func report(_ healthy: Bool?) -> RestoreReport {
       RestoreReport(
@@ -260,8 +257,8 @@ struct RollbackPlan {
     /// mode 切换：设置快照的模式与规则子选项回退（其余字段保留当前值），
     /// 会话内 proxyMode 一并还原。
     case modeTransition(mode: ProxyMode, ruleDefaultAction: RuleDefaultAction)
-    /// rules 提交：恢复规则文档。
-    case customRules(CustomRuleDocument)
+    /// Rule application restores only the previous runtime, never saved intent.
+    case runtimeOnly
   }
 
   /// 回滚目标文档（调用方已用当次加载值补齐）。

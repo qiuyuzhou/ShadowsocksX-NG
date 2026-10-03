@@ -3,6 +3,74 @@ import XCTest
 @testable import ShadowsocksX_NG2
 
 extension ProxyRuntimeControllerTests {
+  func testRapidRuleSavesCoalesceIntoOneLatestACLDeployment() async throws {
+    let seeded = try makeSeededCatalog()
+    let (store, _) = try makeCustomRuleStore()
+    let first = CustomRule(action: .direct, match: .domainExact("first-save.example"))
+    let latest = CustomRule(action: .direct, match: .domainExact("latest-save.example"))
+    let controller = makeControllerWithCustomRules(
+      store: store,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, preferredMode: .rule, agentEnabled: true),
+      proxyMode: .rule)
+    try await controller.activate(seeded.server)
+    let before = agent.registerCount
+    let one = await controller.commitRuleDocument(CustomRuleDocument(rules: [first]))
+    let two = await controller.commitRuleDocument(CustomRuleDocument(rules: [latest]))
+    XCTAssertEqual(one.outcome, .saved)
+    XCTAssertEqual(two.outcome, .saved)
+    XCTAssertEqual(try store.load(), [latest])
+    XCTAssertEqual(
+      agent.registerCount, before, "Saving does not wait for or start deployment inline")
+    await controller.ruleApplicationTask?.value
+    XCTAssertEqual(agent.registerCount, before + 1)
+    let content = try activeACLContent(RuntimeFileStore(fileURL: runtime.contract))
+    XCTAssertTrue(content.contains("latest-save.example"))
+    XCTAssertFalse(content.contains("first-save.example"))
+  }
+
+  func testSaveDuringDeploymentIsAcceptedAndLatestDocumentConvergesAfterIt() async throws {
+    let seeded = try makeSeededCatalog()
+    let (store, _) = try makeCustomRuleStore()
+    let first = CustomRule(action: .direct, match: .domainExact("in-flight.example"))
+    let latest = CustomRule(action: .direct, match: .domainExact("after-flight.example"))
+    let controller = makeControllerWithCustomRules(
+      store: store,
+      settings: ProxySettings(
+        listen: ActivationFixture.listen, preferredMode: .rule, agentEnabled: true),
+      proxyMode: .rule, launchHealthTimeoutSeconds: 2)
+    try await controller.activate(seeded.server)
+    let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
+    let started = expectation(description: "first deployment awaiting receipt")
+    let before = agent.registerCount
+    var firstDocument: SslocalRuntimeDocument?
+    agent.onRegister = { [agent] in
+      guard let document = runtimeStore.loadDocument() else { return }
+      if agent?.registerCount == before + 1 {
+        firstDocument = document
+        try? FileManager.default.removeItem(at: runtimeStore.runtimeStatusFileURL)
+        started.fulfill()
+      } else {
+        try? runtimeStore.writeRuntimeReceipt(for: document, processID: 42)
+      }
+    }
+    let one = await controller.commitRuleDocument(CustomRuleDocument(rules: [first]))
+    XCTAssertEqual(one.outcome, .saved)
+    await fulfillment(of: [started], timeout: 3)
+    let two = await controller.commitRuleDocument(CustomRuleDocument(rules: [latest]))
+    XCTAssertEqual(two.outcome, .saved)
+    XCTAssertEqual(try store.load(), [latest])
+    XCTAssertEqual(agent.registerCount, before + 1, "A new save cannot overlap rule deployments")
+    try runtimeStore.writeRuntimeReceipt(for: XCTUnwrap(firstDocument), processID: 42)
+    await controller.ruleApplicationTask?.value
+    XCTAssertEqual(try store.load(), [latest])
+    XCTAssertEqual(agent.registerCount, before + 2)
+    let content = try activeACLContent(runtimeStore)
+    XCTAssertTrue(content.contains("after-flight.example"))
+    XCTAssertFalse(content.contains("in-flight.example"))
+    XCTAssertEqual(controller.state, .running)
+  }
+
   func testNewPreparationStopsRemainingActionsOfAnAwaitingRuntimeOperation() async throws {
     let seeded = try makeSeededCatalog()
     let (store, _) = try makeCustomRuleStore()
@@ -85,7 +153,8 @@ extension ProxyRuntimeControllerTests {
     loader.release.signal()
     await modeSwitch.value
     let result = await ruleCommit.value
-    XCTAssertEqual(result.outcome, .runtimeChanged(rulesRestored: false))
+    XCTAssertEqual(result.outcome, .saved)
+    await controller.ruleApplicationTask?.value
     XCTAssertEqual(result.document?.disabledIdentities, [identity])
     XCTAssertEqual(try store.loadDocument().disabledIdentities, [identity])
     XCTAssertEqual(controller.state, .off)
@@ -132,7 +201,8 @@ extension ProxyRuntimeControllerTests {
     let absent = RuleIdentity(action: .direct, match: .domainExact("absent.example"))
     let outcome = await controller.updateRuleDocument(
       CustomRuleDocument(rules: [], disabledIdentities: [cnSuffix, absent]))
-    XCTAssertEqual(outcome, .applied)
+    XCTAssertEqual(outcome, .saved)
+    await controller.ruleApplicationTask?.value
     XCTAssertEqual(agent.unregisterCount, before + 1)
     let content = try activeACLContent(runtimeStore)
     XCTAssertFalse(content.split(separator: "\n").contains("||cn"))
@@ -142,7 +212,8 @@ extension ProxyRuntimeControllerTests {
     let noOpBefore = agent.unregisterCount
     let unchanged = await controller.updateRuleDocument(
       CustomRuleDocument(rules: [], disabledIdentities: [cnSuffix]))
-    XCTAssertEqual(unchanged, .runtimeUnchanged)
+    XCTAssertEqual(unchanged, .saved)
+    await controller.ruleApplicationTask?.value
     XCTAssertEqual(agent.unregisterCount, noOpBefore, "Absent identities change only persistence")
   }
 
@@ -154,6 +225,7 @@ extension ProxyRuntimeControllerTests {
     let outcome = await controller.updateRuleDocument(
       CustomRuleDocument(rules: [], disabledIdentities: [identity]))
     XCTAssertEqual(outcome, .saved)
+    await controller.ruleApplicationTask?.value
     XCTAssertEqual(agent.registerCount, 0)
     XCTAssertEqual(try store.loadDocument().disabledIdentities, [identity])
     let broken = Data("broken".utf8)
@@ -213,10 +285,9 @@ extension ProxyRuntimeControllerTests {
     }
     let registrations = agent.registerCount
     let outcome = await pending.value
-    guard case .runtimeChanged(let rulesRestored) = outcome else {
-      return XCTFail("Interrupted recovery must not report success: \(outcome)")
-    }
-    XCTAssertTrue(rulesRestored)
+    XCTAssertEqual(outcome, .saved)
+    await controller.ruleApplicationTask?.value
+    XCTAssertEqual(try store.loadDocument().disabledIdentities, [rule.identity])
     XCTAssertEqual(agent.registerCount, registrations)
     if switchMode {
       XCTAssertEqual(controller.proxyMode, .global)
@@ -245,13 +316,12 @@ extension ProxyRuntimeControllerTests {
     }
     let result = await controller.commitRuleDocument(
       CustomRuleDocument(rules: [rule], disabledIdentities: [rule.identity]))
-    guard case .recoveryFailed(let detail, let rulesRestored) = result.outcome else {
-      return XCTFail("Expected actual recovery failure, got \(result)")
-    }
-    XCTAssertTrue(rulesRestored)
-    XCTAssertEqual(result.document, CustomRuleDocument(rules: [rule]))
-    XCTAssertFalse(detail.isEmpty)
-    XCTAssertEqual(try store.loadDocument().disabledIdentities, [])
+    XCTAssertEqual(result.outcome, .saved)
+    await controller.ruleApplicationTask?.value
+    XCTAssertEqual(
+      result.document, CustomRuleDocument(rules: [rule], disabledIdentities: [rule.identity]))
+    XCTAssertEqual(try store.loadDocument().disabledIdentities, [rule.identity])
+    XCTAssertNotNil(controller.runtimeFacts.failure)
     XCTAssertNotEqual(controller.state, .running)
   }
 }

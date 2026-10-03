@@ -111,7 +111,7 @@ final class OfflineRulesWorkflowTests: XCTestCase {
             ProxySettings(
               preferredMode: mode, ruleDefaultAction: defaultAction,
               agentEnabled: enabled, systemProxyEnabled: enabled))
-          workflow.query(RulesQuery(search: "hidden", source: .fixed, sort: .descending))
+          workflow.query(RulesQuery(search: "hidden", source: .fixed))
           for (target, outcome) in [
             ("proxy.example", OfflineRuleMatcher.Outcome.proxy),
             ("direct.example", .direct), ("unresolved.example", .unmatched),

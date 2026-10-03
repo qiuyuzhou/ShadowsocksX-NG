@@ -1,7 +1,7 @@
 import Foundation
 
 /// 自定义规则持久化（issue #66）：独立 JSON 文档，原子写盘。
-/// 规则内容变化后由调用方重编译 ACL 并走完整重启及回滚路径生效。
+/// Saving intent is independent of subsequent ACL application and runtime recovery.
 struct CustomRuleStore {
   let fileURL: URL
 
@@ -70,8 +70,8 @@ struct CustomRuleStore {
   }
 }
 
-/// One saved-document owner per app process. Writes and rollback update the same
-/// fact only after atomic persistence succeeds; ordinary commands do not reread it.
+/// One saved-document owner per app process. Only successful atomic saves update
+/// this fact; runtime recovery never restores an older rule document.
 @MainActor
 final class RuleDocumentSession {
   private let store: CustomRuleStore

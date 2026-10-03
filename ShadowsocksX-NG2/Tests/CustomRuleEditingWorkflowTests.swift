@@ -218,6 +218,7 @@ final class CustomRuleEditingWorkflowTests: XCTestCase {
       } == true)
     let saved = await workflow.saveCustomRule(draft)
     XCTAssertEqual(saved, .committed(.saved))
+    await workflow.analysisTask?.value
     XCTAssertEqual(
       workflow.snapshot.rows.first { $0.customIDs.contains(draft.id) }?.relationships,
       preview.row?.relationships)
@@ -296,11 +297,10 @@ extension CustomRuleEditingWorkflowTests {
     XCTAssertNil(retry.failure)
   }
 
-  func testIncompleteCollectionAndFailedRecoveryCannotSilentlyUseOldFacts() async throws {
+  func testSavedEditRejectsStaleDraftAndIncompleteCollection() async throws {
     let rule = CustomRule(action: .direct, match: .domainSuffix("old.example"))
     let original = CustomRuleDocument(rules: [rule])
-    let outcome = CustomRuleUpdateOutcome.recoveryFailed(
-      detail: "fixture recovery error", rulesRestored: false)
+    let outcome = CustomRuleUpdateOutcome.saved
     let workflow = RulesWorkflow(
       loadDocument: { original },
       commitDocument: { RuleDocumentCommit(outcome: outcome, document: $0) },

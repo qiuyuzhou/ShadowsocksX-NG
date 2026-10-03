@@ -8,6 +8,7 @@ struct RulesCollection: Sendable {
   let issues: [RulesPageSnapshot.Issue]
   let userDocument: CustomRuleDocument?
   fileprivate let builtinInput: RulesCollectionInput
+  fileprivate let builtinVersion: String
 
   static func load(
     custom loadCustom: () throws -> [CustomRule],
@@ -20,7 +21,7 @@ struct RulesCollection: Sendable {
     }
     var input = builtin
     input.readCustom { try loadDocument?() ?? CustomRuleDocument(rules: loadCustom()) }
-    return input.collection(builtinInput: builtin)
+    return input.collection(builtinInput: builtin, builtinVersion: builtin.contentVersion)
   }
 
   /// A single prospective row uses the same analysis as browsing without sorting
@@ -31,17 +32,29 @@ struct RulesCollection: Sendable {
     return input.previewRow(identity: identity)
   }
 
-  func replacingUserDocument(_ document: CustomRuleDocument) -> RulesCollection {
+  func replacingUserDocument(
+    _ document: CustomRuleDocument, analyzing: Bool = true
+  ) -> RulesCollection {
     var input = builtinInput
     input.readCustom { document }
-    return input.collection(builtinInput: builtinInput)
+    return input.collection(
+      builtinInput: builtinInput, builtinVersion: builtinVersion,
+      cachedRows: analyzing ? nil : Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) }))
   }
 }
 
 private struct RulesCandidate: Sendable {
   let rule: ProxyRule
+  let identity: RuleIdentity
   let source: RulesSource
   let customID: UUID?
+
+  init(rule: ProxyRule, source: RulesSource, customID: UUID?) {
+    self.rule = rule
+    identity = rule.identity
+    self.source = source
+    self.customID = customID
+  }
 }
 
 private struct RulesCollectionInput: Sendable {
@@ -117,7 +130,7 @@ private struct RulesCollectionInput: Sendable {
 
   mutating func previewRow(identity: RuleIdentity) -> RulesRow? {
     appendFixedPolicy()
-    let memberships = entries.filter { $0.rule.identity == identity }
+    let memberships = entries.filter { $0.identity == identity }
     guard !memberships.isEmpty else { return nil }
     let overlapping = entries.compactMap { candidate -> ProxyRule? in
       let rule = candidate.rule
@@ -131,22 +144,43 @@ private struct RulesCollectionInput: Sendable {
     return row(identity: identity, entries: memberships, overlapping: overlapping)
   }
 
-  mutating func collection(builtinInput: RulesCollectionInput) -> RulesCollection {
+  var contentVersion: String {
+    let tokens =
+      entries.map { $0.identity.contentToken + "|" + $0.source.rawValue }
+      + metadataTokens + issues.map { String(describing: $0) }
+    return ProxyACLDocument.digest(tokens.sorted().joined(separator: "\n"))
+  }
+
+  private func documentVersion(builtinVersion: String) -> String {
+    let tokens =
+      (userDocument?.rules ?? []).map { $0.identity.contentToken + "|" + $0.id.uuidString }
+      + disabled.map { "disabled:" + $0.contentToken }
+    return String(
+      ProxyACLDocument.digest(
+        builtinVersion + "\n" + tokens.sorted().joined(separator: "\n")
+      ).prefix(16))
+  }
+
+  mutating func collection(
+    builtinInput: RulesCollectionInput, builtinVersion: String,
+    cachedRows: [RulesRow.SelectionID: RulesRow]? = nil
+  ) -> RulesCollection {
     appendFixedPolicy()
-    let grouped = Dictionary(grouping: entries, by: { $0.rule.identity })
-    let rules = grouped.values.compactMap { $0.first?.rule }
+    let grouped = Dictionary(grouping: entries, by: { $0.identity })
     // Completely fixed-protected proxy candidates remain browsable but cannot
     // cover or shadow another candidate in the effective collection.
-    let effective = rules.filter {
-      !disabled.contains($0.identity)
-        && ($0.action != .proxy
-          || RuleCoverage.fixedLocalCoverage(of: $0.identity.match)?.extent != .full)
-    }
-    let index = RulesOverlapIndex(rules: effective)
-    var rows = grouped.map { identity, entries in
-      row(identity: identity, entries: entries, overlapping: index.overlapping(identity.match))
-    }
-    for identity in disabled where grouped[identity] == nil {
+    let index =
+      cachedRows == nil
+      ? RulesOverlapIndex(
+        rules: grouped.values.compactMap { $0.first?.rule }.filter {
+          !disabled.contains($0.identity)
+            && ($0.action != .proxy
+              || RuleCoverage.fixedLocalCoverage(of: $0.identity.match)?.extent != .full)
+        }) : nil
+    var rows = orderedRows(grouped: grouped, index: index, cachedRows: cachedRows)
+    let orphans = disabled.filter { grouped[$0] == nil }.map { ($0, $0.contentToken) }
+      .sorted { $0.1 < $1.1 }.map(\.0)
+    for identity in orphans {
       rows.append(
         RulesRow(
           id: .rule(identity), identity: identity,
@@ -157,23 +191,51 @@ private struct RulesCollectionInput: Sendable {
       RulesRow(
         id: .noDotHostname, identity: nil, content: "^[^.]+$", sources: [.fixed], customIDs: [],
         relationships: [], fixedCoverage: nil))
-    // Tuple fields are evaluated eagerly. Prepare reflection-based identity
-    // tokens once per row instead of rebuilding them on every sort comparison.
-    rows = rows.map { row in
-      (row: row, key: (row.content, row.action.rawValue, row.identity?.contentToken ?? ""))
-    }.sorted { $0.key < $1.key }.map(\.row)
-    let tokens =
-      rows.map { row in
-        (row.identity?.contentToken ?? "fixed:no-dot") + "|"
-          + row.sources.map(\.rawValue).sorted().joined(separator: ",")
-          + "|" + String(row.isEnabled) + "|"
-          + row.customIDs.map(\.uuidString).sorted().joined(separator: ",")
-      } + metadataTokens.sorted() + issues.map { String(describing: $0) }
     return RulesCollection(
-      version: String(ProxyACLDocument.digest(tokens.sorted().joined(separator: "\n")).prefix(16)),
+      version: documentVersion(builtinVersion: builtinVersion),
       rows: rows, sources: sources, issues: issues, userDocument: userDocument,
-      builtinInput: builtinInput)
+      builtinInput: builtinInput, builtinVersion: builtinVersion)
   }
+  private func cachedCoverage(
+    identity: RuleIdentity, old: RulesRow?, entries: [RulesCandidate]
+  ) -> FixedRuleCoverage? {
+    if let old { return old.fixedCoverage }
+    return entries.contains { $0.source == .fixed }
+      ? nil : RuleCoverage.fixedLocalCoverage(of: identity.match)
+  }
+
+  private func orderedRows(
+    grouped: [RuleIdentity: [RulesCandidate]], index: RulesOverlapIndex?,
+    cachedRows: [RulesRow.SelectionID: RulesRow]?
+  ) -> [RulesRow] {
+    // Preserve the first source occurrence, rather than Dictionary iteration order.
+    var seen: Set<RuleIdentity> = []
+    var rows: [RulesRow] = []
+    for entry in entries {
+      let identity = entry.identity
+      guard seen.insert(identity).inserted else { continue }
+      let memberships = grouped[identity, default: []]
+      if let cachedRows {
+        let old = cachedRows[.rule(identity)]
+        rows.append(
+          RulesRow(
+            id: .rule(identity), identity: identity, content: identity.match.browsingContent,
+            sources: Set(memberships.map(\.source)),
+            customIDs: Set(memberships.compactMap(\.customID)),
+            relationships: old?.relationships ?? [],
+            fixedCoverage: cachedCoverage(identity: identity, old: old, entries: memberships),
+            isEnabled: memberships.contains { $0.source == .fixed } || !disabled.contains(identity))
+        )
+      } else {
+        rows.append(
+          row(
+            identity: identity, entries: memberships,
+            overlapping: disabled.contains(identity) ? [] : index!.overlapping(identity.match)))
+      }
+    }
+    return rows
+  }
+
   private func row(
     identity: RuleIdentity, entries: [RulesCandidate], overlapping: [ProxyRule]
   ) -> RulesRow {

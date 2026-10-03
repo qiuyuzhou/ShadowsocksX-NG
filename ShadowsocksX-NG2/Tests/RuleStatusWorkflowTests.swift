@@ -14,8 +14,8 @@ final class RuleStatusWorkflowTests: XCTestCase {
     let workflow = RulesWorkflow(
       loadDocument: { try store.loadDocument() },
       commitDocument: { document in
-        _ = saveFixture(document, to: store, outcome: .applied)
-        return RuleDocumentCommit(outcome: .applied, document: nil)
+        _ = saveFixture(document, to: store, outcome: .saved)
+        return RuleDocumentCommit(outcome: .saved, document: nil)
       },
       feedbackDelay: { XCTFail("An incomplete collection must not start the success timer") },
       loadBuiltin: { rulesFixture($0) })
@@ -43,7 +43,7 @@ final class RuleStatusWorkflowTests: XCTestCase {
     let workflow = RulesWorkflow(
       loadDocument: { try store.loadDocument() },
       commitDocument: { document in
-        saveFixture(document, to: store, outcome: .applied)
+        saveFixture(document, to: store, outcome: .saved)
       },
       feedbackDelay: { await clock.wait() },
       loadBuiltin: { rulesFixture($0) })
@@ -53,7 +53,7 @@ final class RuleStatusWorkflowTests: XCTestCase {
     let feedback = try XCTUnwrap(workflow.snapshot.commitFeedback)
     XCTAssertEqual(feedback.changedCount, 1)
     XCTAssertEqual(feedback.operation, .enablement(true))
-    XCTAssertEqual(feedback.outcome, .applied)
+    XCTAssertEqual(feedback.outcome, .saved)
     XCTAssertTrue(workflow.snapshot.rows.first { $0.identity == disabled.identity }!.isEnabled)
     await fulfillment(of: [timerStarted], timeout: 3)
     let expired = expectation(description: "success dismissed")
@@ -78,7 +78,7 @@ final class RuleStatusWorkflowTests: XCTestCase {
       loadDocument: { try store.loadDocument() },
       commitDocument: { document in
         await gate.wait()
-        return saveFixture(document, to: store, outcome: .runtimeUnchanged)
+        return saveFixture(document, to: store, outcome: .saved)
       },
       loadBuiltin: { rulesFixture($0) })
     await workflow.refresh()
@@ -97,7 +97,7 @@ final class RuleStatusWorkflowTests: XCTestCase {
     XCTAssertEqual(workflow.snapshot.query, query)
     XCTAssertEqual(workflow.snapshot.selection, [row.id])
     XCTAssertFalse(workflow.snapshot.rows.first!.isEnabled)
-    XCTAssertEqual(workflow.snapshot.commitOutcome, .runtimeUnchanged)
+    XCTAssertEqual(workflow.snapshot.commitOutcome, .saved)
   }
 
   func testOldSuccessTimerCannotDismissNewFailureAndClosingDoesNotChangeRules() async throws {

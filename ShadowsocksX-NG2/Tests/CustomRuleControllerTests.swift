@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 自定义规则变更的完整重启与失败回滚（issue #66 AC1/AC4）。
+/// Saved custom-rule intent and independent runtime application/recovery.
 extension ProxyRuntimeControllerTests {
   func makeCustomRuleStore() throws -> (store: CustomRuleStore, directory: URL) {
     let directory = runtime.directory.appendingPathComponent(
@@ -57,7 +57,8 @@ extension ProxyRuntimeControllerTests {
       action: .direct, match: try RuleMatch(domainSuffix: "internal.example"))
     let outcome = await controller.updateCustomRules([rule])
 
-    XCTAssertEqual(outcome, .applied)
+    XCTAssertEqual(outcome, .saved)
+    await controller.ruleApplicationTask?.value
     XCTAssertEqual(try store.load(), [rule])
     XCTAssertEqual(agent.unregisterCount, unregisterBefore + 1, "ACL 变化触发完整 agent 重启")
     let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)
@@ -83,7 +84,8 @@ extension ProxyRuntimeControllerTests {
       CustomRule(action: .direct, match: .domainExact("a.order.example")),
     ]
     let first = await controller.updateCustomRules(rules)
-    XCTAssertEqual(first, .applied)
+    XCTAssertEqual(first, .saved)
+    await controller.ruleApplicationTask?.value
     XCTAssertEqual(try store.load(), rules, "保存保留用户 UUID 和全部意图")
     // 遮蔽关系由领域层验证器判定（与运行时部署无关的纯函数）。
     let validation = RuleRuntimeCompiler.validation(
@@ -99,7 +101,8 @@ extension ProxyRuntimeControllerTests {
     let summary = controller.readCustomRuleSummary()
     let reversed = Array(rules.reversed())
     let reordered = await controller.updateCustomRules(reversed)
-    XCTAssertEqual(reordered, .runtimeUnchanged)
+    XCTAssertEqual(reordered, .saved)
+    await controller.ruleApplicationTask?.value
     XCTAssertEqual(try store.load(), reversed)
     XCTAssertEqual(try activeACLContent(runtimeStore), before)
     XCTAssertEqual(agent.unregisterCount, unregisterBefore)
@@ -138,8 +141,8 @@ extension ProxyRuntimeControllerTests {
     XCTAssertEqual(try store.load(), [existing], "拒绝时旧规则保持不变")
   }
 
-  /// 部署失败回滚旧规则与旧运行时（issue #66 AC4）。
-  func testFailedCustomRuleDeployRestoresPreviousRulesAndRuntime() async throws {
+  /// Failed application retains new saved rules and restores only the old runtime.
+  func testFailedCustomRuleDeployKeepsSavedRulesAndRestoresOnlyRuntime() async throws {
     let seeded = try makeSeededCatalog()
     let (store, _) = try makeCustomRuleStore()
     let existing = CustomRule(
@@ -175,9 +178,11 @@ extension ProxyRuntimeControllerTests {
       action: .direct, match: try RuleMatch(domainSuffix: "new-rule.example"))
     let result = await controller.commitRuleDocument(CustomRuleDocument(rules: [newRule]))
 
-    XCTAssertEqual(result.outcome, .rolledBack)
-    XCTAssertEqual(result.document, CustomRuleDocument(rules: [existing]))
-    XCTAssertEqual(try store.load(), [existing], "部署失败回滚旧规则")
+    XCTAssertEqual(result.outcome, .saved)
+    XCTAssertEqual(result.document, CustomRuleDocument(rules: [newRule]))
+    await controller.ruleApplicationTask?.value
+    XCTAssertNotNil(controller.runtimeFacts.failure)
+    XCTAssertEqual(try store.load(), [newRule], "部署失败保留已保存规则")
     XCTAssertEqual(runtimeStore.loadDocument(), previousDocument, "回滚旧运行时")
     XCTAssertFalse(
       try activeACLContent(runtimeStore).contains("new-rule.example"),
@@ -206,6 +211,7 @@ extension ProxyRuntimeControllerTests {
     let outcome = await controller.updateCustomRules([rule])
 
     XCTAssertEqual(outcome, .saved)
+    await controller.ruleApplicationTask?.value
     XCTAssertEqual(try store.load(), [rule])
     XCTAssertEqual(agent.unregisterCount, unregisterBefore, "全局模式 ACL 不含自定义规则，无需重启")
     let runtimeStore = RuntimeFileStore(fileURL: runtime.contract)

@@ -8,12 +8,10 @@ struct CustomRuleEditorSheet: View {
   @State private var preview: CustomRulePreview?
   @State private var isSaving = false
   @State private var saveFailure: CustomRuleUpdateOutcome?
-  var onShowRuntime: () -> Void
 
-  init(workflow: RulesWorkflow, draft: CustomRuleDraft, onShowRuntime: @escaping () -> Void) {
+  init(workflow: RulesWorkflow, draft: CustomRuleDraft) {
     self.workflow = workflow
     _draft = State(initialValue: draft)
-    self.onShowRuntime = onShowRuntime
   }
 
   var body: some View {
@@ -71,12 +69,6 @@ struct CustomRuleEditorSheet: View {
               Text(verbatim: detail).textSelection(.enabled)
             }
             if let nextStep = saveFailure.nextStep { Text(RulesCopy.text(nextStep)) }
-            if saveFailure.needsRuntimeInspection {
-              Button(RulesCopy.text("查看运行状态")) {
-                dismiss()
-                onShowRuntime()
-              }
-            }
           }
         }.frame(maxWidth: .infinity, alignment: .leading)
       }.frame(height: 210)

@@ -2,26 +2,20 @@ import Foundation
 
 // MARK: - 自定义规则更新结果
 
-/// 自定义规则更新结果（issue #66）：持久化成功、校验拒绝、持久化失败或部署回滚。
+/// The result of accepting and saving a rule document, independent of runtime.
 enum CustomRuleUpdateOutcome: Equatable, Sendable {
   /// 规则已保存；运行规则模式时应用。
   case saved
-  case applied
-  case runtimeUnchanged
   /// 校验拒绝：整批不落地，旧规则保持不变；附可解释原因。
   case rejected([RejectedCustomRule])
   /// 持久化失败：旧规则保持不变。
   case persistenceFailed
-  /// 保存后部署失败并已回滚到旧规则与旧运行时。
-  case rolledBack
-  case recoveryFailed(detail: String, rulesRestored: Bool)
-  case runtimeChanged(rulesRestored: Bool)
   case busy
   case invalidDocument(detail: String)
 
   var isSuccess: Bool {
     switch self {
-    case .saved, .applied, .runtimeUnchanged: true
+    case .saved: true
     default: false
     }
   }
@@ -36,8 +30,8 @@ struct RuleDocumentCommit: Sendable {
 // MARK: - 自定义规则命令面
 
 extension ProxyRuntimeController {
-  /// 更新自定义规则（issue #66 AC1）：校验 → 持久化 → 重编译 ACL → 完整重启。
-  /// 校验拒绝时整批不落地；部署失败时回滚旧规则、旧 ACL 与旧系统代理状态。
+  /// Validate and atomically save intent; runtime application is a separate worker.
+  /// Deployment failure never restores an older saved rule document.
   /// 全局和直连模式不加载自定义规则，但持久化仍然进行（切换到规则模式后生效）。
   func commitRuleDocument(_ document: CustomRuleDocument) async -> RuleDocumentCommit {
     let previous = try? ruleDocuments.load()
@@ -64,79 +58,78 @@ extension ProxyRuntimeController {
         with:
           Set(RuleCoverage.fixedLocalMatches.map { RuleIdentity(action: .direct, match: $0) }))
     else { return .invalidDocument(detail: "Fixed local policy cannot be disabled") }
-    let previous: CustomRuleDocument
-    let stateAtCapture = state
     do {
-      previous = try ruleDocuments.load()
+      _ = try ruleDocuments.load()
       try ruleDocuments.save(document)
     } catch {
       RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
       return .persistenceFailed
     }
-    return await deployCustomRuleChange(previousRules: previous, stateAtCapture: stateAtCapture)
+    scheduleRuleApplication()
+    return .saved
   }
 
-  /// 规则内容变化后重编译 ACL；非规则模式的 ACL 不含自定义规则，无变化即不重启。
-  private func deployCustomRuleChange(
-    previousRules: CustomRuleDocument,
-    stateAtCapture: AgentRunState
-  ) async -> CustomRuleUpdateOutcome {
+  /// One worker owns rule deployments. Saves never cancel an in-flight restart;
+  /// another saved revision is coalesced and applied after that restart finishes.
+  func scheduleRuleApplication() {
+    ruleApplicationGeneration += 1
+    guard ruleApplicationTask == nil else { return }
+    ruleApplicationTask = Task { [weak self] in
+      guard let self else { return }
+      defer { self.ruleApplicationTask = nil }
+      while !Task.isCancelled {
+        let generation = self.ruleApplicationGeneration
+        do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+        guard generation == self.ruleApplicationGeneration else { continue }
+        await self.applySavedRuleDocument()
+        if generation == self.ruleApplicationGeneration { return }
+      }
+    }
+  }
+
+  private func applySavedRuleDocument() async {
     guard proxyMode == .rule, settings.agentEnabled, state != .off,
       let currentDocument = lastDocument ?? runtimeFileStore.loadDocument()
-    else {
-      return .saved
-    }
+    else { return }
+    let revision = ruleDocuments.revision
     let plan = RollbackPlan(
-      document: currentDocument, state: stateAtCapture,
-      payload: .customRules(previousRules),
+      document: currentDocument, state: state,
+      payload: .runtimeOnly,
       systemProxyIntentAtCapture: settings.systemProxyEnabled,
       convergeProxyOnIntentChange: false)
-
     let nextDocument: SslocalRuntimeDocument
     do {
       nextDocument = try await runtimeDocument(currentDocument, for: proxyMode)
     } catch RulePreparationError.superseded {
-      return .runtimeChanged(rulesRestored: false)
+      return
     } catch {
-      return restoreRulesAfterPreparationFailure(previousRules, error: error)
+      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+      ruleApplicationFailure = .service(.runtimeFile)
+      return
     }
-    guard nextDocument.aclRuntime != currentDocument.aclRuntime else {
-      return .runtimeUnchanged
+    guard nextDocument.aclRuntime != currentDocument.aclRuntime || ruleApplicationFailure != nil
+    else {
+      ruleApplicationFailure = nil
+      return
     }
-
     modeChangeGeneration += 1
     var ticket = convergenceTicket()
     let checks: ConvergenceTicket.Checks = [.flow, .mode, .preparation, .agentEnabled]
     let result = await apply(
       nextDocument, ticket: &ticket, checking: checks,
-      requiresReceipt: true,
-      convergeProxyOnSuccess: false,
-      preserveProxyOnFailure: true,
-      proxyTail: .converge, rollback: plan)
+      requiresReceipt: true, convergeProxyOnSuccess: false,
+      preserveProxyOnFailure: true, proxyTail: .converge, rollback: plan)
     switch result {
-    case .unchanged:
-      return .runtimeUnchanged
+    case .applied, .unchanged:
+      if revision == ruleDocuments.revision { ruleApplicationFailure = nil }
     case .superseded:
-      return .runtimeChanged(rulesRestored: false)
+      break
     case .failed:
-      return await restoreRules(plan, ticket: &ticket, checking: checks)
-    case .applied:
-      guard convergenceIsCurrent(ticket, checking: checks) else {
-        return .runtimeChanged(rulesRestored: false)
+      let failure = ProxyRuntimeFacts(state: state).failure ?? .service(.runtimeFile)
+      _ = await restore(plan, ticket: &ticket, checking: checks)
+      if convergenceIsCurrent(ticket, checking: checks), revision == ruleDocuments.revision {
+        ruleApplicationFailure = failure
       }
-      return .applied
-    }
-  }
-
-  private func restoreRulesAfterPreparationFailure(
-    _ previousRules: CustomRuleDocument, error: Error
-  ) -> CustomRuleUpdateOutcome {
-    RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-    do {
-      try ruleDocuments.save(previousRules)
-      return .rolledBack
-    } catch {
-      return .recoveryFailed(detail: String(describing: error), rulesRestored: false)
     }
   }
 
@@ -152,25 +145,6 @@ extension ProxyRuntimeController {
     let hardRejectedTokens = Set(hardRejected.map(\.rule.contentToken))
     let accepted = rules.filter { !hardRejectedTokens.contains($0.contentToken) }
     return (accepted, hardRejected)
-  }
-
-  /// 规则提交的失败回滚：整体恢复旧规则与旧运行时，按恢复报告映射结果。
-  private func restoreRules(
-    _ plan: RollbackPlan, ticket: inout ConvergenceTicket,
-    checking: ConvergenceTicket.Checks
-  ) async -> CustomRuleUpdateOutcome {
-    let report = await restore(plan, ticket: &ticket, checking: checking)
-    guard report.runtimeHealthy != nil else {
-      return .runtimeChanged(rulesRestored: report.payloadFailureDescription == nil)
-    }
-    var failures: [String] = []
-    if let description = report.payloadFailureDescription { failures.append(description) }
-    if report.runtimeHealthy == false { failures.append(String(describing: state)) }
-    return failures.isEmpty
-      ? .rolledBack
-      : .recoveryFailed(
-        detail: failures.joined(separator: "; "),
-        rulesRestored: report.payloadFailureDescription == nil)
   }
 
   /// 自定义规则安全摘要（issue #66 AC5）：数量 + 内容版本，不含原始域名。

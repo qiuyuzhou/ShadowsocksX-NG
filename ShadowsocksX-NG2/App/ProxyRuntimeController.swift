@@ -50,6 +50,9 @@ final class ProxyRuntimeController: ObservableObject {
   let settingsStore: ProxySettingsStoring
   /// 自定义规则持久化（issue #66）：规则模式 ACL 合并的用户入口。
   var isUpdatingRules = false
+  var ruleApplicationTask: Task<Void, Never>?
+  var ruleApplicationGeneration = 0
+  @Published var ruleApplicationFailure: RuntimeFailureFacts?
   let customRuleStore: CustomRuleStore
   let ruleDocuments: RuleDocumentSession
   let ruleSnapshots: BuiltinRuleSnapshots

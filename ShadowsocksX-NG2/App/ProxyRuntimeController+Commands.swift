@@ -47,6 +47,10 @@ extension ProxyRuntimeController {
   func setAgentEnabled(_ enabled: Bool) async {
     if enabled == settings.agentEnabled {
       guard enabled else { return }
+      if ruleApplicationFailure != nil {
+        scheduleRuleApplication()
+        return
+      }
       switch state {
       case .off, .launchFailed, .serviceFailed:
         await convergeAgent()

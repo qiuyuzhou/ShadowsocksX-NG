@@ -22,9 +22,8 @@ struct RuleAnalysis: Equatable, Sendable {
   }
 
   init(rules: [ProxyRule], subjects: [ProxyRule]? = nil) {
-    let identities = Array(Set(rules.map(\.identity))).sorted {
-      $0.contentToken < $1.contentToken
-    }
+    let identities = Set(rules.map(\.identity)).map { ($0, $0.contentToken) }
+      .sorted { $0.1 < $1.1 }.map(\.0)
     self.identities = identities
     let targets = Set((subjects ?? rules).map(\.identity))
     relationships = identities.filter { targets.contains($0) }.flatMap { target in
