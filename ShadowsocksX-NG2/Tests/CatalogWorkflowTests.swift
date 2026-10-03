@@ -155,7 +155,7 @@ final class CatalogWorkflowTests: XCTestCase {
 
     XCTAssertEqual(workflow.tree.pathSummary(for: groupID), "组A")
     XCTAssertEqual(workflow.tree.pathSummary(for: nestedID), "组A / 嵌套")
-    XCTAssertEqual(workflow.tree.pathSummary(for: leafID), "组A / 嵌套 / 203.0.113.7")
+    XCTAssertEqual(workflow.tree.pathSummary(for: leafID), "组A / 嵌套 / 203.0.113.7:8388")
   }
 
   func testPathSummaryIsNilForMissingTarget() {

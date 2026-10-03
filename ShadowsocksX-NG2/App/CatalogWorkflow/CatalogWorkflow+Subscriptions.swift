@@ -131,7 +131,7 @@ extension CatalogWorkflow {
   private func commitSnapshot(
     _ snapshot: SubscriptionSnapshot, summary: SubscriptionSummary, fallbackName: String
   ) async throws {
-    var removedServers: [CatalogEntry] = []
+    var obsoleteCredentialRefs: Set<CredentialReference> = []
     var credentialJournal = CredentialWriteJournal(credentials: dependencies.credentials)
     do {
       try commitSubscriptionDocument { catalog, subscriptions in
@@ -149,7 +149,11 @@ extension CatalogWorkflow {
           journal: &credentialJournal)
         let name = snapshot.root.name.isEmpty ? fallbackName : snapshot.root.name
         let document = CatalogSubscriptionSnapshot(name: name, root: resolved)
-        removedServers = try catalog.applySubscriptionSnapshot(document, into: summary.groupID)
+        let replacedServers = try catalog.applySubscriptionSnapshot(document, into: summary.groupID)
+        // 快照应用返回整个旧树；延续节点仍复用引用，不能按旧树直接删除秘密。
+        let retainedRefs = Set(Self.credentialRefs(of: Array(catalog.entries.values)))
+        obsoleteCredentialRefs = Set(Self.credentialRefs(of: replacedServers))
+          .subtracting(retainedRefs)
         if let index = subscriptions.firstIndex(where: { $0.id == summary.id }) {
           subscriptions[index].status = .succeeded(at: Date())
         }
@@ -162,8 +166,8 @@ extension CatalogWorkflow {
         error is CredentialStoreError ? .credentials : .persistence
       throw SubscriptionRefreshCommitError(category: category, rollback: rollback)
     }
-    // 被移除节点的凭据引用不会被新树复用（身份已不在），提交成功后清理。
-    for ref in Self.credentialRefs(of: removedServers) {
+    // 只清理已提交目录不再引用的旧秘密，包括延续节点撤销的插件参数。
+    for ref in obsoleteCredentialRefs {
       try? dependencies.credentials.delete(ref)
     }
   }

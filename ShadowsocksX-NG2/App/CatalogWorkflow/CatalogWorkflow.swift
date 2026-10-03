@@ -142,30 +142,16 @@ final class CatalogWorkflow: ObservableObject {
   /// 全新 UUID，不按内容去重（CONTEXT.md 不变量）；返回新节点身份供选中。
   @discardableResult
   func createServer(_ draft: ServerEditDraft, into parent: NodeID?) async throws -> NodeID {
-    let trimmedAddress = draft.address.trimmingCharacters(in: .whitespaces)
-    guard !trimmedAddress.isEmpty else { throw ServerFormError.invalidAddress }
-    guard (1...65_535).contains(draft.port) else { throw ServerFormError.invalidPort }
-    let trimmedMethod = draft.encryptionMethod.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmedMethod.isEmpty else { throw ServerFormError.missingEncryptionMethod }
-    guard EncryptionMethodCatalog.isSupported(trimmedMethod) else {
-      throw ServerFormError.unsupportedEncryptionMethod(trimmedMethod)
-    }
-    guard !draft.password.isEmpty else { throw ServerFormError.invalidPassword }
-    // 插件表单校验与其它字段同处写入之前：表单拒绝不触碰凭据、不进提交管线。
-    if case .managed(let program) = draft.plugin,
-      ManagedPluginCatalog.info(forProgram: program) == nil
-    {
-      throw ServerFormError.pluginNotManaged(program)
-    }
+    let draft = try Self.prepareServerDraft(draft)
     var journal = CredentialWriteJournal(credentials: dependencies.credentials)
     do {
       return try commit { [self] catalog in
         let passwordRef = CredentialReference.fresh()
         try journal.save(draft.password, for: passwordRef)
         var fields = ServerFields(
-          address: trimmedAddress, port: draft.port, encryptionMethod: trimmedMethod,
+          address: draft.address, port: draft.port, encryptionMethod: draft.encryptionMethod,
           passwordRef: passwordRef,
-          remark: draft.remark.trimmingCharacters(in: .whitespaces))
+          remark: draft.remark)
         try Self.applyPluginSelection(
           draft.plugin, options: draft.pluginOptions, to: &fields,
           credentials: dependencies.credentials, journal: &journal)
@@ -220,21 +206,7 @@ final class CatalogWorkflow: ObservableObject {
   /// `CommitError.credentialRollback` 报出。插件选择按 #38 语义
   /// 落盘（「无」整体清除、受管写程序名与参数、集外引用原样保留）。
   func updateServer(_ id: NodeID, draft: ServerEditDraft) async throws {
-    let trimmedAddress = draft.address.trimmingCharacters(in: .whitespaces)
-    guard !trimmedAddress.isEmpty else { throw ServerFormError.invalidAddress }
-    guard (1...65_535).contains(draft.port) else { throw ServerFormError.invalidPort }
-    let trimmedMethod = draft.encryptionMethod.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmedMethod.isEmpty else { throw ServerFormError.missingEncryptionMethod }
-    guard EncryptionMethodCatalog.isSupported(trimmedMethod) else {
-      throw ServerFormError.unsupportedEncryptionMethod(trimmedMethod)
-    }
-    guard !draft.password.isEmpty else { throw ServerFormError.invalidPassword }
-    // 插件表单校验与其它字段同处写入之前：表单拒绝不触碰凭据、不进提交管线。
-    if case .managed(let program) = draft.plugin,
-      ManagedPluginCatalog.info(forProgram: program) == nil
-    {
-      throw ServerFormError.pluginNotManaged(program)
-    }
+    let draft = try Self.prepareServerDraft(draft)
     var journal = CredentialWriteJournal(credentials: dependencies.credentials)
     do {
       try commit { [self] catalog in
@@ -242,10 +214,10 @@ final class CatalogWorkflow: ObservableObject {
           throw CatalogError.notAServer(id)
         }
         try journal.save(draft.password, for: fields.passwordRef)
-        fields.address = trimmedAddress
+        fields.address = draft.address
         fields.port = draft.port
-        fields.encryptionMethod = trimmedMethod
-        fields.remark = draft.remark.trimmingCharacters(in: .whitespaces)
+        fields.encryptionMethod = draft.encryptionMethod
+        fields.remark = draft.remark
         try Self.applyPluginSelection(
           draft.plugin, options: draft.pluginOptions, to: &fields,
           credentials: dependencies.credentials, journal: &journal)
@@ -254,6 +226,29 @@ final class CatalogWorkflow: ObservableObject {
     } catch {
       throw CommitError(underlying: error, credentialRollback: journal.rollback())
     }
+  }
+
+  /// 新建与编辑共享的草稿准备：校验在凭据 journal 与目录提交之前完成。
+  /// 仅手动表单拒绝空名称；导入通过 ServerFields 的构造规则补名。
+  private static func prepareServerDraft(_ input: ServerEditDraft) throws -> ServerEditDraft {
+    var draft = input
+    draft.address = draft.address.trimmingCharacters(in: .whitespaces)
+    guard !draft.address.isEmpty else { throw ServerFormError.invalidAddress }
+    guard (1...65_535).contains(draft.port) else { throw ServerFormError.invalidPort }
+    draft.encryptionMethod = draft.encryptionMethod.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !draft.encryptionMethod.isEmpty else { throw ServerFormError.missingEncryptionMethod }
+    guard EncryptionMethodCatalog.isSupported(draft.encryptionMethod) else {
+      throw ServerFormError.unsupportedEncryptionMethod(draft.encryptionMethod)
+    }
+    guard !draft.password.isEmpty else { throw ServerFormError.invalidPassword }
+    if case .managed(let program) = draft.plugin,
+      ManagedPluginCatalog.info(forProgram: program) == nil
+    {
+      throw ServerFormError.pluginNotManaged(program)
+    }
+    draft.remark = draft.remark.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !draft.remark.isEmpty else { throw ServerFormError.emptyName }
+    return draft
   }
 
   // MARK: - 提交管线（module 内部；UI 不得调用，独立 target 拆分前靠 deletion check）

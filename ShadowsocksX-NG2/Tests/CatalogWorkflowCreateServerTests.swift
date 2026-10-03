@@ -90,7 +90,7 @@ final class CatalogWorkflowCreateServerTests: XCTestCase {
     let id = try await workflow.createServer(
       ServerEditDraft(
         address: "203.0.113.10", port: 8388, encryptionMethod: "aes-256-gcm",
-        password: "密码", remark: "", plugin: .managed(program: "v2ray-plugin"),
+        password: "密码", remark: "插件服务器", plugin: .managed(program: "v2ray-plugin"),
         pluginOptions: "mode=websocket;host=example.com"),
       into: nil)
     let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)

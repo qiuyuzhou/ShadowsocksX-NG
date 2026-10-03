@@ -1,3 +1,5 @@
+import Foundation
+
 /// 服务器叶子字段（spec #21 D3）。密码与插件参数只持凭据引用，秘密值在
 /// Keychain；插件程序引用原样保留，本票不做受管集合校验（激活语义 #26）。
 struct ServerFields: Codable, Equatable, Sendable {
@@ -22,9 +24,21 @@ struct ServerFields: Codable, Equatable, Sendable {
     self.port = port
     self.encryptionMethod = encryptionMethod
     self.passwordRef = passwordRef
-    self.remark = remark
+    self.remark = Self.name(remark, address: address, port: port)
     self.pluginProgram = pluginProgram
     self.pluginOptionsRef = pluginOptionsRef
+  }
+
+  /// 导入与字段构造共用名称规则；非空名称原样保留，缺名时生成并保存端点名。
+  /// 后续修改地址或端口不改变已经保存的名称。`remark` 保留既有存储字段名。
+  private static func name(_ supplied: String, address: String, port: Int) -> String {
+    guard supplied.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return supplied
+    }
+    let host =
+      address.hasPrefix("[") && address.hasSuffix("]")
+      ? String(address.dropFirst().dropLast()) : address
+    return host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
   }
 }
 
@@ -79,14 +93,14 @@ struct CatalogEntry: Codable, Equatable, Sendable {
 }
 
 extension CatalogEntry {
-  /// 行显示名（主窗口侧栏与菜单栏级联共用口径，issue #31）：服务器备注优先、
-  /// 回退地址（含订阅 remarks 回退语义）；分组用名称。
+  /// 行显示名（主窗口侧栏与菜单栏级联共用口径）：服务器使用已保存的名称，
+  /// 导入缺名已在字段构造时补全；分组用名称。
   var displayName: String {
     switch kind {
     case .group(let fields):
       return fields.name
     case .server(let fields):
-      return fields.remark.isEmpty ? fields.address : fields.remark
+      return fields.remark
     }
   }
 }

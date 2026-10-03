@@ -20,7 +20,7 @@ struct TerminalProxyEnvironmentCommands: Equatable, Sendable {
 
 /// 活动目标安全事实（issue #47）：存在性 + 可展示路径摘要。身份是不透明
 /// `NodeID`（级联勾选用）；不含凭据、原始配置 URL 或目录树结构。路径摘要
-/// 是目录 projection 的显示名（无备注的服务器叶子以地址为显示名，与目录树
+/// 是目录 projection 的显示名（导入缺名的服务器叶子以地址端口为名称，与目录树
 /// 呈现一致），不额外携带配置细节。
 struct ProxyActiveTargetFacts: Equatable, Sendable {
   let id: NodeID

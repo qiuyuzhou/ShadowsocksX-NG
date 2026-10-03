@@ -93,7 +93,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
         id,
         draft: ServerEditDraft(
           address: "198.51.100.9", port: 9999, encryptionMethod: "aes-256-gcm",
-          password: "新密码", remark: "", plugin: .none, pluginOptions: nil))
+          password: "新密码", remark: "新名称", plugin: .none, pluginOptions: nil))
     } onThrow: { error in
       guard let commitError = error as? CommitError else {
         XCTFail("预期 CommitError，收到 \(error)")
@@ -132,7 +132,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
         id,
         draft: ServerEditDraft(
           address: "203.0.113.7", port: 8388, encryptionMethod: "aes-256-gcm",
-          password: "旧密码", remark: "", plugin: .none, pluginOptions: nil))
+          password: "旧密码", remark: "新名称", plugin: .none, pluginOptions: nil))
     } onThrow: { error in
       guard let commitError = error as? CommitError else {
         XCTFail("预期 CommitError，收到 \(error)")
@@ -161,7 +161,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
         NodeID(rawValue: "missing"),
         draft: ServerEditDraft(
           address: "198.51.100.9", port: 9999, encryptionMethod: "aes-256-gcm",
-          password: "新密码", remark: "", plugin: .none, pluginOptions: nil))
+          password: "新密码", remark: "新名称", plugin: .none, pluginOptions: nil))
     } onThrow: { error in
       guard let commitError = error as? CommitError else {
         XCTFail("预期 CommitError，收到 \(error)")
@@ -184,7 +184,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
       try await workflow.createServer(
         ServerEditDraft(
           address: "198.51.100.9", port: 8388, encryptionMethod: "aes-256-gcm",
-          password: "新密码", remark: "", plugin: .none, pluginOptions: nil),
+          password: "新密码", remark: "新名称", plugin: .none, pluginOptions: nil),
         into: nil)
     } onThrow: { error in
       guard let commitError = error as? CommitError else {

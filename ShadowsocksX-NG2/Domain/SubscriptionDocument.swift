@@ -14,8 +14,8 @@ struct RemoteServerRecord: Equatable, Sendable {
 
 /// 解析完成的订阅快照（spec #21 D4，issue #4/#35）：SIP-008 `version: 1` 扁平
 /// `servers` + 可选私有扩展 `x_shadowsocksx_ng`。身份已按订阅作用域限定
-/// （服务器引用复用 `servers[].id`；无稳定 ID 的记录用规范化记录的内容指纹，
-/// 仅完全相同记录延续身份）；结构、顺序、名称全部远端权威。扩展缺失/未知/
+/// （服务器引用复用 `servers[].id`；无稳定 ID 的记录用地址端口指纹，
+/// 相同端点延续身份）；结构、顺序、名称全部远端权威。扩展缺失/未知/
 /// 无效时回退标准扁平列表（根分组无名称，由调用方以 URL host 兜底）。
 struct SubscriptionSnapshot: Equatable, Sendable {
   struct ServerLeaf: Equatable, Sendable {
@@ -94,7 +94,7 @@ enum SubscriptionDocumentParser {
   // MARK: - 服务器记录校验与身份
 
   /// 带命名空间键的叶子：键优先为供应商稳定 ID（`id:<uuid>`）；无稳定 ID 的
-  /// 记录用规范化记录内容指纹（`content:<sha256>`）。
+  /// 记录用地址端口指纹（`content:<sha256>`）。
   private struct KeyedLeaf {
     var key: String
     var leaf: SubscriptionSnapshot.ServerLeaf
@@ -128,20 +128,16 @@ enum SubscriptionDocumentParser {
       pluginOptions: dto.pluginOpts)
   }
 
-  /// 记录的命名空间键：优先供应商稳定 ID；无 ID 用内容指纹（仅完全相同记录
-  /// 延续身份，不做任何启发式合并——issue #9）。
+  /// 记录的命名空间键：优先供应商稳定 ID；无 ID 时相同地址和端口延续身份。
   private static func remoteKey(_ dto: ServerDTO, record: RemoteServerRecord) -> String {
     if let id = dto.id { return "id:\(id)" }
-    return "content:\(contentFingerprint(record))"
+    return "content:\(endpointFingerprint(record))"
   }
 
-  /// 无稳定 ID 记录的规范化指纹：全字段长度前缀拼接后 SHA-256，避免拼接歧义
-  /// 与碰撞（相同内容必然同指纹，任一字段变化即不同身份）。
-  private static func contentFingerprint(_ record: RemoteServerRecord) -> String {
-    let parts = [
-      record.address, String(record.port), record.encryptionMethod, record.password,
-      record.remark, record.pluginProgram ?? "", record.pluginOptions ?? "",
-    ]
+  /// 无稳定 ID 记录的端点指纹：地址与端口长度前缀拼接后 SHA-256，避免拼接歧义。
+  /// 名称、密码、加密方式和插件不参与，远端更新这些值不改变身份。
+  private static func endpointFingerprint(_ record: RemoteServerRecord) -> String {
+    let parts = [record.address, String(record.port)]
     let canonical = parts.map { "\($0.utf8.count):\($0)" }.joined(separator: "|")
     let digest = SHA256.hash(data: Data(canonical.utf8))
     return digest.map { String(format: "%02x", $0) }.joined()

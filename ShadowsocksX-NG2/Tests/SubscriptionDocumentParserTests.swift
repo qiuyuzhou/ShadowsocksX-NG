@@ -247,7 +247,7 @@ final class SubscriptionDocumentParserTests: XCTestCase {
     XCTAssertEqual(serverRecords(snapshot.root)[1].address, "203.0.113.2", "未引用按数组序追加")
   }
 
-  // MARK: 身份延续规则（issue #9：无稳定 ID 仅精确匹配延续）
+  // MARK: 身份延续规则（无稳定 ID 按地址端口精确匹配延续）
 
   func testIdLessRecordIdentityIsStableForIdenticalContent() throws {
     let record =
@@ -258,16 +258,16 @@ final class SubscriptionDocumentParserTests: XCTestCase {
     XCTAssertEqual(serverIDs(first.root)[0], serverIDs(second.root)[0])
   }
 
-  func testIdLessRecordIdentityChangesWithAnyField() throws {
+  func testIdLessRecordIdentitySurvivesRemoteRename() throws {
     let base =
       #"{"server": "203.0.113.1", "server_port": 8388, "password": "p", "method": "m", "remarks": "r"}"#
     let original = try parse(Data("{\"version\": 1, \"servers\": [\(base)]}".utf8))
-    // 仅改 remarks（远端改名）：无稳定 ID → 视为新记录，不启发式合并。
+    // 仅改 remarks（远端改名）：显示元数据不参与端点指纹。
     let renamed =
       #"{"server": "203.0.113.1", "server_port": 8388, "password": "p", "method": "m", "remarks": "r2"}"#
     let changed = try parse(Data("{\"version\": 1, \"servers\": [\(renamed)]}".utf8))
 
-    XCTAssertNotEqual(serverIDs(original.root)[0], serverIDs(changed.root)[0])
+    XCTAssertEqual(serverIDs(original.root)[0], serverIDs(changed.root)[0])
   }
 
   func testIdentityScopedPerSubscription() throws {

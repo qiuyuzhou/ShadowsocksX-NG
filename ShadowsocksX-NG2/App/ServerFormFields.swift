@@ -59,7 +59,7 @@ final class ServerFormFields: ObservableObject {
   }
 }
 
-/// 共享表单栅格：地址/端口、加密/备注、密码全宽（reveal）、插件区全宽。
+/// 共享表单栅格：地址/端口、加密/名称、密码全宽（reveal）、插件区全宽。
 /// `isEditable` 为假时整表禁用（订阅节点远端管理）；插件区 facts 由 caller
 /// 注入——新建面无既有引用，编辑面用编辑命令解析出的状态。
 struct ServerFormFieldsGrid: View {
@@ -88,8 +88,8 @@ struct ServerFormFieldsGrid: View {
           }
           .disabled(!isEditable)
         }
-        column("备注") {
-          TextField("备注", text: $fields.remark)
+        column("名称") {
+          TextField("名称", text: $fields.remark)
             .textFieldStyle(.roundedBorder)
             .disabled(!isEditable)
         }
