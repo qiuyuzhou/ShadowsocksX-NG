@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-extension RealSslocalSmokeTests {
+final class RealSslocalGFWListSmokeTests: RealSslocalSmokeTests {
   /// 规则＋未匹配时直连（issue #65）：bypass_all + GFWList 代理候选。命中
   /// GFWList 域名走代理；未匹配域名与 IP 字面目标直连；SOCKS 与 HTTP 共用 ACL。
   func testRuleDirectDefaultACLRoutesGFWListProxyAndUnmatchedDirect() throws {
@@ -30,8 +30,7 @@ extension RealSslocalSmokeTests {
           pluginOpts: nil)
       ],
       listen: listen,
-      acl: .rule(
-        at: aclFileURL,
+      acl: ruleProbeACL(
         defaultAction: .directWhenUnmatched,
         rules: gfwRules))
     XCTAssertTrue(document.isWellFormed)
@@ -42,7 +41,8 @@ extension RealSslocalSmokeTests {
 
     try awaitGlobalInboundsReady(listen: listen, document: document)
     try assertLocalTargetsBypass(listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
-    try assertGFWListDirectDefaultRouting(listen: listen, fakeSS: fakeSSServer)
+    try assertGFWListDirectDefaultRouting(
+      listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
 
     stopWrapperAndAssertCleanExit(wrapper, description: "gfwlist rule wrapper exits")
   }
@@ -77,7 +77,8 @@ extension RealSslocalSmokeTests {
 
     try awaitGlobalInboundsReady(listen: listen, document: document)
     try assertDomainPriorityBeatsBypassList(listen: listen, fakeSS: fakeSSServer)
-    try assertIPPriorityBeatsProxyList(listen: listen, fakeSS: fakeSSServer)
+    try assertIPPriorityBeatsProxyList(
+      listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
 
     let afterHTTPBase = fakeSSServer.connectionCount
     performHTTPConnect(httpPort: listen.httpPort, targetHost: "sub.example.com", targetPort: 443)
@@ -93,7 +94,6 @@ extension RealSslocalSmokeTests {
     let aclContent = """
       [proxy_all]
       [bypass_list]
-      127.0.0.0/8
       10.0.0.0/8
       172.16.0.0/12
       192.168.0.0/16
@@ -104,11 +104,11 @@ extension RealSslocalSmokeTests {
       ||localhost
       ||local
       ^[^.]+$
-      8.8.8.8/32
+      127.0.0.1/32
       ||sub.example.com
       [proxy_list]
       ||example.com
-      8.8.8.0/24
+      127.0.0.0/8
       """
     let acl = ProxyACLDocument(
       path: aclFileURL.standardizedFileURL.path,
@@ -130,23 +130,24 @@ extension RealSslocalSmokeTests {
       "域名优先级：proxy_list 应优先于 bypass_list")
   }
 
-  /// IP：bypass_list 的 `8.8.8.8/32` 覆盖 proxy_list 的 `8.8.8.0/24`；
+  /// IP：bypass_list 的 `127.0.0.1/32` 覆盖 proxy_list 的 `127.0.0.0/8`；
   /// 同 CIDR 内未单列直连的 IP 仍走 proxy_list。
   private func assertIPPriorityBeatsProxyList(
-    listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
+    listen: SslocalListenSettings, echoPort: Int, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeIP = fakeSS.connectionCount
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort,
-      request: socksIPv4ConnectRequest([8, 8, 8, 8], port: 53))
-    Thread.sleep(forTimeInterval: 0.5)
+    let payload = Array("priority direct\n".utf8)
+    XCTAssertEqual(
+      try performDirectSocksEcho(
+        socksPort: listen.socksPort, targetPort: echoPort, payload: payload),
+      payload)
     XCTAssertEqual(
       fakeSS.connectionCount, beforeIP,
       "IP 优先级：bypass_list 应优先于 proxy_list")
 
     _ = performSocksConnectReply(
       socksPort: listen.socksPort,
-      request: socksIPv4ConnectRequest([8, 8, 8, 1], port: 53))
+      request: socksIPv4ConnectRequest([127, 0, 0, 2], port: echoPort))
     XCTAssertTrue(
       try waitForCondition(timeout: 5) { fakeSS.connectionCount > beforeIP },
       "未在 bypass_list 单列的 IP 应命中 proxy_list CIDR")
@@ -155,7 +156,7 @@ extension RealSslocalSmokeTests {
   /// GFWList「未匹配时直连」路由断言：命中代理候选走 SS；未匹配域名与 IP
   /// 字面目标不触达 SS（bypass_all 默认直连）。
   func assertGFWListDirectDefaultRouting(
-    listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
+    listen: SslocalListenSettings, echoPort: Int, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeHit = fakeSS.connectionCount
     _ = performSocksConnectReply(
@@ -172,17 +173,17 @@ extension RealSslocalSmokeTests {
       "GFWList 子域代理候选应连接 Shadowsocks 出口")
 
     let afterMatched = fakeSS.connectionCount
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort, targetHost: "unmatched.example.org", targetPort: 443)
-    Thread.sleep(forTimeInterval: 0.5)
+    try assertDirectDomain(
+      "unmatched.example.org", listen: listen, echoPort: echoPort, exit: fakeSS)
     XCTAssertEqual(
       fakeSS.connectionCount, afterMatched,
       "未匹配域名在 bypass_all 下应直连，不得触达 Shadowsocks 出口")
 
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort,
-      request: socksIPv4ConnectRequest([1, 1, 1, 1], port: 443))
-    Thread.sleep(forTimeInterval: 0.5)
+    let payload = Array("unmatched IP direct\n".utf8)
+    XCTAssertEqual(
+      try performDirectSocksEcho(
+        socksPort: listen.socksPort, targetPort: echoPort, payload: payload),
+      payload)
     XCTAssertEqual(
       fakeSS.connectionCount, afterMatched,
       "未命中规则的 IP 字面目标应直连")

@@ -3,7 +3,8 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-extension RealSslocalSmokeTests {
+final class RealSslocalRuleSemanticsSmokeTests: RealSslocalSmokeTests {
+  override var usesLocalDNS: Bool { false }
   func testRuleSemanticsWithProxyDefaultAndReversedOrder() throws {
     try assertRuleSemantics(defaultHeader: "[proxy_all]", unmatchedProxies: true)
   }

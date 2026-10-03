@@ -7,7 +7,10 @@ import XCTest
 /// v1.25.0——本地 SOCKS 端口完成监听绑定，并完成一次完整 SOCKS5 握手（方法
 /// 协商 + CONNECT 请求得到按协议的应答）。远端服务器不可达只影响应答码，不
 /// 影响握手本身（真实服务器功能验证属发布门槛人工检查项）。
-final class RealSslocalSmokeTests: XCTestCase {
+class RealSslocalSmokeTests: XCTestCase {
+  private var wrappers: [Process] = []
+  private var dns: LoopbackDNSResponder!
+  var usesLocalDNS: Bool { true }
   var workDir: URL!
   var contractURL: URL!
 
@@ -17,9 +20,15 @@ final class RealSslocalSmokeTests: XCTestCase {
       .appendingPathComponent("ssxng-smoke-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
     contractURL = workDir.appendingPathComponent("sslocal-active.json")
+    if usesLocalDNS { dns = try LoopbackDNSResponder() }
   }
 
   override func tearDownWithError() throws {
+    for wrapper in wrappers where wrapper.isRunning {
+      stopWrapperAndAssertCleanExit(wrapper, description: "teardown wrapper exits")
+    }
+    wrappers.removeAll()
+    dns = nil
     try? FileManager.default.removeItem(at: workDir)
     try super.tearDownWithError()
   }
@@ -78,18 +87,32 @@ final class RealSslocalSmokeTests: XCTestCase {
     process.executableURL = wrapperURL
     var environment = ProcessInfo.processInfo.environment
     environment["SSXNG_CONTRACT_PATH"] = contractURL.path
-    environment["SSXNG_SSLOCAL_PATH"] = try sslocalURL.path
+    if usesLocalDNS {
+      // exec preserves the PID supervised by the real wrapper. Only DNS is test-owned.
+      let launcher = workDir.appendingPathComponent("sslocal-with-local-dns")
+      let executable = try sslocalURL.path.replacingOccurrences(of: "'", with: "'\"'\"'")
+      let script = "#!/bin/sh\nexec '\(executable)' --dns udp://127.0.0.1:\(dns.port) \"$@\"\n"
+      try script.write(to: launcher, atomically: true, encoding: .utf8)
+      try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: launcher.path)
+      environment["SSXNG_SSLOCAL_PATH"] = launcher.path
+    } else {
+      environment["SSXNG_SSLOCAL_PATH"] = try sslocalURL.path
+    }
     environment["SSXNG_RUNTIME_DIR"] = workDir.path
     process.environment = environment
     try process.run()
+    wrappers.append(process)
     return process
   }
 
   /// 对本地 SOCKS 端口做完整握手，返回 CONNECT 应答首字节（版本, 应答码）。
-  private func performSocksHandshake(port: Int) throws -> (version: UInt8, reply: UInt8)? {
+  func performSocksHandshake(port: Int) throws -> (version: UInt8, reply: UInt8)? {
     let socketFD = socket(AF_INET, SOCK_STREAM, 0)
     guard socketFD >= 0 else { throw POSIXError(.ENOTSOCK) }
     defer { close(socketFD) }
+    var timeout = timeval(tv_sec: 5, tv_usec: 0)
+    _ = setsockopt(
+      socketFD, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
     var address = sockaddr_in()
     address.sin_family = sa_family_t(AF_INET)
@@ -138,6 +161,37 @@ final class RealSslocalSmokeTests: XCTestCase {
     return bytes
   }
 
+  func descendantPIDs(of parent: Int32) -> [Int32] {
+    let query = Process()
+    query.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+    query.arguments = ["-P", String(parent)]
+    let pipe = Pipe()
+    query.standardOutput = pipe
+    query.standardError = FileHandle.nullDevice
+    guard (try? query.run()) != nil else { return [] }
+    guard (try? waitForCondition(timeout: 2) { !query.isRunning }) == true else {
+      kill(query.processIdentifier, SIGKILL)
+      return []
+    }
+    let children =
+      (String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+      .split(whereSeparator: \.isWhitespace).compactMap { Int32($0) }
+    return children + children.flatMap { descendantPIDs(of: $0) }
+  }
+
+  func waitForCondition(
+    timeout: TimeInterval, _ condition: () throws -> Bool
+  ) throws -> Bool {
+    let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(timeout * 1_000_000_000)
+    while DispatchTime.now().uptimeNanoseconds < deadline {
+      if try condition() { return true }
+      Thread.sleep(forTimeInterval: 0.1)
+    }
+    return try condition()
+  }
+}
+
+final class RealSslocalListenerSmokeTests: RealSslocalSmokeTests {
   func testRealSslocalBindsSOCKSAndHTTPPortsAndCompletesHandshake() throws {
     var ports = Set<Int>()
     while ports.count < 2 {
@@ -184,15 +238,7 @@ final class RealSslocalSmokeTests: XCTestCase {
     // 远端不可达允许失败应答码；关键在于 sslocal 按协议给出 CONNECT 应答。
 
     // 显式停止：SIGTERM 链对真实 sslocal 同样成立。
-    kill(wrapper.processIdentifier, SIGTERM)
-    let exited = XCTestExpectation(description: "wrapper exits")
-    DispatchQueue.global().async {
-      wrapper.waitUntilExit()
-      exited.fulfill()
-    }
-    XCTAssertEqual(
-      XCTWaiter.wait(for: [exited], timeout: 10), .completed, "wrapper 应在 SIGTERM 后退出")
-    XCTAssertEqual(wrapper.terminationStatus, 0, "显式停止干净退出")
+    stopWrapperAndAssertCleanExit(wrapper, description: "wrapper exits")
   }
 
   /// 无活动服务器监听（issue #60）：空 `servers` 契约是合法部署——上游
@@ -224,25 +270,7 @@ final class RealSslocalSmokeTests: XCTestCase {
       },
       "空服务器列表下本地 HTTP 端口应完成监听绑定")
 
-    kill(wrapper.processIdentifier, SIGTERM)
-    let exited = XCTestExpectation(description: "wrapper exits")
-    DispatchQueue.global().async {
-      wrapper.waitUntilExit()
-      exited.fulfill()
-    }
-    XCTAssertEqual(
-      XCTWaiter.wait(for: [exited], timeout: 10), .completed, "wrapper 应在 SIGTERM 后退出")
-    XCTAssertEqual(wrapper.terminationStatus, 0, "空监听会话的显式停止同样干净退出")
+    stopWrapperAndAssertCleanExit(wrapper, description: "wrapper exits")
   }
 
-  func waitForCondition(
-    timeout: TimeInterval, _ condition: () throws -> Bool
-  ) throws -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
-      if try condition() { return true }
-      Thread.sleep(forTimeInterval: 0.1)
-    }
-    return try condition()
-  }
 }

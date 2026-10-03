@@ -49,13 +49,13 @@ extension RealSslocalSmokeTests {
   }
 
   func performDirectHTTPEcho(
-    httpPort: Int, targetPort: Int, payload: [UInt8]
+    httpPort: Int, targetHost: String = "127.0.0.1", targetPort: Int, payload: [UInt8]
   ) throws -> [UInt8] {
     let socketFD = try connectLoopback(port: httpPort)
     defer { Darwin.close(socketFD) }
     let request =
-      "CONNECT 127.0.0.1:\(targetPort) HTTP/1.1\r\n"
-      + "Host: 127.0.0.1:\(targetPort)\r\n\r\n"
+      "CONNECT \(targetHost):\(targetPort) HTTP/1.1\r\n"
+      + "Host: \(targetHost):\(targetPort)\r\n\r\n"
     let requestBytes = Array(request.utf8)
     _ = try requestBytes.withUnsafeBytes { try writeAll(socketFD, $0) }
 
@@ -174,16 +174,45 @@ extension RealSslocalSmokeTests {
     return Array(ports)
   }
 
+  /// Domain/CIDR probes must not pass through the fixed loopback bypass instead.
+  /// Dedicated global-ACL tests cover that bypass separately.
+  func ruleProbeACL(defaultAction: RuleDefaultAction, rules: [ProxyRule]) -> ProxyACLDocument {
+    let compiled = ProxyACLDocument.rule(at: aclFileURL, defaultAction: defaultAction, rules: rules)
+    let content =
+      compiled.content.split(separator: "\n").filter { $0 != "127.0.0.0/8" }
+      .joined(separator: "\n") + "\n"
+    return ProxyACLDocument(path: compiled.path, summary: compiled.summary, content: content)
+  }
+
+  func assertDirectDomain(
+    _ host: String, listen: SslocalListenSettings, echoPort: Int, exit: ConnectionCountingServer
+  ) throws {
+    let before = exit.connectionCount
+    let payload = Array("direct domain\n".utf8)
+    XCTAssertEqual(
+      try performSocksEcho(
+        socksPort: listen.socksPort,
+        request: socksDomainConnectRequest(host: host, port: echoPort), payload: payload,
+        successMessage: "Domain must connect directly: \(host)"), payload)
+    XCTAssertEqual(exit.connectionCount, before)
+  }
+
   /// 优雅停止 wrapper 并断言干净退出（退出码 0）。
   func stopWrapperAndAssertCleanExit(_ wrapper: Process, description: String) {
-    kill(wrapper.processIdentifier, SIGTERM)
-    let exited = XCTestExpectation(description: description)
-    DispatchQueue.global().async {
-      wrapper.waitUntilExit()
-      exited.fulfill()
+    guard wrapper.isRunning else {
+      XCTAssertEqual(wrapper.terminationStatus, 0, description)
+      return
     }
-    XCTAssertEqual(XCTWaiter.wait(for: [exited], timeout: 10), .completed)
-    XCTAssertEqual(wrapper.terminationStatus, 0)
+    let descendants = descendantPIDs(of: wrapper.processIdentifier)
+    kill(wrapper.processIdentifier, SIGTERM)
+    let exited = (try? waitForCondition(timeout: 10) { !wrapper.isRunning }) == true
+    XCTAssertTrue(exited, description)
+    if !exited {
+      for child in descendants.reversed() where kill(child, 0) == 0 { kill(child, SIGKILL) }
+      kill(wrapper.processIdentifier, SIGKILL)
+      XCTAssertTrue((try? waitForCondition(timeout: 2) { !wrapper.isRunning }) == true)
+    }
+    if !wrapper.isRunning { XCTAssertEqual(wrapper.terminationStatus, 0, description) }
   }
 
   /// 断言运行回执已发布、进程存活且拥有契约内全部本地监听。

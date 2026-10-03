@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-extension RealSslocalSmokeTests {
+final class RealSslocalCustomRuleSmokeTests: RealSslocalSmokeTests {
   /// 自定义规则真实 sslocal 路由（issue #66 AC4）：「未匹配时代理」下自定义
   /// 域名直连不触 SS 出口，未匹配目标走代理；SOCKS 与 HTTP 入站共用 ACL。
   func testCustomRulesRouteOnSOCKSAndHTTPInProxyDefaultMode() throws {
@@ -16,9 +16,7 @@ extension RealSslocalSmokeTests {
       ProxyRule(
         action: .direct, match: try RuleMatch(domainSuffix: "direct.example")),
       ProxyRule(
-        action: .direct, match: try RuleMatch(domainExact: "exact.direct.example")),
-      ProxyRule(
-        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24")),
+        action: .direct, match: try RuleMatch(domainExact: "exact.other.example")),
     ]
     let document = SslocalRuntimeDocument(
       servers: [
@@ -32,8 +30,7 @@ extension RealSslocalSmokeTests {
           pluginOpts: nil)
       ],
       listen: listen,
-      acl: .rule(
-        at: aclFileURL,
+      acl: ruleProbeACL(
         defaultAction: .proxyWhenUnmatched,
         rules: customRules))
     XCTAssertTrue(document.isWellFormed)
@@ -43,43 +40,52 @@ extension RealSslocalSmokeTests {
     }
 
     try awaitGlobalInboundsReady(listen: listen, document: document)
-    try assertCustomDirectRulesBypass(listen: listen, fakeSS: fakeSSServer)
-    try assertCustomUnmatchedProxies(listen: listen, fakeSS: fakeSSServer)
+    try assertCustomDirectRulesBypass(
+      listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
+    try assertCustomUnmatchedProxies(
+      listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
 
     stopWrapperAndAssertCleanExit(wrapper, description: "custom rule wrapper exits")
+    try assertCustomCIDRBypass(
+      servers: document.servers, listen: listen, echo: echoServer, exit: fakeSSServer)
   }
 
-  /// 自定义直连候选（域名后缀/完整域名/IPv4 CIDR）不得触达 SS 出口。
+  private func assertCustomCIDRBypass(
+    servers: [SslocalServerDocument], listen: SslocalListenSettings,
+    echo: LoopbackEchoServer, exit: ConnectionCountingServer
+  ) throws {
+    let cidrDocument = SslocalRuntimeDocument(
+      servers: servers, listen: listen,
+      acl: ruleProbeACL(
+        defaultAction: .proxyWhenUnmatched,
+        rules: [
+          ProxyRule(action: .direct, match: try RuleMatch(ipv4CIDR: "127.0.0.1/32"))
+        ]))
+    let cidrWrapper = try launchWrapper(cidrDocument)
+    try awaitGlobalInboundsReady(listen: listen, document: cidrDocument)
+    let beforeCIDR = exit.connectionCount
+    let payload = Array("custom cidr direct\n".utf8)
+    XCTAssertEqual(
+      try performDirectSocksEcho(
+        socksPort: listen.socksPort, targetPort: echo.port, payload: payload), payload)
+    XCTAssertEqual(exit.connectionCount, beforeCIDR)
+    stopWrapperAndAssertCleanExit(cidrWrapper, description: "custom CIDR wrapper exits")
+  }
+
+  /// 后缀与完整域名使用互不覆盖的夹具，分别证明直连完成。
   private func assertCustomDirectRulesBypass(
-    listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
+    listen: SslocalListenSettings, echoPort: Int, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeDirect = fakeSS.connectionCount
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort, targetHost: "sub.direct.example", targetPort: 443)
-    Thread.sleep(forTimeInterval: 0.5)
-    XCTAssertEqual(
-      fakeSS.connectionCount, beforeDirect,
-      "自定义域名后缀直连规则不得触达 Shadowsocks 出口")
-
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort, targetHost: "exact.direct.example", targetPort: 443)
-    Thread.sleep(forTimeInterval: 0.5)
-    XCTAssertEqual(
-      fakeSS.connectionCount, beforeDirect,
-      "自定义完整域名直连规则不得触达 Shadowsocks 出口")
-
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort,
-      request: socksIPv4ConnectRequest([203, 0, 113, 10], port: 443))
-    Thread.sleep(forTimeInterval: 0.5)
-    XCTAssertEqual(
-      fakeSS.connectionCount, beforeDirect,
-      "自定义 IPv4 CIDR 直连规则不得触达 Shadowsocks 出口")
+    for host in ["sub.direct.example", "exact.other.example"] {
+      try assertDirectDomain(host, listen: listen, echoPort: echoPort, exit: fakeSS)
+      XCTAssertEqual(fakeSS.connectionCount, beforeDirect)
+    }
   }
 
   /// 未匹配目标默认代理；HTTP 入站应用同一自定义规则 ACL。
   private func assertCustomUnmatchedProxies(
-    listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
+    listen: SslocalListenSettings, echoPort: Int, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeHit = fakeSS.connectionCount
     _ = performSocksConnectReply(
@@ -87,11 +93,20 @@ extension RealSslocalSmokeTests {
     XCTAssertTrue(
       try waitForCondition(timeout: 5) { fakeSS.connectionCount > beforeHit },
       "未匹配目标应走代理并连接 Shadowsocks 出口")
+    let beforeExactBoundary = fakeSS.connectionCount
+    XCTAssertNotNil(
+      performSocksConnectReply(
+        socksPort: listen.socksPort, targetHost: "sub.exact.other.example", targetPort: echoPort))
+    XCTAssertTrue(
+      try waitForCondition(timeout: 5) { fakeSS.connectionCount > beforeExactBoundary },
+      "完整域名规则不得覆盖子域名")
 
     let afterSocks = fakeSS.connectionCount
-    performHTTPConnect(
-      httpPort: listen.httpPort, targetHost: "other.direct.example", targetPort: 443)
-    Thread.sleep(forTimeInterval: 0.5)
+    let payload = Array("http domain direct\n".utf8)
+    XCTAssertEqual(
+      try performDirectHTTPEcho(
+        httpPort: listen.httpPort, targetHost: "other.direct.example", targetPort: echoPort,
+        payload: payload), payload)
     XCTAssertEqual(
       fakeSS.connectionCount, afterSocks,
       "HTTP 入站的自定义直连规则不得触达 Shadowsocks 出口")
@@ -126,8 +141,7 @@ extension RealSslocalSmokeTests {
           pluginOpts: nil)
       ],
       listen: listen,
-      acl: .rule(
-        at: aclFileURL,
+      acl: ruleProbeACL(
         defaultAction: .directWhenUnmatched,
         rules: customRules))
     XCTAssertTrue(document.isWellFormed)
@@ -137,14 +151,15 @@ extension RealSslocalSmokeTests {
     }
 
     try awaitGlobalInboundsReady(listen: listen, document: document)
-    try assertCustomProxyCandidatesHitSS(listen: listen, fakeSS: fakeSSServer)
+    try assertCustomProxyCandidatesHitSS(
+      listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
 
     stopWrapperAndAssertCleanExit(wrapper, description: "custom direct-default wrapper exits")
   }
 
   /// 自定义代理候选命中 SS；未匹配直连；HTTP 入站共用 ACL。
   private func assertCustomProxyCandidatesHitSS(
-    listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
+    listen: SslocalListenSettings, echoPort: Int, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeHit = fakeSS.connectionCount
     _ = performSocksConnectReply(
@@ -154,9 +169,8 @@ extension RealSslocalSmokeTests {
       "自定义代理候选应连接 Shadowsocks 出口")
 
     let afterHit = fakeSS.connectionCount
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort, targetHost: "unmatched.example.org", targetPort: 443)
-    Thread.sleep(forTimeInterval: 0.5)
+    try assertDirectDomain(
+      "unmatched.example.org", listen: listen, echoPort: echoPort, exit: fakeSS)
     XCTAssertEqual(
       fakeSS.connectionCount, afterHit,
       "未匹配目标在 bypass_all 下应直连")

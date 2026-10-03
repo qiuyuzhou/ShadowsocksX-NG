@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-extension RealSslocalSmokeTests {
+final class RealSslocalACLRoutingSmokeTests: RealSslocalSmokeTests {
   func testDirectACLRoutesSOCKSAndHTTPLocallyWithoutServers() throws {
     let echoServer = try LoopbackEchoServer()
     let selectedPorts = try grabThreeListenPorts(excluding: [echoServer.port])
@@ -79,18 +79,26 @@ extension RealSslocalSmokeTests {
 
     try assertLocalTargetsBypass(listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
     try assertPublicTargetsProxy(listen: listen, fakeSS: fakeSSServer)
-    try assertHostnameAndIPv6Bypass(
-      listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
 
     stopWrapperAndAssertCleanExit(wrapper, description: "global wrapper exits")
+    // Isolate host exceptions from the loopback IP bypass checked above.
+    let hostACL = ProxyACLDocument(
+      path: aclFileURL.path, summary: "fixed-host-probe",
+      content: document.aclRuntime!.content.replacingOccurrences(of: "127.0.0.0/8\n", with: ""))
+    let hostDocument = SslocalRuntimeDocument(
+      servers: document.servers, listen: listen, acl: hostACL)
+    let hostWrapper = try launchWrapper(hostDocument)
+    try awaitGlobalInboundsReady(listen: listen, document: hostDocument)
+    try assertHostnameAndIPv6Bypass(listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
+    stopWrapperAndAssertCleanExit(hostWrapper, description: "fixed host wrapper exits")
     XCTAssertNil(
       RuntimeFileStore(fileURL: contractURL).readRuntimeReceipt(),
       "停止后应清除运行回执")
   }
 
   /// 规则模式 ACL 路由（issue #63）：「未匹配时代理」→ proxy_all + 中国域名
-  /// 直连候选。`.cn` 目标不触达 SS 出口；非中国公网目标默认走代理；固定本地
-  /// 绕过仍然生效；SOCKS 与 HTTP 入站共用同一 ACL。
+  /// 直连候选。`.cn` 目标经本地 DNS 解析到 echo；非中国公网目标默认走代理。
+  /// 专用规则探针去除回环绕过，固定本地绕过由全局模式用例覆盖。
   func testRuleProxyDefaultACLRoutesChinaDirectAndRestThroughProxy() throws {
     let echoServer = try LoopbackEchoServer()
     let fakeSSServer = try ConnectionCountingServer()
@@ -113,8 +121,7 @@ extension RealSslocalSmokeTests {
           pluginOpts: nil)
       ],
       listen: listen,
-      acl: .rule(
-        at: aclFileURL,
+      acl: ruleProbeACL(
         defaultAction: .proxyWhenUnmatched,
         rules: chinaRules))
     XCTAssertTrue(document.isWellFormed)
@@ -125,10 +132,7 @@ extension RealSslocalSmokeTests {
 
     try awaitGlobalInboundsReady(listen: listen, document: document)
 
-    // 固定本地绕过：回环目标直连，不触达 SS。
-    try assertLocalTargetsBypass(listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
-
-    try assertRuleModeRouting(listen: listen, fakeSS: fakeSSServer)
+    try assertRuleModeRouting(listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
 
     stopWrapperAndAssertCleanExit(wrapper, description: "rule wrapper exits")
   }
@@ -154,8 +158,7 @@ extension RealSslocalSmokeTests {
           pluginOpts: nil)
       ],
       listen: listen,
-      acl: .rule(
-        at: aclFileURL,
+      acl: ruleProbeACL(
         defaultAction: .proxyWhenUnmatched,
         rules: try chinaCIDRSmokeRules()))
     XCTAssertTrue(document.isWellFormed)
@@ -165,31 +168,32 @@ extension RealSslocalSmokeTests {
     }
 
     try awaitGlobalInboundsReady(listen: listen, document: document)
-    try assertLocalTargetsBypass(listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
-    try assertCIDRModeRouting(listen: listen, fakeSS: fakeSSServer)
+    try assertCIDRModeRouting(listen: listen, echoPort: echoServer.port, fakeSS: fakeSSServer)
 
     stopWrapperAndAssertCleanExit(wrapper, description: "cidr rule wrapper exits")
   }
 
-  /// issue #64 冒烟夹具：`.cn` 域名 + 测试用 `8.8.8.0/24` CIDR 直连候选
+  /// issue #64 冒烟夹具：`.cn` 域名 + 测试用 `127.0.0.1/32` CIDR 直连候选
   /// （仅验证命中/未命中路由，不代表真实中国 IP 归属）。
   private func chinaCIDRSmokeRules() throws -> [ProxyRule] {
     return [
       ProxyRule(
         action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn")),
       ProxyRule(
-        action: .direct, match: try RuleMatch(ipv4CIDR: "8.8.8.0/24")),
+        action: .direct, match: try RuleMatch(ipv4CIDR: "127.0.0.1/32")),
     ]
   }
 
-  /// CIDR 路由断言：命中 `8.8.8.0/24` 直连不触 SS；未命中公网目标走代理。
+  /// CIDR 路由断言：命中 `127.0.0.1/32` 完成回显；未命中目标走代理。
   private func assertCIDRModeRouting(
-    listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
+    listen: SslocalListenSettings, echoPort: Int, fakeSS: ConnectionCountingServer
   ) throws {
     let beforeHit = fakeSS.connectionCount
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort, targetHost: "8.8.8.8", targetPort: 53)
-    Thread.sleep(forTimeInterval: 0.5)
+    let payload = Array("cidr direct\n".utf8)
+    XCTAssertEqual(
+      try performDirectSocksEcho(
+        socksPort: listen.socksPort, targetPort: echoPort, payload: payload),
+      payload)
     XCTAssertEqual(
       fakeSS.connectionCount, beforeHit,
       "命中中国 IPv4 CIDR 的目标应直连，不得触达 Shadowsocks 出口")
@@ -207,6 +211,9 @@ extension RealSslocalSmokeTests {
       "HTTP 入站应应用同一规则 ACL")
   }
 
+}
+
+extension RealSslocalSmokeTests {
   func awaitGlobalInboundsReady(
     listen: SslocalListenSettings, document: SslocalRuntimeDocument
   ) throws {
@@ -229,13 +236,11 @@ extension RealSslocalSmokeTests {
   /// 规则模式路由断言：`.cn` 直连候选不触 SS 出口；未匹配公网目标经 SS 出口
   /// （SOCKS 与 HTTP 入站同样生效）。
   func assertRuleModeRouting(
-    listen: SslocalListenSettings, fakeSS: ConnectionCountingServer
+    listen: SslocalListenSettings, echoPort: Int, fakeSS: ConnectionCountingServer
   ) throws {
     // .cn 域名候选直连：SOCKS CONNECT example.cn 不应触达 SS 出口。
     let beforeCN = fakeSS.connectionCount
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort, targetHost: "example.cn", targetPort: 443)
-    Thread.sleep(forTimeInterval: 0.5)
+    try assertDirectDomain("example.cn", listen: listen, echoPort: echoPort, exit: fakeSS)
     XCTAssertEqual(
       fakeSS.connectionCount, beforeCN,
       "规则模式的 .cn 直连候选不得触达 Shadowsocks 出口")
@@ -294,9 +299,8 @@ extension RealSslocalSmokeTests {
       "SOCKS 与 HTTP 对公网目标遵循同一 ACL 路由")
   }
 
-  /// 主机名固定绕过与 IPv6 回环（AC2/AC5）。仅 localhost 保证解析到回环 echo；
-  /// 其余主机名与 IPv6 只断言未触达 SS 出口——绕过路由已选定，直连解析失败
-  /// 不改变路由事实，也不依赖不可靠的 IPv6 系统例外。
+  /// 主机名固定绕过与 IPv6 回环（AC2/AC5）：本地 DNS 将主机名解析到 echo，
+  /// 成功回显证明直连完成；IPv6 回环无监听时验证失败应答且不触达 SS。
   func assertHostnameAndIPv6Bypass(
     listen: SslocalListenSettings, echoPort: Int, fakeSS: ConnectionCountingServer
   ) throws {
@@ -308,20 +312,18 @@ extension RealSslocalSmokeTests {
         payload: Array("localhost\n".utf8),
         successMessage: "localhost 应绕过并直连"),
       Array("localhost\n".utf8))
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort,
-      request: socksDomainConnectRequest(host: "printer.local", port: echoPort))
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort,
-      request: socksDomainConnectRequest(host: "nas", port: echoPort))
+    for host in ["printer.local", "nas"] {
+      try assertDirectDomain(host, listen: listen, echoPort: echoPort, exit: fakeSS)
+    }
     XCTAssertEqual(
       fakeSS.connectionCount, afterPublic,
       "localhost/*.local/无点主机名的固定绕过不得触达 Shadowsocks 出口")
 
     let afterHostnames = fakeSS.connectionCount
-    _ = performSocksConnectReply(
-      socksPort: listen.socksPort,
-      request: socksIPv6ConnectRequest(port: echoPort))
+    XCTAssertNotNil(
+      performSocksConnectReply(
+        socksPort: listen.socksPort,
+        request: socksIPv6ConnectRequest(port: echoPort)))
     XCTAssertEqual(
       fakeSS.connectionCount, afterHostnames,
       "IPv6 本地目标不得触达 Shadowsocks 出口，由 ACL 路由兜底")

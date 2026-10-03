@@ -243,4 +243,5 @@ schemes:
         ShadowsocksX-NG2SmokeTests: [test]
     test:
       targets:
-        - ShadowsocksX-NG2SmokeTests
+        - name: ShadowsocksX-NG2SmokeTests
+          parallelizable: true

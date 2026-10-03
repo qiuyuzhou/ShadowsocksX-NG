@@ -3,7 +3,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-extension RealSslocalSmokeTests {
+final class RealSslocalPluginSmokeTests: RealSslocalSmokeTests {
   // MARK: - 受管插件端到端（issue #38）
 
   /// v2ray-plugin v1.3.2 端到端边界：契约携带 bundle 内插件绝对路径 → sslocal
@@ -37,11 +37,19 @@ extension RealSslocalSmokeTests {
       listen: SslocalListenSettings(
         socksPort: socksPort, httpPort: httpPort))
     let wrapper = try launchWrapper(document)
+    let store = RuntimeFileStore(fileURL: contractURL)
+    XCTAssertTrue(try waitForCondition(timeout: 15) { store.readRuntimeReceipt() != nil })
+    let child = try XCTUnwrap(store.readRuntimeReceipt()).processID
+
+    var pluginPIDs: [Int32] = []
 
     // 插件进程建立：sslocal 按 SIP003 拉起 bundle 内 v2ray-plugin 并保持运行
     // （sslocal 先等插件就绪再绑定本地监听，进程先于端口出现）。
     XCTAssertTrue(
-      try waitForCondition(timeout: 15) { self.pluginProcessExists(path: pluginURL.path) },
+      try waitForCondition(timeout: 15) {
+        pluginPIDs = self.pluginProcessIDs(path: pluginURL.path, parent: child)
+        return !pluginPIDs.isEmpty
+      },
       "sslocal 应拉起 bundle 内 v2ray-plugin 进程")
 
     XCTAssertTrue(
@@ -50,35 +58,33 @@ extension RealSslocalSmokeTests {
       },
       "15 秒内本地 SOCKS 端口应完成监听绑定")
 
-    kill(wrapper.processIdentifier, SIGTERM)
-    let exited = XCTestExpectation(description: "wrapper exits")
-    DispatchQueue.global().async {
-      wrapper.waitUntilExit()
-      exited.fulfill()
-    }
-    XCTAssertEqual(
-      XCTWaiter.wait(for: [exited], timeout: 10), .completed, "wrapper 应在 SIGTERM 后退出")
-    XCTAssertEqual(wrapper.terminationStatus, 0)
+    stopWrapperAndAssertCleanExit(wrapper, description: "wrapper exits")
     XCTAssertTrue(
-      try waitForCondition(timeout: 8) { !self.pluginProcessExists(path: pluginURL.path) },
+      try waitForCondition(timeout: 8) {
+        pluginPIDs.allSatisfy { kill($0, 0) != 0 }
+      },
       "停止链应连带结束插件进程")
   }
 
   /// 按完整可执行路径检索进程（pgrep 全命令行匹配）。
-  private func pluginProcessExists(path: String) -> Bool {
+  private func pluginProcessIDs(path: String, parent: Int32) -> [Int32] {
     let pgrep = Process()
     pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-    pgrep.arguments = ["-f", path]
+    pgrep.arguments = ["-P", String(parent), "-f", path]
     let pipe = Pipe()
     pgrep.standardOutput = pipe
     pgrep.standardError = FileHandle.nullDevice
     do {
       try pgrep.run()
     } catch {
-      return false
+      return []
+    }
+    guard (try? waitForCondition(timeout: 2) { !pgrep.isRunning }) == true else {
+      kill(pgrep.processIdentifier, SIGKILL)
+      return []
     }
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    pgrep.waitUntilExit()
-    return pgrep.terminationStatus == 0 && !data.isEmpty
+    return (String(data: data, encoding: .utf8) ?? "")
+      .split(whereSeparator: \.isWhitespace).compactMap { Int32($0) }
   }
 }
