@@ -41,16 +41,9 @@ struct NewServerSheet: View {
     .frame(minWidth: 520, minHeight: 400)
   }
 
-  /// 插件区状态：无既有引用，参数按未配置呈现。新表单只能产生「无」或受管
-  /// 选择；`provided` 恒为真——新建尚无引用可点名，可执行文件缺失由激活
-  /// 语义拒绝并在编辑面呈现。
+  /// 插件区状态经 workflow 投影（与编辑面同缝），选中态跟随草稿。
   private var pluginSection: PluginSectionState {
-    PluginSectionState(
-      selection: fields.pluginChoice,
-      managed: ManagedPluginCatalog.plugins,
-      provided: true,
-      optionsPresent: false,
-      options: "")
+    workflow.newFormPluginSection(selection: fields.pluginChoice)
   }
 
   private func create() {

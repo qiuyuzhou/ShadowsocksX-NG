@@ -121,6 +121,18 @@ final class CatalogWorkflow: ObservableObject {
       options: options)
   }
 
+  /// 新建表单的插件区状态：无既有引用与既有参数，选中态跟随草稿。新表单
+  /// 只能产生「无」或受管选择，`provided` 恒为真——新建尚无引用可点名，
+  /// 可执行文件缺失由激活语义拒绝并在编辑面呈现。
+  func newFormPluginSection(selection: PluginSelection) -> PluginSectionState {
+    PluginSectionState(
+      selection: selection,
+      managed: ManagedPluginCatalog.plugins,
+      provided: true,
+      optionsPresent: false,
+      options: "")
+  }
+
   /// 添加落点：选中手动分组 → 组内；选中服务器 → 其父组（仅手动）；其余 → 根。
   func importTargetParent(for selection: NodeID?) -> NodeID? {
     let catalog = dependencies.coordinator.committedCatalog
