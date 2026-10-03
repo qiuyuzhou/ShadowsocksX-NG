@@ -7,6 +7,8 @@ import SwiftUI
 struct SidebarRow: View {
   let node: CatalogTreeNode
   let workflow: CatalogWorkflow
+  /// 激活反馈共享状态：命令经它发出（单飞互斥、结果记录在会话反馈里）。
+  let activation: ActivationFeedbackState
   let activeTargetID: NodeID?
   let errors: ErrorAlertPresenter
   let onRename: (NodeID) -> Void
@@ -61,9 +63,14 @@ struct SidebarRow: View {
   @ViewBuilder
   private var contextMenu: some View {
     Button("激活") {
-      Task {
+      Task { @MainActor in
         do {
-          _ = try await workflow.activate(node.id)
+          let outcome = try await activation.activate(node.id, via: workflow)
+          // 右键菜单即关、无内联反馈面：原子拒绝点名弹窗（typed 原因随
+          // 结果返回）；单飞忽略（nil）不呈现。
+          if case .rejectedActivation(let failure)? = outcome {
+            errors.present(failure)
+          }
         } catch {
           errors.present(error)
         }

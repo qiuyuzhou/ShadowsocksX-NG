@@ -43,6 +43,8 @@ struct MainWindowView: View {
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
 
   @StateObject private var homeServerList = HomeServerListState()
+  /// 激活反馈共享状态：首页目标树、侧栏右键与分组详情三个激活入口共用。
+  @StateObject private var activationFeedback = ActivationFeedbackState()
   /// 侧栏选中项中转：macOS 的 List/NavigationSplitView 会在视图更新期间回写
   /// selection（选择再同步，且可能携带缓存的旧值），回写必须落在 SwiftUI 自管
   /// 的 @State 上，再经 onChange 单向驱动 route；直接 publish 到 route 会触发
@@ -200,11 +202,13 @@ struct MainWindowView: View {
         workflow: workflow,
         control: control,
         serverList: homeServerList,
+        activation: activationFeedback,
         clipboard: clipboard,
         onManageServers: { route.navigate(to: .servers) })
     case .servers:
       ServersView(
         workflow: workflow,
+        activation: activationFeedback,
         activeTargetID: control.snapshot.activeTarget?.id,
         selection: $selection,
         expansion: expansion,
@@ -473,6 +477,7 @@ private struct WorkspaceHomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
   let serverList: HomeServerListState
+  let activation: ActivationFeedbackState
   let clipboard: any TextClipboard
   let onManageServers: () -> Void
   @StateObject private var errors = ErrorAlertPresenter()
@@ -485,6 +490,7 @@ private struct WorkspaceHomeView: View {
       workflow: workflow,
       control: control,
       serverList: serverList,
+      activation: activation,
       clipboard: clipboard,
       onManageServers: onManageServers,
       errors: errors

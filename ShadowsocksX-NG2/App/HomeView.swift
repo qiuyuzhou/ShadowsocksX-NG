@@ -8,6 +8,7 @@ struct HomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
   let serverList: HomeServerListState
+  let activation: ActivationFeedbackState
   let clipboard: any TextClipboard
   let onManageServers: () -> Void
   let errors: ErrorAlertPresenter
@@ -21,6 +22,7 @@ struct HomeView: View {
             workflow: workflow,
             control: control,
             serverList: serverList,
+            activation: activation,
             onManageServers: onManageServers)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

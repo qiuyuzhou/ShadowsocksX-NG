@@ -5,13 +5,11 @@ struct TargetTreeCard: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
   @ObservedObject var serverList: HomeServerListState
+  /// 激活 pending 与反馈的共享持有者（三激活入口共用，单飞互斥）。
+  @ObservedObject var activation: ActivationFeedbackState
   let onManageServers: () -> Void
 
   @FocusState private var listFocused: Bool
-  @State private var activatingID: NodeID?
-  @State private var activationError: String?
-  @State private var activationRejected = false
-  @State private var activationSkippedCount = 0
 
   private var activeID: NodeID? { control.snapshot.activeTarget?.id }
   private static let navigationKeys: Set<KeyEquivalent> = [
@@ -92,22 +90,24 @@ struct TargetTreeCard: View {
 
   @ViewBuilder
   private var feedback: some View {
-    if let failureMessage {
-      Label(failureMessage, systemImage: "exclamationmark.triangle.fill")
-        .font(.callout)
-        .foregroundStyle(.orange)
-    } else if activationSkippedCount > 0 {
-      Text("已跳过 \(activationSkippedCount) 个无效服务器")
-        .font(.callout)
-        .foregroundStyle(.secondary)
+    if let feedback = activation.feedback {
+      switch feedback {
+      case .failed(let message):
+        Label(message, systemImage: "exclamationmark.triangle.fill")
+          .font(.callout)
+          .foregroundStyle(.orange)
+      case .rejected(let failure):
+        Label(AppPresentation.message(for: failure), systemImage: "exclamationmark.triangle.fill")
+          .font(.callout)
+          .foregroundStyle(.orange)
+      case .activated(let skipped) where skipped > 0:
+        Text("已跳过 \(skipped) 个无效服务器")
+          .font(.callout)
+          .foregroundStyle(.secondary)
+      case .activated:
+        EmptyView()
+      }
     }
-  }
-
-  private var failureMessage: String? {
-    if let activationError { return activationError }
-    guard activationRejected else { return nil }
-    return control.snapshot.activationFailure.map { AppPresentation.message(for: $0) }
-      ?? "激活失败：目标已失效或没有可激活的服务器"
   }
 
   private var emptyState: some View {
@@ -131,8 +131,8 @@ struct TargetTreeCard: View {
             containsActive: activeID.map { serverList.ancestorIDs(for: $0).contains(row.id) }
               ?? false,
             isCollapsed: serverList.collapsedGroupIDs.contains(row.id),
-            isActivationPending: activatingID == row.id,
-            activationBlocked: activatingID != nil,
+            isActivationPending: activation.pendingTargetID == row.id,
+            activationBlocked: activation.isPending,
             onSelect: {
               serverList.select(row.id)
               listFocused = true
@@ -166,26 +166,13 @@ struct TargetTreeCard: View {
   }
 
   private func activate(_ id: NodeID) {
-    guard activatingID == nil,
+    guard
       serverList.activationTarget(
         activeTargetID: activeID, eligibility: workflow.activationEligibility(for: id)) == id
     else { return }
-    activatingID = id
-    activationError = nil
-    activationRejected = false
-    activationSkippedCount = 0
     Task { @MainActor in
-      defer { activatingID = nil }
-      do {
-        switch try await workflow.activate(id) {
-        case .activated(let skipped):
-          activationSkippedCount = skipped
-        case .rejectedActivation:
-          activationRejected = true
-        }
-      } catch {
-        activationError = AppPresentation.message(for: error)
-      }
+      // 意外错误已由反馈状态记录为内联 `.failed`；单飞互斥同样在状态入口。
+      _ = try? await activation.activate(id, via: workflow)
     }
   }
 }

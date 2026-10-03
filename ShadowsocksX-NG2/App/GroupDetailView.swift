@@ -6,6 +6,8 @@ import SwiftUI
 struct GroupDetailView: View {
   let workflow: CatalogWorkflow
   let groupID: NodeID
+  /// 激活反馈共享状态：命令经它发出；pending 与最近反馈呈现在本详情面。
+  @ObservedObject var activation: ActivationFeedbackState
   let errors: ErrorAlertPresenter
 
   @State private var name = ""
@@ -59,17 +61,20 @@ struct GroupDetailView: View {
           }
           LabeledContent("来源", value: isManual ? "手动" : "订阅")
           Button {
-            Task {
+            Task { @MainActor in
               do {
-                _ = try await workflow.activate(groupID)
+                _ = try await activation.activate(groupID, via: workflow)
               } catch {
                 errors.present(error)
               }
             }
           } label: {
-            Label("激活此分组", systemImage: "bolt.fill")
+            Label(
+              activation.pendingTargetID == groupID ? "激活中…" : "激活此分组",
+              systemImage: "bolt.fill")
           }
-          .disabled(!(eligibility?.canActivate ?? false))
+          .disabled(!(eligibility?.canActivate ?? false) || activation.isPending)
+          activationFeedback
           if directChildCount == 0 {
             Text("空分组保留可编辑，但不能激活。")
               .font(.footnote)
@@ -94,6 +99,30 @@ struct GroupDetailView: View {
   }
 
   private var directChildCount: Int { node?.childCount ?? 0 }
+
+  /// 命令后内联反馈（拒绝原因/跳过数/意外错误）；会话级反馈，直至下一次
+  /// 激活命令前保留。成功且无跳过不呈现。
+  @ViewBuilder
+  private var activationFeedback: some View {
+    if let feedback = activation.feedback {
+      switch feedback {
+      case .rejected(let failure):
+        Text(AppPresentation.message(for: failure))
+          .font(.footnote)
+          .foregroundStyle(.orange)
+      case .failed(let message):
+        Text(message)
+          .font(.footnote)
+          .foregroundStyle(.orange)
+      case .activated(let skipped) where skipped > 0:
+        Text("已跳过 \(skipped) 个存在已知阻塞问题的服务器。")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+      case .activated:
+        EmptyView()
+      }
+    }
+  }
 
   private func loadName() {
     name = workflow.displayName(for: groupID)

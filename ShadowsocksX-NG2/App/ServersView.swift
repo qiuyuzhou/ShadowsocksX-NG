@@ -8,8 +8,11 @@ import SwiftUI
 struct ServersView: View {
 
   @ObservedObject var workflow: CatalogWorkflow
+  /// 激活反馈共享状态（三激活入口共用，单飞互斥）：侧栏右键与分组详情的
+  /// 激活命令都经它发出。
+  let activation: ActivationFeedbackState
   /// 活动目标标记：父视图传入的运行时事实，不进目录 projection（与
-  /// SidebarRow/ServerDetailView 的传参先例同法）；激活命令经 `workflow.activate`。
+  /// SidebarRow/ServerDetailView 的传参先例同法）。
   let activeTargetID: NodeID?
   @Binding var selection: NodeID?
   /// 分组折叠状态：组合根持有的共享对象（与首页目标树同源），跨 destination
@@ -135,6 +138,7 @@ struct ServersView: View {
       SidebarRow(
         node: node,
         workflow: workflow,
+        activation: activation,
         activeTargetID: activeTargetID,
         errors: errors,
         onRename: { id in
@@ -220,6 +224,7 @@ extension ServersView {
       if node.isGroup {
         GroupDetailView(
           workflow: workflow, groupID: id,
+          activation: activation,
           errors: errors)
       } else {
         ServerDetailView(
