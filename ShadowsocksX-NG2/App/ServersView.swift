@@ -61,16 +61,7 @@ struct ServersView: View {
       Button("创建") { commitNewGroup() }
       Button("取消", role: .cancel) { cancelNewGroup() }
     }
-    .alert(
-      "操作失败",
-      isPresented: Binding(
-        get: { errors.isPresented },
-        set: { if !$0 { errors.dismiss() } })
-    ) {
-      Button("好", role: .cancel) {}
-    } message: {
-      Text(errors.message ?? "")
-    }
+    .presentingErrors(errors)
     .confirmationDialog(
       deleteTitle,
       isPresented: Binding(

@@ -99,16 +99,7 @@ struct MainWindowView: View {
     .onChange(of: route.destination) { _, destination in
       if destination != .rules { ruleDraft = nil }
     }
-    .alert(
-      "操作失败",
-      isPresented: Binding(
-        get: { shellActionErrors.isPresented },
-        set: { if !$0 { shellActionErrors.dismiss() } })
-    ) {
-      Button("好", role: .cancel) {}
-    } message: {
-      Text(shellActionErrors.message ?? "")
-    }
+    .presentingErrors(shellActionErrors)
     .alert(
       "诊断已导出",
       isPresented: Binding(

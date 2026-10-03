@@ -31,16 +31,7 @@ struct WorkspaceHomeView: View {
       didOfferLegacyImport = true
       showLegacyImportSheet = true
     }
-    .alert(
-      "操作失败",
-      isPresented: Binding(
-        get: { errors.isPresented },
-        set: { if !$0 { errors.dismiss() } })
-    ) {
-      Button("好", role: .cancel) {}
-    } message: {
-      Text(errors.message ?? "")
-    }
+    .presentingErrors(errors)
   }
 }
 
@@ -55,16 +46,7 @@ struct WorkspaceSubscriptionsView: View {
       errors: errors,
       onNodesRemoved: onNodesRemoved
     )
-    .alert(
-      "操作失败",
-      isPresented: Binding(
-        get: { errors.isPresented },
-        set: { if !$0 { errors.dismiss() } })
-    ) {
-      Button("好", role: .cancel) {}
-    } message: {
-      Text(errors.message ?? "")
-    }
+    .presentingErrors(errors)
   }
 }
 
@@ -80,15 +62,6 @@ struct WorkspaceDiagnosticsView: View {
       errors: errors,
       clipboard: clipboard
     )
-    .alert(
-      "操作失败",
-      isPresented: Binding(
-        get: { errors.isPresented },
-        set: { if !$0 { errors.dismiss() } })
-    ) {
-      Button("好", role: .cancel) {}
-    } message: {
-      Text(errors.message ?? "")
-    }
+    .presentingErrors(errors)
   }
 }
