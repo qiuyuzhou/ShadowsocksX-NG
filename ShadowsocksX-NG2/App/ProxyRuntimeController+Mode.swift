@@ -50,7 +50,7 @@ extension ProxyRuntimeController {
     guard settings.agentEnabled, state != .off,
       let currentDocument = lastDocument ?? runtimeFileStore.loadDocument()
     else {
-      if settings.systemProxyEnabled { systemProxyObserver.systemProxyState = .pending }
+      systemProxyObserver.modeTransitionAwaitingRuntime()
       return
     }
 

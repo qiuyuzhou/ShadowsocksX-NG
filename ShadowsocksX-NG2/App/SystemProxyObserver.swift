@@ -14,23 +14,30 @@ final class SystemProxyObserver: ObservableObject {
   }
 
   /// Current configuration or operation result, independent of persisted intent.
-  @Published var systemProxyState: SystemProxyApplicationFacts = .idle
+  @Published private(set) var systemProxyState: SystemProxyApplicationFacts = .idle
   /// Approval remains actionable even after an off-intent clear failure.
-  @Published var systemProxyApprovalRequired = false
-  @Published var systemProxyInspection = SystemProxyInspectionFacts()
+  @Published private(set) var systemProxyApprovalRequired = false
+  @Published private(set) var systemProxyInspection = SystemProxyInspectionFacts()
 
-  var lastDesiredSystemProxyConfiguration: SystemProxyConfiguration?
-  var knownSystemProxyServices: Set<SystemProxyServiceIdentifier> = []
-  var systemProxyOperationInProgress = false
-  var systemProxyStartupInProgress = false
-  var systemProxyInitialApplyPending = false
-  var systemProxyWasUnavailable = false
+  // 写面唯一入口是下方「意图命令」；private(set) 的读面仅开给健康循环体
+  // 与观察机测试，其余实现细节一律 private。
+  private var lastDesiredSystemProxyConfiguration: SystemProxyConfiguration?
+  private var knownSystemProxyServices: Set<SystemProxyServiceIdentifier> = []
+  private var systemProxyOperationInProgress = false
+  /// 读面：健康循环体在 launch 重同步抑制期跳过巡检。
+  private(set) var systemProxyStartupInProgress = false
+  /// 读面：健康循环的收敛条件。
+  private(set) var systemProxyInitialApplyPending = false
+  /// 读面：健康循环的收敛条件。
+  private(set) var systemProxyWasUnavailable = false
+  /// 过渡：任务柄创建仍在控制器侧，柄归属收回观察机后转 private。
   var systemProxyHealthTask: Task<Void, Never>?
-  var systemProxyReadGeneration = 0
-  var systemProxyObservationMode = SystemProxyObservationMode.stopped
-  var systemProxyCleanupRescanRequested = false
-  var systemProxyCleanupTask: Task<SystemProxyApplicationFacts, Never>?
-  var systemProxyInspectionScheduled = false
+  private var systemProxyReadGeneration = 0
+  /// 读面：观察机测试。
+  private(set) var systemProxyObservationMode = SystemProxyObservationMode.stopped
+  private var systemProxyCleanupRescanRequested = false
+  private var systemProxyCleanupTask: Task<SystemProxyApplicationFacts, Never>?
+  private var systemProxyInspectionScheduled = false
 
   let systemProxy: SystemProxyControlling
   let systemProxyHelper: SystemProxyHelperServicing
@@ -216,28 +223,6 @@ final class SystemProxyObserver: ObservableObject {
     }
   }
 
-  func refreshSystemProxyApproval() {
-    systemProxyApprovalRequired =
-      systemProxyHelper.status != .approved
-      && (isIntentEnabled() || systemProxyState.hasOperationFailure)
-  }
-
-  func updateSystemProxyActions() {
-    refreshSystemProxyApproval()
-    let available = !systemProxyOperationInProgress && !systemProxyApprovalRequired
-    systemProxyInspection.canRepair =
-      available && isIntentEnabled()
-      && isExitAvailable() && systemProxyInspection.readFailure == nil
-      && (!systemProxyInspection.differences.isEmpty || systemProxyState.isApplyFailure)
-    systemProxyInspection.canRetryClear = available && systemProxyState.isClearFailure
-    if systemProxyState.hasOperationFailure {
-      startSystemProxyHealthObservation()
-    } else if !isIntentEnabled() {
-      systemProxyHealthTask?.cancel()
-      systemProxyHealthTask = nil
-    }
-  }
-
   func suspendSystemProxy() async {
     guard isIntentEnabled(), !systemProxyStartupInProgress else { return }
     guard !systemProxyWasUnavailable else {
@@ -293,6 +278,125 @@ final class SystemProxyObserver: ObservableObject {
     operationWaiters = []
     for waiter in waiters { waiter.resume() }
     updateSystemProxyActions()
+  }
+}
+
+// MARK: - 呈现动作与批准刷新
+
+extension SystemProxyObserver {
+  func refreshSystemProxyApproval() {
+    systemProxyApprovalRequired =
+      systemProxyHelper.status != .approved
+      && (isIntentEnabled() || systemProxyState.hasOperationFailure)
+  }
+
+  func updateSystemProxyActions() {
+    refreshSystemProxyApproval()
+    let available = !systemProxyOperationInProgress && !systemProxyApprovalRequired
+    systemProxyInspection.canRepair =
+      available && isIntentEnabled()
+      && isExitAvailable() && systemProxyInspection.readFailure == nil
+      && (!systemProxyInspection.differences.isEmpty || systemProxyState.isApplyFailure)
+    systemProxyInspection.canRetryClear = available && systemProxyState.isClearFailure
+    if systemProxyState.hasOperationFailure {
+      startSystemProxyHealthObservation()
+    } else if !isIntentEnabled() {
+      systemProxyHealthTask?.cancel()
+      systemProxyHealthTask = nil
+    }
+  }
+}
+
+// MARK: - 意图命令（控制器写面唯一入口）
+
+extension SystemProxyObserver {
+  /// 系统代理意图开启（setSystemProxyEnabled on）：本轮必须真实应用一次——
+  /// 清理期可能已把系统设置清空，不能凭 lastDesired 相等跳过；收敛后转入
+  /// enabled 观察与网络变化巡检。
+  func enableSystemProxyIntent() async {
+    systemProxyInitialApplyPending = true
+    systemProxyWasUnavailable = false
+    await convergeSystemProxy()
+    startEnabledSystemProxyObservation()
+  }
+
+  /// 系统代理意图关闭（setSystemProxyEnabled off）：撤销待批准/待应用标记，
+  /// 读取代际推进作废在途读，无条件清理并停观察，结果原样呈现。
+  func disableSystemProxyIntent() async {
+    systemProxyApprovalRequired = false
+    systemProxyInitialApplyPending = false
+    systemProxyReadGeneration += 1
+    systemProxyState = await clearAndStopSystemProxyObservation()
+    updateSystemProxyActions()
+  }
+
+  /// agent 停机的观察收尾（stopAgent）：停网络监视与健康循环，观察模式归
+  /// 零。呈现按代理意图分流——意图仍在则保持待应用（等 agent 恢复后收敛，
+  /// issue #71），意图已关则空闲。
+  func agentDidStop() {
+    systemProxyNetworkChangeMonitor.stop()
+    systemProxyHealthTask?.cancel()
+    systemProxyHealthTask = nil
+    systemProxyObservationMode = .stopped
+    if isIntentEnabled() {
+      systemProxyState = .pending
+    } else {
+      if !systemProxyState.hasOperationFailure {
+        systemProxyState = .idle
+      }
+      updateSystemProxyActions()
+    }
+  }
+
+  /// agent 关闭级联的清理结果呈现（setAgentEnabled off）：typed 失败原样
+  /// 上屏（清理不重试），成功不覆盖既有呈现。
+  func presentCleanupOutcome(_ outcome: SystemProxyApplicationFacts) {
+    if outcome.hasOperationFailure {
+      systemProxyState = outcome
+    }
+    updateSystemProxyActions()
+  }
+
+  /// mode 切换发现无可收敛运行时（agent 关或无活动文档）：代理意图仍开时
+  /// 保持待应用，等运行时恢复后由健康循环收敛（+Mode 提前出口）。
+  func modeTransitionAwaitingRuntime() {
+    if isIntentEnabled() {
+      systemProxyState = .pending
+    }
+  }
+
+  /// launch 重同步开始（resyncOnLaunch 入口）：抑制期 converge/suspend 拒绝
+  /// 执行、健康循环跳过巡检；须由 settle 命令解除。
+  func beginStartupResync() {
+    systemProxyStartupInProgress = true
+  }
+
+  /// launch 重同步收尾（agent 意图关闭分支）：解除抑制（抑制期 suspend 的
+  /// 守卫会拒绝执行）；代理意图仍开则挂起残留配置并转入观察。
+  func settleLaunchWithAgentOff() async {
+    systemProxyStartupInProgress = false
+    if isIntentEnabled() {
+      await suspendSystemProxy()
+      startEnabledSystemProxyObservation()
+    }
+  }
+
+  /// launch 重同步收尾（agent 已收敛分支）：解除抑制；代理意图开则播种期望
+  /// 配置（健康 GUI 启动只巡检不强推应用），按出口可用性巡检或挂起，转入
+  /// 观察；意图关呈现空闲。
+  func settleLaunchAfterAgentConverged() async {
+    systemProxyStartupInProgress = false
+    if isIntentEnabled() {
+      lastDesiredSystemProxyConfiguration = desiredConfiguration()
+      if isExitAvailable() {
+        await recheckSystemProxy()
+      } else {
+        await suspendSystemProxy()
+      }
+      startEnabledSystemProxyObservation()
+    } else {
+      systemProxyState = .idle
+    }
   }
 }
 

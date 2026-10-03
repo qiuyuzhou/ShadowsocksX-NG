@@ -69,10 +69,11 @@ extension ProxyRuntimeController {
     } else {
       let cleanupOutcome = await cascadeSystemProxyOffForAgentOff()
       await stopAgent()
-      if let cleanupOutcome, cleanupOutcome.hasOperationFailure {
-        systemProxyObserver.systemProxyState = cleanupOutcome
+      if let cleanupOutcome {
+        systemProxyObserver.presentCleanupOutcome(cleanupOutcome)
+      } else {
+        systemProxyObserver.updateSystemProxyActions()
       }
-      systemProxyObserver.updateSystemProxyActions()
     }
   }
 
@@ -104,47 +105,24 @@ extension ProxyRuntimeController {
     guard persistSettings(next) else { return }
     settings = next
     if enabled {
-      systemProxyObserver.systemProxyInitialApplyPending = true
-      systemProxyObserver.systemProxyWasUnavailable = false
-      await systemProxyObserver.convergeSystemProxy()
-      systemProxyObserver.startEnabledSystemProxyObservation()
+      await systemProxyObserver.enableSystemProxyIntent()
     } else {
-      systemProxyObserver.systemProxyApprovalRequired = false
-      systemProxyObserver.systemProxyInitialApplyPending = false
-      systemProxyObserver.systemProxyReadGeneration += 1
-      systemProxyObserver.systemProxyState =
-        await systemProxyObserver.clearAndStopSystemProxyObservation()
-      systemProxyObserver.updateSystemProxyActions()
+      await systemProxyObserver.disableSystemProxyIntent()
     }
   }
 
   /// GUI startup restores the Agent. Healthy proxy intent only inspects; unhealthy
   /// proxy intent suspends; disabled intent never writes SystemConfiguration.
   func resyncOnLaunch() async {
-    systemProxyObserver.systemProxyStartupInProgress = true
+    systemProxyObserver.beginStartupResync()
     guard settings.agentEnabled else {
       await stopAgent()
-      systemProxyObserver.systemProxyStartupInProgress = false
-      if settings.systemProxyEnabled {
-        await systemProxyObserver.suspendSystemProxy()
-        systemProxyObserver.startEnabledSystemProxyObservation()
-      }
+      await systemProxyObserver.settleLaunchWithAgentOff()
       return
     }
     let catalog = catalogSnapshotReader.catalogSnapshot
     await convergeToReexpanded(catalog)
-    systemProxyObserver.systemProxyStartupInProgress = false
-    if settings.systemProxyEnabled {
-      systemProxyObserver.lastDesiredSystemProxyConfiguration = desiredSystemProxyConfiguration
-      if systemProxyExitAvailable {
-        await systemProxyObserver.recheckSystemProxy()
-      } else {
-        await systemProxyObserver.suspendSystemProxy()
-      }
-      systemProxyObserver.startEnabledSystemProxyObservation()
-    } else {
-      systemProxyObserver.systemProxyState = .idle
-    }
+    await systemProxyObserver.settleLaunchAfterAgentConverged()
   }
 
   // MARK: - 动作执行
@@ -159,23 +137,12 @@ extension ProxyRuntimeController {
   /// 系统代理状态按意图事实收尾——级联后意图已关闭为空闲；残留的「意图开
   /// 启 + agent 关闭」组合保持待应用（不静默清理，也无需网络观察）。
   func stopAgent() async {
-    systemProxyNetworkChangeMonitor.stop()
-    systemProxyObserver.systemProxyHealthTask?.cancel()
-    systemProxyObserver.systemProxyHealthTask = nil
-    systemProxyObserver.systemProxyObservationMode = .stopped
+    systemProxyObserver.agentDidStop()
     _ = await execute(.stop, document: nil)
     state = .off
     lastDocument = nil
     skippedServers = []
     lastActivationFailure = nil
-    if settings.systemProxyEnabled {
-      systemProxyObserver.systemProxyState = .pending
-    } else {
-      if !systemProxyState.hasOperationFailure {
-        systemProxyObserver.systemProxyState = .idle
-      }
-      systemProxyObserver.updateSystemProxyActions()
-    }
   }
 
   /// 无活动目标时 agent 仍提供本地监听（issue #60）：空服务器列表文档，
