@@ -138,12 +138,16 @@ struct RuleSnapshotStore {
         found: snapshot.metadata.converterVersion,
         expected: RuleSnapshotMetadata.currentConverterVersion)
     }
-    let maximum = snapshot.metadata.source.kind == .geolocationCN ? 200_000 : 50_000
-    guard (100...maximum).contains(snapshot.rules.count) else {
-      throw RuleSnapshotError.abnormalRuleCount(
-        found: snapshot.rules.count, minimum: 100, maximum: maximum)
-    }
+    try Self.validateRuleCount(snapshot.rules.count, source: snapshot.metadata.source.kind)
     return snapshot
+  }
+
+  static func validateRuleCount(_ count: Int, source: RuleSourceKind) throws {
+    let maximum = source == .geolocationCN ? 200_000 : 50_000
+    guard (100...maximum).contains(count) else {
+      throw RuleSnapshotError.abnormalRuleCount(
+        found: count, minimum: 100, maximum: maximum)
+    }
   }
 
   func save(_ snapshot: RuleSnapshot) throws {

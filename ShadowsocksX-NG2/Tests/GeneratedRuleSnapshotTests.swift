@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 import XCTest
 
 @testable import ShadowsocksX_NG2
@@ -49,7 +50,7 @@ final class GeneratedRuleSnapshotTests: XCTestCase {
         .converterVersionMismatch(found: "1.0.0", expected: "2.0.0"))
     }
     let rule = try XCTUnwrap(snapshot.rules.first)
-    for count in [0, 99, 100, 200_000, 200_001] {
+    for count in [99, 100] {
       try store.save(
         RuleSnapshot(
           metadata: snapshot.metadata,
@@ -107,6 +108,30 @@ final class GeneratedRuleSnapshotTests: XCTestCase {
       XCTAssertEqual(
         error as? RuleSnapshotError,
         .schemaVersionMismatch(found: 99, expected: RuleSnapshot.currentSchemaVersion))
+    }
+  }
+}
+
+struct RuleSnapshotCountTests {
+  @Test func geolocationCountBoundaries() throws {
+    try checkBoundaries(source: .geolocationCN, maximum: 200_000)
+  }
+
+  @Test(arguments: [RuleSourceKind.chinaIPv4, .gfwlist, .custom])
+  func otherSourceCountBoundaries(source: RuleSourceKind) throws {
+    try checkBoundaries(source: source, maximum: 50_000)
+  }
+
+  private func checkBoundaries(source: RuleSourceKind, maximum: Int) throws {
+    for count in [0, 99, maximum + 1] {
+      #expect(
+        throws: RuleSnapshotError.abnormalRuleCount(found: count, minimum: 100, maximum: maximum)
+      ) {
+        try RuleSnapshotStore.validateRuleCount(count, source: source)
+      }
+    }
+    for count in [100, maximum] {
+      try RuleSnapshotStore.validateRuleCount(count, source: source)
     }
   }
 }
