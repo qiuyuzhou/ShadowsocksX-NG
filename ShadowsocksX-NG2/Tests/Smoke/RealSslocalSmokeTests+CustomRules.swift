@@ -12,18 +12,13 @@ extension RealSslocalSmokeTests {
     let selectedPorts = try grabThreeListenPorts(excluding: [echoServer.port, fakeSSServer.port])
     let listen = SslocalListenSettings(
       socksPort: selectedPorts[0], httpPort: selectedPorts[1])
-    let customSource = RuleSourceIdentity(
-      kind: .custom, upstreamVersion: "user", label: "自定义")
     let customRules = [
       ProxyRule(
-        action: .direct, match: try RuleMatch(domainSuffix: "direct.example"),
-        source: customSource),
+        action: .direct, match: try RuleMatch(domainSuffix: "direct.example")),
       ProxyRule(
-        action: .direct, match: try RuleMatch(domainExact: "exact.direct.example"),
-        source: customSource),
+        action: .direct, match: try RuleMatch(domainExact: "exact.direct.example")),
       ProxyRule(
-        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24"),
-        source: customSource),
+        action: .direct, match: try RuleMatch(ipv4CIDR: "203.0.113.0/24")),
     ]
     let document = SslocalRuntimeDocument(
       servers: [
@@ -115,12 +110,9 @@ extension RealSslocalSmokeTests {
     let selectedPorts = try grabThreeListenPorts(excluding: [echoServer.port, fakeSSServer.port])
     let listen = SslocalListenSettings(
       socksPort: selectedPorts[0], httpPort: selectedPorts[1])
-    let customSource = RuleSourceIdentity(
-      kind: .custom, upstreamVersion: "user", label: "自定义")
     let customRules = [
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"),
-        source: customSource)
+        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"))
     ]
     let document = SslocalRuntimeDocument(
       servers: [

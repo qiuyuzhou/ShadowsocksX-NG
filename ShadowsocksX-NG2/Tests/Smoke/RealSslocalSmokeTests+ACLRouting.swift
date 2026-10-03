@@ -99,9 +99,7 @@ extension RealSslocalSmokeTests {
       socksPort: selectedPorts[0], httpPort: selectedPorts[1])
     let chinaRules = [
       ProxyRule(
-        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"),
-        source: RuleSourceIdentity(
-          kind: .geolocationCN, upstreamVersion: "test", label: "geolocation-cn"))
+        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"))
     ]
     let document = SslocalRuntimeDocument(
       servers: [
@@ -176,17 +174,11 @@ extension RealSslocalSmokeTests {
   /// issue #64 冒烟夹具：`.cn` 域名 + 测试用 `8.8.8.0/24` CIDR 直连候选
   /// （仅验证命中/未命中路由，不代表真实中国 IP 归属）。
   private func chinaCIDRSmokeRules() throws -> [ProxyRule] {
-    let domainSource = RuleSourceIdentity(
-      kind: .geolocationCN, upstreamVersion: "test", label: "geolocation-cn")
-    let cidrSource = RuleSourceIdentity(
-      kind: .chinaIPv4, upstreamVersion: "test", label: "china-operator-ip")
     return [
       ProxyRule(
-        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn"),
-        source: domainSource),
+        action: .direct, match: try RuleMatch(nationalDomainSuffix: "cn")),
       ProxyRule(
-        action: .direct, match: try RuleMatch(ipv4CIDR: "8.8.8.0/24"),
-        source: cidrSource),
+        action: .direct, match: try RuleMatch(ipv4CIDR: "8.8.8.0/24")),
     ]
   }
 

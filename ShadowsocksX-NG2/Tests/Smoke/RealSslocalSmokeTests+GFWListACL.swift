@@ -12,15 +12,11 @@ extension RealSslocalSmokeTests {
     let selectedPorts = try grabThreeListenPorts(excluding: [echoServer.port, fakeSSServer.port])
     let listen = SslocalListenSettings(
       socksPort: selectedPorts[0], httpPort: selectedPorts[1])
-    let gfwSource = RuleSourceIdentity(
-      kind: .gfwlist, upstreamVersion: "test", label: "GFWList")
     let gfwRules = [
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example"),
-        source: gfwSource),
+        action: .proxy, match: try RuleMatch(domainSuffix: "blocked.example")),
       ProxyRule(
-        action: .proxy, match: try RuleMatch(domainSuffix: "cdn.blocked.example"),
-        source: gfwSource),
+        action: .proxy, match: try RuleMatch(domainSuffix: "cdn.blocked.example")),
     ]
     let document = SslocalRuntimeDocument(
       servers: [
