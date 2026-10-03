@@ -27,6 +27,55 @@ struct RuleDocumentCommit: Sendable {
   let document: CustomRuleDocument?
 }
 
+// MARK: - 结果呈现文案
+
+// outcome→文案映射与 outcome 类型同住，供状态行与编辑器两个视图共享。
+
+extension RulesCommitFeedback {
+  var summary: String {
+    guard outcome.isSuccess else { return outcome.rulesMessage }
+    let count: String
+    switch operation {
+    case .enablement(let enabled):
+      count = String.localizedStringWithFormat(
+        RulesCopy.text(enabled ? "已启用 %lld 条规则" : "已禁用 %lld 条规则"), Int64(changedCount))
+    case .add: count = RulesCopy.text("已新增规则")
+    case .edit: count = RulesCopy.text("已编辑规则")
+    case .delete:
+      count = String.localizedStringWithFormat(
+        RulesCopy.text("已删除 %lld 条自定义规则"), Int64(changedCount))
+    }
+    return count + " · " + RulesCopy.text("已保存")
+  }
+}
+
+extension CustomRuleUpdateOutcome {
+  var rulesMessage: String {
+    switch self {
+    case .saved: RulesCopy.text("已保存")
+    case .persistenceFailed: RulesCopy.text("保存失败，规则未更改")
+    case .busy: RulesCopy.text("正在更新规则…")
+    case .invalidDocument, .rejected: RulesCopy.text("无法更新规则")
+    }
+  }
+
+  var failureDetail: String? {
+    switch self {
+    case .invalidDocument(let detail): detail
+    case .rejected(let rejected): rejected.map(\.explanation).joined(separator: "\n")
+    default: nil
+    }
+  }
+
+  var nextStep: String? {
+    switch self {
+    case .persistenceFailed, .busy: "请重试规则操作。"
+    case .invalidDocument, .rejected: "请检查规则数据后再操作。"
+    default: nil
+    }
+  }
+}
+
 // MARK: - 自定义规则命令面
 
 extension ProxyRuntimeController {

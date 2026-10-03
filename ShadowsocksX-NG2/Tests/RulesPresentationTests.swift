@@ -58,6 +58,39 @@ final class RulesPresentationTests: XCTestCase {
     XCTAssertNil(workflow.selectedRelationshipRow)
   }
 
+  func testOutcomeCopyMappingCoversEveryCase() throws {
+    XCTAssertEqual(CustomRuleUpdateOutcome.saved.rulesMessage, RulesCopy.text("已保存"))
+    XCTAssertEqual(
+      CustomRuleUpdateOutcome.persistenceFailed.rulesMessage, RulesCopy.text("保存失败，规则未更改"))
+    XCTAssertEqual(
+      CustomRuleUpdateOutcome.persistenceFailed.nextStep, RulesCopy.text("请重试规则操作。"))
+    XCTAssertNil(CustomRuleUpdateOutcome.persistenceFailed.failureDetail)
+    XCTAssertEqual(CustomRuleUpdateOutcome.busy.rulesMessage, RulesCopy.text("正在更新规则…"))
+    let invalid = CustomRuleUpdateOutcome.invalidDocument(detail: "detail-1")
+    XCTAssertEqual(invalid.rulesMessage, RulesCopy.text("无法更新规则"))
+    XCTAssertEqual(invalid.failureDetail, "detail-1")
+    XCTAssertEqual(invalid.nextStep, RulesCopy.text("请检查规则数据后再操作。"))
+    let rejected = CustomRuleUpdateOutcome.rejected([
+      RejectedCustomRule(
+        rule: CustomRule(action: .direct, match: try RuleMatch(domainExact: "a.test")),
+        reason: .duplicate, explanation: "r1"),
+      RejectedCustomRule(
+        rule: CustomRule(action: .direct, match: try RuleMatch(domainExact: "b.test")),
+        reason: .duplicate, explanation: "r2"),
+    ])
+    XCTAssertEqual(rejected.failureDetail, "r1\nr2")
+    XCTAssertEqual(rejected.nextStep, RulesCopy.text("请检查规则数据后再操作。"))
+    XCTAssertNil(CustomRuleUpdateOutcome.saved.failureDetail)
+    XCTAssertNil(CustomRuleUpdateOutcome.saved.nextStep)
+    let success = RulesCommitFeedback(
+      outcome: .saved, operation: .enablement(true), changedCount: 3)
+    XCTAssertEqual(
+      success.summary,
+      RulesCopy.text("已启用 3 条规则") + " · " + RulesCopy.text("已保存"))
+    let failure = RulesCommitFeedback(outcome: .busy, operation: .delete, changedCount: 1)
+    XCTAssertEqual(failure.summary, RulesCopy.text("正在更新规则…"))
+  }
+
 }
 
 private final class ReportFixtureLoader: @unchecked Sendable {
