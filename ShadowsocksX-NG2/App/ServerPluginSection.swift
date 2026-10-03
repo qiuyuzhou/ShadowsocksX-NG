@@ -2,8 +2,7 @@ import SwiftUI
 
 /// 服务器详情的插件区（issue #38/D10，地图 #52 票 #55）：受管选择器——
 /// 「无」+ 受管列表；集外引用（Legacy 导入/订阅带入）追加显式「本版本未
-/// 提供」项使当前状态可见并原样保留。选中受管项才显示供应链事实（来源
-/// 项目、许可证、固定版本、重签）与参数输入。
+/// 提供」项使当前状态可见并原样保留。选中受管项才显示参数输入与可用性警告。
 struct ServerPluginSection: View {
   @Binding var selection: PluginSelection
   @Binding var optionsText: String
@@ -20,7 +19,7 @@ struct ServerPluginSection: View {
   @ViewBuilder
   private var picker: some View {
     if let plugin {
-      Picker("受管理插件", selection: $selection) {
+      Picker("插件", selection: $selection) {
         Text("无").tag(PluginSelection.none)
         ForEach(plugin.managed, id: \.program) { info in
           Text(info.program).tag(PluginSelection.managed(program: info.program))
@@ -29,6 +28,8 @@ struct ServerPluginSection: View {
           Text("\(program)（本版本未提供）").tag(PluginSelection.unknown(program: program))
         }
       }
+      .labelsHidden()
+      .accessibilityLabel("插件")
       .disabled(!isEditable)
     } else {
       Text("不可用").foregroundStyle(.secondary)
@@ -40,9 +41,7 @@ struct ServerPluginSection: View {
     if let plugin {
       switch selection {
       case .none:
-        Text("不使用插件：生成的配置不含 plugin 字段。")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
+        EmptyView()
       case .managed(let program):
         managedDetails(program: program, plugin: plugin)
       case .unknown(let program):
@@ -51,17 +50,11 @@ struct ServerPluginSection: View {
     }
   }
 
-  /// 选中受管项：供应链事实与参数输入。
+  /// 选中受管项：参数输入与可用性警告。
   @ViewBuilder
   private func managedDetails(program: String, plugin: PluginSectionState) -> some View {
-    if let info = plugin.managed.first(where: { $0.program == program }) {
+    if plugin.managed.contains(where: { $0.program == program }) {
       VStack(alignment: .leading, spacing: 8) {
-        Text("来源项目 \(info.project) · 许可证 \(info.license) · 固定版本 \(info.release)")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
-        Text("随 app 打包，构建期经 Developer ID 重签：\(info.signIdentifier)")
-          .font(.footnote)
-          .foregroundStyle(.secondary)
         if !plugin.provided {
           Label(
             "受管插件可执行文件缺失：激活会被点名拒绝；请重新安装本 app。",
@@ -70,6 +63,9 @@ struct ServerPluginSection: View {
           .font(.footnote)
           .foregroundStyle(.orange)
         }
+        Text("插件参数")
+          .font(.callout.weight(.medium))
+          .foregroundStyle(.secondary)
         TextField(
           "插件参数",
           text: $optionsText,

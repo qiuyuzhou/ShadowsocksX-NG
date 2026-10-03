@@ -1,0 +1,39 @@
+{
+  "sourceLanguage": "zh-Hans",
+  "strings": {
+    "例如：香港服务器": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "e.g. Hong Kong server"
+          }
+        }
+      }
+    },
+    "请输入服务器名称": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a server name"
+          }
+        }
+      }
+    },
+    "重置": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

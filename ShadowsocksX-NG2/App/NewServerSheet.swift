@@ -15,18 +15,17 @@ struct NewServerSheet: View {
   /// 连接字段草稿由共享 module 持有（与编辑表单同一 interface），默认值
   /// 端口 8388、加密 aes-256-gcm、插件「无」。
   @StateObject private var fields = ServerFormFields.newForm()
+  @State private var isSubmitting = false
+  @FocusState private var nameFocused: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("新建服务器")
-          .font(.title2)
-        Text("保存后加入目录；密码存入钥匙串，目录只持引用。")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-      }
+      Text("新建服务器")
+        .font(.title2)
 
-      ServerFormFieldsGrid(fields: fields, plugin: pluginSection, isEditable: true)
+      ServerFormFieldsGrid(
+        fields: fields, plugin: pluginSection, isEditable: !isSubmitting,
+        nameFocus: $nameFocused)
 
       HStack {
         Spacer()
@@ -35,6 +34,9 @@ struct NewServerSheet: View {
           .keyboardShortcut(.defaultAction)
       }
     }
+    .disabled(isSubmitting)
+    .interactiveDismissDisabled(isSubmitting)
+    .defaultFocus($nameFocused, true)
     .padding(20)
     .frame(minWidth: 520, minHeight: 400)
   }
@@ -52,9 +54,17 @@ struct NewServerSheet: View {
   }
 
   private func create() {
+    guard !isSubmitting else { return }
+    guard fields.validateName() else {
+      nameFocused = true
+      return
+    }
+    let draft = fields.draft
+    isSubmitting = true
     Task {
+      defer { isSubmitting = false }
       do {
-        let id = try await workflow.createServer(fields.draft, into: parent)
+        let id = try await workflow.createServer(draft, into: parent)
         selection = id
         dismiss()
       } catch {

@@ -1,14 +1,9 @@
 import SwiftUI
 
-/// 服务器详情表单（issue #32/#38/#41，地图 #52 票 #55）：按原型重排为详情头
-/// （图标 + 名称 + 来源说明）+ 两列表单栅格（地址/端口、加密/名称、密码全宽、
-/// 插件区）+ 底部操作区（取消恢复草稿 / 保存）。表单状态经工作流的显式编辑
-/// 命令解析（凭据明文仅在编辑动作中出现）；插件区为受管选择器（D10）——
-/// 「无」+ 受管列表，选中受管项才显示参数输入；集外引用以显式「本版本未
-/// 提供」呈现并原样保留；分享区（二维码 + 复制 ss://，显式分享命令）。
-/// 订阅服务器整表只读（无底部操作区，横幅说明）。
+/// 服务器详情：标题反映已保存名称，字段持有独立草稿；订阅服务器只读。
+/// 保存成功后重载提交值，失败保留草稿；分享始终经显式命令读取已保存配置。
 struct ServerDetailView: View {
-  let workflow: CatalogWorkflow
+  @ObservedObject var workflow: CatalogWorkflow
   let serverID: NodeID
   /// 运行时事实（活动目标标记）：由父视图从既有接缝传入，详情面不持控制器。
   let isActiveTarget: Bool
@@ -18,6 +13,9 @@ struct ServerDetailView: View {
   /// 连接字段草稿由共享 module 持有（与新建表单同一 interface），经显式
   /// 编辑命令装载（凭据明文仅在编辑动作中出现）。
   @StateObject private var fields = ServerFormFields()
+  @State private var isSubmitting = false
+  @State private var loadedServerID: NodeID?
+  @FocusState private var nameFocused: Bool
   // 分享/二维码状态由同 module 的 ServerDetailView+Share.swift 扩展驱动。
   @State var showQR = false
   @State var qrImage: NSImage?
@@ -43,6 +41,7 @@ struct ServerDetailView: View {
         }
         .padding(.leading, 28)
         .padding(.trailing, 32)
+        .disabled(isSubmitting)
         .padding(.top, 20)
         .padding(.bottom, 24)
       }
@@ -110,7 +109,8 @@ struct ServerDetailView: View {
         .padding(.top, 16)
     }
     ServerFormFieldsGrid(
-      fields: fields, plugin: formState?.plugin, isEditable: isEditable
+      fields: fields, plugin: formState?.plugin, isEditable: isEditable,
+      nameFocus: $nameFocused
     )
     .padding(.top, 20)
 
@@ -150,15 +150,17 @@ struct ServerDetailView: View {
     }
   }
 
-  /// 底部操作区：取消恢复已保存值，保存提交草稿。
+  /// 底部操作区：重置恢复已保存值，保存提交草稿。
   private var detailFooter: some View {
     VStack(spacing: 0) {
       Divider()
       HStack {
         Spacer(minLength: 0)
-        Button("取消") { loadForm() }
+        Button("重置") { loadForm() }
+          .disabled(!fields.hasChanges || isSubmitting)
         Button("保存") { save() }
           .keyboardShortcut(.defaultAction)
+          .disabled(!fields.hasChanges || isSubmitting)
       }
       .padding(.horizontal, 32)
       .padding(.vertical, 12)
@@ -171,12 +173,23 @@ struct ServerDetailView: View {
   private func loadForm() {
     guard let state = formState else { return }
     fields.load(from: state)
+    loadedServerID = serverID
   }
 
   private func save() {
+    guard !isSubmitting, fields.hasChanges else { return }
+    guard fields.validateName() else {
+      nameFocused = true
+      return
+    }
+    let id = serverID
+    let draft = fields.draft
+    isSubmitting = true
     Task {
+      defer { isSubmitting = false }
       do {
-        try await workflow.updateServer(serverID, draft: fields.draft)
+        try await workflow.updateServer(id, draft: draft)
+        if loadedServerID == id { loadForm() }
       } catch {
         errors.present(error)
       }
