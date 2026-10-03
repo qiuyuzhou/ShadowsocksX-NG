@@ -89,9 +89,13 @@ protocol CatalogRuntimeSyncing: AnyObject {
 /// 或启动耗时阻塞。每次提交递增代次：旧代次自然结束，但不得覆盖最新代次的
 /// 最终状态；没有自动重试，后续提交、显式激活或启动代理会发起新的同步尝试。
 @MainActor
-final class CatalogCommitCoordinator: ObservableObject {
-  /// 最新提交的运行时收敛阶段（结构化；呈现由上层决定）。
-  @Published private(set) var syncStatus: RuntimeSyncStatus = .idle
+final class CatalogCommitCoordinator {
+  /// 最新提交的运行时收敛阶段（结构化；呈现由上层决定）。存储与发布单点
+  /// 在本类：写后经 `syncStatusChanges`（didChange 语义）通知；目录工作流
+  /// 只透传读面，不再挂第二份 `@Published`。
+  private(set) var syncStatus: RuntimeSyncStatus = .idle
+  /// 收敛阶段变化通道（didChange 语义，值即当前阶段）。
+  let syncStatusChanges = PassthroughSubject<RuntimeSyncStatus, Never>()
 
   let fileStore: CatalogFileStore
   private let runtime: CatalogRuntimeSyncing
@@ -159,16 +163,22 @@ final class CatalogCommitCoordinator: ObservableObject {
     generation += 1
     let generation = generation
     guard runtime.hasActiveTarget else {
-      syncStatus = .idle
+      setSyncStatus(.idle)
       return
     }
-    syncStatus = .syncing(generation: generation)
+    setSyncStatus(.syncing(generation: generation))
     Task { @MainActor [weak self] in
       guard let self, self.generation == generation else { return }
       let outcome = await self.runtime.converge(to: snapshot)
       guard !Task.isCancelled, self.generation == generation else { return }
-      self.syncStatus = .finished(generation: generation, outcome: outcome)
+      self.setSyncStatus(.finished(generation: generation, outcome: outcome))
     }
+  }
+
+  /// 写入与通知的唯一口径：先落值后发值（didChange 语义）。
+  private func setSyncStatus(_ status: RuntimeSyncStatus) {
+    syncStatus = status
+    syncStatusChanges.send(status)
   }
 
   /// 磁盘读取的容错口径与首次加载一致：损坏文档回退全新空文档，等待

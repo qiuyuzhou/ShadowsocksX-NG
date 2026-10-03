@@ -27,8 +27,16 @@ final class CatalogWorkflow: ObservableObject {
   /// outcome；持久化目录只保存安全的 typed failure facts。
   @Published private(set) var subscriptionRefreshFailures:
     [NodeID: SubscriptionRefreshFailureResult] = [:]
-  /// 最近一次提交的运行时收敛阶段（与目录提交成功分离，story 38）。
-  @Published private(set) var runtimeSync: RuntimeSyncStatus
+  /// 最近一次提交的运行时收敛阶段（与目录提交成功分离，story 38）。存储与
+  /// 发布单点在提交协调器，此处只透传读面；需要实时更新的表面订阅
+  /// `runtimeSyncChanges`（`.onReceive` 消费），不经本类 objectWillChange——
+  /// App 侧目前无视图消费者，避免每次提交徒劳失效全部目录观察者。
+  var runtimeSync: RuntimeSyncStatus { dependencies.coordinator.syncStatus }
+
+  /// 收敛阶段变化通道（didChange 语义，值即当前阶段）。
+  var runtimeSyncChanges: AnyPublisher<RuntimeSyncStatus, Never> {
+    dependencies.coordinator.syncStatusChanges.eraseToAnyPublisher()
+  }
   /// Legacy 快照发现与一次性完成标记。
   @Published private(set) var legacyImportState = LegacyImportAvailability(
     snapshotFound: false, completed: false)
@@ -53,8 +61,6 @@ final class CatalogWorkflow: ObservableObject {
     subscriptions = Self.subscriptionSummaries(
       coordinator.committedSubscriptions, catalog: coordinator.committedCatalog,
       credentials: dependencies.credentials)
-    runtimeSync = coordinator.syncStatus
-    coordinator.$syncStatus.assign(to: &$runtimeSync)
     refreshLegacyImportState()
   }
 
