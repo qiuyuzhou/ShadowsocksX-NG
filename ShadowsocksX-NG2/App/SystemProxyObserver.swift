@@ -30,8 +30,7 @@ final class SystemProxyObserver: ObservableObject {
   private(set) var systemProxyInitialApplyPending = false
   /// 读面：健康循环的收敛条件。
   private(set) var systemProxyWasUnavailable = false
-  /// 过渡：任务柄创建仍在控制器侧，柄归属收回观察机后转 private。
-  var systemProxyHealthTask: Task<Void, Never>?
+  private var systemProxyHealthTask: Task<Void, Never>?
   private var systemProxyReadGeneration = 0
   /// 读面：观察机测试。
   private(set) var systemProxyObservationMode = SystemProxyObservationMode.stopped
@@ -51,8 +50,9 @@ final class SystemProxyObserver: ObservableObject {
   private let isIntentEnabled: @MainActor () -> Bool
   private let isExitAvailable: @MainActor () -> Bool
   private let desiredConfiguration: @MainActor () -> SystemProxyConfiguration?
-  /// 健康观察循环属控制器（循环体含运行时健康呈现），策略机只请求调度。
-  private let startSystemProxyHealthObservation: @MainActor () -> Void
+  /// 健康观察循环体经此注入、留在控制器（循环体含运行时健康呈现）；任务柄
+  /// 由观察机创建并持有（cleanup 与停机路径都要取消它）。
+  private let systemProxyHealthObservationLoop: @MainActor () async -> Void
 
   init(
     systemProxy: SystemProxyControlling,
@@ -64,7 +64,7 @@ final class SystemProxyObserver: ObservableObject {
     isIntentEnabled: @escaping @MainActor () -> Bool,
     isExitAvailable: @escaping @MainActor () -> Bool,
     desiredConfiguration: @escaping @MainActor () -> SystemProxyConfiguration?,
-    startSystemProxyHealthObservation: @escaping @MainActor () -> Void
+    systemProxyHealthObservationLoop: @escaping @MainActor () async -> Void
   ) {
     self.systemProxy = systemProxy
     self.systemProxyHelper = systemProxyHelper
@@ -75,7 +75,7 @@ final class SystemProxyObserver: ObservableObject {
     self.isIntentEnabled = isIntentEnabled
     self.isExitAvailable = isExitAvailable
     self.desiredConfiguration = desiredConfiguration
-    self.startSystemProxyHealthObservation = startSystemProxyHealthObservation
+    self.systemProxyHealthObservationLoop = systemProxyHealthObservationLoop
   }
 
   // MARK: - 收敛与应用
@@ -299,10 +299,18 @@ extension SystemProxyObserver {
       && (!systemProxyInspection.differences.isEmpty || systemProxyState.isApplyFailure)
     systemProxyInspection.canRetryClear = available && systemProxyState.isClearFailure
     if systemProxyState.hasOperationFailure {
-      startSystemProxyHealthObservation()
+      scheduleSystemProxyHealthObservation()
     } else if !isIntentEnabled() {
       systemProxyHealthTask?.cancel()
       systemProxyHealthTask = nil
+    }
+  }
+
+  /// 请求调度健康观察循环：任务柄由观察机创建并持有，已存在则幂等返回。
+  private func scheduleSystemProxyHealthObservation() {
+    guard systemProxyHealthTask == nil else { return }
+    systemProxyHealthTask = Task { @MainActor [weak self] in
+      await self?.systemProxyHealthObservationLoop()
     }
   }
 }
@@ -499,7 +507,7 @@ extension SystemProxyObserver {
   func startEnabledSystemProxyObservation() {
     guard systemProxyObservationMode != .enabled else { return }
     systemProxyObservationMode = .enabled
-    startSystemProxyHealthObservation()
+    scheduleSystemProxyHealthObservation()
     systemProxyNetworkChangeMonitor.start { [weak self] change in
       self?.handleSystemProxyNetworkChange(change)
     }

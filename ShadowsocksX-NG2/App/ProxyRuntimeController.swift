@@ -82,9 +82,9 @@ final class ProxyRuntimeController: ObservableObject {
       guard let self else { return nil }
       return self.desiredSystemProxyConfiguration
     },
-    startSystemProxyHealthObservation: { [weak self] in
+    systemProxyHealthObservationLoop: { [weak self] in
       guard let self else { return }
-      self.startSystemProxyHealthObservation()
+      await self.runSystemProxyHealthObservationLoop()
     })
   let firewallChecker: FirewallStatusChecking
   let firewallExecutableURLs: [URL]

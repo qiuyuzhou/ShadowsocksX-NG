@@ -155,6 +155,6 @@ final class SystemProxyObserverTests: XCTestCase {
           for: SslocalRuntimeDocument(servers: [], listen: SslocalListenSettings()),
           exceptions: [])
       },
-      startSystemProxyHealthObservation: {})
+      systemProxyHealthObservationLoop: {})
   }
 }

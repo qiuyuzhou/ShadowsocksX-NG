@@ -214,25 +214,21 @@ extension ProxyRuntimeController {
 extension ProxyRuntimeController {
   /// Uses the existing local endpoint/receipt health seam while the GUI is alive.
   /// Network path availability is deliberately absent from this decision.
-  /// 任务柄持有在观察机上（cleanup 与停止路径都要取消它）；循环体留在本体，
-  /// 因为它同时承担运行时健康呈现，系统代理反应转发给观察机。
-  func startSystemProxyHealthObservation() {
-    guard systemProxyObserver.systemProxyHealthTask == nil else { return }
-    let interval = systemProxyHealthPollIntervalNanoseconds
-    systemProxyObserver.systemProxyHealthTask = Task { @MainActor [weak self] in
-      while !Task.isCancelled {
-        try? await Task.sleep(nanoseconds: interval)
-        guard !Task.isCancelled, let self,
-          settings.systemProxyEnabled || systemProxyState.hasOperationFailure
-        else { return }
-        systemProxyObserver.refreshSystemProxyApproval()
-        systemProxyObserver.updateSystemProxyActions()
-        guard settings.systemProxyEnabled, state != .starting,
-          !systemProxyObserver.systemProxyStartupInProgress, settings.agentEnabled,
-          let document = lastDocument
-        else { continue }
-        await inspectSystemProxyRuntimeHealth(document)
-      }
+  /// 任务柄与循环调度在观察机（scheduleSystemProxyHealthObservation）；循环体
+  /// 留在本体——它同时承担运行时健康呈现，系统代理反应转发给观察机。
+  func runSystemProxyHealthObservationLoop() async {
+    while !Task.isCancelled {
+      try? await Task.sleep(nanoseconds: systemProxyHealthPollIntervalNanoseconds)
+      guard !Task.isCancelled,
+        settings.systemProxyEnabled || systemProxyState.hasOperationFailure
+      else { return }
+      systemProxyObserver.refreshSystemProxyApproval()
+      systemProxyObserver.updateSystemProxyActions()
+      guard settings.systemProxyEnabled, state != .starting,
+        !systemProxyObserver.systemProxyStartupInProgress, settings.agentEnabled,
+        let document = lastDocument
+      else { continue }
+      await inspectSystemProxyRuntimeHealth(document)
     }
   }
 
