@@ -8,8 +8,9 @@ import SwiftUI
 struct ServersView: View {
 
   @ObservedObject var workflow: CatalogWorkflow
-  /// 运行时事实来源：活动目标标记；激活命令经 `workflow.activate`。
-  @ObservedObject var proxyController: ProxyRuntimeController
+  /// 活动目标标记：父视图传入的运行时事实，不进目录 projection（与
+  /// SidebarRow/ServerDetailView 的传参先例同法）；激活命令经 `workflow.activate`。
+  let activeTargetID: NodeID?
   @Binding var selection: NodeID?
   /// 分组折叠状态：组合根持有的共享对象（与首页目标树同源），跨 destination
   /// 切换存续；OutlineGroup 的内建展开态会随分区切换丢失，侧栏因此自管折叠。
@@ -158,7 +159,7 @@ struct ServersView: View {
       SidebarRow(
         node: node,
         workflow: workflow,
-        activeTargetID: proxyController.activeTargetID,
+        activeTargetID: activeTargetID,
         errors: errors,
         onRename: { id in
           renameTarget = id
@@ -246,7 +247,7 @@ extension ServersView {
           errors: errors)
       } else {
         ServerDetailView(
-          workflow: workflow, serverID: id, isActiveTarget: proxyController.activeTargetID == id,
+          workflow: workflow, serverID: id, isActiveTarget: activeTargetID == id,
           errors: errors, clipboard: clipboard)
       }
     } else {

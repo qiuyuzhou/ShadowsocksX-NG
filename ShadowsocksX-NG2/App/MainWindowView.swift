@@ -215,7 +215,7 @@ struct MainWindowView: View {
     case .servers:
       ServersView(
         workflow: workflow,
-        proxyController: proxyController,
+        activeTargetID: proxyController.activeTargetID,
         selection: $selection,
         expansion: expansion,
         clipboard: clipboard,
