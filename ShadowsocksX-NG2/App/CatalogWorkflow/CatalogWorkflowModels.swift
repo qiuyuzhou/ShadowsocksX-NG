@@ -220,8 +220,9 @@ struct ActivationEligibility: Equatable, Sendable {
 enum ActivationCommandOutcome: Equatable, Sendable {
   /// 成功；组展开时跳过的已知无效叶子数。
   case activated(skippedInvalid: Int)
-  /// 原子拒绝（无 activation candidate / 目标失效）；状态完全不动。
-  case rejectedActivation
+  /// 原子拒绝（无 activation candidate / 目标失效）；携带 typed 点名原因，
+  /// 状态完全不动。结果自含全部事实，调用方不必回读运行时发布事实拼原因。
+  case rejectedActivation(ActivationFailure)
 }
 
 /// 激活缝（issue #41）：目录命令面经此发出激活意图。生产 adapter 为

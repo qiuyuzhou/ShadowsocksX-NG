@@ -104,10 +104,10 @@ func expectThrowsAsync(
 
 // MARK: - 目录工作流测试夹具（issue #49）
 
-/// 中性激活替身：不关心激活语义的测试场景，激活命令原子拒绝。
+/// 中性激活替身：不关心激活语义的测试场景，激活命令原子拒绝（原因任意）。
 final class RejectingActivator: Activating {
   func activate(_ target: NodeID) async throws -> ActivationCommandOutcome {
-    .rejectedActivation
+    .rejectedActivation(.noActiveTarget)
   }
 }
 

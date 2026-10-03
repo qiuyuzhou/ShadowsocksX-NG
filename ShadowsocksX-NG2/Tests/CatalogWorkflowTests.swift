@@ -341,7 +341,7 @@ final class CatalogWorkflowHermeticAssemblyTests: XCTestCase {
     let groupID = try await workflow.createGroup(named: "组装组", into: nil)
     XCTAssertTrue(workflow.tree.containsNode(groupID))
     let activation = try await workflow.activate(groupID)
-    XCTAssertEqual(activation, .rejectedActivation)
+    XCTAssertEqual(activation, .rejectedActivation(.noActiveTarget))
 
     // Legacy 导入走注入服务：报告、完成标记与凭据写入都落在注入的 fake 上；
     // 不经提交管线触发运行时收敛。

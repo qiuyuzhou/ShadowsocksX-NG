@@ -177,9 +177,9 @@ final class CatalogWorkflowPolicyTests: XCTestCase {
 
   func testActivateRejectedOutcomeIsNotThrown() async throws {
     let serverID = try await importServer()
-    activator.result = .rejectedActivation
+    activator.result = .rejectedActivation(.targetNotFound(serverID))
     let outcome = try await workflow.activate(serverID)
-    XCTAssertEqual(outcome, .rejectedActivation)
+    XCTAssertEqual(outcome, .rejectedActivation(.targetNotFound(serverID)))
   }
 }
 

@@ -7,8 +7,8 @@ extension ProxyRuntimeController {
 
   /// 激活一个服务器或分组目标（目录 UI 工单复用入口）：持久化目标；agent
   /// 意图开启时立即把新档推到运行时。激活原子失败时目标与运行时完全不动
-  /// （D3），点名原因进 `lastActivationFailure` 并返回 `.rejectedActivation`；
-  /// 意外错误 throws 并进入 `serviceFailed`。
+  /// （D3），点名原因进 `lastActivationFailure` 并随 `.rejectedActivation`
+  /// 自含返回；意外错误 throws 并进入 `serviceFailed`。
   @discardableResult
   func activate(_ target: NodeID) async throws -> ActivationCommandOutcome {
     let catalog = catalogSnapshotReader.catalogSnapshot
@@ -31,7 +31,7 @@ extension ProxyRuntimeController {
       return .activated(skippedInvalid: configuration.skippedServers.count)
     } catch let failure as ActivationFailure {
       lastActivationFailure = failure
-      return .rejectedActivation
+      return .rejectedActivation(failure)
     } catch {
       state = .serviceFailed(.unknown)
       throw error
