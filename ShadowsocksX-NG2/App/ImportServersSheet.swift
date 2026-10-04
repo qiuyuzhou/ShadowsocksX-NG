@@ -47,7 +47,7 @@ struct ImportServersSheet: View {
       }
     }
     .padding(24)
-    .frame(minWidth: 520, minHeight: 380)
+    .frame(minWidth: 520)
     .fileImporter(
       isPresented: $showFileImporter,
       allowedContentTypes: [.image, .json, .plainText],
@@ -80,8 +80,7 @@ struct ImportServersSheet: View {
         .multilineTextAlignment(.center)
     }
     .frame(maxWidth: .infinity)
-    .frame(minHeight: 160)
-    .padding(.vertical, 12)
+    .frame(height: 170)
     .background(
       RoundedRectangle(cornerRadius: 10)
         .fill(hovering ? Color.orange.opacity(0.08) : Color.primary.opacity(0.03))
