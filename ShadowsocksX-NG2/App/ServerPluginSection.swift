@@ -145,6 +145,7 @@ private struct PluginOptionsEditor: View {
 
   @State private var editingValue: EditingValue?
   @FocusState private var focusedRowID: UUID?
+  @FocusState private var focusedValueRowID: UUID?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -204,6 +205,7 @@ private struct PluginOptionsEditor: View {
           )
           .textFieldStyle(.plain)
           .focused($focusedRowID, equals: row.id)
+          .simultaneousGesture(TapGesture().onEnded { focusedRowID = row.id })
           if row.isUnfinished {
             Image(systemName: "exclamationmark.circle.fill")
               .font(.caption)
@@ -224,9 +226,29 @@ private struct PluginOptionsEditor: View {
         .lineLimit(1)
         .truncationMode(.tail)
         .disabled(row.kind == .flag)
+        .focused($focusedValueRowID, equals: row.id)
+        .simultaneousGesture(TapGesture().onEnded { focusedValueRowID = row.id })
       }
       TableColumn("操作") { row in
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
+          Button {
+            draft.moveRow(row.id, by: -1)
+          } label: {
+            Image(systemName: "chevron.up")
+          }
+          .buttonStyle(.borderless)
+          .help("上移")
+          .disabled(!canMoveRow(row, by: -1))
+
+          Button {
+            draft.moveRow(row.id, by: 1)
+          } label: {
+            Image(systemName: "chevron.down")
+          }
+          .buttonStyle(.borderless)
+          .help("下移")
+          .disabled(!canMoveRow(row, by: 1))
+
           Button {
             editingValue = EditingValue(id: row.id, text: row.valueText)
           } label: {
@@ -243,7 +265,7 @@ private struct PluginOptionsEditor: View {
           .buttonStyle(.borderless)
         }
       }
-      .width(min: 150, ideal: 156, max: 176)
+      .width(min: 196, ideal: 208, max: 224)
     }
     .tableStyle(.inset)
     .frame(height: editTableHeight)
@@ -252,6 +274,19 @@ private struct PluginOptionsEditor: View {
   /// 行数驱动的表格高度：单行约 30pt，夹在上下限之间。
   private var editTableHeight: CGFloat {
     max(min(52 + CGFloat(draft.rows.count) * 30, 440), 112)
+  }
+
+  /// 移动可行性（按钮禁用态）：空行不可移，首行不可上移，末尾空行前不可
+  /// 下移。
+  private func canMoveRow(_ row: PluginOptionsDraft.Row, by offset: Int) -> Bool {
+    guard let index = draft.rows.firstIndex(where: { $0.id == row.id }), !row.isBlank else {
+      return false
+    }
+    var target = index + offset
+    if draft.rows.last?.isBlank ?? false {
+      target = min(target, draft.rows.count - 2)
+    }
+    return target >= 0 && target != index
   }
 
   // MARK: - 原始文本

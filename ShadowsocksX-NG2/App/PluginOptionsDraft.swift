@@ -144,6 +144,22 @@ final class PluginOptionsDraft: ObservableObject {
     normalize()
   }
 
+  /// 单行上移/下移一格（评审追加）：只换行序不改行内容——未修改行仍逐字
+  /// 回写原文片段，故移动不算结构修改、既有末尾分号保留。末尾快速添加行
+  /// 不可移动，也不得把行移到它之后；越界目标是无操作。
+  func moveRow(_ id: UUID, by offset: Int) {
+    guard mode == .table, offset == -1 || offset == 1 else { return }
+    guard let index = rows.firstIndex(where: { $0.id == id }), !rows[index].isBlank else {
+      return
+    }
+    var target = index + offset
+    if rows.last?.isBlank ?? false {
+      target = min(target, rows.count - 2)
+    }
+    guard target >= 0, target != index else { return }
+    rows.swapAt(index, target)
+  }
+
   /// 「添加参数」入口语义：末尾空行即快速添加行，返回其身份供聚焦。
   var quickAddRowID: UUID {
     rows[rows.count - 1].id

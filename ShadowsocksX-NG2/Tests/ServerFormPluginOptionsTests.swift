@@ -157,6 +157,58 @@ struct ServerFormPluginOptionsTests {
     #expect(other.pluginOptions.composedString == "host=a")
   }
 
+  // MARK: - 行顺序调整
+
+  @Test
+  func movingARowReordersVerbatimSlicesOnly() throws {
+    let fields = Self.loadedFields("tls;host=a;path=/p")
+    let host = try #require(Self.formalRows(fields).first { $0.keyText == "host" })
+    fields.pluginOptions.moveRow(host.id, by: 1)
+    #expect(fields.pluginOptions.composedString == "tls;path=/p;host=a")
+    #expect(fields.hasChanges, "重排改变拼装串顺序")
+  }
+
+  @Test
+  func editedRowCarriesItsEncodingWhenMoved() throws {
+    let fields = Self.loadedFields("tls;host=a;path=/p")
+    let path = try #require(Self.formalRows(fields).first { $0.keyText == "path" })
+    fields.pluginOptions.updateValue("x;y", of: path.id)
+    fields.pluginOptions.moveRow(path.id, by: -1)
+    #expect(fields.pluginOptions.composedString == "tls;path=x\\;y;host=a")
+  }
+
+  @Test
+  func trailingSeparatorSurvivesRowMoves() throws {
+    let fields = Self.loadedFields("a=1;b=2;")
+    let first = try #require(Self.formalRows(fields).first)
+    fields.pluginOptions.moveRow(first.id, by: 1)
+    #expect(fields.pluginOptions.composedString == "b=2;a=1;", "移动不算结构修改，末尾分号保留")
+  }
+
+  @Test
+  func movesAreBoundedByFormalRowsAndTheQuickAddRowStaysLast() throws {
+    let fields = Self.loadedFields("a=1;b=2")
+    let rows = Self.formalRows(fields)
+    let firstRow = try #require(rows.first { $0.keyText == "a" })
+    let secondRow = try #require(rows.first { $0.keyText == "b" })
+    let blank = fields.pluginOptions.quickAddRowID
+
+    // 空行不可移动；末尾正式行不可再下移（不得越过空行）。
+    fields.pluginOptions.moveRow(blank, by: -1)
+    fields.pluginOptions.moveRow(secondRow.id, by: 1)
+    #expect(fields.pluginOptions.composedString == "a=1;b=2")
+    #expect(fields.pluginOptions.rows.last?.id == blank)
+
+    // 首行不可上移。
+    fields.pluginOptions.moveRow(firstRow.id, by: -1)
+    #expect(fields.pluginOptions.composedString == "a=1;b=2")
+
+    // 有效下移仍可用。
+    fields.pluginOptions.moveRow(firstRow.id, by: 1)
+    #expect(fields.pluginOptions.composedString == "b=2;a=1")
+    #expect(fields.pluginOptions.rows.last?.id == blank)
+  }
+
   // MARK: - 底部空行与未完成草稿
 
   @Test
