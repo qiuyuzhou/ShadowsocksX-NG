@@ -56,7 +56,7 @@ struct MainWindowView: View {
         .navigationSplitViewColumnWidth(min: 230, ideal: 236, max: 300)
         .toolbar {
           ToolbarItem(placement: .automatic) {
-            addMenu
+            importButton
           }
         }
     } detail: {
@@ -78,13 +78,13 @@ struct MainWindowView: View {
 
   // MARK: - 全局导入入口
 
-  private var addMenu: some View {
+  private var importButton: some View {
     Button {
       presentWorkspaceSheet(.importServers)
     } label: {
-      Label("导入服务器配置", systemImage: "square.and.arrow.down")
+      Label("导入服务器", systemImage: "square.and.arrow.down")
     }
-    .help("导入服务器配置")
+    .help("导入服务器")
   }
 
   private func presentWorkspaceSheet(_ sheet: WorkspaceSheet) {
