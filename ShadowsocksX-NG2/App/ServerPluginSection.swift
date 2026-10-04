@@ -103,7 +103,7 @@ struct ServerPluginSection: View {
 }
 
 /// 查看模式切换（参数列表 ⇄ 原始文本）；被未完成行拒绝时回弹到当前模式。
-private struct PluginOptionsModePicker: View {
+struct PluginOptionsModePicker: View {
   @ObservedObject var draft: PluginOptionsDraft
   @State private var displayedMode = PluginOptionsDraft.Mode.table
 
@@ -123,9 +123,14 @@ private struct PluginOptionsModePicker: View {
     Binding(
       get: { displayedMode },
       set: { requested in
-        let succeeded =
-          requested == .rawText ? draft.switchToRawText() : draft.switchToTable()
-        displayedMode = succeeded ? requested : draft.mode
+        displayedMode = requested
+        // macOS 分段 Picker 在 SwiftUI 更新事务内调用绑定 setter；草稿的
+        // @Published 更新须离开该事务，避免向观察视图同步发布变更。
+        Task { @MainActor in
+          let succeeded =
+            requested == .rawText ? draft.switchToRawText() : draft.switchToTable()
+          displayedMode = succeeded ? requested : draft.mode
+        }
       })
   }
 }
