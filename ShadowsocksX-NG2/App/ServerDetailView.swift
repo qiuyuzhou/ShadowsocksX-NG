@@ -1,14 +1,14 @@
 import SwiftUI
 
 /// 服务器详情：标题反映已保存名称，字段持有独立草稿；订阅服务器只读。
-/// 保存成功后重载提交值，失败保留草稿；分享始终经显式命令读取已保存配置。
+/// 保存成功后重载提交值，失败保留草稿；分享经分区工具栏命令读取已保存
+/// 配置（ServersView+Share.swift）。
 struct ServerDetailView: View {
   @ObservedObject var workflow: CatalogWorkflow
   let serverID: NodeID
   /// 运行时事实（活动目标标记）：由父视图从既有接缝传入，详情面不持控制器。
   let isActiveTarget: Bool
   let errors: ErrorAlertPresenter
-  let clipboard: any TextClipboard
 
   /// 连接字段草稿由共享 module 持有（与新建表单同一 interface），经显式
   /// 编辑命令装载（凭据明文仅在编辑动作中出现）。
@@ -16,9 +16,6 @@ struct ServerDetailView: View {
   @State private var isSubmitting = false
   @State private var loadedServerID: NodeID?
   @FocusState private var fieldFocus: ServerFormField?
-  // 分享/二维码状态由同 module 的 ServerDetailView+Share.swift 扩展驱动。
-  @State var showQR = false
-  @State var qrImage: NSImage?
 
   private var formState: ServerEditForm? {
     workflow.serverEditForm(for: serverID)
@@ -48,9 +45,6 @@ struct ServerDetailView: View {
       if isEditable {
         detailFooter
       }
-    }
-    .popover(isPresented: $showQR) {
-      qrPopover
     }
     .onAppear(perform: loadForm)
     .onChange(of: serverID) { _, _ in loadForm() }
@@ -113,9 +107,6 @@ struct ServerDetailView: View {
       fieldFocus: $fieldFocus
     )
     .padding(.top, 20)
-
-    shareSection
-      .padding(.top, 24)
   }
 
   private func invalidBanner(_ node: CatalogTreeNode) -> some View {
@@ -131,23 +122,6 @@ struct ServerDetailView: View {
       }
     }
     .padding(.top, 16)
-  }
-
-  private var shareSection: some View {
-    HStack(spacing: 10) {
-      Button {
-        copySsUri()
-      } label: {
-        Label("复制 ss:// 链接", systemImage: "doc.on.doc")
-      }
-      Button {
-        generateQR()
-      } label: {
-        Label("二维码…", systemImage: "qrcode")
-      }
-      .disabled(qrPayload() == nil)
-      Spacer(minLength: 0)
-    }
   }
 
   /// 底部操作区：重置恢复已保存值，保存提交草稿。

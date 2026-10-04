@@ -22,7 +22,8 @@ struct ServersView: View {
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
 
   /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
-  @StateObject private var errors = ErrorAlertPresenter()
+  /// 非 private：ServersView+Share.swift 扩展经它呈现分享失败。
+  @StateObject var errors = ErrorAlertPresenter()
 
   // 纯窗口状态（issue #41）：selection/sheet/alert 不进目录 module。
   @State private var renameTarget: NodeID?
@@ -34,6 +35,10 @@ struct ServersView: View {
   @State private var deleteTarget: NodeID?
   @State private var moveTarget: NodeID?
   @State private var rootDropHovering = false
+  // 分享/二维码状态：由 ServersView+Share.swift 扩展驱动，弹窗锚在工具栏
+  // 分享按钮上（原详情区底部分享区已于 2026-10-04 上收至此）。
+  @State var showQR = false
+  @State var qrImage: NSImage?
 
   var body: some View {
     // 主窗口外壳（票 #53）已提供分栏框架；本分区用扁平双栏承载目录与详情
@@ -229,7 +234,7 @@ extension ServersView {
       } else {
         ServerDetailView(
           workflow: workflow, serverID: id, isActiveTarget: activeTargetID == id,
-          errors: errors, clipboard: clipboard)
+          errors: errors)
       }
     } else {
       ContentUnavailableView(
@@ -238,7 +243,7 @@ extension ServersView {
     }
   }
 
-  // MARK: - 工具栏（新建服务器 / 新建分组）
+  // MARK: - 工具栏（新建服务器 / 新建分组 / 分享）
 
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
@@ -259,6 +264,25 @@ extension ServersView {
       }
       .labelStyle(.iconOnly)
       .help("新建分组")
+    }
+    // 分享（分享/导出术语见 CONTEXT.md）：作用于选中的服务器叶子，弹窗内
+    // 提供二维码与复制 ss:// 链接两条通路；无有效载荷即不可用。
+    ToolbarItem(placement: .primaryAction) {
+      Button {
+        generateQR()
+      } label: {
+        Label("分享", systemImage: "square.and.arrow.up")
+      }
+      .labelStyle(.iconOnly)
+      .help("分享")
+      .disabled(sharePayload() == nil)
+      .popover(isPresented: $showQR) {
+        qrPopover
+      }
+      // 弹窗开着时切换选中项：立即收起，避免内容滞留为旧服务器。
+      .onChange(of: selection) {
+        showQR = false
+      }
     }
   }
 
