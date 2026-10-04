@@ -1,127 +1,226 @@
-# ShadowsocksX-NG domain context
+# ShadowsocksX-NG
 
-## Vocabulary
+本领域涵盖 macOS Shadowsocks 客户端的服务器配置、订阅、代理规则与代理控制，以及用户管理这些内容的工作区。术语用于统一产品讨论与代码中的概念，英文名称保留为检索对应。
 
-- **Configuration catalog**: The non-user-visible root of the 2.0 configuration tree. Its ordered top-level children may be server configurations or configuration groups.
-- **Server configuration**: The user-visible connection data for one Shadowsocks server. It is a leaf with an opaque, persistent UUID, a source owner, and a required user-visible name.
-- **Configuration group**: A named, ordered container that may contain server configurations and nested configuration groups. A node has at most one parent, and group membership forms an acyclic tree.
-- **Configuration group export**: A user-requested, shareable snapshot of one configuration group and all of its descendant groups and server configurations. It carries the credentials and configured plugin options needed to recreate those servers, and may include servers that are not activation candidates. It is available only when the selected subtree contains at least one server configuration.
-- **Server share**: The user-requested presentation of one server configuration's `ss://` URI for transfer to other devices, via an on-screen QR code or the clipboard. It reads the committed configuration and resolves credentials at request time and writes no file; a server whose credentials cannot be resolved cannot be shared. It applies to a single server configuration leaf only. _Avoid_: export (in the UI, export is reserved for file snapshots such as the configuration group export and the diagnostics report).
-- **Server form draft**: The UI-held draft of one server configuration's connection fields, shared by the create and edit form faces. It loads from the edit command's resolved form state and commits as one `ServerEditDraft` command; field state, password reveal, and the form grid live in one shared module, so a new form face reuses the same load/commit pair.
-- **Plugin parameter draft**: The server form draft's session state for plugin options: an ordered list of parameter rows with stable row identities, each carrying a parameter name and an optional value that distinguishes a no-equals flag from an equals-with-empty-string value. Parsing and assembly follow the managed v2ray-plugin SIP003 escaping semantics. The raw options string remains the only payload crossing the persistence, credential, and runtime boundaries; viewing, mode switching, and unedited rows keep their original writing verbatim, and only rows the user explicitly edits are re-encoded. Recognizable syntax serves editing only and does not judge the parameter valid for the plugin.
-- **Manual group**: A configuration group owned by the user. It may contain only manually owned nodes; deleting it recursively deletes its descendants. Deletion is always user-confirmed: one confirmation for an empty manual group, and a second confirmation naming the recursive subtree scale when it is non-empty.
-- **Subscription**: A remote configuration source with a persistent opaque UUID and a fixed subscription-group identity. Its URL is a mutable endpoint/credential reference; editing the URL keeps the source identity, while deleting and creating a subscription establishes a new source identity.
-- **Subscription group**: The fixed, source-owned configuration subtree provided by one subscription. Users cannot move or structurally edit its nodes. A subscription server's user-visible name is one remote-derived value from `remarks`, falling back to its address and port when absent, empty, or whitespace-only; each refresh derives that name from the latest remote record. It has no local alias or note override.
-- **Deletable node**: A manually owned node — a server configuration or a manual group — that the user can delete from the catalog. Subscription groups and their remote members are structurally read-only and are not deletable nodes; removing a subscription is subscription management, distinct from node deletion. _Avoid_: removable node.
-- **Active target**: The persisted server configuration or configuration group selected for proxying. When a group is active, the group UUID remains the target even when `sslocal` chooses an individual descendant server.
-- **Activation candidate**: A server configuration with no known local blocking problem for proxy configuration generation. This status does not guarantee remote reachability or correctness of opaque plugin options.
-- **Managed plugin**: A SIP003 plugin executable that the product packages, hash-verifies, re-signs, and distributes only inside the app bundle. The managed set changes only with app releases; users cannot supply their own plugin executables.
-- **Proxy mode**: The user-facing way traffic is routed through the local proxy: rule mode, global (public targets default through Shadowsocks, fixed local targets stay direct via a minimal ACL), or direct mode through an ACL-backed local SOCKS endpoint. All three project the local SOCKS and HTTP inbounds as the system-proxy target.
-- **Rule mode**: The ACL-backed routing mode in which built-in (and later custom) rules choose proxy versus direct per target; the unmatched default action is a separate persisted sub-option.
-- **Rule default action**: The rule-mode sub-option that decides proxy versus direct for targets no rule matches. Factory default is proxy-when-unmatched. _Avoid_: fallback (ambiguous).
-- **Built-in rule snapshot**: An app-shipped, pinned rule set produced by an explicit maintainer update through the sole Python conversion path; Swift validates and consumes snapshots rather than duplicating upstream conversion; ordinary builds only read local snapshots and never fetch or convert. Three sources ship today: **geolocation-cn** (China domain direct candidates), **china-ipv4** (China mainland IPv4 CIDR direct candidates from gaoyifan/china-operator-ip), and **gfwlist** (proxy candidates from the official Base64 AutoProxy GFWList; domain anchors become suffix matches; URL prefixes with an empty or root path, no query, fragment or user information, and a literal domain host become exact matches, discarding scheme and any valid port; `@@` exceptions fully covered by a proxy rule are omitted). A snapshot ships only the rules that can decide routing; same-action absorbed entries and opposite-action shadowed exceptions are omitted at conversion time and never re-enter matching when a broader rule is later disabled. Each snapshot carries one source identity in metadata for the whole set, plus digest, license, attribution, and conversion loss report. Schema 2 and converter 2.0.0 ship compact JSON rules containing only action and match; old snapshots and rule counts outside the generator bounds fail loading.
-- **Custom rule**: A user-owned proxy or direct rule with a stable opaque identity and an exact-domain, domain-suffix, or IPv4/IPv6 address-range match; list order carries no routing priority. Same-action absorption and opposite-action shadowing do not erase saved rules or imply that they determine routing; rules violating the fixed local bypass policy are invalid. _Avoid_: user rule.
-- **Rule identity**: The normalized match condition together with its routing action, shared by equivalent entries from different sources. It is distinct from the persistent identity of an editable custom entry; an individual IP address is equivalent to its full-length CIDR.
-- **Rule source membership**: The collection of sources containing a rule identity; browsing merges equivalent entries while retaining every source membership. Removing a custom entry does not remove matching built-in entries.
-- **Rule disablement**: The user's persisted exclusion of a normalized match condition and routing action across all rule sources; it excludes that rule identity without removing source entries or excluding broader rules covering the same targets. The fixed local bypass policy cannot be disabled.
-- **Rule absorption**: A same-action coverage relationship in the analyzed rule collection in which a broader rule makes a narrower rule redundant for routing; excluding the broader rule makes surviving narrower rules eligible for matching again. Snapshots do not preserve absorbed candidates, so built-in entries omitted at conversion stay omitted even when the broader rule is disabled. It is distinct from opposite-action shadowing and does not erase the user's saved custom rule.
-- **Rule shadowing**: An opposite-action coverage relationship in the analyzed rule collection; it may be complete or partial and may involve the fixed local bypass policy. Built-in shadowed exceptions are omitted from snapshots and are not restored when their blockers are disabled. It is distinct from same-action absorption and does not imply runtime activation.
-- **Snapshot conversion report**: The numeric conversion counts, omissions, rejections, and absorbed total recorded when a built-in rule snapshot was produced. It contains only converted and absorbed totals plus skipped/rejected category counts; shadowed exceptions are counted only as absorbed. It never lists individual upstream entries. It describes snapshot creation rather than the current collection's coverage relationships or runtime state.
-- **Rule document session**: The app-process owner of the final saved custom-rule document. Atomic persistence updates this fact; a runtime application failure never replaces it with an older document. Browsing and runtime projection consume it without rereading the file after a commit. A new app session reads the persisted document again.
-- **Built-in rule snapshots**: The app-process source module shared by browsing and runtime projection. It loads each bundled source on demand, shares concurrent attempts, retains successful snapshots for the process lifetime, and retries a failed source only on an explicit retry request.
-- **Offline rule test**: A rule-only explanation for a supplied domain, IP address, or URL host that returns proxy, direct, or no matching rule, independent of proxy mode, runtime state, and rule default action. It performs no DNS resolution or connectivity check and explicitly leaves DNS-dependent IP rules untested for domain inputs.
-- **Proxy mode selector**: The common user action for choosing rule, global, or direct mode; it is distinct from enabling or disabling the proxy runtime, from the system proxy switch, and from custom-rule management. Its choice persists across GUI restarts.
-- **Agent switch**: The user's persisted on/off intent for the background proxy runtime, distinct from whether that runtime is currently healthy. Its default is off. _Avoid_: proxy switch (ambiguous with the system proxy switch).
-- **System proxy switch**: The user's persisted intent to use 2.0's local proxy endpoints through macOS system proxy settings, distinct from whether those settings are currently applied or suspended. Its default is off. _Avoid_: proxy switch (ambiguous with the agent switch).
-- **System proxy configuration**: The device-wide proxy settings associated with macOS network services, shared across applications and accounts. _Avoid_: global proxy configuration (ambiguous with global proxy mode).
-- **Network service**: A named macOS network configuration entry with its own proxy settings, including entries that are not currently connected. The Home warning calls these entries “网络接口” and identifies them by their names in System Settings; they are distinct from physical interfaces and terminal-command address candidates.
-- **Desired system proxy configuration**: The proxy values currently required by 2.0's saved settings, independent of the values actually present on each network service.
-- **Typed system proxy configuration**: The complete set of desired SOCKS, HTTP, HTTPS, PAC, auto-discovery, simple-hostname exclusion, and exception values managed by 2.0. _Avoid_: complete proxy dictionary (can include fields outside 2.0's managed values).
-- **System proxy configuration difference**: A current semantic mismatch between a network service's managed proxy values and the desired system proxy configuration. It is neither a historical change log nor proof of which application changed the settings.
-- **System proxy repair**: The user's explicit request to align currently differing network services with the desired system proxy configuration. _Avoid_: restore (suggests restoring another application's prior values).
-- **System proxy suspension**: The temporary condition in which system proxy settings have been cleared because the background runtime or the current mode's exit is unavailable, while system proxy intent remains enabled. Failed clearing is a cleanup failure, not successful suspension.
-- **Additional system-proxy exception**: A user-added hostname, domain, IP address, or CIDR that macOS keeps outside 2.0's system proxy. The list defaults to empty and does not change the app's fixed local bypass policy or ACL rules. _Avoid_: bypass list (blurs user additions with app-fixed policy).
-- **Fixed local bypass policy**: App-owned local IP ranges and hostnames that stay direct whether traffic is handled by macOS system-proxy settings or reaches a local proxy inbound. Users can inspect this policy but cannot edit it through additional system-proxy exceptions.
-- **Login item**: The GUI app's registration in the user's login items. It is an independent preference domain: off until the user enables it, and its state is only ever the system login-item registration status.
-- **Independently saved setting item**: A user-facing setting or coherent group of related values that the user explicitly saves as one unit; saving persists and applies that item without committing unrelated unsaved settings. _Avoid_: immediate edit (can imply applying on every keystroke).
-- **HTTP proxy inbound**: The permanent local inbound that accepts HTTP/HTTPS proxy requests through the external tunnel service and its active ACL; it is not a user preference and cannot be disabled, and it is distinct from proxy modes and from the Legacy Privoxy adapter. _Avoid_: HTTP proxy mode.
-- **SOCKS5 UDP relay**: The fixed capability of the local SOCKS5 endpoint to accept UDP ASSOCIATE traffic and relay it through the proxy runtime. It is not a user preference and does not imply that all system UDP traffic is proxied. _Avoid_: system-wide UDP proxy, automatic UDP proxying.
-- **Legacy Privoxy adapter**: The frozen implementation's HTTP(S)-to-local-SOCKS5 bridge. It is a Legacy-only dependency and is not migrated into 2.0.
-- **Listener mode**: The user-facing choice that determines which address families the local proxy listeners accept: this Mac only (IPv4 loopback), all IPv4 interfaces, all IPv4 and IPv6 interfaces, or all IPv6 interfaces only. One mode applies to both the local SOCKS and HTTP proxy inbounds. _Avoid_: Listen scope.
-- **HTTP proxy environment command**: An HTTP-only terminal command that sets lowercase `http_proxy` and `https_proxy` for this Mac's local HTTP proxy inbound. It always targets a loopback address for the selected listener mode.
-- **Terminal proxy environment commands**: Shell-specific commands for zsh/bash and fish that set lowercase `http_proxy` and `https_proxy` through the local HTTP inbound, `all_proxy` through the local SOCKS inbound, and `no_proxy` for `localhost`, `127.0.0.1`, `::1`, and `.local` hostnames. The proxy endpoints use the terminal command address (defaulting to a compatible loopback address), and the commands affect child processes that honor these variables.
-- **Terminal command address**: The user-selected IP address used by both HTTP and SOCKS endpoints in copied terminal proxy environment commands. It defaults to a compatible loopback address; non-local listener modes also offer addresses of enabled Wi-Fi and Ethernet interfaces in the accepted address families, excluding rotating temporary addresses, and the selection lasts only for the current app session without changing listener or system-proxy settings.
-- **Proxy runtime**: The per-user background host process, independent of the GUI's lifetime, that runs the external tunnel service and loads the optional generated ACL sidecar.
-- **Legacy configuration**: The server list and preferences persisted by the frozen implementation in `Legacy/`.
-- **Legacy import**: The user-confirmed, read-only translation of a Legacy configuration's server records into a separate manual group in 2.0. It migrates no preferences, activates no target, and neither starts proxying nor alters the Legacy source.
-- **Runtime configuration file**: The derived JSON document used by the external tunnel service for the active target. It carries only connection-effective values (endpoints, credentials, encryption, plugin, listeners, ACL); user-visible display names are catalog metadata and never enter the file. Fields NG2 omits are left to the bundled `sslocal` defaults; the file is not the user-managed server configuration or subscription document.
-- **Prepared runtime contract**: A deployment-local value holding one runtime document, its encoded JSON bytes, and the digest of those bytes. Planning, persistence, and that deployment's health confirmation share the value; it is not a cache of disk state.
-- **Runtime convergence**: The GUI-side operation that aligns the deployed runtime with one derived runtime definition: it persists the supplied intent, re-expands the committed catalog, derives the runtime document, plans and executes deployment actions under a convergence ticket, verifies launch health, and restores the previous definition as a whole on failure. A change whose derived contract bytes are unchanged against a healthy running runtime performs no convergence work: no contract write, no reload signal, no restart, no launch health re-probe, and no system-proxy reconvergence.
-- **Convergence ticket**: The snapshot of the three concurrency generations (flow, mode change, runtime preparation) that one Runtime convergence captures at entry and rechecks after every await, together with the live agent-switch intent. The four invalidating facts are checked as one; no convergence path checks a subset. The ticket advances its flow component to the occupied generation of the execution it performed and its preparation component after a derivation it triggered. A superseded convergence may not change runtime state, persist intent, or write contracts.
-- **Rules intent ticket**: The fact snapshot that one rule-page operation captures at entry and rechecks as one after every await: the loaded collection with its version, and for write intents additionally the admission gates (complete page, no in-flight transaction, commit seam present, user document loaded). An incomplete page or an advanced collection version supersedes the intent, which then exits without publishing or committing. Address tests capture the whole address-test state so any invalidation drops late results.
-- **Sensitive information**: Server passwords, plugin options (sensitive in their entirety), and nonempty user-provided remote URLs, including subscription URLs.
-- **Credential exposure boundary**: This product reduces accidental disclosure and exposure to other user accounts, but does not guarantee protection against a compromised same-user process, root access, or APFS snapshots and backups; it does not promise secure erasure.
-- **Credential reference**: A non-secret association from a server configuration, subscription, or remote-URL setting to its durable credential; the credential value is kept outside the configuration tree and resolved only when needed.
-- **Diagnostic report**: A user-requested, redacted document containing only approved runtime state, endpoint metadata, aggregate catalog facts, managed-plugin presence, file metadata, and safe GUI event lines. It never contains passwords, plugin options, Keychain values, full remote URLs or tokens, runtime JSON, server addresses, remarks, or raw wrapper log text.
-- **Diagnostic log view**: The explicit view/copy surface for GUI event lines and the raw wrapper `agent.log` tail; child-process verbosity follows `sslocal` defaults unless an external `RUST_LOG` is inherited. Raw wrapper log text is not part of a diagnostic report.
-- **Diagnostic facts**: Aggregate, redacted facts about the catalog and proxy runtime that can enter a diagnostic projection without exposing catalog entries, server addresses, remarks, credential references, URLs, paths, or other sensitive information.
-- **System-level shortcut**: A user-configurable keyboard action registered by the app that can trigger an app action even when the app has no focus.
-  _Avoid_: global hotkey, global shortcut.
-- **Window-local default action shortcut**: A keyboard action bound to the focused app window or form context, such as confirming a dialog; it is distinct from a system-level shortcut.
-- **Workspace destination**: A top-level location in the single 2.0 GUI workspace, such as home, servers, subscriptions, proxy rules, settings, or diagnostics. It is navigation state only; it does not contain a node selection, sheet, alert, or feature draft.
-- **Workspace route**: The in-process navigation choice and intent used to move between workspace destinations from the workspace or another app entry point. It does not persist user configuration or own feature-local state.
-- **Workspace window**: The single main window hosting the workspace. It is presented at every launch unless silent launch is on; while it is open the app presents in its regular form, and once it is closed the status menu is the only way to reopen it.
-- **Adaptive app form**: The app's presentation, which follows its workspace and independent rule-report windows: a regular app with a Dock icon and app-switcher presence while either is open, and a menu-bar-only accessory app with the status menu always available after the last window closes. _Avoid_: menu bar form (the presentation is no longer constant).
-- **Silent launch**: The user preference that a launch present no workspace window, starting in the menu-bar baseline instead. It defaults to off, takes effect on the next launch, and changes nothing about proxy runtime restoration or the login item.
+## 领域术语
 
-## Relationships and invariants
+### 配置与订阅
 
-- Top-level catalog children may be server configurations or groups; there is no artificial user-visible “uncategorized” group.
-- Server and group identities are opaque, persistent UUIDs independent of display name, position, or parent; IDs are not reused for another logical node.
-- Each group stores an explicit child order. A node cannot be shared by multiple groups, and group edges must remain acyclic.
-- Manual and subscription ownership form separate subtrees; a manual group cannot adopt subscription-owned nodes, and subscription-owned nodes cannot be moved into manual groups.
-- New manual servers always receive a new UUID rather than being deduplicated by endpoint or serialized content; Legacy migration preserves an available legacy UUID.
-- Creating or editing a manual server requires a name that is nonempty after trimming leading and trailing whitespace and newlines; rejection changes neither the catalog nor credentials. URI, subscription, and Legacy imports preserve nonblank supplied names and generate a name from the address and port when the supplied name is absent, empty, or whitespace-only: `address:port` for a hostname or IPv4 address and `[address]:port` for an IPv6 address. A generated manual-server name is an ordinary saved name; later endpoint edits do not update it automatically. Names remain catalog metadata rather than activation eligibility or runtime connection fields.
-- Server configurations and configuration groups have no separate node-level enable/disable state. A server configuration is an activation candidate only when no known local blocking problem prevents proxy configuration generation.
-- A server configuration persists its SIP003 plugin program reference and plugin options verbatim. Editing offers only managed plugins as selections; a non-empty but unsupported encryption method or a reference to a program outside the managed set remains stored but makes the server an invalid activation candidate. Opaque plugin options are retained without being declared valid or invalid by the app.
-- A user-initiated edit to a server configuration that changes credential-bearing fields commits the configuration and its credential values as one logical change; if persistence fails, the previous configuration and credential values remain in force.
-- Plugin programs are distributed only as managed plugins; their availability changes only with app releases. If an active target's plugin becomes unavailable, the target is cleared and proxying stops without fallback.
-- Activating a server selects that one server. Activating a group recursively expands activation-candidate server leaves in explicit child order and passes them to the external proxy service; invalid leaves are omitted and surfaced, while a group with no activation candidate rejects activation atomically.
-- An activation command outcome is self-contained: success carries the count of skipped invalid leaves and an atomic rejection carries its typed `ActivationFailure` reason. One session-scoped activation feedback model owns pending state and last-command feedback for the three activation entry points (home target tree, sidebar context menu, group detail) and is single-flight across them; unexpected errors are recorded as feedback and rethrown so each surface chooses inline or alert presentation. Runtime-published activation facts remain the channel for global surfaces (status menu, status card, diagnostics).
-- The active target remains the selected node ID and is not silently replaced by a descendant chosen by `sslocal`. If it is deleted, has no activation candidate, or is otherwise invalid, the target is cleared and proxying stops rather than falling back silently.
-- After a committed edit to the active target's subtree, the target is re-expanded immediately: a non-empty set of activation candidates updates the runtime atomically; no activation candidate clears the target and stops proxying without fallback.
-- A committed catalog edit that leaves the runtime configuration file's bytes unchanged — including edits outside the active target's subtree, remark-only changes, and no-op re-saves — triggers no runtime convergence work: no contract write, no reload signal, no restart of the external tunnel service, and no launch health re-probe. Catalog revalidation (activation-candidate skips, target invalidation) still happens on every commit. Within an active group subtree, a connection-value change — including member order — does change the runtime file and converges.
-- Manual nodes may move between the catalog root and manual groups, carrying their subtree and child order without changing identity or ownership; cross-source moves, shared parents, and cycles are rejected.
-- Manual catalog ownership is independent of proxy mode: removing the manual proxy mode does not remove manual groups, manual servers, or records imported into a manual group.
-- Empty groups may persist and remain editable, but cannot be activated. Deleting a server configuration or an empty manual group takes one user confirmation. Deleting a non-empty manual group recursively deletes its descendants and takes a second confirmation that names the subtree scale and that the subtree's server credentials are removed.
-- A subscription owns its subscription group and its refreshed members; manual groups remain user-owned. Remote connection fields, membership, structure, order, and `remarks` are authoritative; subscription nodes have no local eligibility overlay.
-- Subscription server and nested-group identities use provider-supplied stable IDs scoped to that subscription. When a remote server record has no stable ID, continuity depends on an exact match of its server address and port; changing the name, password, encryption method, plugin program, or plugin options preserves identity. Records without stable IDs that have the same address and port are duplicate identities and reject the whole refresh, even when other fields differ. Distinct provider IDs allow servers at the same endpoint to coexist. Paths and partial endpoint matches must not merge identities.
-- Subscription-owned nodes and nested groups permit no local connection-field, name/remark, membership, parent, order, or eligibility override.
-- Each subscription refresh is a complete, structurally valid snapshot committed atomically. A valid empty snapshot replaces the remote subtree with an empty group; transport, HTTP/authentication, decoding, schema, duplicate-ID, or required-field validation failures leave the last successful snapshot, active target, and runtime state unchanged while marking the source stale. A structurally complete record with an unsupported method or plugin remains in the committed snapshot as an invalid activation candidate. An initial failed refresh leaves an empty group with an error state.
-- The private `x_shadowsocksx_ng` extension is optional decoration on the standard SIP-008 server list. When it is absent, uses an unsupported schema version, or fails validation — unresolvable child references, duplicate or ID-colliding groups, shared parents, or cycles — the refresh still succeeds: the standard flat server list becomes the direct children of the subscription group and only the extension is discarded.
-- Editing a subscription URL keeps the subscription, fixed group, and remote identity namespace; the last successful snapshot remains available until the new URL succeeds. To isolate a different source, delete the old subscription and create a new one. Deleting a subscription removes its source, fixed group, and remote members after explicit confirmation; an active target is cleared and proxying stops without fallback.
-- A Legacy import reads a current snapshot and commits atomically; structurally invalid records are omitted with a report, while unsupported methods or plugins are preserved as invalid activation candidates. Skipping leaves an import entry available, success prevents automatic repetition, and an explicitly requested re-import creates a separate manual group.
-- A unique, syntactically valid Legacy server UUID is preserved. An otherwise valid server with a missing, malformed, or duplicate UUID receives a fresh UUID; invalid records are omitted with a user-visible report.
-- A Legacy import migrates only server records; mode, target, login-item, and all other preferences stay untouched. Legacy passwords, plugin options, and user-provided remote URLs move to credential references; generated configurations, caches, diagnostics, logs, and binaries do not migrate. The imported plugin program reference is preserved verbatim even when 2.0 does not provide that plugin.
-- 2.0 and Legacy are independent applications that may run concurrently. 2.0 never stops Legacy processes, retires Legacy runtime jobs, or transfers preferences; a Legacy import brings over server records only. Their factory-default local endpoint ports are distinct, but enabling 2.0's system proxy switch may replace proxy values in the active network location regardless of which app wrote them.
-- The local SOCKS and HTTP proxy inbounds share one listener mode; the factory default is IPv4 loopback. The other modes bind all interfaces of their selected address families and expose unauthenticated proxy endpoints, whose reachability from other devices depends on the firewall and network. Terminal proxy environment commands are for this Mac's shell and default to a compatible loopback address even when listeners bind to all interfaces; in non-local modes the home command card can point them at an enabled Wi-Fi or Ethernet interface address (see Terminal command address), without changing listener or system-proxy settings.
-- Saving an independently saved setting item persists and applies only that item's complete value. Other unsaved settings remain pending and cannot overwrite the saved item when they are later committed.
-- Listener mode is an independently saved setting item. Saving it does not commit unrelated settings or start a disabled proxy runtime; if the runtime is running, the listener change is applied by restarting it. A saved mode remains selected if runtime convergence fails, and the proxy status UI owns runtime status and restart-failure presentation rather than the settings view or editor.
-- The ports of the locally provided proxy endpoints are explicit user configuration in the range 1000–65535: the system never rewrites a port on its own, and a port conflict rejects proxy start with an error naming the endpoint until the user explicitly chooses a new port. A recovery suggestion only proposes candidate ports (32768–65535, free and distinct from the other endpoints' configured values) and applies only after the user confirms and saves.
-- The SOCKS5 and HTTP listener ports are one independently saved setting item and are validated and persisted together. Invalid or duplicate values and known port conflicts block saving, except when the complete proposed listener configuration matches the active runtime; unknown occupancy is a warning that does not block saving, and a suggested port remains pending until the user saves.
-- A successfully saved port item remains persisted if runtime convergence fails; the UI reflects the saved port values and does not need a separate runtime-error message for this item.
-- The external tunnel service starts and stops with the proxy runtime: its SOCKS and HTTP inbounds are reachable exactly while the agent is running, and neither depends on the GUI being open. The agent runs when the agent switch says so: off by default, and — once turned on — even without an active target it keeps listening with an empty server list.
-- Diagnostic collection is read-only: it never changes the configuration catalog, credentials, proxy runtime, or system proxy settings. A diagnostic report is best-effort; an unavailable fact source is represented as unavailable rather than causing unrelated available facts to be discarded.
-- A diagnostic report contains aggregate catalog facts only. The complete configuration catalog, catalog entries, server addresses, remarks, and credential references never cross into the diagnostic report projection.
-- Raw wrapper log text may be viewed or copied only through the explicit diagnostic log view and never enters a diagnostic report or safe diagnostic projection.
-- Exported GUI event lines are an allowlisted, field-cleaned subset of runtime events; raw event detail remains available only through the explicit diagnostic log view.
-- A diagnostic report presents fixed proxy-state categories rather than free-form failure detail. If its safe projection cannot be constructed, no report is emitted; an unavailable individual fact source remains a marked partial fact instead.
-- A diagnostic export is considered complete only after the user-selected report file is successfully written; opening the export panel or preparing report text is not an export completion.
-- Proxy modes are mutually exclusive: rule mode with proxy-when-unmatched writes the local SOCKS and HTTP/HTTPS system proxies and runs sslocal with a `[proxy_all]` ACL whose bypass list is the fixed local safety rules plus China domain and China IPv4 CIDR direct candidates from the built-in snapshots; rule mode with direct-when-unmatched runs sslocal with a `[bypass_all]` ACL whose proxy list holds only expressible, unshadowed GFWList proxy candidates (the two default actions never unconditionally union all built-in sources), so unmatched targets and IP literals with no matching rule go direct; global writes the local SOCKS and HTTP/HTTPS system proxies and runs sslocal with a `[proxy_all]` ACL whose bypass list is only the fixed local safety rules (no China list, GFWList, or custom rules); direct mode writes the local SOCKS and HTTP/HTTPS system proxies and runs sslocal with `[bypass_all]`, so SOCKS and HTTP requests go direct without a Shadowsocks server. IP-CIDR matching may cause sslocal to issue local DNS queries for unmatched hostnames; the product does not promise that all DNS queries travel through the remote Shadowsocks server. In every mode, the system proxy ExceptionsList contains fixed local IP ranges, `localhost` and `.local` hosts, plus the user's additional system-proxy exceptions (empty by default); the GUI explicitly supplies the simple-hostname exclusion value, defaulting it to on. Applying a typed system proxy configuration disables PAC and auto-discovery, removes PAC URL and JavaScript values, and preserves `Proxies` keys outside its explicit field set. User-added exceptions affect only macOS system-proxy traffic and never enter the ACL. The ACL keeps its fixed local IP and host rules, including the no-dot hostname rule, as the direct-routing guarantee for requests that reach sslocal, including LAN-sharing clients. CGNAT is excluded. IPv6 CIDR strings in system exceptions are not a verified bypass. GFWList `@@` exceptions shadowed by a broader proxy rule are omitted from the ACL and recorded in the conversion report; the product does not claim complete reproduction of GFWList URL/protocol conditions. A change to the active ACL's summary or digest requires a full sslocal restart; the ACL's runtime path is a stable reference and does not change when the proxy mode switches. The wrapper publishes the ACL-backed receipt only after the child owns every configured TCP listener; the controller retains the previous mode and runtime until this instance is verified and restores the previous runtime on verification failure. When a rule/global active target becomes invalid, the agent can keep listening without an available exit; this is distinct from a healthy, usable system proxy. Only traffic that honors the system SOCKS or HTTP/HTTPS proxy settings or explicitly connects to a local inbound is routed; the product does not claim interception of all application or UDP traffic.
-- Preferences have no single restore-all-factory-defaults action. Where a reset exists, it is scoped to one configuration item, never to the whole preference set at once.
-- The proxy mode selector's choice and the rule default action persist with the settings snapshot and survive GUI restarts; a persistence failure keeps the previous mode and sub-option in force and names the reason. Rule, global, and direct mode are always available.
-- The GUI is the user-facing manager; the Shadowsocks tunnel service is an external runtime boundary rather than part of the GUI's domain model.
-- Runtime file deployment prepares contract bytes once and still reads the actual disk contract before choosing actions. ACL digest-manifest hits avoid reading the variant body; a miss reads the existing variant once and reuses those bytes if rollback is needed. An unchanged active-link target is preserved. The synchronous transaction records only completed mutations and attempts every recorded restoration on failure, reporting any restoration failure explicitly. A decoded contract with no ACL body can restore only an existing regular variant file; a missing or unsafe variant fails before publishing its link or contract. Digest metadata is updated only after contract persistence succeeds.
-- The Proxy Rules destination provides browsing through `RulesWorkflow`: it prepares a versioned collection off the UI actor from fixed local policy, all three built-in snapshots, and the custom-rule document. Equivalent identities retain all source memberships and custom UUIDs. Search, source, and action filters intersect; browsing preserves stable source input order with no user sorting; hidden selections are cleared and navigation preserves session query/selection. Source metadata and original conversion reports remain distinct from current coverage explanations. Missing/corrupt inputs explicitly mark the collection incomplete while retaining available sources. The page also tests domains, IP literals, and URL hosts offline against that complete saved collection, independently of browsing filters, runtime state, and the unmatched default action. Results retain all deciding identities and source memberships plus other target-specific hits; domain tests explicitly leave IP rules untested without DNS. Invalid input and incomplete collections are operation errors. Editing the target or retrying clears prior results, and intent tickets reject late tasks. The page supports individual and batch enablement through the Workflow. A schema-2 user document atomically stores custom entries and source-independent disabled identities; schema 1 reads with no disabled records. Disabled identities survive source disappearance and are visible under all sources with the disabled filter, where enabling removes orphan rows. Filtering excludes disabled identities before current coverage analysis and offline matching; runtime analysis separately uses the existing default-action source subset and actual ACL skeleton. Commits finish when the validated rule document is atomically saved and return the saved document. Only persistence blocks repeated edits; runtime application and browsing analysis never prolong a rule operation. Saved enablement, source memberships, custom entries, counts, and document version become available immediately. Coverage explanations retain their previous values while background analysis catches up, with no additional waiting or invalidation UI. Browsing analysis and runtime application independently coalesce nearby saves and consume the latest saved document; stale analysis never replaces newer saved facts. An unchanged document retains the collection. There is no ordinary toolbar reload or post-commit file reread. Initial loading shares bundled source facts with runtime preparation; only failure actions explicitly retry failed sources. Success feedback counts actual saved changes and expires after three seconds; validation and persistence failures remain dismissible with details and contextual retry actions. Runtime application failures belong to proxy status, independently of rule-operation success. A failed source-loading preparation retains cached rows and blocks edits until an explicit successful retry. Runtime projection and ACL compilation use immutable captured inputs off the UI actor, reject superseded intent before deployment, and reuse the compiled document for convergence checks and deployment. Rule deployments run serially and only changed ACL identities restart sslocal. A save during deployment queues convergence to the latest document after that deployment settles. Deployment failure attempts to restore the previous runtime without restoring old saved rules; recovery failures remain explicit runtime errors. Failed rule application is not retried in a loop; another saved change or explicit agent-on retry requests convergence again. The window toolbar adds a single custom rule and custom memberships expose per-row editing through a native sheet. Sheet-local versioned drafts support IPv4/IPv6 IP literals and CIDRs, ASCII/Punycode exact domains and suffixes (including the existing national suffix), normalized previews, and enabled-collection coverage explanations. Previews run outside the UI actor and prepare only the prospective row; explicit saves revalidate the saved version and reuse the same document transaction and feedback path as enablement. Duplicate custom identities and fixed-local proxy conflicts block saving; builtin equivalence and explanatory absorption or shadowing do not. Editing preserves the custom UUID and source metadata, moves only the custom membership, inherits disablement onto the new identity, and retains old disabled records. Additions do not clear an existing disabled identity; edits that would inherit disablement onto an immutable fixed identity are rejected. Cancellation and navigation discard the draft; in-flight commits block repeated saves and interactive dismissal. The operation area counts selected custom memberships and offers single or batch deletion. Workflow preparation captures an immutable custom UUID set and collection version for one confirmation; filtering clears hidden selections, and later selection changes cannot expand the captured set. Confirmation rejects stale or incomplete facts through the same feedback surface as commit failures and uses the same whole-document transaction, retaining builtin memberships and all disabled identities, including orphan records. Saved deletion updates source counts and selection immediately, recomputes relationships in the background, and invalidates the address test; unchanged ACLs do not restart runtime. Cancellation only discards the confirmation.
-- The app presents in the adaptive app form: menu-bar-only after the last workspace or independent rule-report window closes, and with a Dock icon and app-switcher presence while either is open; hiding the app is not closing it and does not change the form; the GUI process keeps running with the status menu available regardless of the workspace window.
-- At launch the GUI presents the workspace window unless silent launch is on; after the workspace window is closed, the status menu is the only way to reopen it. Silent launch changes only window presentation: proxy runtime restoration happens at every launch regardless of it.
+**配置目录（Configuration catalog）**：
+服务器配置与配置组组成的有序树的根，根本身不作为用户可见的配置组。
+
+**服务器配置（Server configuration）**：
+一个 Shadowsocks 服务器的连接资料，包含用户可见名称、来源归属和持久身份，是配置目录中的叶节点。
+
+**配置组（Configuration group）**：
+具有名称和子节点顺序的容器，可包含服务器配置和嵌套配置组；每个节点最多属于一个父节点，组之间不形成环。
+
+**配置组导出（Configuration group export）**：
+用户请求生成的可分享文件快照，包含一个配置组及其全部后代的连接资料和所需凭据。它可以包含不具备激活条件的服务器配置。
+
+**服务器分享（Server share）**：
+通过二维码或剪贴板传递单个服务器配置的 `ss://` URI，供其他设备使用。
+_避免用词_：导出（导出指配置组或诊断报告等文件快照）。
+
+**服务器表单草稿（Server form draft）**：
+用户创建或编辑一个服务器配置时，尚未保存的连接字段集合。
+
+**插件参数草稿（Plugin parameter draft）**：
+服务器表单中尚未保存的有序插件参数集合，每项包含参数名及可选值。无等号的标志与等号后的空值是不同的参数形式。
+
+**手动组（Manual group）**：
+用户拥有的配置组，其后代也由用户拥有。
+
+**订阅（Subscription）**：
+具有持久身份的远程配置来源，对应一个固定的订阅组；订阅 URL 是可修改的访问地址，而非来源身份。
+
+**订阅组（Subscription group）**：
+一个订阅拥有的配置子树，内容和结构以远程资料为准，用户不能在本地覆盖其成员、名称或连接字段。
+
+**可删除节点（Deletable node）**：
+用户拥有且可从配置目录删除的服务器配置或手动组。移除订阅属于订阅管理，与删除节点是不同的操作。
+_避免用词_：可移除节点（Removable node）。
+
+**活动目标（Active target）**：
+用户选定并保存的代理目标，可以是服务器配置或配置组；选择配置组时，目标仍是该组，而非实际被选用的后代服务器。
+
+**激活候选（Activation candidate）**：
+没有已知本地阻断问题、可用于生成代理配置的服务器配置。它不保证远程可达，也不表示插件参数已经验证有效。
+
+**托管插件（Managed plugin）**：
+由产品随应用发布的 SIP003 插件，用户可选择的插件程序限定在这一集合中。
+
+**旧版配置（Legacy configuration）**：
+冻结的旧版客户端保存的服务器列表与偏好设置。
+
+**旧版导入（Legacy import）**：
+经用户确认，将旧版服务器资料转换为新客户端独立手动组的操作。它只迁移服务器资料，保留旧版来源和新客户端现有偏好设置。
+
+### 代理规则
+
+**代理模式（Proxy mode）**：
+用户选择的流量路由方式，包括规则模式、全局模式和直连模式。全局模式下公共目标默认经 Shadowsocks 转发，固定本地目标仍直连。
+
+**规则模式（Rule mode）**：
+由内置规则和自定义规则决定各目标代理或直连的路由模式；未匹配目标的处理方式由规则默认动作决定。
+
+**规则默认动作（Rule default action）**：
+规则模式下，没有规则匹配目标时采用的代理或直连动作。
+_避免用词_：回退（Fallback，含义不明确）。
+
+**内置规则快照（Built-in rule snapshot）**：
+随应用发布的固定规则集，包含来源、归属与转换报告等资料。它只保留转换后可决定路由的规则，不保留被吸收或遮蔽而省略的上游条目。
+
+**自定义规则（Custom rule）**：
+用户拥有的代理或直连规则，以精确域名、域名后缀或 IPv4/IPv6 地址范围作为匹配条件，并具有持久身份。列表顺序不代表路由优先级。
+_避免用词_：用户规则（User rule）。
+
+**规则身份（Rule identity）**：
+规范化匹配条件与路由动作的组合，用于识别不同来源中的等价规则。它与可编辑自定义条目的持久身份不同，单个 IP 地址与其完整前缀长度的 CIDR 等价。
+
+**规则来源归属（Rule source membership）**：
+一个规则身份所属的全部来源；等价条目合并展示时仍保留各来源归属。
+
+**规则停用（Rule disablement）**：
+用户保存的、跨全部来源排除某个规则身份的选择；来源条目仍保留，覆盖同一目标的更宽规则也不因此被停用。固定本地绕过策略不能停用。
+
+**规则吸收（Rule absorption）**：
+同动作规则之间的覆盖关系，其中较宽规则使较窄规则在路由判定中冗余。它与反动作遮蔽不同，也不删除已保存的自定义规则。
+
+**规则遮蔽（Rule shadowing）**：
+动作相反的规则之间的覆盖关系，可以是全部或部分覆盖，也可以涉及固定本地绕过策略。它与同动作吸收不同，也不表示规则已在运行中生效。
+
+**快照转换报告（Snapshot conversion report）**：
+生成内置规则快照时记录的转换、吸收、跳过与拒绝数量。它描述快照生成时的结果，而非当前规则集合的覆盖关系或运行状态。
+
+**离线规则测试（Offline rule test）**：
+针对域名、IP 地址或 URL 主机，仅依据规则给出“代理／直连／未匹配规则”的解释。它独立于代理模式、运行状态和规则默认动作，不解析 DNS，也不测试连通性。
+
+### 代理控制与网络
+
+**代理模式选择器（Proxy mode selector）**：
+用户选择规则、全局或直连模式的统一入口，与代理服务开关、系统代理开关和自定义规则管理分别对应不同意图。
+
+**代理服务开关（Agent switch）**：
+用户保存的后台代理服务开启或关闭意图，与服务当前是否健康不同。
+_避免用词_：代理开关（Proxy switch，与系统代理开关混淆）。
+
+**系统代理开关（System proxy switch）**：
+用户保存的、通过 macOS 系统代理设置使用本地代理入口的意图，与设置当前是否已应用或暂停不同。
+_避免用词_：代理开关（Proxy switch，与代理服务开关混淆）。
+
+**系统代理配置（System proxy configuration）**：
+macOS 网络服务上的设备级代理设置，由不同应用与用户账户共享。
+_避免用词_：全局代理配置（Global proxy configuration，与全局代理模式混淆）。
+
+**网络服务（Network service）**：
+macOS 中具有独立代理设置的命名网络配置项，包括当前未连接的项。它与物理接口及终端命令地址候选不同。
+
+**期望系统代理配置（Desired system proxy configuration）**：
+新客户端已保存设置所要求的代理值，与各网络服务上实际存在的值不同。
+
+**受管系统代理配置（Typed system proxy configuration）**：
+新客户端负责管理的 SOCKS、HTTP、HTTPS、PAC、自动发现、简单主机名排除和例外值的完整集合。
+_避免用词_：完整代理字典（Complete proxy dictionary，可能包含产品管理范围外的值）。
+
+**系统代理配置差异（System proxy configuration difference）**：
+网络服务上的受管代理值与期望系统代理配置之间当前存在的语义差异。它不表示历史变更，也不能证明由哪个应用造成。
+
+**系统代理修复（System proxy repair）**：
+用户明确请求将存在差异的网络服务对齐到期望系统代理配置的操作。
+_避免用词_：恢复（Restore，可能暗示恢复其他应用的旧值）。
+
+**系统代理暂停（System proxy suspension）**：
+后台代理服务或当前模式的出口不可用时，系统代理设置已清除、但系统代理意图仍开启的临时状态。清除失败属于清理失败，不属于成功暂停。
+
+**附加系统代理例外（Additional system-proxy exception）**：
+用户添加的主机名、域名、IP 地址或 CIDR，用于让 macOS 将对应流量排除在系统代理之外。它不改变固定本地绕过策略或代理规则。
+_避免用词_：绕过列表（Bypass list，混淆用户附加项与产品固定策略）。
+
+**固定本地绕过策略（Fixed local bypass policy）**：
+产品规定始终直连的本地 IP 范围与主机名，适用于系统代理和本地代理入口。用户可查看该策略，但不能通过附加系统代理例外修改它。
+
+**HTTP 代理入口（HTTP proxy inbound）**：
+后台代理服务提供的本地 HTTP/HTTPS 请求入口，与代理模式和旧版 Privoxy 适配器不同。
+_避免用词_：HTTP 代理模式（HTTP proxy mode）。
+
+**SOCKS5 UDP 中继（SOCKS5 UDP relay）**：
+本地 SOCKS5 入口接受 UDP ASSOCIATE 流量并通过代理服务中继的固定能力。它不表示系统全部 UDP 流量都会被代理。
+_避免用词_：系统级 UDP 代理、自动 UDP 代理。
+
+**旧版 Privoxy 适配器（Legacy Privoxy adapter）**：
+冻结旧版中，将 HTTP(S) 请求桥接到本地 SOCKS5 的组件，仅属于旧版实现。
+
+**监听模式（Listener mode）**：
+本地 SOCKS 与 HTTP 代理入口共同使用的地址族和可访问范围选项，包括仅本机、全部 IPv4 接口、全部 IPv4 与 IPv6 接口、仅全部 IPv6 接口。
+_避免用词_：监听范围（Listen scope）。
+
+**HTTP 代理环境命令（HTTP proxy environment command）**：
+仅设置本机 HTTP/HTTPS 代理环境变量的终端命令，目标为监听模式对应的回环地址。
+
+**终端代理环境命令（Terminal proxy environment commands）**：
+适用于 zsh/bash 和 fish 的命令，通过 HTTP 与 SOCKS 入口设置代理环境变量，并设置本地主机例外。它只影响遵循这些环境变量的子进程。
+
+**终端命令地址（Terminal command address）**：
+复制的终端代理环境命令中，HTTP 与 SOCKS 入口共同使用的 IP 地址。它是当前应用会话内的选择，与监听设置和系统代理设置独立。
+
+**代理运行服务（Proxy runtime）**：
+为当前用户提供代理入口与外部隧道服务的后台服务，其生命周期独立于图形界面。
+
+**运行配置文件（Runtime configuration file）**：
+供外部隧道服务使用、由活动目标派生的连接配置，包含端点、凭据、加密、插件、监听与规则信息。它与用户管理的服务器配置和订阅文档不同。
+
+**运行状态收敛（Runtime convergence）**：
+将已部署的代理服务对齐到期望运行配置的过程，与保存用户配置意图是不同的概念。
+
+### 设置与工作区
+
+**登录项（Login item）**：
+图形界面应用在用户登录项中的系统注册，是独立的偏好设置。
+
+**独立保存设置项（Independently saved setting item）**：
+用户作为一个整体明确保存的设置或一组关联值，其保存边界不包含其他未保存设置。
+_避免用词_：即时编辑（Immediate edit，可能暗示每次按键都应用）。
+
+**系统级快捷键（System-level shortcut）**：
+用户可配置的键盘操作，即使应用未获得焦点也能触发应用动作。
+_避免用词_：全局热键（Global hotkey）、全局快捷键（Global shortcut）。
+
+**窗口内默认动作快捷键（Window-local default action shortcut）**：
+绑定到当前聚焦窗口或表单的键盘操作，例如确认对话框；它与系统级快捷键不同。
+
+**工作区页面（Workspace destination）**：
+单一工作区中的顶层位置，例如首页、服务器、订阅、代理规则、设置或诊断。它只表示导航位置，不包含节点选择或功能草稿。
+
+**工作区路由（Workspace route）**：
+从工作区或其他应用入口切换工作区页面的导航选择与意图，与用户配置和功能局部状态不同。
+
+**工作区窗口（Workspace window）**：
+承载工作区的唯一主窗口；关闭后可从状态菜单重新打开。
+
+**自适应应用形态（Adaptive app form）**：
+随工作区和独立规则报告窗口的开启状态变化的应用呈现方式：有窗口时显示 Dock 图标并参与应用切换，最后一个窗口关闭后仅保留菜单栏状态菜单。
+_避免用词_：菜单栏形态（Menu bar form，应用形态并非恒定）。
+
+**静默启动（Silent launch）**：
+启动时不显示工作区窗口、从菜单栏形态开始的用户偏好。它只影响窗口呈现，与代理服务恢复和登录项分别对应不同设置。
+
+### 凭据与诊断
+
+**敏感信息（Sensitive information）**：
+服务器密码、完整插件选项，以及用户提供的非空远程 URL，包括订阅 URL。
+
+**凭据暴露边界（Credential exposure boundary）**：
+产品降低意外泄露及向其他用户账户暴露凭据的保护范围。该范围不包含同一用户进程被攻破、root 访问或快照与备份，也不承诺安全擦除。
+
+**凭据引用（Credential reference）**：
+服务器配置、订阅或远程 URL 设置与其持久凭据之间的非秘密关联，与凭据值本身不同。
+
+**诊断报告（Diagnostic report）**：
+用户请求生成的脱敏文档，包含允许披露的运行状态、端点元数据、配置汇总及安全事件资料。它排除敏感信息、服务器地址、备注和原始日志。
+
+**诊断日志视图（Diagnostic log view）**：
+用户明确查看或复制界面事件与后台服务原始日志的入口，所展示的原始日志不属于诊断报告。
+
+**诊断事实（Diagnostic facts）**：
+可供诊断报告使用的配置目录与代理服务汇总事实，已经脱敏，且不暴露配置条目或敏感信息。

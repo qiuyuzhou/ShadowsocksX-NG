@@ -16,6 +16,8 @@ triage 标签使用五个默认角色名作为标签字符串(needs-triage / nee
 
 single-context:根目录一个 `GLOSSARY.md` + `docs/adr/`,按需惰性创建。见 `docs/agents/domain.md`。
 
+`GLOSSARY.md` 和新建 ADR 的正文使用简体中文，代码标识符与必要的英文术语保留原文。已有 ADR 保留原文，不作语言迁移。
+
 现状与已定设计以当前代码、`GLOSSARY.md` 和 `docs/adr/` 为准。仅 `GLOSSARY.md` 和 `docs/adr/` 持续维护为最新状态；判断当前实现时，以当前代码为事实依据。将设计文档或研究报告作为实现依据前，应先在代码中核实相关描述。
 
 `docs/design/` 记录对应任务执行时的需求、设计与规格，仅作为历史参考，不代表最新代码现状。
