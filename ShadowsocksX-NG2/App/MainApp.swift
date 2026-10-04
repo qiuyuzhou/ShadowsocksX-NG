@@ -17,6 +17,9 @@ struct ShadowsocksXNG2App: App {
   @StateObject private var windowActivation: WindowActivationPolicyCoordinator
   private let textClipboard: any TextClipboard
   private let workspaceContent: MainWindowView
+  /// 窗口工具栏标签风格默认「图标和文本」。绑定版修饰符让用户仍可经工具栏
+  /// 右键改选，选择回写本 AppStorage 键持久化，下次启动延续。
+  @AppStorage("toolbarLabelStyle") private var toolbarLabelStyle: ToolbarLabelStyle = .titleAndIcon
   /// 启动呈现行为在进程内一次性定格（ADR 0017）：静默启动偏好关闭（默认）
   /// 时 presented，开启时 suppressed。切换偏好当次会话无影响，下次启动生效。
   private let launchPresentation: SceneLaunchBehavior
@@ -67,7 +70,12 @@ struct ShadowsocksXNG2App: App {
     }
     .defaultLaunchBehavior(launchPresentation)
     .defaultSize(width: 960, height: 640)
+    .windowToolbarLabelStyle($toolbarLabelStyle)
 
+    rulesReportScene
+  }
+
+  private var rulesReportScene: some Scene {
     Window(RulesCopy.text("快照制作时的转换报告"), id: RulesReportView.sceneID) {
       RulesReportView(workflow: rulesWorkflow)
         .modifier(WindowActivationPolicy(coordinator: windowActivation))
@@ -76,6 +84,7 @@ struct ShadowsocksXNG2App: App {
     .restorationBehavior(.disabled)
     .commandsRemoved()
     .defaultSize(width: 680, height: 480)
+    .windowToolbarLabelStyle($toolbarLabelStyle)
   }
 }
 

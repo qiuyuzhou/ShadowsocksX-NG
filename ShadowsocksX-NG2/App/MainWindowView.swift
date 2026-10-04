@@ -97,7 +97,6 @@ struct MainWindowView: View {
     } label: {
       Label("导入", systemImage: "square.and.arrow.down")
     }
-    .labelStyle(.iconOnly)
     .help("导入")
   }
 

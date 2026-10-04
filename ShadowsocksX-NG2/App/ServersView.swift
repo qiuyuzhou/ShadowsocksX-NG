@@ -253,7 +253,6 @@ extension ServersView {
       } label: {
         Label("新建服务器", systemImage: "plus")
       }
-      .labelStyle(.iconOnly)
       .help("新建服务器")
     }
     ToolbarItem(placement: .primaryAction) {
@@ -262,7 +261,6 @@ extension ServersView {
       } label: {
         Label("新建分组", systemImage: "folder.badge.plus")
       }
-      .labelStyle(.iconOnly)
       .help("新建分组")
     }
     // 删除：作用于当前选中的服务器叶子或手动分组，确认弹窗与右键菜单共用
@@ -274,7 +272,6 @@ extension ServersView {
       } label: {
         Label("删除", systemImage: "trash")
       }
-      .labelStyle(.iconOnly)
       .help("删除")
       .disabled(!canDeleteSelection)
     }
@@ -286,7 +283,6 @@ extension ServersView {
       } label: {
         Label("分享", systemImage: "square.and.arrow.up")
       }
-      .labelStyle(.iconOnly)
       .help("分享")
       .disabled(sharePayload() == nil)
       .popover(isPresented: $showQR) {
