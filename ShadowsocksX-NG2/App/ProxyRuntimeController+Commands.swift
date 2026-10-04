@@ -154,49 +154,10 @@ extension ProxyRuntimeController {
     await deploy(document)
   }
 
-  /// 把「运行定义档」意图推到运行时：派生文档 → 收敛脊柱 apply（幂等跳过、
-  /// 计划执行、健康门）。
+  /// 普通部署意图；配置派生、执行与失败呈现由运行状态收敛 module 拥有。
   @discardableResult
   func deploy(_ sourceDocument: SslocalRuntimeDocument) async -> ConvergenceResult {
-    if listenSettingsUnreadable || settingsUnreadable {
-      await refuseDeployForUnreadableListenSettings()
-      return .failed
-    }
-    let contract: PreparedRuntimeContract
-    do {
-      contract = try PreparedRuntimeContract(await runtimeDocument(sourceDocument, for: proxyMode))
-    } catch RulePreparationError.superseded {
-      return .superseded
-    } catch {
-      // 规则快照缺失/损坏：不静默退化成全局（issue #63 AC4）。
-      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-      state = .serviceFailed(.runtimeFile)
-      return .failed
-    }
-    return await deployPrepared(contract)
-  }
-
-  @discardableResult
-  func deployPrepared(_ contract: PreparedRuntimeContract) async -> ConvergenceResult {
-    let document = contract.document
-    var ticket = convergenceTicket()
-    return await apply(
-      document, ticket: &ticket,
-      requiresReceipt: document.aclRuntime != nil,
-      convergeProxyOnSuccess: true,
-      preserveProxyOnFailure: false,
-      proxyTail: .none, rollback: nil)
-  }
-
-  /// D8「任何路径不静默改端口」：监听设置不可读时以占位出厂端口部署等于
-  /// 系统擅自改端口——停止运行时并点名呈现，等用户在设置区修复（#33 接线）。
-  private func refuseDeployForUnreadableListenSettings() async {
-    RuntimeLog.emit(.activationFailed(reason: "listen settings unreadable"))
-    _ = await execute(.stop, document: nil)
-    lastDocument = nil
-    skippedServers = []
-    state = .launchFailed(.unreadableSettings)
-    await systemProxyObserver.holdSystemProxyIntent()
+    await convergeRuntime(.deployment(sourceDocument))
   }
 
   /// 活动目标失效（issue #60）：清除并持久化 nil，点名原因独立呈现；agent

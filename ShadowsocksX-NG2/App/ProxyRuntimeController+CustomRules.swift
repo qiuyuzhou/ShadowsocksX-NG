@@ -126,53 +126,8 @@ extension ProxyRuntimeController {
         let generation = self.ruleApplicationGeneration
         do { try await self.ruleApplicationDelay() } catch { return }
         guard generation == self.ruleApplicationGeneration else { continue }
-        await self.applySavedRuleDocument()
+        await self.convergeRuntime(.savedRules)
         if generation == self.ruleApplicationGeneration { return }
-      }
-    }
-  }
-
-  private func applySavedRuleDocument() async {
-    guard proxyMode == .rule, settings.agentEnabled, state != .off,
-      let currentDocument = lastDocument ?? runtimeFileStore.loadDocument()
-    else { return }
-    let revision = ruleDocuments.revision
-    let plan = RollbackPlan(
-      document: currentDocument, state: state,
-      payload: .runtimeOnly,
-      systemProxyIntentAtCapture: settings.systemProxyEnabled,
-      convergeProxyOnIntentChange: false)
-    let nextDocument: SslocalRuntimeDocument
-    do {
-      nextDocument = try await runtimeDocument(currentDocument, for: proxyMode)
-    } catch RulePreparationError.superseded {
-      return
-    } catch {
-      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
-      ruleApplicationFailure = .service(.runtimeFile)
-      return
-    }
-    guard nextDocument.aclRuntime != currentDocument.aclRuntime || ruleApplicationFailure != nil
-    else {
-      ruleApplicationFailure = nil
-      return
-    }
-    modeChangeGeneration += 1
-    var ticket = convergenceTicket()
-    let result = await apply(
-      nextDocument, ticket: &ticket,
-      requiresReceipt: true, convergeProxyOnSuccess: false,
-      preserveProxyOnFailure: true, proxyTail: .converge, rollback: plan)
-    switch result {
-    case .applied, .unchanged:
-      if revision == ruleDocuments.revision { ruleApplicationFailure = nil }
-    case .superseded:
-      break
-    case .failed:
-      let failure = ProxyRuntimeFacts(state: state).failure ?? .service(.runtimeFile)
-      _ = await restore(plan, ticket: &ticket)
-      if convergenceIsCurrent(ticket), revision == ruleDocuments.revision {
-        ruleApplicationFailure = failure
       }
     }
   }

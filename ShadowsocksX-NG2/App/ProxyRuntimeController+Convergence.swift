@@ -21,7 +21,7 @@ struct RuntimeExecutionOutcome {
 /// 与推进时机:flow 分量在 execute 后以实际占用值推进,mode 切换路径在
 /// 派生后推进 preparation 分量(派生自身会推进它),rules 部署在推进 mode
 /// 代际之后捕获。
-struct ConvergenceTicket: Equatable {
+private struct ConvergenceTicket: Equatable {
   /// 并发流代际;每次 execute 之后由调用方以实际占用值推进。
   var flow: Int
   /// 模式切换代际;捕获后不再变化。
@@ -32,7 +32,7 @@ struct ConvergenceTicket: Equatable {
 
 extension ProxyRuntimeController {
   /// 以当前代际捕获收敛票据。
-  func convergenceTicket() -> ConvergenceTicket {
+  private func convergenceTicket() -> ConvergenceTicket {
     ConvergenceTicket(
       flow: flowGeneration, mode: modeChangeGeneration,
       preparation: runtimePreparationGeneration)
@@ -40,7 +40,7 @@ extension ProxyRuntimeController {
 
   /// 票据是否仍代表当前收敛:并发流 / 模式切换 / 派生三个代际均未前进,
   /// 且会话内 agent 意图仍开启。
-  func convergenceIsCurrent(_ ticket: ConvergenceTicket) -> Bool {
+  private func convergenceIsCurrent(_ ticket: ConvergenceTicket) -> Bool {
     ticket.flow == flowGeneration && ticket.mode == modeChangeGeneration
       && ticket.preparation == runtimePreparationGeneration
       && settings.agentEnabled
@@ -51,7 +51,7 @@ extension ProxyRuntimeController {
   /// 存活、控制器处于健康运行态——计划层动作序列为空即幂等跳过。判定在
   /// 置 `starting` 之前进行，跳过路径不闪状态、不重走健康门；磁盘漂移或
   /// wrapper 失踪时动作序列自然非空，走完整 deploy 自愈。
-  func convergencePlanIsEmpty(
+  private func convergencePlanIsEmpty(
     _ document: SslocalRuntimeDocument, preparedContract: PreparedRuntimeContract?
   ) -> Bool {
     switch state {
@@ -96,46 +96,162 @@ extension ProxyRuntimeController {
     }
   }
 
-  /// 收敛脊柱 apply 层的结果。
+  /// 一个意图入口隐藏派生、执行政策、恢复和失败呈现；调用者不组合执行选项。
+  enum RuntimeConvergenceIntent {
+    case deployment(SslocalRuntimeDocument)
+    case modeTransition(ModeTransitionSnapshot)
+    case savedRules
+  }
+
+  /// 用户改变模式前的事实，由意图命令捕获；恢复计划只在收敛实现中构造。
+  struct ModeTransitionSnapshot {
+    let settings: ProxySettings
+    let mode: ProxyMode
+    let document: SslocalRuntimeDocument?
+    let state: AgentRunState
+  }
+
   enum ConvergenceResult {
-    /// 部署已执行且启动健康通过。
     case applied
-    /// 派生契约与运行中运行时逐字节相同：不写契约、不发信号、不闪
-    /// starting、不重走健康门与系统代理收敛（幂等跳过）。
     case unchanged
-    /// 执行或健康门失败；回滚由调用方按 RollbackPlan 处理。
+    /// 派生或部署失败；该意图要求的恢复与失败呈现已经处理。
     case failed
-    /// 被更新的收敛取代：不得再变更任何状态。
+    /// 被新意图取代，不得恢复或发布旧结果。
     case superseded
   }
 
-  /// 成功收敛后的系统代理收尾方式。
-  enum ProxyConvergenceTail {
-    /// 强制重收敛（mode 切换：系统代理值随模式 ACL 变化）。
-    case forceApply
-    /// 常规收敛（rules 提交）。
-    case converge
-    /// 无需收尾（deploy 路径由健康门自身的 convergeProxyOnSuccess 收敛）。
-    case none
+  @discardableResult
+  func convergeRuntime(_ intent: RuntimeConvergenceIntent) async -> ConvergenceResult {
+    switch intent {
+    case .deployment(let source): return await convergeDeployment(source)
+    case .modeTransition(let snapshot): return await convergeModeTransition(snapshot)
+    case .savedRules: return await convergeSavedRules()
+    }
   }
 
-  /// 收敛脊柱 apply 层：把一个已派生的运行时定义推到运行时——幂等跳过、
-  /// 计划执行、启动健康门、成功后按参数收敛系统代理。失败不在此回滚：
-  /// 返回 `.failed` 由调用方按 RollbackPlan 整体恢复。
-  ///
-  /// 票据 inout 传参：execute / 派生后的代际推进对调用方可见，调用方
-  /// 在 apply 之后的时效检查使用的是推进过的票据。
-  ///
-  /// `starting` 在 execute 之前置位：`.run` 计划的动作全部同步执行，二者
-  /// 之间不存在可见的挂起点，与旧路径「deploy 后置位」不可区分。
-  func apply(
+  private func convergeDeployment(_ source: SslocalRuntimeDocument) async -> ConvergenceResult {
+    if listenSettingsUnreadable || settingsUnreadable {
+      RuntimeLog.emit(.activationFailed(reason: "listen settings unreadable"))
+      _ = await execute(.stop, document: nil)
+      lastDocument = nil
+      skippedServers = []
+      state = .launchFailed(.unreadableSettings)
+      await systemProxyObserver.holdSystemProxyIntent()
+      return .failed
+    }
+    let contract: PreparedRuntimeContract
+    do {
+      contract = try PreparedRuntimeContract(await runtimeDocument(source, for: proxyMode))
+    } catch RulePreparationError.superseded {
+      return .superseded
+    } catch {
+      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+      state = .serviceFailed(.runtimeFile)
+      return .failed
+    }
+    var ticket = convergenceTicket()
+    return await apply(contract.document, ticket: &ticket, policy: .deployment)
+  }
+
+  private func convergeModeTransition(_ snapshot: ModeTransitionSnapshot) async -> ConvergenceResult
+  {
+    var ticket = convergenceTicket()
+    guard settings.agentEnabled, state != .off,
+      let current = lastDocument ?? runtimeFileStore.loadDocument()
+    else {
+      systemProxyObserver.modeTransitionAwaitingRuntime()
+      return .unchanged
+    }
+    let plan = RollbackPlan(
+      document: snapshot.document ?? current, state: snapshot.state,
+      payload: .modeTransition(
+        mode: snapshot.mode, ruleDefaultAction: snapshot.settings.ruleDefaultAction),
+      systemProxyIntentAtCapture: snapshot.settings.systemProxyEnabled,
+      convergeProxyOnIntentChange: true)
+    let next: SslocalRuntimeDocument
+    do {
+      next = try await runtimeDocument(current, for: proxyMode)
+    } catch RulePreparationError.superseded {
+      return .superseded
+    } catch {
+      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+      ticket.preparation = runtimePreparationGeneration
+      await recoverModeTransition(plan, ticket: &ticket)
+      return .failed
+    }
+    // 派生会推进 preparation；仅该意图在派生前捕获了收敛票据。
+    ticket.preparation = runtimePreparationGeneration
+    guard next.aclRuntime != current.aclRuntime else {
+      // 保留原有特殊路径：无系统代理意图即结束；否则只检查健康，不部署或恢复。
+      guard settings.systemProxyEnabled else { return .unchanged }
+      state = .starting
+      return await presentLaunchHealth(next) ? .applied : .failed
+    }
+    let result = await apply(next, ticket: &ticket, policy: .modeTransition)
+    if case .failed = result { await recoverModeTransition(plan, ticket: &ticket) }
+    return result
+  }
+
+  private func recoverModeTransition(_ plan: RollbackPlan, ticket: inout ConvergenceTicket) async {
+    let report = await restore(plan, ticket: &ticket)
+    if report.runtimeHealthy == true, report.payloadFailureDescription != nil {
+      state = .serviceFailed(.persistence)
+    }
+  }
+
+  private func convergeSavedRules() async -> ConvergenceResult {
+    guard proxyMode == .rule, settings.agentEnabled, state != .off,
+      let current = lastDocument ?? runtimeFileStore.loadDocument()
+    else { return .unchanged }
+    let revision = ruleDocuments.revision
+    let plan = RollbackPlan(
+      document: current, state: state, payload: .runtimeOnly,
+      systemProxyIntentAtCapture: settings.systemProxyEnabled,
+      convergeProxyOnIntentChange: false)
+    let next: SslocalRuntimeDocument
+    do {
+      next = try await runtimeDocument(current, for: proxyMode)
+    } catch RulePreparationError.superseded {
+      return .superseded
+    } catch {
+      RuntimeLog.emit(.runtimePersistFailed(detail: String(describing: error)))
+      ruleApplicationFailure = .service(.runtimeFile)
+      return .failed
+    }
+    guard next.aclRuntime != current.aclRuntime || ruleApplicationFailure != nil else {
+      ruleApplicationFailure = nil
+      return .unchanged
+    }
+    modeChangeGeneration += 1
+    var ticket = convergenceTicket()
+    let result = await apply(next, ticket: &ticket, policy: .savedRules)
+    switch result {
+    case .applied, .unchanged:
+      if revision == ruleDocuments.revision { ruleApplicationFailure = nil }
+    case .superseded:
+      break
+    case .failed:
+      let failure = ProxyRuntimeFacts(state: state).failure ?? .service(.runtimeFile)
+      _ = await restore(plan, ticket: &ticket)
+      if convergenceIsCurrent(ticket), revision == ruleDocuments.revision {
+        ruleApplicationFailure = failure
+      }
+    }
+    return result
+  }
+
+  /// 三种意图的执行差异只在 module 内选择，不能由调用者拼成任意组合。
+  private enum DeploymentPolicy {
+    case deployment
+    case modeTransition
+    case savedRules
+  }
+
+  /// 共用执行脊柱；恢复在同一 module 的意图实现中，票据不越过意图 seam。
+  private func apply(
     _ document: SslocalRuntimeDocument,
     ticket: inout ConvergenceTicket,
-    requiresReceipt: Bool,
-    convergeProxyOnSuccess: Bool,
-    preserveProxyOnFailure: Bool,
-    proxyTail: ProxyConvergenceTail,
-    rollback: RollbackPlan?
+    policy: DeploymentPolicy
   ) async -> ConvergenceResult {
     let contract = try? PreparedRuntimeContract(document)
     if convergencePlanIsEmpty(document, preparedContract: contract) {
@@ -152,17 +268,17 @@ extension ProxyRuntimeController {
     guard execution.succeeded else { return .failed }
     let healthy = await presentLaunchHealth(
       document,
-      requiresReceipt: requiresReceipt,
-      convergeProxyOnSuccess: convergeProxyOnSuccess,
-      preserveProxyOnFailure: preserveProxyOnFailure, preparedContract: contract)
+      requiresReceipt: policy != .deployment || document.aclRuntime != nil,
+      convergeProxyOnSuccess: policy == .deployment,
+      preserveProxyOnFailure: policy != .deployment, preparedContract: contract)
     guard convergenceIsCurrent(ticket) else { return .superseded }
     guard healthy else { return .failed }
     lastDocument = document
     ruleApplicationFailure = nil
-    switch proxyTail {
-    case .forceApply: await systemProxyObserver.convergeSystemProxy(forceApply: true)
-    case .converge: await systemProxyObserver.convergeSystemProxy()
-    case .none: break
+    switch policy {
+    case .modeTransition: await systemProxyObserver.convergeSystemProxy(forceApply: true)
+    case .savedRules: await systemProxyObserver.convergeSystemProxy()
+    case .deployment: break
     }
     return .applied
   }
@@ -173,7 +289,8 @@ extension ProxyRuntimeController {
   /// 由计划层对注销/信号/注册的裁决保证与旧 restore 例程等价)→ 启动健康
   /// 门。载荷持久化失败不阻断文档恢复;文档恢复失败或健康不过即撤下系统
   /// 代理意图。
-  func restore(_ plan: RollbackPlan, ticket: inout ConvergenceTicket) async -> RestoreReport {
+  private func restore(_ plan: RollbackPlan, ticket: inout ConvergenceTicket) async -> RestoreReport
+  {
     guard convergenceIsCurrent(ticket) else {
       return RestoreReport(payloadFailureDescription: nil, runtimeHealthy: nil)
     }
@@ -235,7 +352,7 @@ extension ProxyRuntimeController {
 
 /// 收敛失败时的整体回滚计划：恢复到哪个运行时文档、健康通过后呈现哪个
 /// 状态、以及除文档外还要重持久化的载荷。
-struct RollbackPlan {
+private struct RollbackPlan {
   /// 回滚载荷：除运行时文档外还要恢复的持久化事实。
   enum Payload {
     /// mode 切换：设置快照的模式与规则子选项回退（其余字段保留当前值），
@@ -257,7 +374,7 @@ struct RollbackPlan {
 }
 
 /// 回滚报告：载荷重持久化与旧运行时恢复的结果。
-struct RestoreReport {
+private struct RestoreReport {
   /// 载荷持久化失败的点名描述；nil = 成功。
   let payloadFailureDescription: String?
   /// 旧运行时是否恢复到健康；nil = 恢复未尝试（被弃权或被取代）。

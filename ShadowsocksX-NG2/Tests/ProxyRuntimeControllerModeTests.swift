@@ -104,59 +104,7 @@ extension ProxyRuntimeControllerModeTests {
     XCTAssertEqual(controller.settings.preferredMode, ProxyModeKind.rule, "切换意图保留")
   }
 
-  /// restore 的时效门禁先于任何事实变更：agent 意图关闭或票据过期时弃权——
-  /// 不执行计划、不重注册，回滚载荷不得写回持久层（否则会静默撤销用户的
-  /// mode 意图）。
-  func testRestoreSkipsPayloadPersistenceWhenAgentOffOrSuperseded() async throws {
-    let seeded = try makeSeededCatalog()
-    let settingsStore = InMemoryProxySettingsStore()
-    let controller = makeController(
-      probe: ProxyRuntimeFixture.FakeProbe.reachable(),
-      settingsStore: settingsStore,
-      settings: ProxySettings(
-        listen: ActivationFixture.listen, preferredMode: .global, agentEnabled: true),
-      proxyMode: .global)
-    try await controller.activate(seeded.server)
-    let document = try XCTUnwrap(controller.lastDocument)
-
-    // (a) agent 意图已关闭：门禁弃权。
-    await controller.setAgentEnabled(false)
-    let registrationsAfterStop = agent.registerCount
-    var offTicket = controller.convergenceTicket()
-    let offReport = await controller.restore(
-      RollbackPlan(
-        document: document, state: .running,
-        payload: .modeTransition(mode: .rule, ruleDefaultAction: .proxyWhenUnmatched),
-        systemProxyIntentAtCapture: false, convergeProxyOnIntentChange: false),
-      ticket: &offTicket)
-    XCTAssertNil(offReport.runtimeHealthy)
-    XCTAssertNil(offReport.payloadFailureDescription)
-    XCTAssertEqual(agent.registerCount, registrationsAfterStop, "弃权的回滚不得拉起旧运行时")
-    XCTAssertEqual(settingsStore.saved?.preferredMode, ProxyModeKind.global, "旧载荷未写回持久层")
-    XCTAssertFalse(settingsStore.saved?.agentEnabled ?? true)
-    XCTAssertEqual(controller.state, .off)
-
-    // (b) 票据过期（mode 代际已前进）：同样弃权且不写回。
-    await controller.setAgentEnabled(true)
-    await controller.setProxyMode(.direct)
-    XCTAssertEqual(controller.state, .running)
-    let staleTicket = controller.convergenceTicket()
-    await controller.setProxyMode(.rule)
-    XCTAssertEqual(controller.state, .running)
-    let registrationsBeforeRestore = agent.registerCount
-    var ticket = staleTicket
-    let staleReport = await controller.restore(
-      RollbackPlan(
-        document: try XCTUnwrap(controller.lastDocument), state: .running,
-        payload: .modeTransition(mode: .global, ruleDefaultAction: .proxyWhenUnmatched),
-        systemProxyIntentAtCapture: false, convergeProxyOnIntentChange: false),
-      ticket: &ticket)
-    XCTAssertNil(staleReport.runtimeHealthy)
-    XCTAssertEqual(agent.registerCount, registrationsBeforeRestore)
-    XCTAssertEqual(settingsStore.saved?.preferredMode, ProxyModeKind.rule, "过期回滚不得改写持久层")
-  }
-
-  /// agent-off 落在目录部署（deployPrepared 路径）的健康门窗口内：结果必须是
+  /// agent-off 落在目录部署的健康门窗口内：结果必须是
   /// superseded（而非误分类的 failed），运行时保持 off、lastDocument 不复活。
   func testAgentOffDuringDeploymentHealthGateSupersedesDeployment() async throws {
     let seeded = try makeSeededCatalog()
