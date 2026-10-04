@@ -27,66 +27,20 @@ extension CatalogWorkflow {
     ).encode()
   }
 
-  // MARK: - URI 批量导入与叶子字段
+  // MARK: - URI → 服务器叶子字段
 
-  /// ss:// 批量导入（URL 表单和二维码识别入口的共同落点，story 20/21）。
-  /// 逐行解码，可解析行全部添加（每次新建身份，不按内容去重）；每条失败行以
-  /// 行号 + 类型化原因点名，已成功记录不被局部失败回滚。
-  func createServers(fromURIs text: String, into parent: NodeID?) async throws
-    -> BatchImportOutcome
-  {
-    var prepared: [(uri: SsUri, fields: ServerFields)] = []
-    var failures: [ImportLineFailure] = []
-    for (index, line) in text.split(whereSeparator: \.isNewline).enumerated() {
-      do {
-        let uri = try SsUri.decode(String(line))
-        let fields = try Self.serverFields(from: uri, credentials: dependencies.credentials)
-        prepared.append((uri: uri, fields: fields))
-      } catch {
-        let reason: ImportLineFailureReason
-        if let uriError = error as? SsUriError {
-          reason = .decode(uriError)
-        } else if let credentialError = error as? CredentialStoreError {
-          reason = .credential(credentialError)
-        } else {
-          reason = .decode(.malformed(detail: String(describing: error)))
-        }
-        failures.append(ImportLineFailure(lineIndex: index, reason: reason))
-      }
-    }
-    guard !prepared.isEmpty else { return BatchImportOutcome(addedCount: 0, failures: failures) }
-    do {
-      try commit { catalog in
-        for item in prepared {
-          try catalog.addServer(item.fields, to: parent)
-        }
-      }
-    } catch {
-      for item in prepared {
-        Self.deleteCredentialRefs(for: item.fields, credentials: dependencies.credentials)
-      }
-      throw error
-    }
-    return BatchImportOutcome(addedCount: prepared.count, failures: failures)
-  }
-
-  /// URI → 服务器叶子字段：密码与插件参数入凭据存储、目录只持引用。
+  /// URI → 服务器叶子字段：密码与插件参数经 journal 写入凭据存储、目录只持
+  /// 引用。回滚由调用方持有 journal 统一处理（统一导入管线，story 20/21）。
   static func serverFields(
-    from uri: SsUri, credentials: CredentialStoring
+    from uri: SsUri, journal: inout CredentialWriteJournal
   ) throws -> ServerFields {
     let passwordRef = CredentialReference.fresh()
+    try journal.save(uri.password, for: passwordRef)
     var pluginOptionsRef: CredentialReference?
-    do {
-      try credentials.save(uri.password, for: passwordRef)
-      if uri.pluginProgram != nil, let options = uri.pluginOptions {
-        let ref = CredentialReference.fresh()
-        try credentials.save(options, for: ref)
-        pluginOptionsRef = ref
-      }
-    } catch {
-      try? credentials.delete(passwordRef)
-      if let pluginOptionsRef { try? credentials.delete(pluginOptionsRef) }
-      throw error
+    if uri.pluginProgram != nil, let options = uri.pluginOptions {
+      let ref = CredentialReference.fresh()
+      try journal.save(options, for: ref)
+      pluginOptionsRef = ref
     }
     return ServerFields(
       address: uri.host,
@@ -109,13 +63,6 @@ extension CatalogWorkflow {
       guard let fields = serverFields(of: entry) else { return [] }
       return [fields.passwordRef] + (fields.pluginOptionsRef.map { [$0] } ?? [])
     }
-  }
-
-  static func deleteCredentialRefs(
-    for fields: ServerFields, credentials: CredentialStoring
-  ) {
-    try? credentials.delete(fields.passwordRef)
-    if let optionsRef = fields.pluginOptionsRef { try? credentials.delete(optionsRef) }
   }
 
   /// 插件选择落盘（issue #38，D10/GLOSSARY.md 不变量）：「无」整体清除引用与

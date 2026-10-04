@@ -1,11 +1,9 @@
 import SwiftUI
 
-/// 服务器导入表单清单：由边栏「导入」菜单打开，全部属服务器域，窗口壳统一
-/// 持有呈现；添加订阅表单由订阅分区自持（SubscriptionsView）。
+/// 服务器导入面板：由边栏工具栏「导入服务器配置」按钮打开，窗口壳统一持有
+/// 呈现；添加订阅表单由订阅分区自持（SubscriptionsView）。
 private enum WorkspaceSheet: String, Identifiable {
-  case importURL
-  case qrImport
-  case legacyImport
+  case importServers
 
   var id: String { rawValue }
 }
@@ -49,9 +47,8 @@ struct MainWindowView: View {
   /// 初值须与 WorkspaceRoute 的初始 destination 对齐，否则首帧侧栏无高亮行。
   @State private var sidebarSelection: WorkspaceDestination? = WorkspaceRoute.initialDestination
   @State private var selection: NodeID?
-  /// 全局导入菜单打开的表单由窗口壳持有。
+  /// 全局导入面板由窗口壳持有。
   @State private var presentedWorkspaceSheet: WorkspaceSheet?
-  @StateObject private var shellActionErrors = ErrorAlertPresenter()
 
   var body: some View {
     NavigationSplitView {
@@ -72,36 +69,22 @@ struct MainWindowView: View {
     .frame(minWidth: 920, minHeight: 580)
     .sheet(item: $presentedWorkspaceSheet) { sheet in
       switch sheet {
-      case .importURL:
-        ImportURLSheet(
-          workflow: workflow, errors: shellActionErrors, clipboard: clipboard,
-          selection: $selection)
-      case .qrImport:
-        QRImportSheet(workflow: workflow, errors: shellActionErrors, selection: $selection)
-      case .legacyImport:
-        LegacyImportSheet(workflow: workflow)
+      case .importServers:
+        ImportServersSheet(
+          workflow: workflow, clipboard: clipboard, selection: $selection)
       }
     }
-    .presentingErrors(shellActionErrors)
   }
 
-  // MARK: - 全局导入菜单
+  // MARK: - 全局导入入口
 
   private var addMenu: some View {
-    Menu {
-      Button("通过 URL 导入…") { presentWorkspaceSheet(.importURL) }
-      Button("从二维码图片导入…") { presentWorkspaceSheet(.qrImport) }
-      if workflow.legacyImportState.snapshotFound {
-        Button(legacyImportActionTitle) { presentWorkspaceSheet(.legacyImport) }
-      }
+    Button {
+      presentWorkspaceSheet(.importServers)
     } label: {
-      Label("导入", systemImage: "square.and.arrow.down")
+      Label("导入服务器配置", systemImage: "square.and.arrow.down")
     }
-    .help("导入")
-  }
-
-  private var legacyImportActionTitle: String {
-    workflow.legacyImportState.completed ? "再次导入旧版本服务器…" : "导入旧版本服务器…"
+    .help("导入服务器配置")
   }
 
   private func presentWorkspaceSheet(_ sheet: WorkspaceSheet) {
@@ -267,9 +250,9 @@ extension MainWindowView {
 
 // MARK: - 首页 destination 包装壳
 
-/// 首页 destination 的包装视图：承载旧版导入主动弹窗与共享错误弹窗挂载
-/// （票 #53/#54），行为委托给 HomeView。@State 生命周期绑定在 home 分支上：
-/// 离开首页即重置，回到首页时按 legacyImportState 重新判断是否主动弹窗。
+/// 首页 destination 的包装视图：承载共享错误弹窗挂载（票 #53/#54），行为
+/// 委托给 HomeView。旧版导入的主动弹窗已移除（docs/design/unified-server-
+/// import.md），发现状态仅供统一导入面板的 Legacy 入口显隐。
 private struct WorkspaceHomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
@@ -278,9 +261,6 @@ private struct WorkspaceHomeView: View {
   let clipboard: any TextClipboard
   let onManageServers: () -> Void
   @StateObject private var errors = ErrorAlertPresenter()
-
-  @State private var showLegacyImportSheet = false
-  @State private var didOfferLegacyImport = false
 
   var body: some View {
     HomeView(
@@ -292,14 +272,6 @@ private struct WorkspaceHomeView: View {
       onManageServers: onManageServers,
       errors: errors
     )
-    .sheet(isPresented: $showLegacyImportSheet) {
-      LegacyImportSheet(workflow: workflow)
-    }
-    .onAppear {
-      guard !didOfferLegacyImport, workflow.legacyImportState.shouldOffer else { return }
-      didOfferLegacyImport = true
-      showLegacyImportSheet = true
-    }
     .presentingErrors(errors)
   }
 }

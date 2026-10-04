@@ -168,3 +168,31 @@ func makeCatalogWorkflow(
       postLegacyImport: postLegacyImport,
       activator: activator))
 }
+
+// MARK: - 统一导入结果取用助手
+
+extension ImportSourceResult {
+  /// `.imported` 的添加数（非该 case 为 nil）。
+  var importedCount: Int? {
+    if case .imported(let count, _) = self { return count }
+    return nil
+  }
+
+  /// `.imported` 的落点/新建分组（非该 case 或目录根为 nil）。
+  var importedGroupID: NodeID? {
+    if case .imported(_, let groupID) = self { return groupID }
+    return nil
+  }
+
+  /// `.partial` 的添加数与失败行（非该 case 为 nil）。
+  var partialFacts: (addedCount: Int, failures: [ImportLineFailure])? {
+    if case .partial(let addedCount, let failures) = self { return (addedCount, failures) }
+    return nil
+  }
+
+  /// `.failed` 的原因（非该 case 为 nil）。
+  var sourceFailure: ImportSourceFailure? {
+    if case .failed(let failure) = self { return failure }
+    return nil
+  }
+}

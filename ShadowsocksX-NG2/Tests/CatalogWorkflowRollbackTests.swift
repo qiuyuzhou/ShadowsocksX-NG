@@ -259,13 +259,15 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
         self?.bootstrap.catalogSnapshotReader
         .catalogSnapshot.rootChildren
     }
-    XCTAssertTrue(workflow.legacyImportState.shouldOffer, "首启发现快照后应提供自动导入入口")
+    XCTAssertTrue(
+      workflow.legacyImportState.snapshotFound, "发现快照后统一导入面板提供 Legacy 入口")
+    XCTAssertFalse(workflow.legacyImportState.completed)
     // 有活动目标也不得触发运行时收敛（导入不启动代理、不写系统代理）。
     XCTAssertTrue(runtime.hasActiveTarget)
 
-    let report = try await workflow.importLegacy()
+    let outcome = try await workflow.importLegacy()
 
-    XCTAssertEqual(report.importedServerCount, 1)
+    XCTAssertEqual(outcome.report.importedServerCount, 1)
     XCTAssertEqual(workflow.tree.roots.count, 1)
     let group = try XCTUnwrap(workflow.tree.roots.first)
     XCTAssertTrue(group.isGroup)
@@ -277,7 +279,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
     XCTAssertEqual(runtime.convergeCount, 0, "导入不经提交管线触发运行时收敛")
     XCTAssertEqual(postCalls, 1, "导入后的运行时边界只经注入闭包（独立于普通提交）")
     XCTAssertEqual(workflow.legacyImportState.completed, true, "成功导入写完成标记")
-    XCTAssertNotNil(workflow.legacyImportReport)
+    XCTAssertNotNil(workflow.tree.node(withID: outcome.groupID), "返回新建分组身份供选中")
     XCTAssertEqual(try settingsStore.load(), existingSettings, "工作流导入不得写入 2.0 偏好")
     XCTAssertEqual(
       try activationStore.loadActiveTargetID(), existingTarget,
@@ -285,7 +287,8 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
 
     // 首次导入成功后不再自动重复；显式再导入创建独立分组。
     workflow.refreshLegacyImportState()
-    XCTAssertFalse(workflow.legacyImportState.shouldOffer)
+    XCTAssertTrue(workflow.legacyImportState.snapshotFound, "发现状态与完成标记独立")
+    XCTAssertTrue(workflow.legacyImportState.completed)
     _ = try await workflow.importLegacy(reimport: true)
     XCTAssertEqual(workflow.tree.roots.count, 2, "再导入创建新的独立手动分组")
     XCTAssertEqual(runtime.convergeCount, 0)

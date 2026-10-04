@@ -8,8 +8,9 @@ extension CatalogWorkflowTests {
 
   func testRenameGroupKeepsIdentityParentAndOrder() async throws {
     let groupID = try await workflow.createGroup(named: "旧名", into: nil)
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: groupID)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388")],
+      into: groupID)
     try await workflow.renameGroup(groupID, to: "新名")
     let node = try XCTUnwrap(workflow.tree.node(withID: groupID))
     XCTAssertEqual(node.name, "新名")

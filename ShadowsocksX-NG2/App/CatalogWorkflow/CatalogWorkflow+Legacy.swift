@@ -7,9 +7,10 @@ import Foundation
 extension CatalogWorkflow {
   /// 显式请求导入（story 31/34/35）：`reimport` 为 `false` 时导入首次发现的
   /// 快照（成功后不再自动重复）；`true` 时读取当前快照创建新的独立手动分组。
-  /// 返回结构化导入报告（导入/跳过/身份重生成计数），秘密值不出现在报告中。
+  /// 返回含新建分组身份的结构化导入报告（导入/跳过/身份重生成计数），秘密值
+  /// 不出现在报告中；分组身份供统一导入面板成功后选中。
   @discardableResult
-  func importLegacy(reimport: Bool = false) async throws -> LegacyImportReport {
+  func importLegacy(reimport: Bool = false) async throws -> LegacyImportOutcome {
     let snapshot: LegacySnapshot
     if reimport {
       guard let current = try dependencies.legacyImportService.readSnapshot() else {
@@ -30,10 +31,9 @@ extension CatalogWorkflow {
     // 因此不触发运行时收敛。
     dependencies.coordinator.reloadCommittedStateFromStore()
     republishCommittedState()
-    publishLegacyImportReport(outcome.report)
     refreshLegacyImportState()
     await dependencies.postLegacyImport?(outcome)
-    return outcome.report
+    return outcome
   }
 
   /// 重读磁盘发现状态，不写任何标记或 Legacy 数据。

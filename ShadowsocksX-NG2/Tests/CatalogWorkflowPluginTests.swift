@@ -202,8 +202,8 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     XCTAssertEqual(decoded.pluginOptions, "mode=websocket;host=example.com")
 
     // 导回目录：插件字段同构（新建身份，不按内容去重）。
-    let outcome = try await workflow.createServers(fromURIs: shared, into: nil)
-    XCTAssertEqual(outcome.addedCount, 1)
+    let outcome = await workflow.importServers(from: [.clipboardText(shared)], into: nil)
+    XCTAssertEqual(outcome.sources.first?.result.importedCount, 1)
     let importedNode = try XCTUnwrap(
       workflow.tree.roots.dropFirst().first, "第二个根节点应是新导入的服务器")
     let imported = try XCTUnwrap(try workflow.serverEditForm(for: importedNode.id))

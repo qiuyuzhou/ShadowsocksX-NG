@@ -45,6 +45,10 @@ extension AppPresentation {
       return message(for: error)
     case let error as ImportLineFailureReason:
       return importLine(error)
+    case let error as ImportSourceFailure:
+      return importSource(error)
+    case let error as LegacySkippedRecord.Reason:
+      return reason(error)
     case let error as CommitError:
       return commit(error)
     case let error as ProxyModeError:
@@ -132,16 +136,6 @@ extension AppPresentation {
     switch issue {
     case .port(_, let error):
       return message(for: error)
-    }
-  }
-
-  static func message(for reason: LegacySkippedRecord.Reason) -> String {
-    switch reason {
-    case .notDictionary: return "记录不是字典"
-    case .invalidAddress: return "服务器地址缺失或无效"
-    case .invalidPort: return "服务器端口缺失或无效"
-    case .invalidEncryptionMethod: return "加密方式缺失或无效"
-    case .missingPassword: return "密码缺失或为空"
     }
   }
 
@@ -239,6 +233,28 @@ extension AppPresentation {
     switch error {
     case .decode(let error): return ssURI(error)
     case .credential(let error): return credential(error)
+    }
+  }
+
+  /// 统一导入的来源级失败：解析失败复用订阅解析文案族，提交失败复用
+  /// CommitError 口径（含回滚状态），其余点名具体原因。
+  private static func importSource(_ error: ImportSourceFailure) -> String {
+    switch error {
+    case .parse(let error): return subscriptionParse(error)
+    case .undecodableImage: return "图片无法识别，请使用常见图片格式"
+    case .qrPayloadNotFound: return "未识别到 ss:// 二维码"
+    case .noImportableLines: return "没有可导入的 ss:// 链接"
+    case .commit(let error): return message(for: error)
+    }
+  }
+
+  private static func reason(_ error: LegacySkippedRecord.Reason) -> String {
+    switch error {
+    case .notDictionary: return "记录不是字典"
+    case .invalidAddress: return "服务器地址缺失或无效"
+    case .invalidPort: return "服务器端口缺失或无效"
+    case .invalidEncryptionMethod: return "加密方式缺失或无效"
+    case .missingPassword: return "密码缺失或为空"
     }
   }
 

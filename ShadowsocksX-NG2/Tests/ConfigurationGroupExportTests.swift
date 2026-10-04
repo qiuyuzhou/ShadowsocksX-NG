@@ -264,8 +264,8 @@ final class ConfigurationGroupExportTests: XCTestCase {
     let uri = SsUri(
       method: "aes-256-gcm", password: password, host: host, port: 8388, remark: remark
     ).encode()
-    let result = try await workflow.createServers(fromURIs: uri, into: parent)
-    XCTAssertEqual(result.addedCount, 1)
+    let result = await workflow.importServers(from: [.clipboardText(uri)], into: parent)
+    XCTAssertEqual(result.sources.first?.result.importedCount, 1)
     return try XCTUnwrap(workflow.tree.node(withID: parent)?.childNodes.last?.id)
   }
 }

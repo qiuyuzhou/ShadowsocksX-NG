@@ -44,8 +44,9 @@ final class CatalogWorkflowPolicyTests: XCTestCase {
 
   private func importServer(into parent: NodeID? = nil) async throws -> NodeID {
     let before = Set(workflow.tree.roots.flatMap(\.subtreeIDs))
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: parent)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388")],
+      into: parent)
     if let parent {
       let node = try XCTUnwrap(workflow.tree.node(withID: parent))
       return try XCTUnwrap(node.childNodes.last?.id)
@@ -68,11 +69,13 @@ final class CatalogWorkflowPolicyTests: XCTestCase {
 
   func testDeleteFactsNonEmptyGroupNamesSubtreeAndCredentials() async throws {
     let groupID = try await workflow.createGroup(named: "组", into: nil)
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: groupID)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388")],
+      into: groupID)
     let nestedID = try await workflow.createGroup(named: "嵌套", into: groupID)
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.8:8388", into: nestedID)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.8:8388")],
+      into: nestedID)
     // 组内：服务器 + 嵌套组 + 嵌套服务器 = 3 个后代节点（不含自身）。
     XCTAssertEqual(
       workflow.deleteFacts(for: groupID),
@@ -159,11 +162,13 @@ final class CatalogWorkflowPolicyTests: XCTestCase {
 
   func testActivationEligibilityCountsCandidatesAndSkips() async throws {
     let groupID = try await workflow.createGroup(named: "组", into: nil)
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: groupID)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388")],
+      into: groupID)
     // 无效叶子（不支持的加密方法）。
-    _ = try await workflow.createServers(
-      fromURIs: "ss://ZnV0dXJlLWNpcGhlcjp4eHg=@203.0.113.9:8388", into: groupID)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://ZnV0dXJlLWNpcGhlcjp4eHg=@203.0.113.9:8388")],
+      into: groupID)
     let eligibility = try XCTUnwrap(workflow.activationEligibility(for: groupID))
     XCTAssertTrue(eligibility.canActivate)
     XCTAssertEqual(eligibility.candidateCount, 1)
@@ -172,8 +177,9 @@ final class CatalogWorkflowPolicyTests: XCTestCase {
   }
 
   func testActivationEligibilityAllInvalidIsNoCandidates() async throws {
-    _ = try await workflow.createServers(
-      fromURIs: "ss://ZnV0dXJlLWNpcGhlcjp4eHg=@203.0.113.9:8388", into: nil)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://ZnV0dXJlLWNpcGhlcjp4eHg=@203.0.113.9:8388")],
+      into: nil)
     let serverID = try XCTUnwrap(workflow.tree.roots.first?.id)
     let eligibility = try XCTUnwrap(workflow.activationEligibility(for: serverID))
     XCTAssertEqual(eligibility.ineligibility, .noCandidates)

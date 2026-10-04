@@ -53,9 +53,12 @@ struct ServerNameWorkflowTests {
       #expect(try workflow.serverEditForm(for: created)?.remark == "新名称")
       try await workflow.updateServer(created, draft: Self.draft(name: "\n编辑名称\t"))
       #expect(try workflow.serverEditForm(for: created)?.remark == "编辑名称")
-      _ = try await workflow.createServers(
-        fromURIs: SsUri(method: "aes-256-gcm", password: "p", host: "203.0.113.7", port: 8388)
-          .encode(), into: nil)
+      _ = await workflow.importServers(
+        from: [
+          .clipboardText(
+            SsUri(method: "aes-256-gcm", password: "p", host: "203.0.113.7", port: 8388)
+              .encode())
+        ], into: nil)
       let imported = try #require(workflow.tree.roots.last)
       var edited = Self.draft(name: imported.name)
       edited.address = "198.51.100.9"
@@ -72,8 +75,8 @@ struct ServerNameWorkflowTests {
       let uri = SsUri(
         method: "aes-256-gcm", password: "p", host: sample.host, port: sample.port,
         remark: sample.supplied)
-      let result = try await workflow.createServers(fromURIs: uri.encode(), into: nil)
-      #expect(result.addedCount == 1)
+      let result = await workflow.importServers(from: [.clipboardText(uri.encode())], into: nil)
+      #expect(result.sources.first?.result.importedCount == 1)
       let node = try #require(workflow.tree.roots.first)
       #expect(node.name == sample.expected)
       #expect(try workflow.serverEditForm(for: node.id)?.remark == sample.expected)

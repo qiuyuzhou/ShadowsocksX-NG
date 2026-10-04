@@ -137,7 +137,8 @@ protocol LegacyCatalogStoring {
 extension CatalogFileStore: LegacyCatalogStoring {}
 
 struct LegacySkippedRecord: Equatable, Sendable {
-  enum Reason: Equatable, Sendable {
+  /// 点名跳过原因（typed，无成句文案；呈现归 presentation edge）。
+  enum Reason: Error, Equatable, Sendable {
     case notDictionary
     case invalidAddress
     case invalidPort

@@ -54,11 +54,12 @@ final class CatalogWorkflowTests: XCTestCase {
   func testImportMixedLinesAddsParsedAndReportsFailures() async throws {
     let validSIP002 = "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388#香港 01"
     let legacy = "ss://YWVzLTI1Ni1nY206dGVzdEAyMDMuMC4xMTMuNzo4Mzg4"
-    let outcome = try await workflow.createServers(
-      fromURIs: "\(validSIP002)\n垃圾行\n\(legacy)", into: nil)
-    XCTAssertEqual(outcome.addedCount, 2)
-    XCTAssertEqual(outcome.failures.count, 1)
-    XCTAssertEqual(outcome.failures[0].lineIndex, 1, "失败行按换行切分点名")
+    let outcome = await workflow.importServers(
+      from: [.clipboardText("\(validSIP002)\n垃圾行\n\(legacy)")], into: nil)
+    let facts = try XCTUnwrap(outcome.sources.first?.result.partialFacts)
+    XCTAssertEqual(facts.addedCount, 2)
+    XCTAssertEqual(facts.failures.count, 1)
+    XCTAssertEqual(facts.failures[0].lineIndex, 1, "失败行按换行切分点名")
 
     let roots = workflow.tree.roots
     XCTAssertEqual(roots.count, 2)
@@ -74,7 +75,7 @@ final class CatalogWorkflowTests: XCTestCase {
     let uri =
       "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388"
       + "/?plugin=v2ray-plugin%3Bmode%3Dwebsocket%3Bhost%3Dexample.com"
-    _ = try await workflow.createServers(fromURIs: uri, into: nil)
+    _ = await workflow.importServers(from: [.clipboardText(uri)], into: nil)
     let id = try XCTUnwrap(workflow.tree.roots.first?.id)
     let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .managed(program: "v2ray-plugin"))
@@ -89,9 +90,9 @@ final class CatalogWorkflowTests: XCTestCase {
       method: "future-cipher", password: "password", host: "203.0.113.7", port: 8388
     ).encode()
 
-    let outcome = try await workflow.createServers(fromURIs: uri, into: nil)
+    let outcome = await workflow.importServers(from: [.clipboardText(uri)], into: nil)
 
-    XCTAssertEqual(outcome.addedCount, 1)
+    XCTAssertEqual(outcome.sources.first?.result.importedCount, 1)
     let node = try XCTUnwrap(workflow.tree.roots.first)
     XCTAssertEqual(
       node.invalidReasons, [.unsupportedEncryptionMethod("future-cipher")],
@@ -102,8 +103,9 @@ final class CatalogWorkflowTests: XCTestCase {
     let groupID = try await workflow.createGroup(named: "手动组", into: nil)
     let target = try XCTUnwrap(workflow.importTargetParent(for: groupID))
     XCTAssertEqual(target, groupID)
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: target)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388")],
+      into: target)
     XCTAssertEqual(workflow.tree.node(withID: groupID)?.childCount, 1)
     // 选中服务器时落到其手动父组；无选中落到根。
     let serverID = try XCTUnwrap(workflow.tree.node(withID: groupID)?.children?.first?.id)
@@ -123,10 +125,12 @@ final class CatalogWorkflowTests: XCTestCase {
   func testTreeSnapshotMirrorsStructureCountsAndParents() async throws {
     let groupID = try await workflow.createGroup(named: "组A", into: nil)
     let nestedID = try await workflow.createGroup(named: "嵌套", into: groupID)
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: nestedID)
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.8:8388", into: nil)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388")],
+      into: nestedID)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.8:8388")],
+      into: nil)
 
     let group = try XCTUnwrap(workflow.tree.node(withID: groupID))
     XCTAssertTrue(group.isGroup)
@@ -149,8 +153,9 @@ final class CatalogWorkflowTests: XCTestCase {
   func testPathSummaryResolvesRootToLeafNames() async throws {
     let groupID = try await workflow.createGroup(named: "组A", into: nil)
     let nestedID = try await workflow.createGroup(named: "嵌套", into: groupID)
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: nestedID)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388")],
+      into: nestedID)
     let leafID = try XCTUnwrap(workflow.tree.node(withID: nestedID)?.childNodes.first?.id)
 
     XCTAssertEqual(workflow.tree.pathSummary(for: groupID), "组A")
@@ -165,8 +170,9 @@ final class CatalogWorkflowTests: XCTestCase {
   // MARK: - 表单编辑与凭据生命周期
 
   func testUpdateServerPersistsFieldsAndPassword() async throws {
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: nil)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388")],
+      into: nil)
     let id = try XCTUnwrap(workflow.tree.roots.first?.id)
     try await workflow.updateServer(
       id,
@@ -190,8 +196,9 @@ final class CatalogWorkflowTests: XCTestCase {
   }
 
   func testUpdateServerRejectsInvalidAddressAndPort() async throws {
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: nil)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388")],
+      into: nil)
     let id = try XCTUnwrap(workflow.tree.roots.first?.id)
     await expectThrowsAsync(
       {
@@ -243,8 +250,9 @@ final class CatalogWorkflowTests: XCTestCase {
 
   func testRemoveNonEmptyGroupRemovesWholeSubtree() async throws {
     let groupID = try await workflow.createGroup(named: "组", into: nil)
-    _ = try await workflow.createServers(
-      fromURIs: "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388", into: groupID)
+    _ = await workflow.importServers(
+      from: [.clipboardText("ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388")],
+      into: groupID)
     let serverID = try XCTUnwrap(workflow.tree.node(withID: groupID)?.children?.first?.id)
     let outcome = try await workflow.remove(groupID)
     XCTAssertEqual(outcome.removedNodeIDs, [groupID, serverID])
@@ -257,7 +265,7 @@ final class CatalogWorkflowTests: XCTestCase {
     let source =
       "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@203.0.113.7:8388"
       + "/?plugin=v2ray-plugin%3Bmode%3Dwebsocket%3Bhost%3Dexample.com#分享节点"
-    _ = try await workflow.createServers(fromURIs: source, into: nil)
+    _ = await workflow.importServers(from: [.clipboardText(source)], into: nil)
     let id = try XCTUnwrap(workflow.tree.roots.first?.id)
     let shared = try workflow.shareURI(for: id)
     let decoded = try SsUri.decode(shared)
@@ -345,8 +353,8 @@ final class CatalogWorkflowHermeticAssemblyTests: XCTestCase {
 
     // Legacy 导入走注入服务：报告、完成标记与凭据写入都落在注入的 fake 上；
     // 不经提交管线触发运行时收敛。
-    let report = try await workflow.importLegacy()
-    XCTAssertEqual(report.importedServerCount, 1)
+    let outcome = try await workflow.importLegacy()
+    XCTAssertEqual(outcome.report.importedServerCount, 1)
     XCTAssertEqual(try marker.isCompleted(), true)
     XCTAssertEqual(
       credentials.storageSnapshot.values.contains("legacy-pw"), true,

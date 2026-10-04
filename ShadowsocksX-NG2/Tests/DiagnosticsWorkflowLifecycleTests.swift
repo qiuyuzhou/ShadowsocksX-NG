@@ -143,7 +143,7 @@ final class DiagnosticsWorkflowLifecycleTests: DiagnosticsWorkflowTestCase {
     let uri =
       "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQxMjM@\(address):8388"
       + "/?plugin=v2ray-plugin%3Bmode%3Dwebsocket"
-    _ = try await catalogWorkflow.createServers(fromURIs: uri, into: nil)
+    _ = await catalogWorkflow.importServers(from: [.clipboardText(uri)], into: nil)
 
     let facts = catalogWorkflow.diagnosticCatalogFacts
 

@@ -40,8 +40,6 @@ final class CatalogWorkflow: ObservableObject {
   /// Legacy 快照发现与一次性完成标记。
   @Published private(set) var legacyImportState = LegacyImportAvailability(
     snapshotFound: false, completed: false)
-  /// 最近一次 Legacy 导入报告（story 31）。
-  @Published private(set) var legacyImportReport: LegacyImportReport?
 
   /// 组合根与测试装配的全部实现 adapter（issue #49）：coordinator、凭据、
   /// 插件、订阅获取、Legacy 导入服务、导入后回调与激活缝只经此束持有，
@@ -349,10 +347,6 @@ final class CatalogWorkflow: ObservableObject {
 
   func publishLegacyImportState(_ state: LegacyImportAvailability) {
     legacyImportState = state
-  }
-
-  func publishLegacyImportReport(_ report: LegacyImportReport?) {
-    legacyImportReport = report
   }
 
   /// 订阅刷新并发守卫的写入口（集合对外只读）。

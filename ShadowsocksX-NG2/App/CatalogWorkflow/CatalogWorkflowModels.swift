@@ -349,14 +349,61 @@ extension SubscriptionRefreshFailure {
   }
 }
 
-// MARK: - 命令结果（structured outcome）
+// MARK: - 统一导入（docs/design/unified-server-import.md，ADR-0027）
 
-/// 批量导入的逐行结构化结果（story 20/21）：成功计数 + 失败行点名（行号 +
-/// 类型化原因）；部分失败不回滚已成功记录。原始行文本由 UI 自行持有，摘要
-/// 在呈现层截取，秘密值不出 module。
-struct BatchImportOutcome: Equatable {
-  let addedCount: Int
-  let failures: [ImportLineFailure]
+/// 导入来源：剪贴板文本或单个文件。文件类型按内容嗅探分派（图片→二维码、
+/// JSON 对象→SIP-008、其余→ss:// 文本行）；来源是独立解码、独立提交与
+/// 结果报告的粒度单位。
+enum ImportSource: Equatable, Sendable {
+  case clipboardText(String)
+  case file(name: String, data: Data)
+}
+
+/// 一次导入的逐来源结果聚合；来源之间互不影响。不标 Sendable：携带的
+/// `CommitError` 含 `any Error`，与既有 CommitError 同口径（管线与 UI 同在
+/// 主 actor，无跨域传递）。
+struct ImportRunOutcome {
+  let sources: [ImportSourceOutcome]
+
+  /// 成功来源中的落点/新建分组（最后一个），供导入后选中；nil 表示无可
+  /// 选中目标（全部失败，或只导入了目录根层的文本来源）。
+  var selectionCandidate: NodeID? {
+    sources.compactMap { outcome -> NodeID? in
+      if case .imported(_, let groupID) = outcome.result { return groupID }
+      return nil
+    }.last
+  }
+}
+
+struct ImportSourceOutcome {
+  let source: ImportSource
+  let result: ImportSourceResult
+}
+
+/// 单来源结果；整体失败时不产生任何目录变更。非 Equatable：提交失败携带
+/// `CommitError`（含底层 `any Error`），与既有 CommitError 同口径，测试
+/// 逐 case 模式匹配。
+enum ImportSourceResult {
+  /// 全部导入成功。`groupID` 为新建根分组（SIP-008 来源）或落点分组
+  /// （文本来源），nil 表示目录根。
+  case imported(count: Int, groupID: NodeID?)
+  /// 文本行部分成功：可解析行已全部添加，失败行逐条点名。
+  case partial(addedCount: Int, failures: [ImportLineFailure])
+  case failed(ImportSourceFailure)
+}
+
+/// 来源级失败（typed，无成句文案；呈现归 presentation edge）。
+enum ImportSourceFailure: Error {
+  /// SIP-008 文档解析失败（整份拒绝）。
+  case parse(SubscriptionParseError)
+  /// 图片不是可解码位图。
+  case undecodableImage
+  /// 二维码图片中没有 ss:// 负载。
+  case qrPayloadNotFound
+  /// 文本来源没有可解析的行（空文本）。
+  case noImportableLines
+  /// 目录或凭据提交失败；已写入凭据按 journal 尽力回滚。
+  case commit(CommitError)
 }
 
 struct ImportLineFailure: Equatable {
@@ -379,12 +426,11 @@ struct RemovalOutcome: Equatable, Sendable {
 // MARK: - Legacy 导入可用性
 
 /// Legacy 快照发现与完成标记（story 31/34）：跳过不写标记，显式再导入仍
-/// 创建新的独立手动分组。
+/// 创建新的独立手动分组。首启主动弹窗已移除，发现状态仅供导入面板的
+/// Legacy 入口显隐。
 struct LegacyImportAvailability: Equatable {
   let snapshotFound: Bool
   let completed: Bool
-
-  var shouldOffer: Bool { snapshotFound && !completed }
 }
 
 // MARK: - 表单级 typed error（本地化由 UI 呈现层负责）
