@@ -2,10 +2,9 @@ import SwiftUI
 
 /// 订阅分区（spec #21 D11，issue #35/#41，地图 #52 票 #56）：每订阅一张卡片
 /// （图标 + 名称 + 「HTTPS 订阅地址已隐藏」+ 状态徽标 + 更新/重试 + 「…」菜单 +
-/// 三列元数据 + 脱敏说明行），失败卡警告色描边。添加订阅通过窗口壳侧栏的
-/// 「添加」菜单进入；「更新全部」由本页自挂工具栏（呈现于窗口工具栏右端，
-/// 与服务器分区同法）。卡片数据来自订阅 projection（非敏感）；结构化刷新
-/// 状态在呈现层本地化（story 42）。
+/// 三列元数据 + 脱敏说明行），失败卡警告色描边。「添加订阅」与「更新全部」
+/// 均由本页自挂工具栏（呈现于窗口工具栏右端，与服务器分区同法）。卡片数据
+/// 来自订阅 projection（非敏感）；结构化刷新状态在呈现层本地化（story 42）。
 struct SubscriptionsView: View {
   @ObservedObject var workflow: CatalogWorkflow
   /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
@@ -15,6 +14,8 @@ struct SubscriptionsView: View {
 
   @State private var editTarget: SubscriptionSummary?
   @State private var deleteTarget: SubscriptionSummary?
+  /// 添加订阅表单：本页自持（2026-10-04 自窗口壳「添加」菜单移回本页工具栏）。
+  @State private var isPresentingAddSubscription = false
 
   var body: some View {
     ScrollView {
@@ -40,13 +41,16 @@ struct SubscriptionsView: View {
       if workflow.subscriptions.isEmpty {
         ContentUnavailableView(
           "暂无订阅", systemImage: "arrow.triangle.2.circlepath",
-          description: Text("用窗口左上方的「添加」菜单添加 HTTPS 订阅地址（SIP-008 JSON）")
+          description: Text("用工具栏的「添加订阅」按钮添加 HTTPS 订阅地址（SIP-008 JSON）")
         )
         .allowsHitTesting(false)
       }
     }
     .sheet(item: $editTarget) { summary in
       EditSubscriptionURLSheet(workflow: workflow, errors: errors, summary: summary)
+    }
+    .sheet(isPresented: $isPresentingAddSubscription) {
+      AddSubscriptionSheet(workflow: workflow, errors: errors)
     }
     .confirmationDialog(
       "删除订阅「\(deleteTarget?.name ?? "")」及其整棵子树？",
@@ -64,6 +68,11 @@ struct SubscriptionsView: View {
     }
     .presentingErrors(errors)
     .toolbar {
+      ToolbarItem(placement: .primaryAction) {
+        Button("添加订阅", systemImage: "plus") {
+          isPresentingAddSubscription = true
+        }
+      }
       ToolbarItem(placement: .primaryAction) {
         HStack(spacing: 8) {
           if !workflow.refreshingSubscriptionIDs.isEmpty {

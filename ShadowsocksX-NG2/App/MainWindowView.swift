@@ -1,21 +1,13 @@
 import SwiftUI
 
+/// 服务器导入表单清单：由边栏「导入」菜单打开，全部属服务器域，窗口壳统一
+/// 持有呈现；添加订阅表单由订阅分区自持（SubscriptionsView）。
 private enum WorkspaceSheet: String, Identifiable {
   case importURL
   case qrImport
   case legacyImport
-  case addSubscription
 
   var id: String { rawValue }
-
-  var destination: WorkspaceDestination {
-    switch self {
-    case .importURL, .qrImport, .legacyImport:
-      .servers
-    case .addSubscription:
-      .subscriptions
-    }
-  }
 }
 
 /// 主窗口外壳（地图 #52，票 #53）：NavigationSplitView 侧栏承载五项导航与
@@ -53,11 +45,11 @@ struct MainWindowView: View {
   /// selection（选择再同步，且可能携带缓存的旧值），回写必须落在 SwiftUI 自管
   /// 的 @State 上，再经 onChange 单向驱动 route；直接 publish 到 route 会触发
   /// view-update 期间发布警告，且缓存的旧值会把外部导航弹回。route 的外部
-  /// 导航（添加菜单、规则编辑器返回等）经 sidebar 上的 onChange 回填选中项。
+  /// 导航（导入菜单、规则编辑器返回等）经 sidebar 上的 onChange 回填选中项。
   /// 初值须与 WorkspaceRoute 的初始 destination 对齐，否则首帧侧栏无高亮行。
   @State private var sidebarSelection: WorkspaceDestination? = WorkspaceRoute.initialDestination
   @State private var selection: NodeID?
-  /// 全局添加菜单打开的表单由窗口壳持有。
+  /// 全局导入菜单打开的表单由窗口壳持有。
   @State private var presentedWorkspaceSheet: WorkspaceSheet?
   @StateObject private var shellActionErrors = ErrorAlertPresenter()
 
@@ -88,14 +80,12 @@ struct MainWindowView: View {
         QRImportSheet(workflow: workflow, errors: shellActionErrors, selection: $selection)
       case .legacyImport:
         LegacyImportSheet(workflow: workflow)
-      case .addSubscription:
-        AddSubscriptionSheet(workflow: workflow, errors: shellActionErrors)
       }
     }
     .presentingErrors(shellActionErrors)
   }
 
-  // MARK: - 全局添加菜单
+  // MARK: - 全局导入菜单
 
   private var addMenu: some View {
     Menu {
@@ -104,13 +94,11 @@ struct MainWindowView: View {
       if workflow.legacyImportState.snapshotFound {
         Button(legacyImportActionTitle) { presentWorkspaceSheet(.legacyImport) }
       }
-      Divider()
-      Button("添加订阅…") { presentWorkspaceSheet(.addSubscription) }
     } label: {
-      Label("添加", systemImage: "plus")
+      Label("导入", systemImage: "square.and.arrow.down")
     }
     .labelStyle(.iconOnly)
-    .help("添加")
+    .help("导入")
   }
 
   private var legacyImportActionTitle: String {
@@ -118,7 +106,7 @@ struct MainWindowView: View {
   }
 
   private func presentWorkspaceSheet(_ sheet: WorkspaceSheet) {
-    route.navigate(to: sheet.destination)
+    route.navigate(to: .servers)
     presentedWorkspaceSheet = sheet
   }
 
