@@ -127,7 +127,7 @@ extension SubscriptionRefreshStatus {
   var footerNote: String {
     isFailed
       ? "保留最后一次成功快照 · 不会清空现有节点"
-      : "远端结构由订阅管理，本地仅保留启用状态"
+      : "远端结构由订阅管理，本地仅保留远端快照"
   }
 }
 
