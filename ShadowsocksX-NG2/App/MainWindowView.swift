@@ -53,7 +53,7 @@ struct MainWindowView: View {
   var body: some View {
     NavigationSplitView {
       sidebar
-        .navigationSplitViewColumnWidth(min: 230, ideal: 236, max: 300)
+        .navigationSplitViewColumnWidth(min: 236, ideal: 250, max: 300)
         .toolbar {
           ToolbarItem(placement: .automatic) {
             importButton
@@ -82,9 +82,9 @@ struct MainWindowView: View {
     Button {
       presentWorkspaceSheet(.importServers)
     } label: {
-      Label("导入服务器", systemImage: "square.and.arrow.down")
+      Label("导入", systemImage: "square.and.arrow.down")
     }
-    .help("导入服务器")
+    .help("导入")
   }
 
   private func presentWorkspaceSheet(_ sheet: WorkspaceSheet) {
