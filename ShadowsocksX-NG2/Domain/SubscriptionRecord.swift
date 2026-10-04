@@ -10,6 +10,10 @@ struct SubscriptionRecord: Codable, Equatable, Sendable, Identifiable {
   let groupID: NodeID
   var urlRef: CredentialReference
   var status: SubscriptionRefreshStatus
+  /// 最近成功提交的白名单资料；成功响应省略时清除，失败或取消保留。
+  var information: SubscriptionInformation?
+  /// 独立于最近尝试状态，旧文件缺失时不猜测。
+  var lastSucceededAt: Date?
 }
 
 /// 最近一次刷新结果。失败只保存白名单事实，不保存订阅 URL、秘密、凭据引用

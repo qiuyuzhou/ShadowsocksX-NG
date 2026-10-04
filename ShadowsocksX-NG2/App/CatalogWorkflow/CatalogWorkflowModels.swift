@@ -300,6 +300,8 @@ struct SubscriptionSummary: Identifiable, Equatable {
   let host: String
   let status: SubscriptionRefreshStatus
   let serverCount: Int
+  var information: SubscriptionInformation?
+  var lastSucceededAt: Date?
 }
 
 /// Transient refresh result retained by the workflow. The durable status stores

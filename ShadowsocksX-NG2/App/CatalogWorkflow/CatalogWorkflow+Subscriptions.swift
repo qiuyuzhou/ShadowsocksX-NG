@@ -56,6 +56,7 @@ extension CatalogWorkflow {
     } catch is CancellationError {
       // 取消不构成失败：快照与状态都不动。
     } catch {
+      guard !Task.isCancelled else { return }
       let result = Self.refreshFailureResult(from: error)
       setSubscriptionRefreshFailure(result, for: id)
       await markRefreshFailed(subscriptionID: id, failure: result.failure)
@@ -120,6 +121,7 @@ extension CatalogWorkflow {
     let urlString = try subscriptionURL(for: record.id)
     let url = try Self.validatedSubscriptionURL(urlString)
     let data = try await dependencies.subscriptionFetcher.fetch(url)
+    try Task.checkCancellation()
     let snapshot = try SubscriptionDocumentParser.parse(data, subscriptionID: record.id)
     let summary =
       subscriptions.first(where: { $0.id == record.id })
@@ -132,6 +134,7 @@ extension CatalogWorkflow {
   private func commitSnapshot(
     _ snapshot: SubscriptionSnapshot, summary: SubscriptionSummary, fallbackName: String
   ) async throws {
+    try Task.checkCancellation()
     var obsoleteCredentialRefs: Set<CredentialReference> = []
     var credentialJournal = CredentialWriteJournal(credentials: dependencies.credentials)
     do {
@@ -148,6 +151,7 @@ extension CatalogWorkflow {
         let resolved = try Self.resolveCredentials(
           snapshot.root, catalogGroupID: summary.groupID, reuse: reusedRefs,
           journal: &credentialJournal)
+        try Task.checkCancellation()
         let name = snapshot.root.name.isEmpty ? fallbackName : snapshot.root.name
         let document = CatalogSubscriptionSnapshot(name: name, root: resolved)
         let replacedServers = try catalog.applySubscriptionSnapshot(document, into: summary.groupID)
@@ -156,13 +160,18 @@ extension CatalogWorkflow {
         obsoleteCredentialRefs = Set(Self.credentialRefs(of: replacedServers))
           .subtracting(retainedRefs)
         if let index = subscriptions.firstIndex(where: { $0.id == summary.id }) {
-          subscriptions[index].status = .succeeded(at: Date())
+          let succeededAt = Date()
+          subscriptions[index].status = .succeeded(at: succeededAt)
+          subscriptions[index].information =
+            snapshot.information.isEmpty ? nil : snapshot.information
+          subscriptions[index].lastSucceededAt = succeededAt
         }
       }
     } catch {
       // story 29：尽力恢复旧秘密；完整 outcome 只随 transient error 留在
       // 内存，durable status 只会保存粗粒度 rollback 状态。
       let rollback = credentialJournal.rollback()
+      if error is CancellationError { throw error }
       let category: SubscriptionRefreshFailure.CommitCategory =
         error is CredentialStoreError ? .credentials : .persistence
       throw SubscriptionRefreshCommitError(category: category, rollback: rollback)
@@ -224,7 +233,9 @@ extension CatalogWorkflow {
         name: catalog.entry(for: record.groupID)?.displayName ?? "",
         host: host,
         status: record.status,
-        serverCount: serverCount)
+        serverCount: serverCount,
+        information: record.information,
+        lastSucceededAt: record.lastSucceededAt)
     }
   }
 

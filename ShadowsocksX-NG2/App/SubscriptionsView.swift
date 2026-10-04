@@ -112,14 +112,6 @@ extension SubscriptionRefreshStatus {
     }
   }
 
-  var lastRefreshText: String {
-    switch self {
-    case .never: "尚未刷新"
-    case .succeeded(let date), .failed(let date, _):
-      date.formatted(date: .abbreviated, time: .shortened)
-    }
-  }
-
   var failureDetail: String? {
     if case .failed(_, let failure) = self {
       return AppPresentation.message(for: failure)
@@ -142,6 +134,8 @@ extension SubscriptionRefreshStatus {
 
 /// 单张订阅卡片（票 #56）：头部、三列元数据与脱敏说明；失败态警告色描边。
 private struct SubscriptionCard: View {
+  @Environment(\.locale) private var locale
+  @Environment(\.timeZone) private var timeZone
   let summary: SubscriptionSummary
   let groupName: String
   let isRefreshing: Bool
@@ -156,6 +150,10 @@ private struct SubscriptionCard: View {
         .padding(.top, 16)
       meta
         .padding(.top, 14)
+      if let information = summary.information {
+        subscriptionInformation(information)
+          .padding(.top, 14)
+      }
       if let detail = summary.status.failureDetail {
         Text(detail)
           .font(.footnote)
@@ -269,14 +267,59 @@ private struct SubscriptionCard: View {
         Text("\(summary.serverCount) 台")
       }
       metaColumn("上次成功刷新") {
-        Text(summary.status.lastRefreshText)
+        if let date = summary.lastSucceededAt {
+          dateText(date)
+        } else {
+          Text("—")
+        }
       }
       Spacer(minLength: 0)
     }
   }
 
+  @ViewBuilder
+  private func subscriptionInformation(_ information: SubscriptionInformation) -> some View {
+    VStack(alignment: .leading, spacing: 12) {
+      if information.bytesUsed != nil || information.bytesRemaining != nil {
+        HStack(alignment: .top, spacing: 24) {
+          if let used = information.bytesUsed {
+            metaColumn("已用流量") {
+              Text(SubscriptionInformation.byteCountText(used, locale: locale))
+            }
+          }
+          if let remaining = information.bytesRemaining {
+            metaColumn("剩余流量") {
+              Text(SubscriptionInformation.byteCountText(remaining, locale: locale))
+            }
+          }
+        }
+        if let fraction = information.usedFraction {
+          ProgressView(value: fraction)
+            .accessibilityLabel("流量消耗")
+        }
+      }
+      if information.expiresAt != nil || information.trafficResetAt != nil {
+        HStack(alignment: .top, spacing: 24) {
+          if let expiresAt = information.expiresAt {
+            metaColumn("到期时间") { dateText(expiresAt) }
+          }
+          if let resetAt = information.trafficResetAt {
+            metaColumn("重置时间") { dateText(resetAt) }
+          }
+        }
+      }
+    }
+  }
+
+  private func dateText(_ date: Date) -> Text {
+    Text(
+      date,
+      format: Date.FormatStyle(
+        date: .abbreviated, time: .shortened, locale: locale, timeZone: timeZone))
+  }
+
   private func metaColumn<Content: View>(
-    _ label: String, @ViewBuilder content: () -> Content
+    _ label: LocalizedStringKey, @ViewBuilder content: () -> Content
   ) -> some View {
     VStack(alignment: .leading, spacing: 3) {
       Text(label)

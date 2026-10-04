@@ -39,6 +39,7 @@ struct SubscriptionSnapshot: Equatable, Sendable {
 
   /// 根分组内容：落入订阅固定分组（固定分组身份客户端所有，不取自远端）。
   let root: Group
+  var information = SubscriptionInformation()
 }
 
 /// 快照解析失败（整份拒绝，不做部分提交；spec #21 D4 刷新失败族）。
@@ -86,9 +87,12 @@ enum SubscriptionDocumentParser {
       return SubscriptionSnapshot(
         root: SubscriptionSnapshot.Group(
           id: NodeID(rawValue: "\(subscriptionID.rawValue):root"),
-          name: "", children: leaves.map { .server($0.leaf) }))
+          name: "", children: leaves.map { .server($0.leaf) }),
+        information: SubscriptionInformation.parse(data))
     }
-    return buildSnapshot(tree: tree, leaves: leaves, subscriptionID: subscriptionID)
+    var snapshot = buildSnapshot(tree: tree, leaves: leaves, subscriptionID: subscriptionID)
+    snapshot.information = SubscriptionInformation.parse(data)
+    return snapshot
   }
 
   // MARK: - 服务器记录校验与身份
