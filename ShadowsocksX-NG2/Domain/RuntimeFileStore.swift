@@ -156,23 +156,11 @@ struct RuntimeFileStore {
     try? Data(contentsOf: fileURL)
   }
 
+  /// 部署收据只读：唯一生产写者是 Agent wrapper（AgentContract.writeRuntimeReceipt），
+  /// GUI 在健康检查中核对 pid 与契约摘要，从不写。
   func readRuntimeReceipt() -> RuntimeDeploymentReceipt? {
     guard let data = try? Data(contentsOf: runtimeStatusFileURL) else { return nil }
     return try? JSONDecoder().decode(RuntimeDeploymentReceipt.self, from: data)
-  }
-
-  func writeRuntimeReceipt(for document: SslocalRuntimeDocument, processID: Int32) throws {
-    guard let digest = document.deploymentSHA256 else {
-      throw PersistenceError.ioFailure(detail: "Runtime contract digest is unavailable")
-    }
-    let receipt = RuntimeDeploymentReceipt(processID: processID, contractSHA256: digest)
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.sortedKeys]
-    do {
-      try AtomicFileWriter.write(try encoder.encode(receipt), to: runtimeStatusFileURL)
-    } catch {
-      throw PersistenceError.ioFailure(detail: String(describing: error))
-    }
   }
 
   /// 显式停止清理（D2 停止协议末端）：运行时契约、wrapper pid、ACL 链接与
