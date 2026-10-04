@@ -363,7 +363,11 @@ private struct EditSubscriptionURLSheet: View {
     .onAppear {
       guard !loaded else { return }
       loaded = true
-      urlString = (try? workflow.subscriptionURL(for: summary.id)) ?? ""
+      do {
+        urlString = try workflow.subscriptionURL(for: summary.id)
+      } catch {
+        errors.present(error)
+      }
     }
   }
 
