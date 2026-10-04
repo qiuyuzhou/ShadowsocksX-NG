@@ -9,7 +9,7 @@ struct NewServerSheet: View {
   let workflow: CatalogWorkflow
   let errors: ErrorAlertPresenter
   let parent: NodeID?
-  @Binding var selection: NodeID?
+  let onCreated: (NodeID) -> Void
   @Environment(\.dismiss) private var dismiss
 
   /// 连接字段草稿由共享 module 持有（与编辑表单同一 interface），默认值
@@ -59,7 +59,7 @@ struct NewServerSheet: View {
       defer { isSubmitting = false }
       do {
         let id = try await workflow.createServer(draft, into: parent)
-        selection = id
+        onCreated(id)
         dismiss()
       } catch {
         errors.present(error)

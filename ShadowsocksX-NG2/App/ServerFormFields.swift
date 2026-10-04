@@ -248,7 +248,7 @@ final class ServerFormFields: ObservableObject {
   /// 落在 1–65535。
   private var submittablePort: Int? {
     guard !portText.isEmpty, portText.count <= Self.portDigitLimit,
-      portText.allSatisfy { ("0"..."9").contains($0) },
+      portText.allSatisfy({ ("0"..."9").contains($0) }),
       let port = Int(portText)
     else { return nil }
     return (1...65_535).contains(port) ? port : nil

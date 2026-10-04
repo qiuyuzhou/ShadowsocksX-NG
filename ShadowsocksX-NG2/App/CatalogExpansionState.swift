@@ -19,4 +19,13 @@ final class CatalogExpansionState: ObservableObject {
       collapsedGroupIDs.insert(id)
     }
   }
+
+  /// 创建成功后仅展开祖先，保留其他分组的折叠状态。
+  func reveal(_ id: NodeID, in tree: CatalogTreeSnapshot) {
+    var parent = tree.node(withID: id)?.parentID
+    while let current = parent {
+      collapsedGroupIDs.remove(current)
+      parent = tree.node(withID: current)?.parentID
+    }
+  }
 }
