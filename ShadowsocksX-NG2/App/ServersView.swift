@@ -29,12 +29,13 @@ struct ServersView: View {
   @State private var renameTarget: NodeID?
   @State private var renameText = ""
   @State private var newGroupParent: NodeID?
-  @State private var newGroupName = ""
+  @State private var newServerParent: NodeID?
   @State private var isPresentingNewGroup = false
   @State private var isPresentingNewServer = false
   @State private var deleteTarget: NodeID?
   @State private var moveTarget: NodeID?
   @State private var rootDropHovering = false
+  @FocusState private var treeFocused: Bool
   // 分享/二维码状态：由 ServersView+Share.swift 扩展驱动，弹窗锚在工具栏
   // 分享按钮上（原详情区底部分享区已于 2026-10-04 上收至此）。
   @State var showQR = false
@@ -61,13 +62,10 @@ struct ServersView: View {
       Button("确定") { commitRename() }
       Button("取消", role: .cancel) { renameTarget = nil }
     }
-    .alert(
-      "新建分组",
-      isPresented: $isPresentingNewGroup
-    ) {
-      TextField("名称", text: $newGroupName)
-      Button("创建") { commitNewGroup() }
-      Button("取消", role: .cancel) { cancelNewGroup() }
+    .sheet(isPresented: $isPresentingNewGroup) {
+      NewGroupSheet(
+        workflow: workflow, errors: errors, parent: newGroupParent,
+        onCreated: selectCreatedNode)
     }
     .presentingErrors(errors)
     .confirmationDialog(
@@ -92,8 +90,7 @@ struct ServersView: View {
     .sheet(isPresented: $isPresentingNewServer) {
       NewServerSheet(
         workflow: workflow, errors: errors,
-        parent: workflow.importTargetParent(for: selection),
-        selection: $selection)
+        parent: newServerParent, onCreated: selectCreatedNode)
     }
   }
 
@@ -104,6 +101,19 @@ struct ServersView: View {
       }
     }
     .listStyle(.sidebar)
+    .focusable(interactions: .edit)
+    .focused($treeFocused)
+    .onKeyPress(.escape) {
+      guard treeFocused, selection != nil else { return .ignored }
+      selection = nil
+      return .handled
+    }
+    .background {
+      ServerTreeBlankClickObserver {
+        selection = nil
+        treeFocused = true
+      }
+    }
     .overlay(alignment: .center) {
       if workflow.tree.isEmpty {
         ContentUnavailableView(
@@ -248,16 +258,26 @@ extension ServersView {
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
     ToolbarItem(placement: .primaryAction) {
-      Button {
-        isPresentingNewServer = true
+      Menu {
+        if let parent = workflow.importTargetParent(for: selection),
+          let path = workflow.tree.pathSummary(for: parent)
+        {
+          Button("在「\(path)」中新建服务器") { presentNewServer(in: parent) }
+        }
+        Button("在根目录新建服务器") { presentNewServer(in: nil) }
       } label: {
         Label("新建服务器", systemImage: "plus")
       }
       .help("新建服务器")
     }
     ToolbarItem(placement: .primaryAction) {
-      Button {
-        presentNewGroup(in: workflow.importTargetParent(for: selection))
+      Menu {
+        if let parent = workflow.importTargetParent(for: selection),
+          let path = workflow.tree.pathSummary(for: parent)
+        {
+          Button("在「\(path)」中新建分组") { presentNewGroup(in: parent) }
+        }
+        Button("在根目录新建分组") { presentNewGroup(in: nil) }
       } label: {
         Label("新建分组", systemImage: "folder.badge.plus")
       }
@@ -304,13 +324,17 @@ extension ServersView {
 
   private func presentNewGroup(in parent: NodeID?) {
     newGroupParent = parent
-    newGroupName = ""
     isPresentingNewGroup = true
   }
 
-  private func cancelNewGroup() {
-    isPresentingNewGroup = false
-    newGroupParent = nil
+  private func presentNewServer(in parent: NodeID?) {
+    newServerParent = parent
+    isPresentingNewServer = true
+  }
+
+  private func selectCreatedNode(_ id: NodeID) {
+    expansion.reveal(id, in: workflow.tree)
+    selection = id
   }
 
   private func commitRename() {
@@ -319,19 +343,6 @@ extension ServersView {
     Task {
       do {
         try await workflow.renameGroup(id, to: renameText)
-      } catch {
-        errors.present(error)
-      }
-    }
-  }
-
-  private func commitNewGroup() {
-    let parent = newGroupParent
-    let name = newGroupName
-    cancelNewGroup()
-    Task {
-      do {
-        _ = try await workflow.createGroup(named: name, into: parent)
       } catch {
         errors.present(error)
       }

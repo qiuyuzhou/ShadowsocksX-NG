@@ -1,3 +1,4 @@
+import Testing
 import XCTest
 
 @testable import ShadowsocksX_NG2
@@ -38,5 +39,56 @@ final class CatalogExpansionStateTests: XCTestCase {
     XCTAssertEqual(expansion.collapsedGroupIDs, [second])
     XCTAssertFalse(expansion.isCollapsed(first))
     XCTAssertTrue(expansion.isCollapsed(second))
+  }
+}
+
+@MainActor
+struct CatalogCreationExpansionTests {
+  @Test
+  func revealingCreatedNodeExpandsAncestorsAndPreservesOtherCollapsedGroups() throws {
+    var catalog = ConfigurationCatalog()
+    let outer = try catalog.addGroup("工作")
+    let inner = try catalog.addGroup("香港", to: outer)
+    let created = try catalog.addGroup("新组", to: inner)
+    let other = try catalog.addGroup("其他")
+    let tree = CatalogTreeSnapshot.build(
+      from: catalog, credentials: InMemoryCredentialStore(), plugins: NoManagedPluginProvider())
+    let expansion = CatalogExpansionState()
+    for id in [outer, inner, other] { expansion.toggleCollapsed(id) }
+
+    expansion.reveal(created, in: tree)
+
+    #expect(expansion.collapsedGroupIDs == [other])
+    #expect(tree.visibleRows(collapsed: expansion.collapsedGroupIDs).map(\.id).contains(created))
+  }
+
+  @Test(arguments: [false, true])
+  func removedCreationParentRejectsWithoutFallingBackToRoot(createServer: Bool) async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let credentials = InMemoryCredentialStore()
+    let workflow = makeCatalogWorkflow(
+      coordinator: CatalogCommitCoordinator(
+        fileStore: CatalogFileStore(fileURL: directory.appendingPathComponent("catalog.json")),
+        runtime: FakeCatalogRuntime()), credentials: credentials)
+    let parent = try await workflow.createGroup(named: "目标组", into: nil)
+    _ = try await workflow.remove(parent)
+
+    do {
+      if createServer {
+        _ = try await workflow.createServer(
+          ServerEditDraft(
+            address: "203.0.113.1", port: 8388, encryptionMethod: "aes-256-gcm",
+            password: "pw", remark: "新服务器", plugin: .none, pluginOptions: nil), into: parent)
+      } else {
+        _ = try await workflow.createGroup(named: "新组", into: parent)
+      }
+      Issue.record("失效的父组应拒绝创建")
+    } catch {
+      let underlying = (error as? CommitError)?.underlying ?? error
+      #expect(underlying as? CatalogError == .parentNotFound(parent))
+    }
+    #expect(workflow.tree.isEmpty)
+    #expect(credentials.storageSnapshot.isEmpty)
   }
 }
