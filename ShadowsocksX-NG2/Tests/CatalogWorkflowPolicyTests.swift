@@ -79,6 +79,22 @@ final class CatalogWorkflowPolicyTests: XCTestCase {
       .subtree(count: 3, includesCredentials: true))
   }
 
+  // MARK: - 删除资格
+
+  func testCanDeleteManualLeafAndGroupButNotSubscriptionOrMissing() async throws {
+    let serverID = try await importServer()
+    let groupID = try await workflow.createGroup(named: "组", into: nil)
+    XCTAssertTrue(workflow.canDelete(serverID), "手动叶子可删")
+    XCTAssertTrue(workflow.canDelete(groupID), "手动分组可删（空组同理）")
+
+    let fixture = try CatalogFixtures.makeSubscriptionFixture()
+    try CatalogFileStore(fileURL: fileURL).save(CatalogDocument(catalog: fixture.catalog))
+    workflow = makeWorkflow()
+    XCTAssertFalse(workflow.canDelete(fixture.serverIDs[0]), "订阅成员结构只读")
+    XCTAssertFalse(workflow.canDelete(fixture.groupID), "订阅分组结构只读")
+    XCTAssertFalse(workflow.canDelete(NodeID(rawValue: "ghost")), "节点不存在")
+  }
+
   // MARK: - 移动目的地
 
   func testMoveDestinationsAreRootAndManualGroupsExcludingOwnSubtree() async throws {

@@ -265,6 +265,19 @@ extension ServersView {
       .labelStyle(.iconOnly)
       .help("新建分组")
     }
+    // 删除：作用于当前选中的服务器叶子或手动分组，确认弹窗与右键菜单共用
+    // deleteTarget 流（档位见 deleteFacts）；无选中或选中项不可删（订阅节点
+    // 结构只读，CONTEXT.md）即禁用，资格判定归政策 seam。
+    ToolbarItem(placement: .primaryAction) {
+      Button {
+        deleteTarget = selection
+      } label: {
+        Label("删除", systemImage: "trash")
+      }
+      .labelStyle(.iconOnly)
+      .help("删除")
+      .disabled(!canDeleteSelection)
+    }
     // 分享（分享/导出术语见 CONTEXT.md）：作用于选中的服务器叶子，弹窗内
     // 提供二维码与复制 ss:// 链接两条通路；无有效载荷即不可用。
     ToolbarItem(placement: .primaryAction) {
@@ -287,6 +300,11 @@ extension ServersView {
   }
 
   // MARK: - 告警动作
+
+  /// 工具栏删除钮可用性：无选中或选中项不可删（订阅节点、失效选择）即禁用。
+  private var canDeleteSelection: Bool {
+    selection.map(workflow.canDelete) ?? false
+  }
 
   private func presentNewGroup(in parent: NodeID?) {
     newGroupParent = parent
