@@ -61,6 +61,18 @@ struct MainWindowView: View {
         }
     } detail: {
       destinationView
+        .toolbar {
+          // macOS 会在详情工具栏项从零变为非零（或反向）时淡入淡出整条
+          // 工具栏背景，连带常驻边栏按钮闪烁。保留不可见的零尺寸项，
+          // 让各页面始终有详情工具栏内容；EmptyView / Spacer 会被系统省略。
+          ToolbarItem(id: "workspace-detail-toolbar-anchor", placement: .primaryAction) {
+            Color.clear
+              .frame(width: 0, height: 0)
+              .hidden()
+              .allowsHitTesting(false)
+              .accessibilityHidden(true)
+          }
+        }
     }
     .onChange(of: workflow.tree, initial: true) {
       homeServerList.update(tree: workflow.tree, activeTargetID: control.snapshot.activeTarget?.id)
