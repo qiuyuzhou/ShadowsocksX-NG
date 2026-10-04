@@ -607,13 +607,13 @@
         }
       }
     },
-    "全部状态": {
+    "全部": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "All states"
+            "value": "All"
           }
         }
       }

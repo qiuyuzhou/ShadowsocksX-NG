@@ -118,12 +118,12 @@ struct RulesView: View {
         Text(RulesCopy.text("代理")).tag(Optional(RuleAction.proxy))
       }.labelsHidden().fixedSize()
       Picker(
-        RulesCopy.text("状态"),
+        RulesCopy.text("启用"),
         selection: Binding(
           get: { workflow.snapshot.query.enabled },
           set: { value in updateQuery { $0.enabled = value } })
       ) {
-        Text(RulesCopy.text("全部状态")).tag(Optional<Bool>.none)
+        Text(RulesCopy.text("全部")).tag(Optional<Bool>.none)
         Text(RulesCopy.text("已启用")).tag(Optional(true))
         Text(RulesCopy.text("已禁用")).tag(Optional(false))
       }.labelsHidden().fixedSize()
