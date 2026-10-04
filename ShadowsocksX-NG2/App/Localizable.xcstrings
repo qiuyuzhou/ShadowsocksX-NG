@@ -23,13 +23,13 @@
         }
       }
     },
-    "删除参数行": {
+    "删除": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Delete Parameter Row"
+            "value": "Delete"
           }
         }
       }
@@ -100,6 +100,17 @@
         }
       }
     },
+    "开关": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flag"
+          }
+        }
+      }
+    },
     "插件参数最多 %lld 个字节": {
       "extractionState": "manual",
       "localizations": {
@@ -111,13 +122,13 @@
         }
       }
     },
-    "无值开关": {
+    "操作": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Flag"
+            "value": "Actions"
           }
         }
       }
@@ -140,17 +151,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "View Mode"
-          }
-        }
-      }
-    },
-    "添加参数": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add Parameter"
           }
         }
       }

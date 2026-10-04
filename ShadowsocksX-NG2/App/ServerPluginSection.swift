@@ -3,7 +3,8 @@ import SwiftUI
 /// 服务器详情的插件区（issue #38/D10，地图 #52 票 #55）：受管选择器——
 /// 「无」+ 受管列表；集外引用（Legacy 导入/订阅带入）追加显式「本版本未
 /// 提供」项使当前状态可见并原样保留。选中受管项才显示参数编辑区与可用性
-/// 警告。订阅只读面无可编辑入口，但仍可切换参数查看模式（issue #81）。
+/// 警告。编辑面与订阅只读面是两个独立视图（issue #81），都经共享的模式
+/// 切换器支持参数列表 ⇄ 原始文本查看。
 struct ServerPluginSection: View {
   @Binding var selection: PluginSelection
   @ObservedObject var options: PluginOptionsDraft
@@ -54,7 +55,7 @@ struct ServerPluginSection: View {
     }
   }
 
-  /// 选中受管项：参数编辑区与可用性警告。
+  /// 选中受管项：参数编辑区与可用性警告；订阅只读走独立只读视图。
   @ViewBuilder
   private func managedDetails(program: String, plugin: PluginSectionState) -> some View {
     if plugin.managed.contains(where: { $0.program == program }) {
@@ -70,11 +71,14 @@ struct ServerPluginSection: View {
         Text("插件参数")
           .font(.callout.weight(.medium))
           .foregroundStyle(.secondary)
-        PluginOptionsEditor(
-          draft: options,
-          isEditable: isEditable,
-          fieldError: optionsError,
-          fieldFocus: optionsFocus)
+        if isEditable {
+          PluginOptionsEditor(
+            draft: options,
+            fieldError: optionsError,
+            fieldFocus: optionsFocus)
+        } else {
+          PluginOptionsReadOnlyEditor(draft: options)
+        }
       }
     }
   }
@@ -98,11 +102,39 @@ struct ServerPluginSection: View {
   }
 }
 
-/// 插件参数编辑区（issue #81）：参数列表 ⇄ 原始文本双模式、底部空行快速
-/// 添加、行内编辑与删除、长值独立编辑；切换查看模式不触发表单变更检测。
+/// 查看模式切换（参数列表 ⇄ 原始文本）；被未完成行拒绝时回弹到当前模式。
+private struct PluginOptionsModePicker: View {
+  @ObservedObject var draft: PluginOptionsDraft
+  @State private var displayedMode = PluginOptionsDraft.Mode.table
+
+  var body: some View {
+    Picker("查看模式", selection: modeBinding) {
+      Text("参数列表").tag(PluginOptionsDraft.Mode.table)
+      Text("原始文本").tag(PluginOptionsDraft.Mode.rawText)
+    }
+    .pickerStyle(.segmented)
+    .labelsHidden()
+    .onChange(of: draft.mode) { _, mode in
+      displayedMode = mode
+    }
+  }
+
+  private var modeBinding: Binding<PluginOptionsDraft.Mode> {
+    Binding(
+      get: { displayedMode },
+      set: { requested in
+        let succeeded =
+          requested == .rawText ? draft.switchToRawText() : draft.switchToTable()
+        displayedMode = succeeded ? requested : draft.mode
+      })
+  }
+}
+
+/// 插件参数编辑区（issue #81）：Table 布局的无边框输入行——行首「值/开关」
+/// 分段选择器决定行的值形态，底部空行即快速添加入口，长值经「编辑值…」
+/// 独立编辑；切换查看模式不触发表单变更检测。
 private struct PluginOptionsEditor: View {
   @ObservedObject var draft: PluginOptionsDraft
-  let isEditable: Bool
   let fieldError: ServerFormFieldError?
   let fieldFocus: FocusState<ServerFormField?>.Binding
 
@@ -111,19 +143,12 @@ private struct PluginOptionsEditor: View {
     let text: String
   }
 
-  /// 模式选择器的显示态：切换被未完成行拒绝时回弹到当前模式。
-  @State private var displayedMode = PluginOptionsDraft.Mode.table
   @State private var editingValue: EditingValue?
   @FocusState private var focusedRowID: UUID?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
-      Picker("查看模式", selection: modeBinding) {
-        Text("参数列表").tag(PluginOptionsDraft.Mode.table)
-        Text("原始文本").tag(PluginOptionsDraft.Mode.rawText)
-      }
-      .pickerStyle(.segmented)
-      .labelsHidden()
+      PluginOptionsModePicker(draft: draft)
       switch draft.mode {
       case .table:
         tableView
@@ -131,9 +156,6 @@ private struct PluginOptionsEditor: View {
         rawTextView
       }
       fieldErrorLabel
-    }
-    .onChange(of: draft.mode) { _, mode in
-      displayedMode = mode
     }
     .onChange(of: fieldError) { _, error in
       // 首错定位：未完成行时聚焦第一行的参数名。
@@ -150,146 +172,99 @@ private struct PluginOptionsEditor: View {
     }
   }
 
-  private var modeBinding: Binding<PluginOptionsDraft.Mode> {
-    Binding(
-      get: { displayedMode },
-      set: { requested in
-        let succeeded =
-          requested == .rawText ? draft.switchToRawText() : draft.switchToTable()
-        displayedMode = succeeded ? requested : draft.mode
-      })
-  }
-
-  // MARK: - 参数列表
+  // MARK: - 参数列表（Table 布局）
 
   private var tableView: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      ForEach(draft.rows) { row in
-        rowView(row)
-      }
-      if isEditable {
-        Button {
-          focusedRowID = draft.quickAddRowID
-        } label: {
-          Label("添加参数", systemImage: "plus")
+    // 无排序 Table 的列泛型固定为 Never，width:/value: 变体一概接不上
+    // （实测 macOS 15 SDK），列宽经内容约束表达：类型列定宽、参数名列
+    // 限宽、值列弹性吸收剩余宽度。
+    Table(draft.rows) {
+      TableColumn("类型") { row in
+        Picker(
+          "参数类型",
+          selection: Binding(
+            get: { row.kind },
+            set: { draft.setKind($0, of: row.id) })
+        ) {
+          Text("值").tag(PluginOptionsDraft.Kind.keyValue)
+          Text("开关").tag(PluginOptionsDraft.Kind.flag)
         }
-        .buttonStyle(.borderless)
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .frame(width: 96)
       }
-    }
-  }
-
-  private func rowView(_ row: PluginOptionsDraft.Row) -> some View {
-    VStack(alignment: .leading, spacing: 3) {
-      HStack(spacing: 8) {
-        keyField(row)
-        valueField(row)
-        kindPicker(row)
-        if isEditable {
-          rowActions(row)
+      TableColumn("参数名") { row in
+        HStack(spacing: 4) {
+          TextField(
+            "参数名",
+            text: Binding(
+              get: { row.keyText },
+              set: { draft.updateKey($0, of: row.id) })
+          )
+          .textFieldStyle(.plain)
+          .frame(maxWidth: 140, alignment: .leading)
+          .focused($focusedRowID, equals: row.id)
+          if row.isUnfinished {
+            Image(systemName: "exclamationmark.circle.fill")
+              .font(.caption)
+              .foregroundStyle(.red)
+              .help("缺少参数名")
+          }
         }
       }
-      if row.isUnfinished {
-        Text("缺少参数名")
-          .font(.caption)
-          .foregroundStyle(.red)
-      }
-    }
-  }
-
-  @ViewBuilder
-  private func keyField(_ row: PluginOptionsDraft.Row) -> some View {
-    if isEditable {
-      TextField(
-        "参数名",
-        text: Binding(
-          get: { row.keyText },
-          set: { draft.updateKey($0, of: row.id) })
-      )
-      .textFieldStyle(.roundedBorder)
-      .focused($focusedRowID, equals: row.id)
-    } else {
-      Text(row.keyText)
+      TableColumn("值") { row in
+        TextField(
+          "值",
+          text: Binding(
+            get: { row.valueText },
+            set: { draft.updateValue($0, of: row.id) })
+        )
+        .textFieldStyle(.plain)
         .lineLimit(1)
         .truncationMode(.tail)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .disabled(row.kind == .flag)
+      }
+      TableColumn("操作") { row in
+        HStack(spacing: 10) {
+          Button {
+            editingValue = EditingValue(id: row.id, text: row.valueText)
+          } label: {
+            Label("编辑值…", systemImage: "square.and.pencil")
+          }
+          .buttonStyle(.borderless)
+          .disabled(row.kind == .flag)
+
+          Button {
+            draft.deleteRow(row.id)
+          } label: {
+            Label("删除", systemImage: "trash")
+          }
+          .buttonStyle(.borderless)
+        }
+      }
     }
+    .tableStyle(.inset)
+    .frame(height: editTableHeight)
   }
 
-  @ViewBuilder
-  private func valueField(_ row: PluginOptionsDraft.Row) -> some View {
-    if isEditable {
-      TextField(
-        "值",
-        text: Binding(
-          get: { row.valueText },
-          set: { draft.updateValue($0, of: row.id) })
-      )
-      .textFieldStyle(.roundedBorder)
-      .disabled(row.kind == .flag)
-    } else {
-      // 值单元格单行展示、尾部省略；完整内容保留在草稿与无障碍读取中。
-      Text(row.valueText)
-        .lineLimit(1)
-        .truncationMode(.tail)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel(row.kind == .flag ? "无值开关" : "值")
-    }
-  }
-
-  private func kindPicker(_ row: PluginOptionsDraft.Row) -> some View {
-    Picker(
-      "类型",
-      selection: Binding(
-        get: { row.kind },
-        set: { draft.setKind($0, of: row.id) })
-    ) {
-      Text("值").tag(PluginOptionsDraft.Kind.keyValue)
-      Text("无值开关").tag(PluginOptionsDraft.Kind.flag)
-    }
-    .labelsHidden()
-    .pickerStyle(.menu)
-    .frame(width: 96)
-    .disabled(!isEditable)
-  }
-
-  @ViewBuilder
-  private func rowActions(_ row: PluginOptionsDraft.Row) -> some View {
-    Button {
-      editingValue = EditingValue(id: row.id, text: row.valueText)
-    } label: {
-      Label("编辑值…", systemImage: "square.and.pencil")
-    }
-    .buttonStyle(.borderless)
-    .disabled(row.kind == .flag)
-
-    Button {
-      draft.deleteRow(row.id)
-    } label: {
-      Label("删除参数行", systemImage: "trash")
-    }
-    .buttonStyle(.borderless)
+  /// 行数驱动的表格高度：单行约 30pt，夹在上下限之间。
+  private var editTableHeight: CGFloat {
+    max(min(52 + CGFloat(draft.rows.count) * 30, 440), 112)
   }
 
   // MARK: - 原始文本
 
   private var rawTextView: some View {
-    Group {
-      if isEditable {
-        TextEditor(text: $draft.rawText)
-          .font(.system(.body, design: .monospaced))
-          .frame(minHeight: 76, maxHeight: 152)
-          .autocorrectionDisabled()
-          .focused(fieldFocus, equals: .pluginOptions)
-      } else {
-        ScrollView {
-          Text(draft.rawText)
-            .font(.system(.body, design: .monospaced))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
-        }
-        .frame(minHeight: 76, maxHeight: 152)
-      }
-    }
+    TextEditor(text: $draft.rawText)
+      .font(.system(.body, design: .monospaced))
+      .frame(minHeight: 76, maxHeight: 152)
+      .autocorrectionDisabled()
+      .focused(fieldFocus, equals: .pluginOptions)
+      .overlay(
+        RoundedRectangle(cornerRadius: 6)
+          .stroke(Color(nsColor: .separatorColor))
+      )
   }
 
   // MARK: - 字段错误
@@ -308,6 +283,63 @@ private struct PluginOptionsEditor: View {
     case .missingName, .tooManyCharacters, .invalidPort, nil:
       EmptyView()
     }
+  }
+}
+
+/// 订阅节点的参数只读呈现（issue #81）：Table 控件的表格展现与原始文本
+/// 只读，可切换查看模式，无任何编辑入口。
+private struct PluginOptionsReadOnlyEditor: View {
+  @ObservedObject var draft: PluginOptionsDraft
+
+  private var visibleRows: [PluginOptionsDraft.Row] {
+    draft.rows.filter { !$0.isBlank }
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      PluginOptionsModePicker(draft: draft)
+      switch draft.mode {
+      case .table:
+        Table(visibleRows) {
+          TableColumn("参数名") { row in
+            Text(row.keyText)
+              .lineLimit(1)
+              .truncationMode(.tail)
+              .frame(maxWidth: 220, alignment: .leading)
+              .textSelection(.enabled)
+          }
+          TableColumn("值") { row in
+            // 值单元格单行展示、尾部省略；完整内容保留在草稿与无障碍读取中。
+            Text(row.valueText)
+              .lineLimit(1)
+              .truncationMode(.tail)
+              .textSelection(.enabled)
+          }
+          TableColumn("类型") { row in
+            Text(row.kind == .flag ? "开关" : "值")
+              .foregroundStyle(.secondary)
+          }
+        }
+        .tableStyle(.inset)
+        .frame(height: readOnlyTableHeight)
+      case .rawText:
+        ScrollView {
+          Text(draft.rawText)
+            .font(.system(.body, design: .monospaced))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+        }
+        .frame(minHeight: 76, maxHeight: 152)
+        .overlay(
+          RoundedRectangle(cornerRadius: 6)
+            .stroke(Color(nsColor: .separatorColor))
+        )
+      }
+    }
+  }
+
+  private var readOnlyTableHeight: CGFloat {
+    max(min(48 + CGFloat(visibleRows.count) * 28, 400), 96)
   }
 }
 
@@ -333,6 +365,10 @@ private struct PluginOptionValueEditorSheet: View {
         .font(.system(.body, design: .monospaced))
         .frame(minHeight: 76, maxHeight: 152)
         .autocorrectionDisabled()
+        .overlay(
+          RoundedRectangle(cornerRadius: 6)
+            .stroke(Color(nsColor: .separatorColor))
+        )
       HStack {
         Spacer()
         Button("取消", role: .cancel) { dismiss() }

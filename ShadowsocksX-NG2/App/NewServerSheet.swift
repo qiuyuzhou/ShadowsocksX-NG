@@ -23,8 +23,10 @@ struct NewServerSheet: View {
       Text("新建服务器")
         .font(.title2)
 
+      // isEditable 恒真：提交期间的禁用由外层 .disabled(isSubmitting) 负责，
+      // 避免参数编辑区在提交瞬间闪换成订阅只读视图。
       ServerFormFieldsGrid(
-        fields: fields, plugin: pluginSection, isEditable: !isSubmitting,
+        fields: fields, plugin: pluginSection, isEditable: true,
         fieldFocus: $fieldFocus)
 
       HStack {
