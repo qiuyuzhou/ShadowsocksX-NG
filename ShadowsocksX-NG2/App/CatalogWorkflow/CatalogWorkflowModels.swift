@@ -138,8 +138,9 @@ extension CatalogTreeSnapshot {
   static func build(
     from catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
-    plugins: ManagedPluginProviding
+    plugins: PluginExecutableResolving
   ) -> CatalogTreeSnapshot {
+    let plugins = plugins.catalogSnapshot()
     func buildNode(_ id: NodeID, entry: CatalogEntry, parentID: NodeID?) -> CatalogTreeNode {
       switch entry.kind {
       case .group(let fields):
@@ -267,12 +268,12 @@ struct CommitError: Error {
   let credentialRollback: CredentialRollbackOutcome
 }
 
-/// 插件选择器选中态（D10）：「无」、受管集内程序、受管集外引用。集外引用
-/// （Legacy 导入或订阅带入）以显式「本版本未提供」状态呈现并原样保留。
+/// 插件选择器选中态：无、目录中的名称引用、未解析的导入引用。
+/// 托管或用户来源由有效目录解释，不参与选中值身份。
 /// Hashable 以直接充当 SwiftUI Picker 的选中值。
 enum PluginSelection: Hashable {
   case none
-  case managed(program: String)
+  case named(program: String)
   case unknown(program: String)
 }
 
@@ -281,12 +282,13 @@ struct PluginSectionState: Equatable {
   let selection: PluginSelection
   /// 本版本受管集（「无」不由这里提供）。
   let managed: [ManagedPluginInfo]
-  /// 当前受管引用的可执行文件是否在位（生成配置时的存在性检查事实）。
+  /// 当前具名引用的可执行文件是否在位（生成配置时的存在性检查事实）。
   let provided: Bool
   /// 参数是否已配置（存于钥匙串）。
   let optionsPresent: Bool
-  /// 参数明文（仅受管选中态解析，供参数输入框预填；其余为空串）。
+  /// 参数明文（仅目录中的具名选中态解析，供参数输入框预填；其余为空串）。
   let options: String
+  var programs: [String]?
 }
 
 // MARK: - 订阅 projection
@@ -365,8 +367,8 @@ enum ServerFormError: Error, Equatable {
   case unsupportedEncryptionMethod(String)
   case invalidPassword
   case emptyName
-  /// 提交了受管集之外的插件选择（表单只能产生受管集内的选择，此为程序错误防线的显式拒绝）。
-  case pluginNotManaged(String)
+  /// 提交了有效目录之外的插件选择；拒绝陈旧或未知的表单选择。
+  case pluginUnknown(String)
 }
 
 /// 订阅表单级失败（URL 门禁、订阅不存在）；获取/解析失败仍以原错误上抛。

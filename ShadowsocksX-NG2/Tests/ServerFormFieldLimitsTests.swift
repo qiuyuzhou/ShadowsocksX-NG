@@ -29,7 +29,7 @@ struct ServerFormFieldLimitsTests {
       password: password,
       remark: name,
       plugin: PluginSectionState(
-        selection: .managed(program: "v2ray-plugin"),
+        selection: .named(program: "v2ray-plugin"),
         managed: ManagedPluginCatalog.plugins,
         provided: true,
         optionsPresent: !pluginOptions.isEmpty,

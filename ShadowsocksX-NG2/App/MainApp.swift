@@ -142,13 +142,22 @@ private struct AppComposition {
     // access to this same in-process source.
     let catalogBootstrap = CatalogCommitCoordinator.bootstrap(
       fileStore: dependencies.catalogFileStore)
+    let plugins = PluginCatalog()
     let controller = makeRuntimeController(
-      dependencies: dependencies, bootstrap: catalogBootstrap)
+      dependencies: dependencies, bootstrap: catalogBootstrap, plugins: plugins)
     let loginController = LaunchAtLoginController(service: dependencies.loginService)
     let catalogWorkflow = makeCatalogWorkflow(
       dependencies: dependencies,
       controller: controller,
-      bootstrap: catalogBootstrap)
+      bootstrap: catalogBootstrap, plugins: plugins)
+    plugins.connect(
+      invalidateRuntime: { [weak controller] in controller?.pluginMappingsDidPublish() },
+      revalidate: { [weak catalogWorkflow] in catalogWorkflow?.republishCommittedState() },
+      converge: { [weak controller] in
+        guard let controller else { return }
+        _ = await controller.catalogDidCommit(
+          snapshot: controller.catalogSnapshotReader.catalogSnapshot)
+      })
     // 代理控制工作流 module（issue #47）：状态菜单等 UI 表面的唯一代理控制
     // seam，组合根接线一次。生产 runtime adapter 包装既有控制器（不复制运行
     // 时语义）；目录目标事实经窄缝从目录工作流读取；本机接口事实经独立缝
@@ -164,7 +173,14 @@ private struct AppComposition {
     // 实例供诊断侧栏与详情共同使用。
     let diagnosticsWorkflow = DiagnosticsWorkflow(
       runtimeFacts: controller,
-      catalogFacts: { catalogWorkflow.diagnosticCatalogFacts })
+      catalogFacts: { catalogWorkflow.diagnosticCatalogFacts },
+      managedPlugins: {
+        plugins.catalogSnapshot().entries.map { entry in
+          DiagnosticPluginFacts(
+            program: entry.program, version: entry.managedInfo?.release ?? "",
+            present: entry.availability == .available, source: entry.source)
+        }
+      })
     let workspaceRoute = WorkspaceRoute()
     let silentLaunch = SilentLaunchController(store: dependencies.silentLaunchStore)
     let expansion = CatalogExpansionState()
@@ -204,13 +220,16 @@ private struct AppComposition {
   /// 系统服务适配器。
   private static func makeRuntimeController(
     dependencies: ApplicationDependencies,
-    bootstrap: CatalogCommitBootstrap
+    bootstrap: CatalogCommitBootstrap,
+    plugins: PluginCatalog
   ) -> ProxyRuntimeController {
     ProxyRuntimeController(
       catalogSnapshotReader: bootstrap.catalogSnapshotReader,
       activationFileStore: dependencies.activationFileStore,
       runtimeFileStore: dependencies.runtimeFileStore,
       credentials: dependencies.credentials,
+      plugins: plugins,
+      refreshPluginSecurityFacts: { [weak plugins] in _ = plugins?.refreshSecurityFacts() },
       listenRestore: dependencies.listenRestore,
       settingsStore: dependencies.settingsStore,
       settingsRestore: dependencies.settingsRestore,
@@ -223,7 +242,8 @@ private struct AppComposition {
   private static func makeCatalogWorkflow(
     dependencies: ApplicationDependencies,
     controller: ProxyRuntimeController,
-    bootstrap: CatalogCommitBootstrap
+    bootstrap: CatalogCommitBootstrap,
+    plugins: PluginCatalog
   ) -> CatalogWorkflow {
     let coordinator = CatalogCommitCoordinator(
       fileStore: dependencies.catalogFileStore,
@@ -233,7 +253,7 @@ private struct AppComposition {
       dependencies: CatalogWorkflowDependencies(
         coordinator: coordinator,
         credentials: dependencies.credentials,
-        plugins: BundleManagedPluginProvider(),
+        plugins: plugins,
         subscriptionFetcher: HTTPSSubscriptionFetcher(),
         legacyImportService: dependencies.legacyImportService,
         postLegacyImport: { _ in

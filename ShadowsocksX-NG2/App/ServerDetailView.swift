@@ -46,10 +46,12 @@ struct ServerDetailView: View {
       fields.showServer(serverID, load: workflow.serverEditForm)
     }
     .onReceive(workflow.$tree) { _ in
-      fields.updatePresentation(workflow.serverFormPresentation(for: serverID))
+      fields.updatePresentation(
+        workflow.serverFormPresentation(for: serverID), load: workflow.serverEditForm)
     }
     .onReceive(workflow.subscriptionServerRefreshes) { affected in
-      fields.updatePresentation(workflow.serverFormPresentation(for: serverID))
+      fields.updatePresentation(
+        workflow.serverFormPresentation(for: serverID), load: workflow.serverEditForm)
       fields.subscriptionDidRefresh(affectedServers: affected, load: workflow.serverEditForm)
     }
   }

@@ -83,7 +83,7 @@ extension CatalogWorkflow {
       }
       fields.pluginProgram = nil
       fields.pluginOptionsRef = nil
-    case .managed(let program):
+    case .named(let program):
       fields.pluginProgram = program
       let trimmedOptions = (options ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
       if trimmedOptions.isEmpty {

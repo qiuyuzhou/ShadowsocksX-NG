@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 服务器详情的插件区（issue #38/D10，地图 #52 票 #55）：受管选择器——
+/// 服务器详情的插件区（issue #38/D10，地图 #52 票 #55）：有效插件目录选择器——
 /// 「无」+ 受管列表；集外引用（Legacy 导入/订阅带入）追加显式「本版本未
 /// 提供」项使当前状态可见并原样保留。选中受管项才显示参数编辑区与可用性
 /// 警告。编辑面与订阅只读面是两个独立视图（issue #81），都经共享的模式
@@ -26,8 +26,8 @@ struct ServerPluginSection: View {
     if let plugin {
       Picker("插件", selection: $selection) {
         Text("无").tag(PluginSelection.none)
-        ForEach(plugin.managed, id: \.program) { info in
-          Text(info.program).tag(PluginSelection.managed(program: info.program))
+        ForEach(plugin.programs ?? plugin.managed.map(\.program), id: \.self) { program in
+          Text(program).tag(PluginSelection.named(program: program))
         }
         if case .unknown(let program) = plugin.selection {
           Text("\(program)（本版本未提供）").tag(PluginSelection.unknown(program: program))
@@ -47,8 +47,8 @@ struct ServerPluginSection: View {
       switch selection {
       case .none:
         EmptyView()
-      case .managed(let program):
-        managedDetails(program: program, plugin: plugin)
+      case .named(let program):
+        namedPluginDetails(program: program, plugin: plugin)
       case .unknown(let program):
         unknownNotice(program: program, plugin: plugin)
       }
@@ -57,12 +57,12 @@ struct ServerPluginSection: View {
 
   /// 选中受管项：参数编辑区与可用性警告；订阅只读走独立只读视图。
   @ViewBuilder
-  private func managedDetails(program: String, plugin: PluginSectionState) -> some View {
-    if plugin.managed.contains(where: { $0.program == program }) {
+  private func namedPluginDetails(program: String, plugin: PluginSectionState) -> some View {
+    if (plugin.programs ?? plugin.managed.map(\.program)).contains(program) {
       VStack(alignment: .leading, spacing: 8) {
         if !plugin.provided {
           Label(
-            "受管插件可执行文件缺失：激活会被点名拒绝；请重新安装本 app。",
+            "不可用",
             systemImage: "exclamationmark.triangle.fill"
           )
           .font(.footnote)

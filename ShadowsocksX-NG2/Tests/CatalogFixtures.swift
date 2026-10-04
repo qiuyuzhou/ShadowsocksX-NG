@@ -146,7 +146,7 @@ final class InMemoryLegacyImportMarker: LegacyImportMarkerStoring {
 func makeCatalogWorkflow(
   coordinator: CatalogCommitCoordinator,
   credentials: CredentialStoring,
-  plugins: ManagedPluginProviding = NoManagedPluginProvider(),
+  plugins: PluginExecutableResolving = NoManagedPluginProvider(),
   subscriptionFetcher: SubscriptionFetching = FakeSubscriptionFetcher(
     behavior: .success(Data())),
   legacyImportService: LegacyImportService? = nil,

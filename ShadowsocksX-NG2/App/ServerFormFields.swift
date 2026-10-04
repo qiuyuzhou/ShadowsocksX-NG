@@ -190,7 +190,44 @@ final class ServerFormFields: ObservableObject {
     reloadServer(load: load)
   }
 
-  func updatePresentation(_ facts: ServerFormPresentation?) {
+  func updatePresentation(
+    _ facts: ServerFormPresentation?,
+    load: ((NodeID) throws -> ServerEditForm?)? = nil
+  ) {
+    if let selection = facts?.plugin.selection,
+      presentation?.plugin.selection != selection
+    {
+      let oldProgram: String?
+      switch pluginChoice {
+      case .named(let program), .unknown(let program): oldProgram = program
+      case .none: oldProgram = nil
+      }
+      let newProgram: String?
+      switch selection {
+      case .named(let program), .unknown(let program): newProgram = program
+      case .none: newProgram = nil
+      }
+      if let oldProgram, oldProgram == newProgram,
+        savedDraft?.plugin == pluginChoice
+      {
+        // Only refresh plugin facts. Independent unsaved server fields stay intact.
+        if case .unknown = pluginChoice, case .named = selection,
+          let serverID, let load,
+          pluginOptions.composedString == savedDraft?.pluginOptions
+        {
+          do {
+            if let form = try load(serverID) {
+              pluginOptions.load(form.plugin.options)
+              savedDraft?.pluginOptions = pluginOptions.composedString
+            }
+          } catch {
+            loadFailure = .credentialsUnavailable
+          }
+        }
+        pluginChoice = selection
+        savedDraft?.plugin = selection
+      }
+    }
     if presentation != facts { presentation = facts }
   }
 

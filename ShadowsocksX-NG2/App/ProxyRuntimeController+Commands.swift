@@ -11,6 +11,7 @@ extension ProxyRuntimeController {
   /// 自含返回；意外错误 throws 并进入 `serviceFailed`。
   @discardableResult
   func activate(_ target: NodeID) async throws -> ActivationCommandOutcome {
+    refreshPluginSecurityFacts()
     let catalog = catalogSnapshotReader.catalogSnapshot
     do {
       let configuration = try machine.activate(
@@ -114,6 +115,7 @@ extension ProxyRuntimeController {
   /// GUI startup restores the Agent. Healthy proxy intent only inspects; unhealthy
   /// proxy intent suspends; disabled intent never writes SystemConfiguration.
   func resyncOnLaunch() async {
+    refreshPluginSecurityFacts()
     systemProxyObserver.beginStartupResync()
     guard settings.agentEnabled else {
       await stopAgent()
@@ -157,7 +159,10 @@ extension ProxyRuntimeController {
   /// 普通部署意图；配置派生、执行与失败呈现由运行状态收敛 module 拥有。
   @discardableResult
   func deploy(_ sourceDocument: SslocalRuntimeDocument) async -> ConvergenceResult {
-    await convergeRuntime(.deployment(sourceDocument))
+    refreshPluginSecurityFacts()
+    let result = await convergeRuntime(.deployment(sourceDocument))
+    if case .failed = result { refreshPluginSecurityFacts() }
+    return result
   }
 
   /// 活动目标失效（issue #60）：清除并持久化 nil，点名原因独立呈现；agent

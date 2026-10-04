@@ -148,7 +148,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
     }
 
     let form = try XCTUnwrap(try workflow.serverEditForm(for: id))
-    XCTAssertEqual(form.plugin.selection, .managed(program: "v2ray-plugin"), "插件引用保留")
+    XCTAssertEqual(form.plugin.selection, .named(program: "v2ray-plugin"), "插件引用保留")
     XCTAssertEqual(form.plugin.options, "mode=websocket", "被删除的参数秘密已恢复")
   }
 

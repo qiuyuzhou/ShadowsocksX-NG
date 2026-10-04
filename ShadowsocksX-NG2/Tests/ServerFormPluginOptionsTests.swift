@@ -18,7 +18,7 @@ struct ServerFormPluginOptionsTests {
       password: "password",
       remark: "服务器",
       plugin: PluginSectionState(
-        selection: .managed(program: "v2ray-plugin"),
+        selection: .named(program: "v2ray-plugin"),
         managed: ManagedPluginCatalog.plugins,
         provided: true,
         optionsPresent: !pluginOptions.isEmpty,

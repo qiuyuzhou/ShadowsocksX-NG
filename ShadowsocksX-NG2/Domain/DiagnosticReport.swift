@@ -122,6 +122,7 @@ struct DiagnosticPluginFacts: Equatable, Sendable {
   let program: String
   let version: String
   let present: Bool
+  var source: PluginCatalogSnapshot.Source = .managed
 }
 
 /// 诊断报告构建器（spec #21 D5，issue #34）：只输出状态、存在性、权限、
@@ -226,8 +227,10 @@ enum DiagnosticReportBuilder {
       lines.append("（本版本未打包任何插件）")
     } else {
       for plugin in snapshot.managedPlugins {
+        let version = plugin.source == .managed ? plugin.version : plugin.source.rawValue
         lines.append(
-          "- \(plugin.program) \(plugin.version)：\(plugin.present ? "已提供" : "缺失")")
+          "- \(plugin.program) \(version)：\(plugin.present ? "已提供" : "缺失")"
+        )
       }
     }
     lines.append("")

@@ -95,7 +95,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     try writePluginBinary()
     let id = try await addPluginServer(program: pluginBinaryName, options: "mode=websocket")
     let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
-    XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName))
+    XCTAssertEqual(plugin.selection, .named(program: pluginBinaryName))
     XCTAssertTrue(plugin.provided, "二进制在位即提供")
     XCTAssertTrue(plugin.optionsPresent)
     XCTAssertEqual(plugin.options, "mode=websocket", "参数明文供输入框预填")
@@ -105,7 +105,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
   func testMissingBinaryShowsManagedButNotProvided() async throws {
     let id = try await addPluginServer(program: pluginBinaryName, options: nil)
     let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
-    XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName))
+    XCTAssertEqual(plugin.selection, .named(program: pluginBinaryName))
     XCTAssertFalse(plugin.provided, "打包损坏/降级丢插件时点名呈现")
   }
 
@@ -132,10 +132,10 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     try writePluginBinary()
     let id = try await addPluginServer(program: nil, options: nil)
     try await update(
-      id, plugin: .managed(program: pluginBinaryName),
+      id, plugin: .named(program: pluginBinaryName),
       pluginOptions: "mode=websocket;host=example.com")
     let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
-    XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName))
+    XCTAssertEqual(plugin.selection, .named(program: pluginBinaryName))
     XCTAssertEqual(plugin.options, "mode=websocket;host=example.com")
     XCTAssertTrue(plugin.optionsPresent)
   }
@@ -143,9 +143,9 @@ final class CatalogWorkflowPluginTests: XCTestCase {
   func testSavingEmptyOptionsDropsOptions() async throws {
     try writePluginBinary()
     let id = try await addPluginServer(program: pluginBinaryName, options: "mode=websocket")
-    try await update(id, plugin: .managed(program: pluginBinaryName), pluginOptions: "   ")
+    try await update(id, plugin: .named(program: pluginBinaryName), pluginOptions: "   ")
     let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
-    XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName), "程序引用保留")
+    XCTAssertEqual(plugin.selection, .named(program: pluginBinaryName), "程序引用保留")
     XCTAssertFalse(plugin.optionsPresent, "空参数即无参数引用")
     XCTAssertEqual(plugin.options, "")
     // 秘密确实从凭据存储删除（引用固定为夹具常量）。
@@ -180,10 +180,10 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     let id = try await addPluginServer(program: nil, options: nil)
     await expectThrowsAsync(
       {
-        try await update(id, plugin: .managed(program: "obfs-local"), pluginOptions: nil)
+        try await update(id, plugin: .named(program: "obfs-local"), pluginOptions: nil)
       },
       onThrow: { error in
-        XCTAssertEqual(error as? ServerFormError, .pluginNotManaged("obfs-local"))
+        XCTAssertEqual(error as? ServerFormError, .pluginUnknown("obfs-local"))
       })
   }
 
@@ -193,7 +193,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     try writePluginBinary()
     let id = try await addPluginServer(program: nil, options: nil)
     try await update(
-      id, plugin: .managed(program: pluginBinaryName),
+      id, plugin: .named(program: pluginBinaryName),
       pluginOptions: "mode=websocket;host=example.com")
 
     let shared = try workflow.shareURI(for: id)
@@ -207,7 +207,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     let importedNode = try XCTUnwrap(
       workflow.tree.roots.dropFirst().first, "第二个根节点应是新导入的服务器")
     let imported = try XCTUnwrap(try workflow.serverEditForm(for: importedNode.id))
-    XCTAssertEqual(imported.plugin.selection, .managed(program: pluginBinaryName))
+    XCTAssertEqual(imported.plugin.selection, .named(program: pluginBinaryName))
     XCTAssertEqual(imported.plugin.options, "mode=websocket;host=example.com")
   }
 }

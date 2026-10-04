@@ -90,11 +90,11 @@ final class CatalogWorkflowCreateServerTests: XCTestCase {
     let id = try await workflow.createServer(
       ServerEditDraft(
         address: "203.0.113.10", port: 8388, encryptionMethod: "aes-256-gcm",
-        password: "密码", remark: "插件服务器", plugin: .managed(program: "v2ray-plugin"),
+        password: "密码", remark: "插件服务器", plugin: .named(program: "v2ray-plugin"),
         pluginOptions: "mode=websocket;host=example.com"),
       into: nil)
     let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
-    XCTAssertEqual(plugin.selection, .managed(program: "v2ray-plugin"))
+    XCTAssertEqual(plugin.selection, .named(program: "v2ray-plugin"))
     XCTAssertTrue(plugin.optionsPresent)
     XCTAssertEqual(plugin.options, "mode=websocket;host=example.com")
   }
@@ -120,8 +120,8 @@ final class CatalogWorkflowCreateServerTests: XCTestCase {
         .unsupportedEncryptionMethod("future-cipher")),
       InvalidCreateDraftCase("空密码", draft(password: ""), .invalidPassword),
       InvalidCreateDraftCase(
-        "受管集外插件", draft(plugin: .managed(program: "future-plugin")),
-        .pluginNotManaged("future-plugin")),
+        "受管集外插件", draft(plugin: .named(program: "future-plugin")),
+        .pluginUnknown("future-plugin")),
     ]
   }
 }

@@ -97,7 +97,7 @@ final class CatalogWorkflow: ObservableObject {
       isEditable: entry.source == .manual, plugin: pluginPresentation(for: fields))
   }
 
-  /// 服务器编辑面（显式命令，story 11）：解析密码与受管插件参数明文。
+  /// 服务器编辑面（显式命令，story 11）：解析密码与目录中的具名插件参数明文。
   /// 节点不存在或不是服务器叶子为 `nil`。
   func serverEditForm(for id: NodeID) throws -> ServerEditForm? {
     guard let entry = dependencies.coordinator.committedCatalog.entry(for: id),
@@ -129,48 +129,51 @@ final class CatalogWorkflow: ObservableObject {
   /// 插件区状态（#38）：集内引用给可执行文件存在性事实与参数明文；集外引用
   /// 以显式 unknown 呈现（原样保留，激活语义由状态机点名拒绝）。
   private func pluginPresentation(for fields: ServerFields) -> PluginSectionState {
+    let snapshot = dependencies.plugins.catalogSnapshot()
     let selection: PluginSelection
     if let program = fields.pluginProgram {
       selection =
-        ManagedPluginCatalog.info(forProgram: program) != nil
-        ? .managed(program: program) : .unknown(program: program)
+        snapshot.entry(for: program) != nil
+        ? .named(program: program) : .unknown(program: program)
     } else {
       selection = .none
     }
     let provided: Bool
-    if case .managed(let program) = selection {
-      provided = dependencies.plugins.executablePath(forProgram: program) != nil
+    if case .named(let program) = selection {
+      provided = snapshot.executablePath(forProgram: program) != nil
     } else {
       provided = false
     }
     return PluginSectionState(
       selection: selection, managed: ManagedPluginCatalog.plugins, provided: provided,
-      optionsPresent: fields.pluginOptionsRef != nil, options: "")
+      optionsPresent: fields.pluginOptionsRef != nil, options: "",
+      programs: snapshot.entries.map(\.program))
   }
 
   private func loadedPluginState(for fields: ServerFields) throws -> PluginSectionState {
     let facts = pluginPresentation(for: fields)
     let options: String
-    if case .managed = facts.selection, let reference = fields.pluginOptionsRef {
+    if case .named = facts.selection, let reference = fields.pluginOptionsRef {
       options = try requiredServerSecret(reference)
     } else {
       options = ""
     }
     return PluginSectionState(
       selection: facts.selection, managed: facts.managed, provided: facts.provided,
-      optionsPresent: facts.optionsPresent, options: options)
+      optionsPresent: facts.optionsPresent, options: options, programs: facts.programs)
   }
 
   /// 新建表单的插件区状态：无既有引用与既有参数，选中态跟随草稿。新表单
-  /// 只能产生「无」或受管选择，`provided` 恒为真——新建尚无引用可点名，
+  /// 只能产生「无」或目录中的具名选择，`provided` 恒为真——新建尚无引用可点名，
   /// 可执行文件缺失由激活语义拒绝并在编辑面呈现。
   func newFormPluginSection(selection: PluginSelection) -> PluginSectionState {
-    PluginSectionState(
+    let snapshot = dependencies.plugins.catalogSnapshot()
+    return PluginSectionState(
       selection: selection,
       managed: ManagedPluginCatalog.plugins,
       provided: true,
       optionsPresent: false,
-      options: "")
+      options: "", programs: snapshot.entries.map(\.program))
   }
 
   /// 添加落点：选中手动分组 → 组内；选中服务器 → 其父组（仅手动）；其余 → 根。
@@ -194,7 +197,7 @@ final class CatalogWorkflow: ObservableObject {
   /// 全新 UUID，不按内容去重（GLOSSARY.md 不变量）；返回新节点身份供选中。
   @discardableResult
   func createServer(_ draft: ServerEditDraft, into parent: NodeID?) async throws -> NodeID {
-    let draft = try Self.prepareServerDraft(draft)
+    let draft = try prepareServerDraft(draft)
     var journal = CredentialWriteJournal(credentials: dependencies.credentials)
     do {
       return try commit { [self] catalog in
@@ -256,9 +259,9 @@ final class CatalogWorkflow: ObservableObject {
   /// 服务器编辑提交（story 12/13）：配置与凭据作为一个逻辑变更；凭据写入经
   /// journal 记录原值，提交失败时全部恢复旧秘密，恢复结果经
   /// `CommitError.credentialRollback` 报出。插件选择按 #38 语义
-  /// 落盘（「无」整体清除、受管写程序名与参数、集外引用原样保留）。
+  /// 落盘（「无」整体清除、具名选择写程序名与参数、集外引用原样保留）。
   func updateServer(_ id: NodeID, draft: ServerEditDraft) async throws {
-    let draft = try Self.prepareServerDraft(draft)
+    let draft = try prepareServerDraft(draft)
     var journal = CredentialWriteJournal(credentials: dependencies.credentials)
     do {
       try commit { [self] catalog in
@@ -282,7 +285,7 @@ final class CatalogWorkflow: ObservableObject {
 
   /// 新建与编辑共享的草稿准备：校验在凭据 journal 与目录提交之前完成。
   /// 仅手动表单拒绝空名称；导入通过 ServerFields 的构造规则补名。
-  private static func prepareServerDraft(_ input: ServerEditDraft) throws -> ServerEditDraft {
+  private func prepareServerDraft(_ input: ServerEditDraft) throws -> ServerEditDraft {
     var draft = input
     draft.address = draft.address.trimmingCharacters(in: .whitespaces)
     guard !draft.address.isEmpty else { throw ServerFormError.invalidAddress }
@@ -293,10 +296,10 @@ final class CatalogWorkflow: ObservableObject {
       throw ServerFormError.unsupportedEncryptionMethod(draft.encryptionMethod)
     }
     guard !draft.password.isEmpty else { throw ServerFormError.invalidPassword }
-    if case .managed(let program) = draft.plugin,
-      ManagedPluginCatalog.info(forProgram: program) == nil
+    if case .named(let program) = draft.plugin,
+      dependencies.plugins.catalogSnapshot().entry(for: program) == nil
     {
-      throw ServerFormError.pluginNotManaged(program)
+      throw ServerFormError.pluginUnknown(program)
     }
     draft.remark = draft.remark.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !draft.remark.isEmpty else { throw ServerFormError.emptyName }

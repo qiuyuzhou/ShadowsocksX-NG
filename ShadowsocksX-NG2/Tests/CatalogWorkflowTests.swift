@@ -78,7 +78,7 @@ final class CatalogWorkflowTests: XCTestCase {
     _ = await workflow.importServers(from: [.clipboardText(uri)], into: nil)
     let id = try XCTUnwrap(workflow.tree.roots.first?.id)
     let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
-    XCTAssertEqual(plugin.selection, .managed(program: "v2ray-plugin"))
+    XCTAssertEqual(plugin.selection, .named(program: "v2ray-plugin"))
     XCTAssertTrue(plugin.optionsPresent)
     // NoManagedPluginProvider:程序引用保留但可执行文件缺失(集外点名事实)。
     XCTAssertFalse(plugin.provided)
