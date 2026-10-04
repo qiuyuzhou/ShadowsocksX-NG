@@ -3,6 +3,12 @@ import Foundation
 // MARK: - 运行时失败事实的呈现（RuntimeFailureFacts / 系统代理应用态）
 
 extension AppPresentation {
+  /// 系统代理暂停的统一文案：状态菜单、运行控制卡与错误呈现边三面共用。
+  static let systemProxyPausedNotice = "后台代理不可用，已清除系统代理配置。恢复后将自动应用。"
+
+  /// 系统代理配置不可读的统一前缀：状态菜单与运行控制卡差异区共用。
+  static let systemProxyUnreadablePrefix = "无法读取网络接口的代理配置："
+
   static func message(for failure: RuntimeFailureFacts) -> String {
     switch failure {
     case .firewallBlocked(let facts):
@@ -27,7 +33,7 @@ extension AppPresentation {
     case .changed: return "系统代理配置已改变"
     case .applying: return "系统代理应用中"
     case .repairing: return "系统代理修复中"
-    case .paused: return "后台代理不可用，已清除系统代理配置。恢复后将自动应用。"
+    case .paused: return systemProxyPausedNotice
     }
   }
 

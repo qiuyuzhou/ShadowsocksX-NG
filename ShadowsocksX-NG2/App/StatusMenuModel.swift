@@ -97,11 +97,12 @@ enum StatusMenuModel {
     case .applying: return ("应用中", nil)
     case .repairing: return ("修复中", nil)
     case .paused:
-      return ("已暂停", "后台代理不可用，已清除系统代理配置。恢复后将自动应用。")
+      return ("已暂停", AppPresentation.systemProxyPausedNotice)
     case .unreadable(let facts):
       return (
         "无法检查",
-        "无法读取网络接口的代理配置：\(AppPresentation.message(for: RuntimeFailureFacts.systemProxy(facts)))"
+        AppPresentation.systemProxyUnreadablePrefix
+          + AppPresentation.message(for: RuntimeFailureFacts.systemProxy(facts))
       )
     case .repairFailed(let facts):
       return (

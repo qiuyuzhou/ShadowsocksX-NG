@@ -103,7 +103,7 @@ struct RuntimeControlCard: View {
     case .failed, .repairFailed, .clearFailed:
       "操作失败，原因见下方"
     case .paused:
-      "后台代理不可用，已清除系统代理配置。恢复后将自动应用。"
+      AppPresentation.systemProxyPausedNotice
     case .changed:
       "当前系统代理配置与预期存在差异"
     case .unreadable:
@@ -146,7 +146,8 @@ private struct SystemProxyDifferenceView: View {
         control.snapshot.systemProxyApplication != .unreadable(failure)
       {
         Text(
-          "无法读取网络接口的代理配置：\(AppPresentation.message(for: RuntimeFailureFacts.systemProxy(failure)))"
+          AppPresentation.systemProxyUnreadablePrefix
+            + AppPresentation.message(for: RuntimeFailureFacts.systemProxy(failure))
         )
         .font(.caption)
         .foregroundStyle(.orange)
