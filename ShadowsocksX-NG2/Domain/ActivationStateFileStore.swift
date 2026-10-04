@@ -21,9 +21,7 @@ struct ActivationStateFileStore {
 
   /// 默认位置：`~/Library/Application Support/ShadowsocksX-NG2/activation.json`。
   static func defaultFileURL() -> URL {
-    let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
-      0]
-    return support.appendingPathComponent("ShadowsocksX-NG2/activation.json")
+    RuntimePaths.activationStateFileURL()
   }
 
   /// 文件缺失/损坏/版本未知 → `nil`（安全侧：无活动目标）。

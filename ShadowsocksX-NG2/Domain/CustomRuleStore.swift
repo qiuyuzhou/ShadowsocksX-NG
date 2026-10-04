@@ -10,9 +10,7 @@ struct CustomRuleStore {
   }
 
   static func defaultFileURL() -> URL {
-    let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
-      0]
-    return support.appendingPathComponent("ShadowsocksX-NG2/custom-rules.json")
+    RuntimePaths.customRulesFileURL()
   }
 
   /// 读取规则集合；文件不存在视为无自定义规则。

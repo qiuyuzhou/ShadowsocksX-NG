@@ -9,11 +9,7 @@ import Foundation
 struct SilentLaunchStore {
   private static let key = "silentLaunch"
   /// ADR 0017 初版（文件形态）的落盘位置，仅迁移路径使用。
-  static let legacyFileURL: URL = {
-    let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
-      0]
-    return support.appendingPathComponent("ShadowsocksX-NG2/silent-launch.json")
-  }()
+  static let legacyFileURL = RuntimePaths.silentLaunchLegacyFileURL()
 
   private static let currentVersion = 1
 

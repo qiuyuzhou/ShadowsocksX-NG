@@ -15,9 +15,7 @@ struct ProxySettingsFileStore: ProxySettingsStoring {
   }
 
   static func defaultFileURL() -> URL {
-    let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
-      0]
-    return support.appendingPathComponent("ShadowsocksX-NG2/settings.json")
+    RuntimePaths.settingsFileURL()
   }
 
   func load() throws -> ProxySettings {

@@ -27,9 +27,7 @@ struct CatalogFileStore {
 
   /// 默认位置：`~/Library/Application Support/ShadowsocksX-NG2/catalog.json`。
   static func defaultFileURL() -> URL {
-    let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
-      0]
-    return support.appendingPathComponent("ShadowsocksX-NG2/catalog.json")
+    RuntimePaths.catalogFileURL()
   }
 
   /// 文件缺失 → 全新空文档；存在但损坏/版本未知/结构不一致 → `.corrupt`。

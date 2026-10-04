@@ -39,9 +39,7 @@ struct ListenSettingsFileStore: ListenSettingsStoring {
   let fileURL: URL
 
   static func defaultFileURL() -> URL {
-    let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
-      0]
-    return support.appendingPathComponent("ShadowsocksX-NG2/listen-settings.json")
+    RuntimePaths.listenSettingsFileURL()
   }
 
   init(fileURL: URL = ListenSettingsFileStore.defaultFileURL()) {

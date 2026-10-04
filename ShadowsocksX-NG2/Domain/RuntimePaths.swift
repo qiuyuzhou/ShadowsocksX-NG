@@ -1,7 +1,9 @@
 import Foundation
 
-/// 跨进程运行时路径契约（spec #21 D5，issue #27）：GUI 写、wrapper 读的固定
-/// 位置。目录 0700、文件 0600，由写入方与 wrapper 共同维护。
+/// App Support 目录全部文件的路径清单：GUI 配置与跨进程运行时契约共用同一
+/// 目录。运行时契约子集（spec #21 D5，issue #27）是 GUI 写、wrapper 读的固定
+/// 位置；GUI 配置文件 wrapper 不经手。目录 0700、文件 0600，由写入方与
+/// wrapper 共同维护。
 enum RuntimePaths {
   static func runtimeDirectory() -> URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -42,6 +44,40 @@ enum RuntimePaths {
   // 旧版端点签名/所有权文件（system-proxy-endpoint-signature.json、
   // system-proxy-ownership.json）按 issue #71 就地遗留：不读取、不迁移、
   // 不删除。
+
+  // MARK: - GUI 配置文件（GUI 私有读写，wrapper 不经手）
+
+  /// 服务器目录（CatalogFileStore）。
+  static func catalogFileURL() -> URL {
+    runtimeDirectory().appendingPathComponent("catalog.json")
+  }
+
+  /// 代理偏好（ProxySettingsFileStore，#33）。
+  static func settingsFileURL() -> URL {
+    runtimeDirectory().appendingPathComponent("settings.json")
+  }
+
+  /// 监听设置（ListenSettingsFileStore；settings.json 未建立时的 legacy 回退
+  /// 读取源）。
+  static func listenSettingsFileURL() -> URL {
+    runtimeDirectory().appendingPathComponent("listen-settings.json")
+  }
+
+  /// 自定义规则文档（CustomRuleStore，issue #66）。
+  static func customRulesFileURL() -> URL {
+    runtimeDirectory().appendingPathComponent("custom-rules.json")
+  }
+
+  /// 活动目标（ActivationStateFileStore，spec #21 D3/D5）。
+  static func activationStateFileURL() -> URL {
+    runtimeDirectory().appendingPathComponent("activation.json")
+  }
+
+  /// 静默启动偏好的 ADR 0017 初版文件形态，仅遗留迁移路径使用
+  /// （SilentLaunchStore.migrateLegacyFileIfPresent）。
+  static func silentLaunchLegacyFileURL() -> URL {
+    runtimeDirectory().appendingPathComponent("silent-launch.json")
+  }
 }
 
 /// ACL 活动链接的防逃逸校验（ADR-0011）：解析 symlink 后必须仍是运行目录
