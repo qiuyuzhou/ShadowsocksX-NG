@@ -57,13 +57,20 @@ struct SMAppLaunchAgentService: LaunchAgentControlling {
     (try? runLaunchctl(["print", "gui/\(getuid())/\(Self.label)"])) != nil
   }
 
-  private func writeUserPlist() throws {
-    let plist: [String: Any] = [
+  /// manifest 字典单一构造点：writeUserPlist（launchctl bootstrap 用）与
+  /// 打包 plist 的一致性测试共用。KeepAlive/ThrottleInterval 承载 crash
+  /// 重放协议（Agent 崩溃 → 非零退出 → launchd 重启重放最后有效快照）。
+  static func manifestDictionary(programArguments: [String]) -> [String: Any] {
+    [
       "Label": Self.label,
-      "ProgramArguments": [agentBinaryURL.path],
+      "ProgramArguments": programArguments,
       "KeepAlive": ["SuccessfulExit": false],
       "ThrottleInterval": 2,
     ]
+  }
+
+  private func writeUserPlist() throws {
+    let plist = Self.manifestDictionary(programArguments: [agentBinaryURL.path])
     let data = try PropertyListSerialization.data(
       fromPropertyList: plist, format: .xml, options: 0)
     try FileManager.default.createDirectory(
