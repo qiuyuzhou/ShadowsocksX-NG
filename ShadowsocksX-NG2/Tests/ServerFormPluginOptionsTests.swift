@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import ShadowsocksX_NG2
@@ -317,5 +318,51 @@ struct ServerFormPluginOptionsTests {
     fields.pluginChoice = .none
     fields.pluginOptions.updateValue("x", of: fields.pluginOptions.quickAddRowID)
     #expect(fields.validateForSubmit(), "插件「无」时隐藏参数草稿不阻塞保存")
+  }
+}
+
+extension ServerFormPluginOptionsTests {
+  // 移动可行性与执行共用草稿 interface。
+  @Test(arguments: [false, true])
+  func movementEligibilityMatchesActionsAndTracksReordering(rawMode: Bool) throws {
+    let fields = Self.loadedFields("a=1;b=2;")
+    let draft = fields.pluginOptions
+    let rows = Self.formalRows(fields)
+    let first = try #require(rows.first)
+    let last = try #require(rows.last)
+    let blank = draft.quickAddRowID
+    let unknown = UUID()
+    if rawMode { #expect(draft.switchToRawText()) }
+
+    let denied = [
+      (first.id, -1), (last.id, 1), (blank, -1), (blank, 1),
+      (unknown, -1), (unknown, 1), (first.id, 0), (first.id, 2),
+      (first.id, Int.min), (first.id, Int.max),
+    ]
+    for (id, offset) in denied {
+      #expect(!draft.canMoveRow(id, by: offset))
+      draft.moveRow(id, by: offset)
+      #expect(draft.rows.map(\.id) == rows.map(\.id) + [blank])
+      #expect(draft.composedString == "a=1;b=2;")
+      #expect(!fields.hasChanges)
+    }
+
+    #expect(draft.canMoveRow(first.id, by: 1) == !rawMode)
+    #expect(draft.canMoveRow(last.id, by: -1) == !rawMode)
+    draft.moveRow(first.id, by: 1)
+    if rawMode {
+      #expect(draft.composedString == "a=1;b=2;")
+      #expect(!fields.hasChanges)
+    } else {
+      #expect(draft.rows.map(\.id) == [last.id, first.id, blank])
+      #expect(draft.composedString == "b=2;a=1;")
+      #expect(fields.hasChanges)
+      #expect(!draft.canMoveRow(first.id, by: 1))
+      #expect(!draft.canMoveRow(last.id, by: -1))
+      #expect(draft.canMoveRow(first.id, by: -1))
+      draft.moveRow(first.id, by: -1)
+      #expect(draft.composedString == "a=1;b=2;")
+      #expect(!fields.hasChanges)
+    }
   }
 }

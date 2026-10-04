@@ -243,7 +243,7 @@ private struct PluginOptionsEditor: View {
           }
           .buttonStyle(.borderless)
           .help("上移")
-          .disabled(!canMoveRow(row, by: -1))
+          .disabled(!draft.canMoveRow(row.id, by: -1))
 
           Button {
             draft.moveRow(row.id, by: 1)
@@ -252,7 +252,7 @@ private struct PluginOptionsEditor: View {
           }
           .buttonStyle(.borderless)
           .help("下移")
-          .disabled(!canMoveRow(row, by: 1))
+          .disabled(!draft.canMoveRow(row.id, by: 1))
 
           Button {
             editingValue = EditingValue(id: row.id, text: row.valueText)
@@ -279,19 +279,6 @@ private struct PluginOptionsEditor: View {
   /// 行数驱动的表格高度：单行约 30pt，夹在上下限之间。
   private var editTableHeight: CGFloat {
     max(min(52 + CGFloat(draft.rows.count) * 30, 440), 112)
-  }
-
-  /// 移动可行性（按钮禁用态）：空行不可移，首行不可上移，末尾空行前不可
-  /// 下移。
-  private func canMoveRow(_ row: PluginOptionsDraft.Row, by offset: Int) -> Bool {
-    guard let index = draft.rows.firstIndex(where: { $0.id == row.id }), !row.isBlank else {
-      return false
-    }
-    var target = index + offset
-    if draft.rows.last?.isBlank ?? false {
-      target = min(target, draft.rows.count - 2)
-    }
-    return target >= 0 && target != index
   }
 
   // MARK: - 原始文本

@@ -148,16 +148,26 @@ final class PluginOptionsDraft: ObservableObject {
   /// 回写原文片段，故移动不算结构修改、既有末尾分号保留。末尾快速添加行
   /// 不可移动，也不得把行移到它之后；越界目标是无操作。
   func moveRow(_ id: UUID, by offset: Int) {
-    guard mode == .table, offset == -1 || offset == 1 else { return }
+    guard let move = rowMove(id, by: offset) else { return }
+    rows.swapAt(move.source, move.target)
+  }
+
+  /// 按钮与移动动作共用同一判定，视图不再维护空行和目标位置约束。
+  func canMoveRow(_ id: UUID, by offset: Int) -> Bool {
+    rowMove(id, by: offset) != nil
+  }
+
+  private func rowMove(_ id: UUID, by offset: Int) -> (source: Int, target: Int)? {
+    guard mode == .table, offset == -1 || offset == 1 else { return nil }
     guard let index = rows.firstIndex(where: { $0.id == id }), !rows[index].isBlank else {
-      return
+      return nil
     }
     var target = index + offset
     if rows.last?.isBlank ?? false {
       target = min(target, rows.count - 2)
     }
-    guard target >= 0, target != index else { return }
-    rows.swapAt(index, target)
+    guard target >= 0, target != index else { return nil }
+    return (index, target)
   }
 
   /// 「添加参数」入口语义：末尾空行即快速添加行，返回其身份供聚焦。
