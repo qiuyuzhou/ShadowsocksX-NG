@@ -8,6 +8,18 @@ enum AtomicFileWriter {
     case failure(detail: String)
   }
 
+  /// 隐藏暂存名约定 `.<name>.tmp-<uuid>` 的唯一出处：write 内部使用，同目录
+  /// 内的 symlink 暂存也由此派生，保证泄漏的暂存项能被 `isResidueName` 识别。
+  static func temporaryURL(for targetURL: URL) -> URL {
+    targetURL.deletingLastPathComponent()
+      .appendingPathComponent(".\(targetURL.lastPathComponent).tmp-\(UUID().uuidString)")
+  }
+
+  /// 目录项是否为本写入器的暂存残留（宽松匹配：0700 私有目录内过扫无害）。
+  static func isResidueName(_ name: String) -> Bool {
+    name.hasPrefix(".") && name.contains(".tmp-")
+  }
+
   /// 把 `data` 原子写入 `fileURL`（含父目录创建与 0700 基线自愈）。
   static func write(_ data: Data, to fileURL: URL) throws {
     let directory = fileURL.deletingLastPathComponent()
@@ -20,8 +32,7 @@ enum AtomicFileWriter {
     } catch {
       throw WriteError.failure(detail: String(describing: error))
     }
-    let temporaryURL = directory.appendingPathComponent(
-      ".\(fileURL.lastPathComponent).tmp-\(UUID().uuidString)")
+    let temporaryURL = temporaryURL(for: fileURL)
     if !FileManager.default.createFile(
       atPath: temporaryURL.path,
       contents: data,

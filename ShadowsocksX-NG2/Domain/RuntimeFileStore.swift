@@ -176,10 +176,10 @@ struct RuntimeFileStore {
     try? fileManager.removeItem(at: directoryURL.appendingPathComponent("sslocal-active.acl"))
     if let names = try? fileManager.contentsOfDirectory(atPath: directoryURL.path) {
       for name in names {
-        // 变体实文件，或 AtomicFileWriter 的 `.<name>.tmp-<uuid>` 残留。
+        // 变体实文件，或 AtomicFileWriter 的暂存残留。
         if name.hasPrefix("acl-") && name.hasSuffix(".ini") {
           try? fileManager.removeItem(at: directoryURL.appendingPathComponent(name))
-        } else if name.hasPrefix(".") && name.contains(".tmp-") {
+        } else if AtomicFileWriter.isResidueName(name) {
           try? fileManager.removeItem(at: directoryURL.appendingPathComponent(name))
         }
       }
@@ -259,8 +259,7 @@ extension RuntimeFileStore {
 
   private func repointActiveLink(to variantURL: URL) throws {
     let fileManager = FileManager.default
-    let temporaryLink = directoryURL.appendingPathComponent(
-      ".\(aclFileURL.lastPathComponent).tmp-\(UUID().uuidString)")
+    let temporaryLink = AtomicFileWriter.temporaryURL(for: aclFileURL)
     try? fileManager.removeItem(at: temporaryLink)
     try fileManager.createSymbolicLink(
       atPath: temporaryLink.path, withDestinationPath: variantURL.lastPathComponent)
@@ -289,8 +288,7 @@ extension RuntimeFileStore {
   private func restoreLink(_ state: LinkState) throws {
     switch state {
     case .link(let target):
-      let temporary = directoryURL.appendingPathComponent(
-        ".\(aclFileURL.lastPathComponent).tmp-\(UUID().uuidString)")
+      let temporary = AtomicFileWriter.temporaryURL(for: aclFileURL)
       defer { try? FileManager.default.removeItem(at: temporary) }
       try FileManager.default.createSymbolicLink(
         atPath: temporary.path, withDestinationPath: target)
