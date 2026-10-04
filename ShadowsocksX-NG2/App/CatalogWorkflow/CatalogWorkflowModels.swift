@@ -184,7 +184,7 @@ extension CatalogTreeSnapshot {
 
 // MARK: - 目录政策事实（UI 写句子；本 module 不产成句文案）
 
-/// 删除确认档位（CONTEXT.md 删除不变量的结构化事实）。
+/// 删除确认档位（GLOSSARY.md 删除不变量的结构化事实）。
 enum DeleteConfirmKind: Equatable, Sendable {
   /// 服务器叶子：单次确认。
   case leaf

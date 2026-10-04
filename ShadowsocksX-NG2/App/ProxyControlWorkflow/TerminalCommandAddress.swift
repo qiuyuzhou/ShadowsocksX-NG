@@ -3,7 +3,7 @@ import SystemConfiguration
 
 // MARK: - 命令地址投影（issue #72）
 
-/// 首页命令地址候选（CONTEXT.md「Terminal command address」）。身份 = BSD
+/// 首页命令地址候选（GLOSSARY.md「Terminal command address」）。身份 = BSD
 /// 接口身份 + 规范化 IP；显示名与类型注记仅用于呈现，不参与身份，由呈现层
 /// 自行组合（菜单项主行 IP、副标题「注记 - 名称」与收起状态说明行）。
 struct TerminalCommandAddress: Equatable, Sendable {

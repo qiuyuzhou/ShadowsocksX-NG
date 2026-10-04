@@ -3,7 +3,7 @@ import SwiftUI
 /// 侧栏树行（issue #41）：来源标识、有效性提示、活动目标标记与右键菜单。
 /// 数据来自目录工作流 module 的树 projection；激活经 seam 的 typed command，
 /// 活动目标标记由父视图传入（运行时事实，不进目录 projection）。删除一律
-/// 交父视图确认弹窗（空手动组单次、非空二次，CONTEXT.md）。
+/// 交父视图确认弹窗（空手动组单次、非空二次，GLOSSARY.md）。
 struct SidebarRow: View {
   let node: CatalogTreeNode
   let workflow: CatalogWorkflow

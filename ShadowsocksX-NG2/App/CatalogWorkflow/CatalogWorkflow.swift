@@ -151,7 +151,7 @@ final class CatalogWorkflow: ObservableObject {
   /// 表单新建手动服务器：校验与提交语义与编辑对称——表单校验在建 journal
   /// 前失败保持裸 `ServerFormError`；密码与可选插件参数和目录作为一个逻辑
   /// 变更提交，持久化失败经 journal 回滚并以 `CommitError` 报出。新身份恒
-  /// 全新 UUID，不按内容去重（CONTEXT.md 不变量）；返回新节点身份供选中。
+  /// 全新 UUID，不按内容去重（GLOSSARY.md 不变量）；返回新节点身份供选中。
   @discardableResult
   func createServer(_ draft: ServerEditDraft, into parent: NodeID?) async throws -> NodeID {
     let draft = try Self.prepareServerDraft(draft)

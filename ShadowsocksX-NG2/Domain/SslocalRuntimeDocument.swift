@@ -176,7 +176,7 @@ struct SslocalRuntimeDocument: Codable, Equatable, Sendable {
 }
 
 /// 上游 `servers[]` 条目。id 携带叶子身份，供上游稳定标识；显示名是目录
-/// 元数据，不进契约（CONTEXT.md「Runtime configuration file」）。
+/// 元数据，不进契约（GLOSSARY.md「Runtime configuration file」）。
 /// 插件字段在无插件时整体省略（D10）。
 struct SslocalServerDocument: Codable, Equatable, Sendable {
   let id: String

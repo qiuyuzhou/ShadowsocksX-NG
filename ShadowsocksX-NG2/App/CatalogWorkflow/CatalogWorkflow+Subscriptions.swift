@@ -25,7 +25,7 @@ extension CatalogWorkflow {
     try dependencies.credentials.save(url.absoluteString, for: record.urlRef)
     do {
       try commitSubscriptionDocument { catalog, subscriptions in
-        // 固定分组挂在目录根（CONTEXT.md「Subscription group」）；名称以 host
+        // 固定分组挂在目录根（GLOSSARY.md「Subscription group」）；名称以 host
         // 兜底，首次成功刷新后跟随远端。
         try catalog.addGroup(url.host ?? "", source: .subscription, id: record.groupID)
         subscriptions.append(record)

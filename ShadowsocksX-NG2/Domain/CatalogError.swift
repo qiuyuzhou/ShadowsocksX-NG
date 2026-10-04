@@ -1,4 +1,4 @@
-/// 目录操作失败原因，逐项对应 CONTEXT.md 的结构不变量（单父、显子序、
+/// 目录操作失败原因，逐项对应 GLOSSARY.md 的结构不变量（单父、显子序、
 /// 无环、手动/订阅严格分离）。
 enum CatalogError: Error, Equatable, Sendable {
   /// 目标节点不存在。
@@ -18,7 +18,7 @@ enum CatalogError: Error, Equatable, Sendable {
   /// 订阅子树由远端权威所有：本地结构操作（移动/删除/改连接字段/改名）一律拒绝；
   /// 整棵订阅子树的移除属于订阅票（#35）。
   case subscriptionNodeImmutable(NodeID)
-  /// 订阅服务器叶子必须位于其订阅固定分组内，不得直挂目录根（CONTEXT.md
+  /// 订阅服务器叶子必须位于其订阅固定分组内，不得直挂目录根（GLOSSARY.md
   /// 「Subscription group」：根层只允许订阅固定分组本身）。
   case subscriptionServerAtRoot(NodeID)
   /// 把分组移动进它自己的子树会成环。

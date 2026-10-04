@@ -7,14 +7,14 @@ extension CatalogWorkflow {
   // MARK: - 删除确认事实
 
   /// 删除资格（命令入口的统一 disable 判据，如分区工具栏删除钮）：节点存在
-  /// 且来源为 manual。订阅节点结构只读（CONTEXT.md），其移除属订阅分区流程，
+  /// 且来源为 manual。订阅节点结构只读（GLOSSARY.md），其移除属订阅分区流程，
   /// 不经此口径。
   func canDelete(_ id: NodeID) -> Bool {
     guard let node = tree.node(withID: id) else { return false }
     return node.isManual
   }
 
-  /// 删除确认档位（CONTEXT.md：空手动组/服务器单次；非空手动组二次并点名规模）。
+  /// 删除确认档位（GLOSSARY.md：空手动组/服务器单次；非空手动组二次并点名规模）。
   /// 节点不存在时为 `nil`。
   func deleteFacts(for id: NodeID) -> DeleteConfirmKind? {
     guard let node = tree.node(withID: id) else { return nil }

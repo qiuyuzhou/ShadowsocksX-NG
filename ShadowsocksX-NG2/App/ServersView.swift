@@ -267,7 +267,7 @@ extension ServersView {
     }
     // 删除：作用于当前选中的服务器叶子或手动分组，确认弹窗与右键菜单共用
     // deleteTarget 流（档位见 deleteFacts）；无选中或选中项不可删（订阅节点
-    // 结构只读，CONTEXT.md）即禁用，资格判定归政策 seam。
+    // 结构只读，GLOSSARY.md）即禁用，资格判定归政策 seam。
     ToolbarItem(placement: .primaryAction) {
       Button {
         deleteTarget = selection
@@ -278,7 +278,7 @@ extension ServersView {
       .help("删除")
       .disabled(!canDeleteSelection)
     }
-    // 分享（分享/导出术语见 CONTEXT.md）：作用于选中的服务器叶子，弹窗内
+    // 分享（分享/导出术语见 GLOSSARY.md）：作用于选中的服务器叶子，弹窗内
     // 提供二维码与复制 ss:// 链接两条通路；无有效载荷即不可用。
     ToolbarItem(placement: .primaryAction) {
       Button {

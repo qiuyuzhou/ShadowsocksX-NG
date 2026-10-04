@@ -4,7 +4,7 @@ import Foundation
 /// 身份 + 订阅 URL 凭据引用 + 最近刷新状态。URL 是敏感信息，权威副本在凭据
 /// 存储（D5），目录文档只持引用；编辑 URL 保留订阅与固定分组身份。
 struct SubscriptionRecord: Codable, Equatable, Sendable, Identifiable {
-  /// 订阅源身份；删除后新建即新身份（CONTEXT.md「Subscription」）。
+  /// 订阅源身份；删除后新建即新身份（GLOSSARY.md「Subscription」）。
   let id: NodeID
   /// 固定订阅分组的稳定身份（客户端所有，跨刷新与 URL 编辑不变）。
   let groupID: NodeID

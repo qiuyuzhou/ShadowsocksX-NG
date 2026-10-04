@@ -1,4 +1,4 @@
-/// 配置目录：不可见的配置树根（CONTEXT.md「Configuration catalog」）。有序顶层
+/// 配置目录：不可见的配置树根（GLOSSARY.md「Configuration catalog」）。有序顶层
 /// 子节点为服务器配置或配置组。存储形态：全量节点表 + 根序 + 各分组显子序；
 /// 单父由「一个身份只出现在一条子序里」构造保证，无环与来源分离由操作校验。
 ///
@@ -252,7 +252,7 @@ extension ConfigurationCatalog {
     return collected
   }
 
-  /// 订阅快照原子应用（CONTEXT.md 刷新契约）：以快照整体重建固定分组子树；
+  /// 订阅快照原子应用（GLOSSARY.md 刷新契约）：以快照整体重建固定分组子树；
   /// 名称、结构、顺序和连接字段全部跟随远端（扩展缺失时由调用方给 URL host
   /// 兜底）。返回被移除的旧服务器叶子（供调用方清理凭据）。
   @discardableResult

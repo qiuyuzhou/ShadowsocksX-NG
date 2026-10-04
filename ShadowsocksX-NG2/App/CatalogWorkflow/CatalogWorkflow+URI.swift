@@ -118,7 +118,7 @@ extension CatalogWorkflow {
     if let optionsRef = fields.pluginOptionsRef { try? credentials.delete(optionsRef) }
   }
 
-  /// 插件选择落盘（issue #38，D10/CONTEXT.md 不变量）：「无」整体清除引用与
+  /// 插件选择落盘（issue #38，D10/GLOSSARY.md 不变量）：「无」整体清除引用与
   /// 参数秘密；受管程序写引用、参数按空/非空经 journal 写删钥匙串；集外引用
   /// 原样保留（不因打开或保存表单而漂移，激活语义由状态机点名拒绝）。
   /// 受管集校验已由 `updateServer` 的表单校验完成。

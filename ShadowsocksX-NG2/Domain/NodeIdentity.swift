@@ -1,6 +1,6 @@
 import Foundation
 
-/// 节点来源：手动子树与订阅子树严格分离（CONTEXT.md「Relationships and invariants」）。
+/// 节点来源：手动子树与订阅子树严格分离（GLOSSARY.md「Relationships and invariants」）。
 enum NodeSource: String, Codable, Equatable, Sendable {
   case manual
   case subscription
@@ -27,7 +27,7 @@ struct NodeID: Hashable, Codable, Sendable {
   }
 }
 
-/// 凭据引用：指向 Keychain 权威副本的非秘密关联（CONTEXT.md「Credential
+/// 凭据引用：指向 Keychain 权威副本的非秘密关联（GLOSSARY.md「Credential
 /// reference」）。配置树只存引用，永不存秘密明文；秘密值按 D5 由
 /// CredentialStoring 写读。
 struct CredentialReference: Hashable, Codable, Sendable {

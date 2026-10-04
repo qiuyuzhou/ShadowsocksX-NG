@@ -42,7 +42,7 @@ struct ServerFields: Codable, Equatable, Sendable {
   }
 }
 
-/// 分组：命名的有序容器，显式持有子节点顺序（CONTEXT.md「Configuration group」）。
+/// 分组：命名的有序容器，显式持有子节点顺序（GLOSSARY.md「Configuration group」）。
 struct GroupFields: Codable, Equatable, Sendable {
   var name: String
   var children: [NodeID]

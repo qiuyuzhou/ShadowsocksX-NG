@@ -46,7 +46,7 @@ extension ProxyRuntimeController {
       && settings.agentEnabled
   }
 
-  /// 派生文档对当前运行时是否无事可做（CONTEXT.md「有效值未变的提交不做
+  /// 派生文档对当前运行时是否无事可做（GLOSSARY.md「有效值未变的提交不做
   /// 运行时收敛」）：磁盘契约与派生字节逐位相同、agent 已注册且 wrapper
   /// 存活、控制器处于健康运行态——计划层动作序列为空即幂等跳过。判定在
   /// 置 `starting` 之前进行，跳过路径不闪状态、不重走健康门；磁盘漂移或

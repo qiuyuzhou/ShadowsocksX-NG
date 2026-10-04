@@ -2,7 +2,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 目录提交 → 运行时收敛语义（D3/D5 与 CONTEXT.md「有效值未变的提交不做
+/// 目录提交 → 运行时收敛语义（D3/D5 与 GLOSSARY.md「有效值未变的提交不做
 /// 运行时收敛」）：与主测试类同构扩展，按既有模式独立成文件。
 final class ProxyRuntimeCatalogConvergenceTests: ProxyRuntimeControllerTests {
   override func makeDefaultRuleSnapshots() -> BuiltinRuleSnapshots {
