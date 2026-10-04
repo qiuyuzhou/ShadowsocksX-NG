@@ -64,6 +64,20 @@ final class CatalogWorkflow: ObservableObject {
     refreshLegacyImportState()
   }
 
+  /// Successful subscription commits, including unchanged references with new secrets.
+  private let subscriptionServerRefreshSubject = PassthroughSubject<Set<NodeID>, Never>()
+
+  var subscriptionServerRefreshes: AnyPublisher<Set<NodeID>, Never> {
+    subscriptionServerRefreshSubject.eraseToAnyPublisher()
+  }
+
+  func publishSubscriptionServerRefresh(_ id: NodeID) {
+    guard let summary = subscriptions.first(where: { $0.id == id }),
+      let group = tree.node(withID: summary.groupID)
+    else { return }
+    subscriptionServerRefreshSubject.send(group.subtreeIDs)
+  }
+
   // MARK: - 查询面
 
   /// 行显示名（导航标题、重命名预填等）；节点不存在为空串。
@@ -76,49 +90,77 @@ final class CatalogWorkflow: ObservableObject {
     tree.node(withID: id)?.invalidReasons ?? []
   }
 
-  /// 服务器编辑面（显式命令，story 11）：解析密码与受管插件参数明文。
-  /// 节点不存在或不是服务器叶子为 `nil`。
-  func serverEditForm(for id: NodeID) -> ServerEditForm? {
+  /// Rendering reads metadata only, never credentials or form baselines.
+  func serverFormPresentation(for id: NodeID) -> ServerFormPresentation? {
     guard let entry = dependencies.coordinator.committedCatalog.entry(for: id),
       case .server(let fields) = entry.kind
     else { return nil }
-    let password = (try? dependencies.credentials.secret(for: fields.passwordRef)) ?? ""
+    return ServerFormPresentation(
+      isEditable: entry.source == .manual, plugin: pluginPresentation(for: fields))
+  }
+
+  /// 服务器编辑面（显式命令，story 11）：解析密码与受管插件参数明文。
+  /// 节点不存在或不是服务器叶子为 `nil`。
+  func serverEditForm(for id: NodeID) throws -> ServerEditForm? {
+    guard let entry = dependencies.coordinator.committedCatalog.entry(for: id),
+      case .server(let fields) = entry.kind
+    else { return nil }
+    let password = try requiredServerSecret(fields.passwordRef)
     return ServerEditForm(
       address: fields.address,
       port: fields.port,
       encryptionMethod: fields.encryptionMethod,
       password: password,
       remark: fields.remark,
-      plugin: pluginSectionState(for: fields),
+      plugin: try loadedPluginState(for: fields),
       isEditable: entry.source == .manual)
+  }
+
+  /// An absent referenced secret is a load failure, never an empty saved baseline.
+  private func requiredServerSecret(_ reference: CredentialReference) throws -> String {
+    do {
+      guard let value = try dependencies.credentials.secret(for: reference) else {
+        throw ServerFormLoadError.credentialsUnavailable
+      }
+      return value
+    } catch {
+      throw ServerFormLoadError.credentialsUnavailable
+    }
   }
 
   /// 插件区状态（#38）：集内引用给可执行文件存在性事实与参数明文；集外引用
   /// 以显式 unknown 呈现（原样保留，激活语义由状态机点名拒绝）。
-  private func pluginSectionState(for fields: ServerFields) -> PluginSectionState {
+  private func pluginPresentation(for fields: ServerFields) -> PluginSectionState {
     let selection: PluginSelection
     if let program = fields.pluginProgram {
       selection =
         ManagedPluginCatalog.info(forProgram: program) != nil
-        ? .managed(program: program)
-        : .unknown(program: program)
+        ? .managed(program: program) : .unknown(program: program)
     } else {
       selection = .none
     }
-    var provided = false
-    var options = ""
+    let provided: Bool
     if case .managed(let program) = selection {
       provided = dependencies.plugins.executablePath(forProgram: program) != nil
-      options =
-        fields.pluginOptionsRef.flatMap { (try? dependencies.credentials.secret(for: $0)) ?? "" }
-        ?? ""
+    } else {
+      provided = false
     }
     return PluginSectionState(
-      selection: selection,
-      managed: ManagedPluginCatalog.plugins,
-      provided: provided,
-      optionsPresent: fields.pluginOptionsRef != nil,
-      options: options)
+      selection: selection, managed: ManagedPluginCatalog.plugins, provided: provided,
+      optionsPresent: fields.pluginOptionsRef != nil, options: "")
+  }
+
+  private func loadedPluginState(for fields: ServerFields) throws -> PluginSectionState {
+    let facts = pluginPresentation(for: fields)
+    let options: String
+    if case .managed = facts.selection, let reference = fields.pluginOptionsRef {
+      options = try requiredServerSecret(reference)
+    } else {
+      options = ""
+    }
+    return PluginSectionState(
+      selection: facts.selection, managed: facts.managed, provided: facts.provided,
+      optionsPresent: facts.optionsPresent, options: options)
   }
 
   /// 新建表单的插件区状态：无既有引用与既有参数，选中态跟随草稿。新表单

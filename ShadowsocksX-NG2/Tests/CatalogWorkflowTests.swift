@@ -64,7 +64,7 @@ final class CatalogWorkflowTests: XCTestCase {
     XCTAssertEqual(roots.count, 2)
     XCTAssertEqual(roots[0].name, "香港 01", "备注优先的显示名")
     XCTAssertEqual(
-      workflow.serverEditForm(for: roots[0].id)?.password, "password123", "密码入凭据存储")
+      try workflow.serverEditForm(for: roots[0].id)?.password, "password123", "密码入凭据存储")
     XCTAssertTrue(roots[0].invalidReasons.isEmpty)
     // 两个身份均为全新 UUID 形态（不按内容去重）。
     XCTAssertNotEqual(roots[0].id, roots[1].id)
@@ -76,7 +76,7 @@ final class CatalogWorkflowTests: XCTestCase {
       + "/?plugin=v2ray-plugin%3Bmode%3Dwebsocket%3Bhost%3Dexample.com"
     _ = try await workflow.createServers(fromURIs: uri, into: nil)
     let id = try XCTUnwrap(workflow.tree.roots.first?.id)
-    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .managed(program: "v2ray-plugin"))
     XCTAssertTrue(plugin.optionsPresent)
     // NoManagedPluginProvider:程序引用保留但可执行文件缺失(集外点名事实)。
@@ -174,7 +174,7 @@ final class CatalogWorkflowTests: XCTestCase {
         address: "198.51.100.9", port: 9999,
         encryptionMethod: "chacha20-ietf-poly1305", password: "新密码",
         remark: "改过的", plugin: .none, pluginOptions: nil))
-    let form = try XCTUnwrap(workflow.serverEditForm(for: id))
+    let form = try XCTUnwrap(try workflow.serverEditForm(for: id))
     XCTAssertEqual(form.address, "198.51.100.9")
     XCTAssertEqual(form.port, 9999)
     XCTAssertEqual(form.remark, "改过的")

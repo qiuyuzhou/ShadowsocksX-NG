@@ -63,6 +63,15 @@ final class ServerFormFields: ObservableObject {
   @Published private(set) var fieldErrors: [ServerFormField: ServerFormFieldError] = [:]
   @Published private var savedDraft: ServerEditDraft?
 
+  @Published private(set) var serverID: NodeID?
+  @Published private(set) var presentation: ServerFormPresentation?
+  @Published private(set) var loadFailure: ServerFormLoadError?
+  @Published private(set) var hasLoadedServer = false
+
+  var canSaveServer: Bool {
+    hasLoadedServer && loadFailure == nil && presentation?.isEditable == true
+  }
+
   init() {
     pluginOptionsChanges = pluginOptions.objectWillChange.sink { [weak self] _ in
       guard let self else { return }
@@ -169,6 +178,68 @@ final class ServerFormFields: ObservableObject {
       remark: remark,
       plugin: pluginChoice,
       pluginOptions: options)
+  }
+
+  // MARK: - Explicit server loading
+
+  /// Reappearing with the same selection preserves the loaded draft, including failures.
+  func showServer(_ id: NodeID, load: (NodeID) throws -> ServerEditForm?) {
+    guard serverID != id else { return }
+    serverID = id
+    clearLoadedServer()
+    reloadServer(load: load)
+  }
+
+  func updatePresentation(_ facts: ServerFormPresentation?) {
+    if presentation != facts { presentation = facts }
+  }
+
+  /// Only a manual reset failure may retain a successfully loaded draft.
+  func reloadServer(load: (NodeID) throws -> ServerEditForm?) {
+    guard let serverID else { return }
+    let preserveDraft = hasLoadedServer && presentation?.isEditable == true
+    do {
+      guard let form = try load(serverID) else { throw ServerFormLoadError.notFound }
+      self.load(from: form)
+      presentation = ServerFormPresentation(isEditable: form.isEditable, plugin: form.plugin)
+      hasLoadedServer = true
+      loadFailure = nil
+    } catch {
+      if !preserveDraft { clearLoadedServer() }
+      loadFailure = (error as? ServerFormLoadError) ?? .credentialsUnavailable
+    }
+  }
+
+  /// A late save completion must not reset a different server's draft.
+  func didSaveServer(_ id: NodeID, load: (NodeID) throws -> ServerEditForm?) {
+    guard serverID == id else { return }
+    reloadServer(load: load)
+  }
+
+  /// Only successful refreshes of the displayed read-only server trigger a reload.
+  func subscriptionDidRefresh(
+    affectedServers: Set<NodeID>, load: (NodeID) throws -> ServerEditForm?
+  ) {
+    guard let serverID, affectedServers.contains(serverID),
+      presentation?.isEditable == false
+    else { return }
+    reloadServer(load: load)
+  }
+
+  private func clearLoadedServer() {
+    address = ""
+    portText = ""
+    encryptionMethod = ""
+    password = ""
+    remark = ""
+    pluginChoice = .none
+    pluginOptions.load("")
+    showPassword = false
+    fieldErrors = [:]
+    savedDraft = nil
+    presentation = nil
+    hasLoadedServer = false
+    loadFailure = nil
   }
 
   // MARK: - 校验实现

@@ -50,9 +50,9 @@ struct ServerNameWorkflowTests {
   func manualNamesAreTrimmedAndGeneratedNamesSurviveEndpointEdits() async throws {
     try await withWorkflow { workflow, store, _ in
       let created = try await workflow.createServer(Self.draft(name: " \t新名称\n "), into: nil)
-      #expect(workflow.serverEditForm(for: created)?.remark == "新名称")
+      #expect(try workflow.serverEditForm(for: created)?.remark == "新名称")
       try await workflow.updateServer(created, draft: Self.draft(name: "\n编辑名称\t"))
-      #expect(workflow.serverEditForm(for: created)?.remark == "编辑名称")
+      #expect(try workflow.serverEditForm(for: created)?.remark == "编辑名称")
       _ = try await workflow.createServers(
         fromURIs: SsUri(method: "aes-256-gcm", password: "p", host: "203.0.113.7", port: 8388)
           .encode(), into: nil)
@@ -61,7 +61,7 @@ struct ServerNameWorkflowTests {
       edited.address = "198.51.100.9"
       edited.port = 9999
       try await workflow.updateServer(imported.id, draft: edited)
-      #expect(workflow.serverEditForm(for: imported.id)?.remark == "203.0.113.7:8388")
+      #expect(try workflow.serverEditForm(for: imported.id)?.remark == "203.0.113.7:8388")
       #expect(try store.load().catalog.entry(for: imported.id)?.displayName == "203.0.113.7:8388")
     }
   }
@@ -76,7 +76,7 @@ struct ServerNameWorkflowTests {
       #expect(result.addedCount == 1)
       let node = try #require(workflow.tree.roots.first)
       #expect(node.name == sample.expected)
-      #expect(workflow.serverEditForm(for: node.id)?.remark == sample.expected)
+      #expect(try workflow.serverEditForm(for: node.id)?.remark == sample.expected)
       #expect(try store.load().catalog.entry(for: node.id)?.displayName == sample.expected)
     }
   }
@@ -121,7 +121,7 @@ struct ServerNameWorkflowTests {
       let group = try #require(workflow.tree.node(withID: subscription.groupID))
       let node = try #require(group.childNodes.first)
       #expect(node.name == sample.expected)
-      #expect(workflow.serverEditForm(for: node.id)?.remark == sample.expected)
+      #expect(try workflow.serverEditForm(for: node.id)?.remark == sample.expected)
       #expect(try store.load().catalog.entry(for: node.id)?.displayName == sample.expected)
     }
   }
@@ -142,7 +142,7 @@ struct ServerNameWorkflowTests {
       #expect(workflow.tree.node(withID: id)?.name == "远端新名")
       fetcher.setBehavior(.success(try Self.document(initial, password: "updated-password")))
       await workflow.refreshSubscription(subscription.id)
-      #expect(workflow.serverEditForm(for: id)?.password == "updated-password")
+      #expect(try workflow.serverEditForm(for: id)?.password == "updated-password")
       fetcher.setBehavior(.success(try Self.document(initial)))
       await workflow.refreshSubscription(subscription.id)
       #expect(workflow.tree.node(withID: id)?.name == "203.0.113.7:8388")
@@ -172,13 +172,13 @@ struct ServerNameWorkflowTests {
           try Self.document(
             sample, password: "new-password", plugin: "v2ray-plugin", pluginOptions: "mode=quic")))
       await workflow.refreshSubscription(subscription.id)
-      let updated = try #require(workflow.serverEditForm(for: id))
+      let updated = try #require(try workflow.serverEditForm(for: id))
       #expect(updated.password == "new-password")
       #expect(updated.plugin.options == "mode=quic")
       #expect(credentials.storageCount == 3)
       fetcher.setBehavior(.success(try Self.document(sample, password: "new-password")))
       await workflow.refreshSubscription(subscription.id)
-      let cleared = try #require(workflow.serverEditForm(for: id))
+      let cleared = try #require(try workflow.serverEditForm(for: id))
       #expect(cleared.password == "new-password")
       #expect(cleared.plugin.selection == .none)
       #expect(credentials.storageCount == 2)

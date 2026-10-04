@@ -63,7 +63,7 @@ final class CatalogWorkflowCreateServerTests: XCTestCase {
     XCTAssertFalse(node.isGroup)
     XCTAssertTrue(node.isManual)
     XCTAssertEqual(node.parentID, groupID)
-    let form = try XCTUnwrap(workflow.serverEditForm(for: id))
+    let form = try XCTUnwrap(try workflow.serverEditForm(for: id))
     XCTAssertEqual(form.address, "203.0.113.10")
     XCTAssertEqual(form.port, 8389)
     XCTAssertEqual(form.remark, "新来的")
@@ -93,7 +93,7 @@ final class CatalogWorkflowCreateServerTests: XCTestCase {
         password: "密码", remark: "插件服务器", plugin: .managed(program: "v2ray-plugin"),
         pluginOptions: "mode=websocket;host=example.com"),
       into: nil)
-    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .managed(program: "v2ray-plugin"))
     XCTAssertTrue(plugin.optionsPresent)
     XCTAssertEqual(plugin.options, "mode=websocket;host=example.com")

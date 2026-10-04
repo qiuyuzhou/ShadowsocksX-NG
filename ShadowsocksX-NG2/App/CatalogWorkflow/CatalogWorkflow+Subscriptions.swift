@@ -52,6 +52,7 @@ extension CatalogWorkflow {
     do {
       try await performRefresh(id)
       setSubscriptionRefreshFailure(nil, for: id)
+      publishSubscriptionServerRefresh(id)
     } catch is CancellationError {
       // 取消不构成失败：快照与状态都不动。
     } catch {

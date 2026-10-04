@@ -1,6 +1,50 @@
 {
   "sourceLanguage": "zh-Hans",
   "strings": {
+    "无法加载服务器资料": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to Load Server Details"
+          }
+        }
+      }
+    },
+    "无法读取服务器凭据。请重新加载后再试。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to read the server credentials. Reload the server details and try again."
+          }
+        }
+      }
+    },
+    "重新加载失败。当前草稿已保留，重新加载成功后才能保存。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload failed. Your draft has been kept. Reload successfully before saving."
+          }
+        }
+      }
+    },
+    "重新加载": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reload"
+          }
+        }
+      }
+    },
     "例如：香港服务器": {
       "extractionState": "manual",
       "localizations": {

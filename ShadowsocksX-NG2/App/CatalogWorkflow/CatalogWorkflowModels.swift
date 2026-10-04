@@ -406,3 +406,22 @@ enum SubscriptionFormError: Error, Equatable {
   case invalidURL
   case notFound
 }
+
+/// Safe load failure facts; no credential reference or underlying error detail escapes.
+enum ServerFormLoadError: Error, Equatable {
+  case credentialsUnavailable
+  case notFound
+}
+
+/// Non-secret facts for rendering; options is always empty in this projection.
+struct ServerFormPresentation: Equatable {
+  let isEditable: Bool
+  let plugin: PluginSectionState
+
+  init(isEditable: Bool, plugin: PluginSectionState) {
+    self.isEditable = isEditable
+    self.plugin = PluginSectionState(
+      selection: plugin.selection, managed: plugin.managed, provided: plugin.provided,
+      optionsPresent: plugin.optionsPresent, options: "")
+  }
+}

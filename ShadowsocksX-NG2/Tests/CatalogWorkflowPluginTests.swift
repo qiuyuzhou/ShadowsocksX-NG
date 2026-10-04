@@ -94,7 +94,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
   func testManagedSelectionShownWithFactsAndParamsPlaintext() async throws {
     try writePluginBinary()
     let id = try await addPluginServer(program: pluginBinaryName, options: "mode=websocket")
-    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName))
     XCTAssertTrue(plugin.provided, "二进制在位即提供")
     XCTAssertTrue(plugin.optionsPresent)
@@ -104,14 +104,14 @@ final class CatalogWorkflowPluginTests: XCTestCase {
 
   func testMissingBinaryShowsManagedButNotProvided() async throws {
     let id = try await addPluginServer(program: pluginBinaryName, options: nil)
-    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName))
     XCTAssertFalse(plugin.provided, "打包损坏/降级丢插件时点名呈现")
   }
 
   func testUnknownProgramRendersExplicitUnknownState() async throws {
     let id = try await addPluginServer(program: "obfs-local", options: "obfs=http")
-    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .unknown(program: "obfs-local"), "集外引用显式未提供")
     XCTAssertFalse(plugin.provided)
     XCTAssertTrue(plugin.optionsPresent, "已配置参数的事实照常呈现")
@@ -120,7 +120,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
 
   func testNoPluginSelectionIsDefault() async throws {
     let id = try await addPluginServer(program: nil, options: nil)
-    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .none)
     XCTAssertFalse(plugin.provided)
     XCTAssertFalse(plugin.optionsPresent)
@@ -134,7 +134,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     try await update(
       id, plugin: .managed(program: pluginBinaryName),
       pluginOptions: "mode=websocket;host=example.com")
-    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName))
     XCTAssertEqual(plugin.options, "mode=websocket;host=example.com")
     XCTAssertTrue(plugin.optionsPresent)
@@ -144,7 +144,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     try writePluginBinary()
     let id = try await addPluginServer(program: pluginBinaryName, options: "mode=websocket")
     try await update(id, plugin: .managed(program: pluginBinaryName), pluginOptions: "   ")
-    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .managed(program: pluginBinaryName), "程序引用保留")
     XCTAssertFalse(plugin.optionsPresent, "空参数即无参数引用")
     XCTAssertEqual(plugin.options, "")
@@ -157,7 +157,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
   func testSelectingNoneClearsProgramAndOptions() async throws {
     let id = try await addPluginServer(program: pluginBinaryName, options: "mode=websocket")
     try await update(id, plugin: .none, pluginOptions: nil)
-    let plugin = try XCTUnwrap(workflow.serverEditForm(for: id)?.plugin)
+    let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .none)
     XCTAssertFalse(plugin.optionsPresent)
     XCTAssertNil(try credentials.secret(for: CredentialReference(rawValue: "ref-opts")))
@@ -168,7 +168,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     try await update(
       id, plugin: .unknown(program: "obfs-local"), pluginOptions: nil,
       address: "198.51.100.9")
-    let form = try XCTUnwrap(workflow.serverEditForm(for: id))
+    let form = try XCTUnwrap(try workflow.serverEditForm(for: id))
     XCTAssertEqual(form.address, "198.51.100.9", "连接字段照常更新")
     XCTAssertEqual(form.plugin.selection, .unknown(program: "obfs-local"), "集外引用原样保留")
     XCTAssertTrue(form.plugin.optionsPresent)
@@ -206,7 +206,7 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     XCTAssertEqual(outcome.addedCount, 1)
     let importedNode = try XCTUnwrap(
       workflow.tree.roots.dropFirst().first, "第二个根节点应是新导入的服务器")
-    let imported = try XCTUnwrap(workflow.serverEditForm(for: importedNode.id))
+    let imported = try XCTUnwrap(try workflow.serverEditForm(for: importedNode.id))
     XCTAssertEqual(imported.plugin.selection, .managed(program: pluginBinaryName))
     XCTAssertEqual(imported.plugin.options, "mode=websocket;host=example.com")
   }

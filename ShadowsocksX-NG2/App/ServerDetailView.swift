@@ -14,15 +14,10 @@ struct ServerDetailView: View {
   /// 编辑命令装载（凭据明文仅在编辑动作中出现）。
   @StateObject private var fields = ServerFormFields()
   @State private var isSubmitting = false
-  @State private var loadedServerID: NodeID?
   @FocusState private var fieldFocus: ServerFormField?
 
-  private var formState: ServerEditForm? {
-    workflow.serverEditForm(for: serverID)
-  }
-
   private var isEditable: Bool {
-    formState?.isEditable ?? false
+    fields.presentation?.isEditable ?? false
   }
 
   private var node: CatalogTreeNode? {
@@ -46,8 +41,17 @@ struct ServerDetailView: View {
         detailFooter
       }
     }
-    .onAppear(perform: loadForm)
-    .onChange(of: serverID) { _, _ in loadForm() }
+    .onAppear { fields.showServer(serverID, load: workflow.serverEditForm) }
+    .onChange(of: serverID) { _, _ in
+      fields.showServer(serverID, load: workflow.serverEditForm)
+    }
+    .onReceive(workflow.$tree) { _ in
+      fields.updatePresentation(workflow.serverFormPresentation(for: serverID))
+    }
+    .onReceive(workflow.subscriptionServerRefreshes) { affected in
+      fields.updatePresentation(workflow.serverFormPresentation(for: serverID))
+      fields.subscriptionDidRefresh(affectedServers: affected, load: workflow.serverEditForm)
+    }
   }
 
   // MARK: - 详情头与表单
@@ -96,17 +100,44 @@ struct ServerDetailView: View {
     if let node, node.isInvalid {
       invalidBanner(node)
     }
-    if !isEditable {
-      Label("订阅节点由远端管理：连接字段只读。", systemImage: "info.circle")
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .padding(.top, 16)
+    if fields.hasLoadedServer {
+      if let failure = fields.loadFailure {
+        loadFailureNotice(failure, preservingDraft: true)
+      }
+      if !isEditable {
+        Label("订阅节点由远端管理：连接字段只读。", systemImage: "info.circle")
+          .font(.footnote)
+          .foregroundStyle(.secondary)
+          .padding(.top, 16)
+      }
+      ServerFormFieldsGrid(
+        fields: fields, plugin: fields.presentation?.plugin, isEditable: isEditable,
+        fieldFocus: $fieldFocus
+      )
+      .padding(.top, 20)
+    } else if let failure = fields.loadFailure {
+      loadFailureNotice(failure, preservingDraft: false)
     }
-    ServerFormFieldsGrid(
-      fields: fields, plugin: formState?.plugin, isEditable: isEditable,
-      fieldFocus: $fieldFocus
-    )
-    .padding(.top, 20)
+  }
+
+  private func loadFailureNotice(
+    _ failure: ServerFormLoadError, preservingDraft: Bool
+  ) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Label("无法加载服务器资料", systemImage: "exclamationmark.triangle")
+        .font(.headline)
+      if preservingDraft {
+        Text("重新加载失败。当前草稿已保留，重新加载成功后才能保存。")
+      } else if failure == .notFound {
+        Text("未选择节点")
+      } else {
+        Text("无法读取服务器凭据。请重新加载后再试。")
+      }
+      Button("重新加载", action: loadForm)
+        .disabled(isSubmitting)
+    }
+    .font(.callout)
+    .padding(.top, 16)
   }
 
   private func invalidBanner(_ node: CatalogTreeNode) -> some View {
@@ -134,7 +165,7 @@ struct ServerDetailView: View {
           .disabled(!fields.hasChanges || isSubmitting)
         Button("保存") { save() }
           .keyboardShortcut(.defaultAction)
-          .disabled(!fields.hasChanges || isSubmitting)
+          .disabled(!fields.hasChanges || !fields.canSaveServer || isSubmitting)
       }
       .padding(.horizontal, 32)
       .padding(.vertical, 12)
@@ -145,13 +176,11 @@ struct ServerDetailView: View {
   // MARK: - 表单装载与提交
 
   private func loadForm() {
-    guard let state = formState else { return }
-    fields.load(from: state)
-    loadedServerID = serverID
+    fields.reloadServer(load: workflow.serverEditForm)
   }
 
   private func save() {
-    guard !isSubmitting, fields.hasChanges else { return }
+    guard !isSubmitting, fields.canSaveServer, fields.hasChanges else { return }
     guard fields.validateForSubmit(), let draft = fields.draft else {
       fieldFocus = fields.firstErrorField
       return
@@ -162,7 +191,7 @@ struct ServerDetailView: View {
       defer { isSubmitting = false }
       do {
         try await workflow.updateServer(id, draft: draft)
-        if loadedServerID == id { loadForm() }
+        fields.didSaveServer(id, load: workflow.serverEditForm)
       } catch {
         errors.present(error)
       }

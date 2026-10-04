@@ -105,7 +105,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
         "journal 回滚经 typed outcome 报出（story 13）")
     }
 
-    let form = try XCTUnwrap(workflow.serverEditForm(for: id))
+    let form = try XCTUnwrap(try workflow.serverEditForm(for: id))
     XCTAssertEqual(form.address, "203.0.113.7", "目录提交失败则已发布状态不动")
     XCTAssertEqual(form.password, "旧密码", "旧凭据继续生效（journal 回滚，story 13）")
   }
@@ -147,7 +147,7 @@ final class CatalogWorkflowRollbackTests: XCTestCase {
         "密码覆盖写与参数删除都被回滚（story 13）")
     }
 
-    let form = try XCTUnwrap(workflow.serverEditForm(for: id))
+    let form = try XCTUnwrap(try workflow.serverEditForm(for: id))
     XCTAssertEqual(form.plugin.selection, .managed(program: "v2ray-plugin"), "插件引用保留")
     XCTAssertEqual(form.plugin.options, "mode=websocket", "被删除的参数秘密已恢复")
   }
