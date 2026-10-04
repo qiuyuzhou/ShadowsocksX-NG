@@ -175,9 +175,9 @@ private struct PluginOptionsEditor: View {
   // MARK: - 参数列表（Table 布局）
 
   private var tableView: some View {
-    // 无排序 Table 的列泛型固定为 Never，width:/value: 变体一概接不上
-    // （实测 macOS 15 SDK），列宽经内容约束表达：类型列定宽、参数名列
-    // 限宽、值列弹性吸收剩余宽度。
+    // 无排序 Table 的列泛型固定为 Never，TableColumn 初值的 width:/value:
+    // 参数接不上（实测 macOS 15 SDK）；列宽经实例方法 width(min:ideal:max:)
+    // 表达：类型/操作列定宽、参数名列限宽、值列无约束弹性吸收剩余宽度。
     Table(draft.rows) {
       TableColumn("类型") { row in
         Picker(
@@ -192,8 +192,8 @@ private struct PluginOptionsEditor: View {
         .labelsHidden()
         .pickerStyle(.segmented)
         .controlSize(.small)
-        .frame(width: 96)
       }
+      .width(min: 96, ideal: 96, max: 96)
       TableColumn("参数名") { row in
         HStack(spacing: 4) {
           TextField(
@@ -203,7 +203,6 @@ private struct PluginOptionsEditor: View {
               set: { draft.updateKey($0, of: row.id) })
           )
           .textFieldStyle(.plain)
-          .frame(maxWidth: 140, alignment: .leading)
           .focused($focusedRowID, equals: row.id)
           if row.isUnfinished {
             Image(systemName: "exclamationmark.circle.fill")
@@ -213,6 +212,7 @@ private struct PluginOptionsEditor: View {
           }
         }
       }
+      .width(min: 72, ideal: 96, max: 140)
       TableColumn("值") { row in
         TextField(
           "值",
@@ -243,6 +243,7 @@ private struct PluginOptionsEditor: View {
           .buttonStyle(.borderless)
         }
       }
+      .width(min: 150, ideal: 156, max: 176)
     }
     .tableStyle(.inset)
     .frame(height: editTableHeight)
@@ -305,9 +306,9 @@ private struct PluginOptionsReadOnlyEditor: View {
             Text(row.keyText)
               .lineLimit(1)
               .truncationMode(.tail)
-              .frame(maxWidth: 220, alignment: .leading)
               .textSelection(.enabled)
           }
+          .width(min: 72, ideal: 120, max: 220)
           TableColumn("值") { row in
             // 值单元格单行展示、尾部省略；完整内容保留在草稿与无障碍读取中。
             Text(row.valueText)
@@ -319,6 +320,7 @@ private struct PluginOptionsReadOnlyEditor: View {
             Text(row.kind == .flag ? "开关" : "值")
               .foregroundStyle(.secondary)
           }
+          .width(min: 48, ideal: 56, max: 64)
         }
         .tableStyle(.inset)
         .frame(height: readOnlyTableHeight)
