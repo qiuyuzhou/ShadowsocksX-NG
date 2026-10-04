@@ -99,8 +99,6 @@ struct LegacyImportSheet: View {
     Task { @MainActor in
       do {
         _ = try await workflow.importLegacy(reimport: reimport)
-      } catch let error as LegacyImportError {
-        errorMessage = error.presentableMessage
       } catch {
         errorMessage = error.presentableMessage
       }
