@@ -258,26 +258,16 @@ extension ServersView {
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
     ToolbarItem(placement: .primaryAction) {
-      Menu {
-        if let parent = workflow.importTargetParent(for: selection),
-          let path = workflow.tree.pathSummary(for: parent)
-        {
-          Button("在「\(path)」中新建服务器") { presentNewServer(in: parent) }
-        }
-        Button("在根目录新建服务器") { presentNewServer(in: nil) }
+      Button {
+        presentNewServer(in: workflow.importTargetParent(for: selection))
       } label: {
         Label("新建服务器", systemImage: "plus")
       }
       .help("新建服务器")
     }
     ToolbarItem(placement: .primaryAction) {
-      Menu {
-        if let parent = workflow.importTargetParent(for: selection),
-          let path = workflow.tree.pathSummary(for: parent)
-        {
-          Button("在「\(path)」中新建分组") { presentNewGroup(in: parent) }
-        }
-        Button("在根目录新建分组") { presentNewGroup(in: nil) }
+      Button {
+        presentNewGroup(in: workflow.importTargetParent(for: selection))
       } label: {
         Label("新建分组", systemImage: "folder.badge.plus")
       }

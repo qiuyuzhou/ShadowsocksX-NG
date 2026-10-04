@@ -275,50 +275,6 @@
           }
         }
       }
-    },
-    "在根目录新建服务器": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Server at Root"
-          }
-        }
-      }
-    },
-    "在「%@」中新建服务器": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Server in “%@”"
-          }
-        }
-      }
-    },
-    "在根目录新建分组": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Group at Root"
-          }
-        }
-      }
-    },
-    "在「%@」中新建分组": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Group in “%@”"
-          }
-        }
-      }
     }
   },
   "version": "1.0"
