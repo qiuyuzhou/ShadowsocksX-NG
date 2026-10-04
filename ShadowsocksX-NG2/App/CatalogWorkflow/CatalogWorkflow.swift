@@ -138,42 +138,37 @@ final class CatalogWorkflow: ObservableObject {
     } else {
       selection = .none
     }
-    let provided: Bool
-    if case .named(let program) = selection {
-      provided = snapshot.executablePath(forProgram: program) != nil
-    } else {
-      provided = false
-    }
-    return PluginSectionState(
-      selection: selection, managed: ManagedPluginCatalog.plugins, provided: provided,
-      optionsPresent: fields.pluginOptionsRef != nil, options: "",
-      programs: snapshot.entries.map(\.program))
+    return pluginSection(
+      selection: selection, snapshot: snapshot,
+      optionsPresent: fields.pluginOptionsRef != nil)
   }
 
   private func loadedPluginState(for fields: ServerFields) throws -> PluginSectionState {
-    let facts = pluginPresentation(for: fields)
-    let options: String
+    var facts = pluginPresentation(for: fields)
     if case .named = facts.selection, let reference = fields.pluginOptionsRef {
-      options = try requiredServerSecret(reference)
-    } else {
-      options = ""
+      facts.options = try requiredServerSecret(reference)
     }
-    return PluginSectionState(
-      selection: facts.selection, managed: facts.managed, provided: facts.provided,
-      optionsPresent: facts.optionsPresent, options: options, programs: facts.programs)
+    return facts
   }
 
-  /// 新建表单的插件区状态：无既有引用与既有参数，选中态跟随草稿。新表单
-  /// 只能产生「无」或目录中的具名选择，`provided` 恒为真——新建尚无引用可点名，
-  /// 可执行文件缺失由激活语义拒绝并在编辑面呈现。
   func newFormPluginSection(selection: PluginSelection) -> PluginSectionState {
-    let snapshot = dependencies.plugins.catalogSnapshot()
-    return PluginSectionState(
+    pluginSection(
+      selection: selection, snapshot: dependencies.plugins.catalogSnapshot(),
+      optionsPresent: false)
+  }
+
+  private func pluginSection(
+    selection: PluginSelection, snapshot: PluginCatalogSnapshot, optionsPresent: Bool
+  ) -> PluginSectionState {
+    PluginSectionState(
       selection: selection,
-      managed: ManagedPluginCatalog.plugins,
-      provided: true,
-      optionsPresent: false,
-      options: "", programs: snapshot.entries.map(\.program))
+      programs: snapshot.entries.map {
+        PluginSectionState.Program(
+          program: $0.program, source: $0.source,
+          availability: $0.availability)
+      },
+      mappingsUnreadable: snapshot.mappingsUnreadable,
+      optionsPresent: optionsPresent, options: "")
   }
 
   /// 添加落点：选中手动分组 → 组内；选中服务器 → 其父组（仅手动）；其余 → 根。

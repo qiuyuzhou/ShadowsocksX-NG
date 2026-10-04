@@ -277,18 +277,28 @@ enum PluginSelection: Hashable {
   case unknown(program: String)
 }
 
-/// 插件区表单状态：选中态、受管事实表、提供事实与参数明文（编辑面）。
+/// 表单所需的目录事实，不包含本机路径或托管发布信息。
 struct PluginSectionState: Equatable {
+  struct Program: Equatable {
+    let program: String
+    let source: PluginCatalogSnapshot.Source
+    let availability: PluginCatalogSnapshot.Availability
+  }
+
   let selection: PluginSelection
-  /// 本版本受管集（「无」不由这里提供）。
-  let managed: [ManagedPluginInfo]
-  /// 当前具名引用的可执行文件是否在位（生成配置时的存在性检查事实）。
-  let provided: Bool
-  /// 参数是否已配置（存于钥匙串）。
+  let programs: [Program]
+  let mappingsUnreadable: Bool
   let optionsPresent: Bool
-  /// 参数明文（仅目录中的具名选中态解析，供参数输入框预填；其余为空串）。
-  let options: String
-  var programs: [String]?
+  var options: String
+
+  /// 当前草稿引用可能与已保存选择不同，目录移除不能让它从表单消失。
+  func unresolvedProgram(for selection: PluginSelection) -> String? {
+    switch selection {
+    case .none: return nil
+    case .named(let program), .unknown(let program):
+      return programs.contains { $0.program == program } ? nil : program
+    }
+  }
 }
 
 // MARK: - 订阅 projection
@@ -390,8 +400,8 @@ struct ServerFormPresentation: Equatable {
 
   init(isEditable: Bool, plugin: PluginSectionState) {
     self.isEditable = isEditable
-    self.plugin = PluginSectionState(
-      selection: plugin.selection, managed: plugin.managed, provided: plugin.provided,
-      optionsPresent: plugin.optionsPresent, options: "")
+    var facts = plugin
+    facts.options = ""
+    self.plugin = facts
   }
 }

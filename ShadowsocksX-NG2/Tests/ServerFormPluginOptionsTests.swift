@@ -19,8 +19,8 @@ struct ServerFormPluginOptionsTests {
       remark: "服务器",
       plugin: PluginSectionState(
         selection: .named(program: "v2ray-plugin"),
-        managed: ManagedPluginCatalog.plugins,
-        provided: true,
+        programs: [.init(program: "v2ray-plugin", source: .managed, availability: .available)],
+        mappingsUnreadable: false,
         optionsPresent: !pluginOptions.isEmpty,
         options: pluginOptions),
       isEditable: true)

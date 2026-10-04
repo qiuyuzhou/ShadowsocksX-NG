@@ -65,6 +65,9 @@ struct PluginCatalogTests {
         remark: "Custom", plugin: .named(program: "custom-plugin"), pluginOptions: "flag"),
       into: nil)
     #expect(try workflow.serverEditForm(for: id)?.plugin.options == "flag")
+    let presentation = try #require(workflow.serverFormPresentation(for: id))
+    #expect(
+      presentation.plugin.programs.contains { $0.program == "custom-plugin" && $0.source == .user })
   }
 
   @Test @MainActor func commitPublishesBeforeSchedulingRuntimeApplication() async throws {
@@ -106,6 +109,14 @@ struct PluginCatalogTests {
       store: PluginMappingFileStore(fileURL: file),
       managed: BundleManagedPluginProvider(bundleURL: root), inspector: QuietPluginInspector())
     #expect(catalog.catalogSnapshot().mappingsUnreadable)
+    let workflow = makeCatalogWorkflow(
+      coordinator: CatalogCommitCoordinator(
+        fileStore: CatalogFileStore(fileURL: root.appendingPathComponent("catalog.json")),
+        runtime: FakeCatalogRuntime()),
+      credentials: InMemoryCredentialStore(), plugins: catalog)
+    #expect(
+      workflow.newFormPluginSection(selection: .named(program: "v2ray-plugin")).mappingsUnreadable)
+
     #expect(catalog.executablePath(forProgram: "v2ray-plugin") == nil)
     #expect(catalog.catalogSnapshot().entry(for: "v2ray-plugin")?.source == .unknown)
     #expect(throws: PluginMappingError.unreadable) { try catalog.commit([]) }
@@ -161,7 +172,7 @@ struct PluginCatalogTests {
     let id = NodeID.fresh()
     let fields = ServerFormFields()
     var plugin = PluginSectionState(
-      selection: .unknown(program: "tool"), managed: [], provided: false,
+      selection: .unknown(program: "tool"), programs: [], mappingsUnreadable: false,
       optionsPresent: true, options: "")
     let original = ServerEditForm(
       address: "127.0.0.1", port: 8388, encryptionMethod: "aes-256-gcm", password: "pw",
@@ -169,8 +180,10 @@ struct PluginCatalogTests {
     fields.showServer(id) { _ in original }
     fields.remark = "Unsaved name"
     plugin = PluginSectionState(
-      selection: .named(program: "tool"), managed: [], provided: true,
-      optionsPresent: true, options: "flag", programs: ["tool"])
+      selection: .named(program: "tool"),
+      programs: [.init(program: "tool", source: .user, availability: .available)],
+      mappingsUnreadable: false,
+      optionsPresent: true, options: "flag")
     let mapped = ServerEditForm(
       address: original.address, port: original.port, encryptionMethod: original.encryptionMethod,
       password: original.password, remark: original.remark, plugin: plugin, isEditable: true)
@@ -371,4 +384,121 @@ private final class UnreadablePluginFileManager: FileManager, @unchecked Sendabl
   override func attributesOfItem(atPath path: String) throws -> [FileAttributeKey: Any] {
     throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError)
   }
+}
+
+/// Server-form behavior through workflow and draft interfaces.
+struct PluginFormCatalogTests {
+  @Test(arguments: [
+    PluginCatalogSnapshot.Availability.available, .missing, .notExecutable, .unreadable,
+  ])
+  @MainActor func formRetainsAvailabilityForNewlySelectedPlugin(
+    availability: PluginCatalogSnapshot.Availability
+  ) throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let snapshot = PluginCatalogSnapshot(entries: [
+      .init(
+        program: "tool", path: "/private/tool", source: .user,
+        availability: availability, managedInfo: nil)
+    ])
+    let workflow = makeCatalogWorkflow(
+      coordinator: CatalogCommitCoordinator(
+        fileStore: CatalogFileStore(fileURL: root.appendingPathComponent("catalog.json")),
+        runtime: FakeCatalogRuntime()),
+      credentials: InMemoryCredentialStore(), plugins: snapshot)
+    let form = workflow.newFormPluginSection(selection: .named(program: "tool"))
+    #expect(form.programs.first?.source == .user)
+    #expect(form.programs.first?.availability == availability)
+    #expect(!form.mappingsUnreadable)
+  }
+
+  @Test @MainActor func missingUnsavedChoiceHasUnresolvedPresentation() {
+    let plugin = PluginSectionState(
+      selection: .named(program: "saved"),
+      programs: [.init(program: "saved", source: .managed, availability: .available)],
+      mappingsUnreadable: false, optionsPresent: true, options: "flag")
+    let form = ServerEditForm(
+      address: "127.0.0.1", port: 8388,
+      encryptionMethod: "aes-256-gcm", password: "pw", remark: "Original",
+      plugin: plugin, isEditable: true)
+    let fields = ServerFormFields()
+    fields.showServer(.fresh()) { _ in form }
+    fields.pluginChoice = .named(program: "removed")
+    fields.pluginOptions.load("host=unsaved")
+    fields.updatePresentation(ServerFormPresentation(isEditable: true, plugin: plugin))
+    #expect(fields.pluginChoice == .named(program: "removed"))
+    #expect(fields.presentation?.plugin.unresolvedProgram(for: fields.pluginChoice) == "removed")
+    #expect(fields.pluginOptions.composedString == "host=unsaved")
+    #expect(plugin.unresolvedProgram(for: .none) == nil)
+    #expect(plugin.unresolvedProgram(for: .named(program: "saved")) == nil)
+  }
+
+  @Test @MainActor func mappingRemovalAndOverrideChangesPreserveServerDraft() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let managedBinary = root.appendingPathComponent("Contents/Helpers/Plugins/v2ray-plugin")
+    try FileManager.default.createDirectory(
+      at: managedBinary.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("#!/bin/sh\n".utf8).write(to: managedBinary)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o755], ofItemAtPath: managedBinary.path)
+    let plugins = PluginCatalog(
+      store: PluginMappingFileStore(fileURL: root.appendingPathComponent("plugins.json")),
+      managed: BundleManagedPluginProvider(bundleURL: root), inspector: QuietPluginInspector())
+    try plugins.commit([.add(program: "tool", path: managedBinary.path)])
+    let workflow = makeCatalogWorkflow(
+      coordinator: CatalogCommitCoordinator(
+        fileStore: CatalogFileStore(fileURL: root.appendingPathComponent("catalog.json")),
+        runtime: FakeCatalogRuntime()),
+      credentials: InMemoryCredentialStore(), plugins: plugins)
+    let id = try await workflow.createServer(
+      ServerEditDraft(
+        address: "127.0.0.1", port: 8388, encryptionMethod: "aes-256-gcm",
+        password: "pw", remark: "Original", plugin: .named(program: "tool"), pluginOptions: "flag"),
+      into: nil)
+    let fields = ServerFormFields()
+    fields.showServer(id, load: workflow.serverEditForm)
+    fields.remark = "Unsaved"
+    fields.pluginOptions.load("host=unsaved")
+    try plugins.commit([.remove(program: "tool")])
+    fields.updatePresentation(
+      workflow.serverFormPresentation(for: id), load: workflow.serverEditForm)
+    #expect(fields.pluginChoice == .unknown(program: "tool"))
+    #expect(fields.pluginOptions.composedString == "host=unsaved")
+    try plugins.commit([.add(program: "tool", path: managedBinary.path)])
+    fields.updatePresentation(
+      workflow.serverFormPresentation(for: id), load: workflow.serverEditForm)
+    #expect(fields.pluginChoice == .named(program: "tool"))
+    #expect(fields.pluginOptions.composedString == "host=unsaved")
+    #expect(try workflow.serverEditForm(for: id)?.plugin.options == "flag")
+    #expect(fields.remark == "Unsaved")
+
+    // An unsaved choice disappearing must retain a selectable unresolved reference.
+    fields.pluginChoice = .named(program: "tool")
+    try plugins.commit([.remove(program: "tool")])
+    fields.updatePresentation(
+      workflow.serverFormPresentation(for: id), load: workflow.serverEditForm)
+    #expect(fields.presentation?.plugin.unresolvedProgram(for: .named(program: "tool")) == "tool")
+    #expect(
+      workflow.newFormPluginSection(selection: .named(program: "tool"))
+        .unresolvedProgram(for: .named(program: "tool")) == "tool")
+    #expect(fields.pluginOptions.composedString == "host=unsaved")
+
+    fields.pluginChoice = .named(program: "v2ray-plugin")
+    try plugins.commit([.add(program: "v2ray-plugin", path: managedBinary.path)])
+    fields.updatePresentation(
+      workflow.serverFormPresentation(for: id), load: workflow.serverEditForm)
+    #expect(
+      fields.presentation?.plugin.programs.first { $0.program == "v2ray-plugin" }?.source == .user)
+    try plugins.commit([.remove(program: "v2ray-plugin")])
+    fields.updatePresentation(
+      workflow.serverFormPresentation(for: id), load: workflow.serverEditForm)
+    #expect(
+      fields.presentation?.plugin.programs.first { $0.program == "v2ray-plugin" }?.source
+        == .managed)
+    #expect(fields.pluginChoice == .named(program: "v2ray-plugin"))
+    #expect(fields.pluginOptions.composedString == "host=unsaved")
+    #expect(fields.remark == "Unsaved")
+  }
+
 }

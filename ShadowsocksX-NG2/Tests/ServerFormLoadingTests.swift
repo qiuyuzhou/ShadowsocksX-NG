@@ -209,7 +209,7 @@ struct ServerFormLoadingTests {
       address: "203.0.113.1", port: 8388, encryptionMethod: "aes-256-gcm",
       password: password, remark: "服务器",
       plugin: PluginSectionState(
-        selection: .none, managed: ManagedPluginCatalog.plugins, provided: false,
+        selection: .none, programs: [], mappingsUnreadable: false,
         optionsPresent: false, options: ""), isEditable: isEditable)
   }
 }

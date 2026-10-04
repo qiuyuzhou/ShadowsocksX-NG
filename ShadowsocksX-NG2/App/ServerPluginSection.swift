@@ -1,10 +1,6 @@
 import SwiftUI
 
-/// 服务器详情的插件区（issue #38/D10，地图 #52 票 #55）：有效插件目录选择器——
-/// 「无」+ 受管列表；集外引用（Legacy 导入/订阅带入）追加显式「本版本未
-/// 提供」项使当前状态可见并原样保留。选中受管项才显示参数编辑区与可用性
-/// 警告。编辑面与订阅只读面是两个独立视图（issue #81），都经共享的模式
-/// 切换器支持参数列表 ⇄ 原始文本查看。
+/// 服务器表单通过目录事实解释名称引用；参数草稿独立于插件来源。
 struct ServerPluginSection: View {
   @Binding var selection: PluginSelection
   @ObservedObject var options: PluginOptionsDraft
@@ -26,11 +22,16 @@ struct ServerPluginSection: View {
     if let plugin {
       Picker("插件", selection: $selection) {
         Text("无").tag(PluginSelection.none)
-        ForEach(plugin.programs ?? plugin.managed.map(\.program), id: \.self) { program in
+        ForEach(plugin.programs.map(\.program), id: \.self) { program in
           Text(program).tag(PluginSelection.named(program: program))
         }
-        if case .unknown(let program) = plugin.selection {
-          Text("\(program)（本版本未提供）").tag(PluginSelection.unknown(program: program))
+        if let program = plugin.unresolvedProgram(for: selection) {
+          Text(program).tag(selection)
+        }
+        if plugin.selection != selection,
+          let program = plugin.unresolvedProgram(for: plugin.selection)
+        {
+          Text(program).tag(plugin.selection)
         }
       }
       .labelsHidden()
@@ -47,38 +48,31 @@ struct ServerPluginSection: View {
       switch selection {
       case .none:
         EmptyView()
-      case .named(let program):
-        namedPluginDetails(program: program, plugin: plugin)
-      case .unknown(let program):
-        unknownNotice(program: program, plugin: plugin)
+      case .named(let program), .unknown(let program):
+        if plugin.unresolvedProgram(for: selection) != nil {
+          unknownNotice(program: program, plugin: plugin)
+        } else {
+          namedPluginDetails(program: program, plugin: plugin)
+        }
       }
     }
   }
 
-  /// 选中受管项：参数编辑区与可用性警告；订阅只读走独立只读视图。
+  /// 目录中的名称引用：参数编辑区与可用性警告；订阅只读走独立只读视图。
   @ViewBuilder
   private func namedPluginDetails(program: String, plugin: PluginSectionState) -> some View {
-    if (plugin.programs ?? plugin.managed.map(\.program)).contains(program) {
-      VStack(alignment: .leading, spacing: 8) {
-        if !plugin.provided {
-          Label(
-            "不可用",
-            systemImage: "exclamationmark.triangle.fill"
-          )
-          .font(.footnote)
-          .foregroundStyle(.orange)
-        }
-        Text("插件参数")
-          .font(.callout.weight(.medium))
-          .foregroundStyle(.secondary)
-        if isEditable {
-          PluginOptionsEditor(
-            draft: options,
-            fieldError: optionsError,
-            fieldFocus: optionsFocus)
-        } else {
-          PluginOptionsReadOnlyEditor(draft: options)
-        }
+    VStack(alignment: .leading, spacing: 8) {
+      availabilityNotice(program: program, plugin: plugin)
+      Text("插件参数")
+        .font(.callout.weight(.medium))
+        .foregroundStyle(.secondary)
+      if isEditable {
+        PluginOptionsEditor(
+          draft: options,
+          fieldError: optionsError,
+          fieldFocus: optionsFocus)
+      } else {
+        PluginOptionsReadOnlyEditor(draft: options)
       }
     }
   }
@@ -87,18 +81,45 @@ struct ServerPluginSection: View {
   @ViewBuilder
   private func unknownNotice(program: String, plugin: PluginSectionState) -> some View {
     VStack(alignment: .leading, spacing: 8) {
-      Label(
-        "本版本未提供「\(program)」：引用原样保留，激活包含该服务器会被点名拒绝；可改选「无」或受管插件。",
-        systemImage: "exclamationmark.triangle.fill"
-      )
-      .font(.footnote)
-      .foregroundStyle(.orange)
+      if plugin.mappingsUnreadable {
+        availabilityNotice(program: program, plugin: plugin)
+      } else {
+        warning(Text("未找到插件“\(program)”。引用和已保存参数将保留；可添加同名用户插件，或改选其他插件或“无”。"))
+      }
       if plugin.optionsPresent {
         Text("插件参数已配置（存于钥匙串，原样保留）。")
           .font(.footnote)
           .foregroundStyle(.secondary)
       }
     }
+  }
+
+  @ViewBuilder
+  private func availabilityNotice(program: String, plugin: PluginSectionState) -> some View {
+    if plugin.mappingsUnreadable {
+      warning(Text("无法读取用户插件映射，插件暂不可用。请修复映射后重试。"))
+    } else if let facts = plugin.programs.first(where: { $0.program == program }) {
+      switch facts.availability {
+      case .available:
+        EmptyView()
+      case .missing:
+        warning(Text("插件文件不存在，请检查用户插件路径或应用安装。"))
+      case .notExecutable:
+        warning(Text("插件文件不可执行，请检查文件类型和执行权限。"))
+      case .unreadable:
+        warning(Text("无法读取插件文件信息，请检查路径和访问权限。"))
+      }
+    }
+  }
+
+  private func warning(_ text: Text) -> some View {
+    Label {
+      text
+    } icon: {
+      Image(systemName: "exclamationmark.triangle.fill")
+    }
+    .font(.footnote)
+    .foregroundStyle(.orange)
   }
 }
 

@@ -96,24 +96,25 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     let id = try await addPluginServer(program: pluginBinaryName, options: "mode=websocket")
     let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .named(program: pluginBinaryName))
-    XCTAssertTrue(plugin.provided, "二进制在位即提供")
+    XCTAssertEqual(plugin.programs.first?.availability, .available, "二进制在位即提供")
     XCTAssertTrue(plugin.optionsPresent)
     XCTAssertEqual(plugin.options, "mode=websocket", "参数明文供输入框预填")
-    XCTAssertEqual(plugin.managed.map(\.program), [pluginBinaryName])
+    XCTAssertEqual(plugin.programs.map(\.program), [pluginBinaryName])
   }
 
   func testMissingBinaryShowsManagedButNotProvided() async throws {
     let id = try await addPluginServer(program: pluginBinaryName, options: nil)
     let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .named(program: pluginBinaryName))
-    XCTAssertFalse(plugin.provided, "打包损坏/降级丢插件时点名呈现")
+    XCTAssertEqual(plugin.programs.first?.availability, .missing, "打包损坏/降级丢插件时点名呈现")
   }
 
   func testUnknownProgramRendersExplicitUnknownState() async throws {
     let id = try await addPluginServer(program: "obfs-local", options: "obfs=http")
     let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .unknown(program: "obfs-local"), "集外引用显式未提供")
-    XCTAssertFalse(plugin.provided)
+    XCTAssertFalse(
+      plugin.programs.contains { $0.program == "obfs-local" && $0.availability == .available })
     XCTAssertTrue(plugin.optionsPresent, "已配置参数的事实照常呈现")
     XCTAssertEqual(plugin.options, "", "集外引用不解析参数明文")
   }
@@ -122,7 +123,6 @@ final class CatalogWorkflowPluginTests: XCTestCase {
     let id = try await addPluginServer(program: nil, options: nil)
     let plugin = try XCTUnwrap(try workflow.serverEditForm(for: id)?.plugin)
     XCTAssertEqual(plugin.selection, .none)
-    XCTAssertFalse(plugin.provided)
     XCTAssertFalse(plugin.optionsPresent)
   }
 
