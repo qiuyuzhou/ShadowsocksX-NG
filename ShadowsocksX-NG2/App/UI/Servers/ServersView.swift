@@ -122,7 +122,7 @@ struct ServersView: View {
       if workflow.tree.isEmpty {
         ContentUnavailableView(
           "暂无服务器", systemImage: "server.rack",
-          description: Text("用工具栏的「新建服务器」按钮手动录入，或用「导入」菜单导入 ss:// 链接")
+          description: Text("用工具栏的「新建服务器」按钮手动录入，或用「导入」菜单导入")
         )
         .allowsHitTesting(false)
       }
