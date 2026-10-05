@@ -231,7 +231,6 @@ private struct PluginOptionsEditor: View {
           )
           .textFieldStyle(.plain)
           .focused($focusedRowID, equals: row.id)
-          .simultaneousGesture(TapGesture().onEnded { focusedRowID = row.id })
           if row.isUnfinished {
             Image(systemName: "exclamationmark.circle.fill")
               .font(.caption)
@@ -253,7 +252,6 @@ private struct PluginOptionsEditor: View {
         .truncationMode(.tail)
         .disabled(row.kind == .flag)
         .focused($focusedValueRowID, equals: row.id)
-        .simultaneousGesture(TapGesture().onEnded { focusedValueRowID = row.id })
       }
       TableColumn("操作") { row in
         HStack(spacing: 8) {
