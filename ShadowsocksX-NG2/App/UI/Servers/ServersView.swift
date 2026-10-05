@@ -37,7 +37,6 @@ struct ServersView: View {
   @State private var deleteTarget: NodeID?
   @State private var moveTarget: NodeID?
   @State private var rootDropHovering = false
-  @FocusState private var treeFocused: Bool
   // 分享 popover 打开时冻结载荷、顶部资料与建议文件名。
   @State var shareContext: ShareContext?
 
@@ -105,18 +104,10 @@ struct ServersView: View {
       }
     }
     .listStyle(.sidebar)
-    .focusable(interactions: .edit)
-    .focused($treeFocused)
     .onKeyPress(.escape) {
-      guard treeFocused, selection != nil else { return .ignored }
+      guard selection != nil else { return .ignored }
       selection = nil
       return .handled
-    }
-    .background {
-      ServerTreeBlankClickObserver {
-        selection = nil
-        treeFocused = true
-      }
     }
     .overlay(alignment: .center) {
       if workflow.tree.isEmpty {
