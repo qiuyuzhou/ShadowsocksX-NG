@@ -38,9 +38,7 @@ struct ServersView: View {
   @State private var moveTarget: NodeID?
   @State private var rootDropHovering = false
   @FocusState private var treeFocused: Bool
-  // 分享 sheet 状态：由 ServersView+Share.swift 扩展驱动；2026-10-05 自工具
-  // 栏 popover 升级为 sheet（docs/design/server-share-sheet.md），打开时冻结
-  // 载荷与建议文件名。
+  // 分享 popover 打开时冻结载荷、顶部资料与建议文件名。
   @State var shareContext: ShareContext?
 
   var body: some View {
@@ -94,16 +92,7 @@ struct ServersView: View {
         workflow: workflow, errors: errors,
         parent: newServerParent, onCreated: selectCreatedNode)
     }
-    .sheet(item: $shareContext) { context in
-      ShareServerSheet(
-        payload: context.payload,
-        suggestedFileName: context.suggestedFileName,
-        imageClipboard: imageClipboard,
-        textClipboard: clipboard,
-        saver: qrImageSaver,
-        errors: errors)
-    }
-    // 分享 sheet 开着时切换选中项：立即收起，避免内容滞留为旧服务器。
+    // 切换选中项时立即收起分享，避免显示旧服务器。
     .onChange(of: selection) {
       shareContext = nil
     }
@@ -300,7 +289,7 @@ extension ServersView {
       .help("删除")
       .disabled(!canDeleteSelection)
     }
-    // 分享（分享/导出术语见 GLOSSARY.md）：作用于选中的服务器叶子，sheet 内
+    // 分享（分享/导出术语见 GLOSSARY.md）：作用于选中的服务器叶子，popover 内
     // 提供二维码、复制/保存图片与复制 ss:// 链接；无有效载荷即不可用。
     ToolbarItem(placement: .primaryAction) {
       Button {
@@ -310,6 +299,16 @@ extension ServersView {
       }
       .help("分享")
       .disabled(sharePayload() == nil)
+      .popover(item: $shareContext, arrowEdge: .top) { context in
+        ShareServerPopover(
+          payload: context.payload,
+          presentation: context.presentation,
+          suggestedFileName: context.suggestedFileName,
+          imageClipboard: imageClipboard,
+          textClipboard: clipboard,
+          saver: qrImageSaver,
+          errors: errors)
+      }
     }
   }
 

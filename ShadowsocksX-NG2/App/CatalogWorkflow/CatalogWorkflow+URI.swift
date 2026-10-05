@@ -1,8 +1,26 @@
 import Foundation
 
+/// 分享顶部的已保存资料，不包含密码或插件参数。
+struct ServerSharePresentation {
+  let name: String
+  let address: String
+  let port: Int
+  let encryptionMethod: String
+  let pluginProgram: String?
+}
+
 // MARK: - 分享与 URI → 服务器叶子
 
 extension CatalogWorkflow {
+  func serverSharePresentation(for id: NodeID) -> ServerSharePresentation? {
+    guard let entry = dependencies.coordinator.committedCatalog.entry(for: id),
+      case .server(let fields) = entry.kind
+    else { return nil }
+    return ServerSharePresentation(
+      name: entry.displayName, address: fields.address, port: fields.port,
+      encryptionMethod: fields.encryptionMethod, pluginProgram: fields.pluginProgram)
+  }
+
   /// 服务器 → ss://（SIP002，story 22）：凭据从存储解析；无凭据即点名失败
   /// （不分享空档）。仅在用户明确请求分享时调用。
   func shareURI(for id: NodeID) throws -> String {

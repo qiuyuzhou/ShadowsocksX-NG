@@ -1,14 +1,11 @@
 import SwiftUI
 
-/// 服务器分区的分享与二维码呈现（issue #16/D10，地图 #52 票 #55；2026-10-05
-/// 按草图自工具栏 popover 升级为 sheet，docs/design/server-share-sheet.md）：
-/// 大幅二维码加复制图片、保存图片、复制 ss:// 三条通路。分享是显式命令，
-/// 作用于打开时选中的服务器叶子，载荷与建议文件名随 ShareContext 冻结，
-/// sheet 生命周期内不随选择漂移。
+/// 服务器分享由工具栏按钮旁的 popover 呈现；打开时冻结已保存资料和载荷。
 extension ServersView {
-  /// 打开 sheet 即冻结的分享载荷与保存面板建议名。
+  /// 打开 popover 即冻结的分享载荷、资料与保存面板建议名。
   struct ShareContext: Identifiable {
     let payload: String
+    let presentation: ServerSharePresentation
     let suggestedFileName: String
     var id: String { payload }
   }
@@ -21,25 +18,28 @@ extension ServersView {
   }
 
   func presentShare() {
-    guard let selection, let payload = try? workflow.shareURI(for: selection) else { return }
+    guard let selection,
+      let presentation = workflow.serverSharePresentation(for: selection),
+      let payload = try? workflow.shareURI(for: selection)
+    else { return }
     shareContext = ShareContext(
       payload: payload,
+      presentation: presentation,
       suggestedFileName: QrImageSaveDraft.suggestedFileName(
-        from: workflow.displayName(for: selection)))
+        from: presentation.name))
   }
 }
 
-/// 分享 sheet 本体：草图的顶部说明加大幅二维码，三个动作按钮纵向铺满，
-/// 「完成」收尾；两个复制动作给瞬时「已复制」反馈，保存由系统面板反馈。
-struct ShareServerSheet: View {
+/// 系统分享菜单式分区：服务器资料、二维码、带图标的操作行。
+struct ShareServerPopover: View {
   let payload: String
+  let presentation: ServerSharePresentation
   let suggestedFileName: String
   let imageClipboard: any ImageClipboard
   let textClipboard: any TextClipboard
   let saver: any QrImageSaver
   let errors: ErrorAlertPresenter
 
-  @Environment(\.dismiss) private var dismiss
   @State private var png: Data?
   @State private var copyFeedback: CopyFeedback = .none
   @State private var feedbackResetTask: Task<Void, Never>?
@@ -50,41 +50,57 @@ struct ShareServerSheet: View {
     case link
   }
 
-  /// 四枚按钮统一最小宽：所有标签（含「已复制」反馈态）都远小于该值，保证
-  /// 视觉等宽，且按草图略窄于二维码块（minWidth 施于标签内侧，bordered 样式
-  /// 随标签边界绘制）。
-  private static let buttonMinWidth: CGFloat = 260
-
   var body: some View {
-    VStack(spacing: 16) {
-      Text("用其他设备的客户端扫描此二维码")
-        .font(.headline)
+    VStack(spacing: 12) {
+      serverSummary
+        .padding(.horizontal, 8)
+      Divider()
       qrDisplay
-      VStack(spacing: 8) {
-        shareButton("复制二维码图片", feedback: .image, disabled: png == nil) {
-          copyImage()
-        }
-        shareButton("保存二维码图片", feedback: nil, disabled: png == nil) {
+      Divider()
+      VStack(spacing: 2) {
+        shareButton(
+          "保存二维码图片", symbol: "square.and.arrow.down", feedback: nil,
+          disabled: png == nil
+        ) {
           saveImage()
         }
-        // ss:// 链接不依赖二维码生成，sheet 打开即可复制。
-        shareButton("复制 ss:// 链接", feedback: .link, disabled: false) {
+        shareButton(
+          "拷贝二维码图片", symbol: "doc.on.doc", feedback: .image,
+          disabled: png == nil
+        ) {
+          copyImage()
+        }
+        shareButton("拷贝 URI 链接", symbol: "link", feedback: .link, disabled: false) {
           copySsUri()
         }
       }
-      Button {
-        dismiss()
-      } label: {
-        Text("完成")
-          .frame(minWidth: Self.buttonMinWidth)
-      }
-      .keyboardShortcut(.cancelAction)
-      .buttonStyle(.bordered)
     }
-    .padding(24)
-    .frame(width: 340)
+    .padding(12)
+    .frame(width: 324)
     .task { await generate() }
     .onDisappear { feedbackResetTask?.cancel() }
+  }
+
+  private var serverSummary: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(verbatim: presentation.name)
+        .font(.headline)
+      Text(verbatim: endpoint)
+        .foregroundStyle(.secondary)
+      Text("加密方式：\(presentation.encryptionMethod)")
+      if let plugin = presentation.pluginProgram, !plugin.isEmpty {
+        Text("插件：\(plugin)")
+      }
+    }
+    .lineLimit(1)
+    .truncationMode(.tail)
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var endpoint: String {
+    let address = presentation.address
+    let host = address.contains(":") && !address.hasPrefix("[") ? "[\(address)]" : address
+    return "\(host):\(presentation.port)"
   }
 
   private var qrDisplay: some View {
@@ -111,21 +127,23 @@ struct ShareServerSheet: View {
 
   private func shareButton(
     _ title: String,
+    symbol: String,
     feedback: CopyFeedback?,
     disabled: Bool,
     action: @escaping () -> Void
   ) -> some View {
     Button(action: action) {
-      Group {
-        if let feedback, copyFeedback == feedback {
-          Label("已复制", systemImage: "checkmark")
-        } else {
-          Text(title)
-        }
+      HStack(spacing: 12) {
+        Image(systemName: copyFeedback == feedback ? "checkmark" : symbol)
+          .frame(width: 20)
+        Text(copyFeedback == feedback ? "已复制" : title)
+        Spacer(minLength: 0)
       }
-      .frame(minWidth: Self.buttonMinWidth)
+      .padding(.horizontal, 8)
+      .padding(.vertical, 7)
+      .contentShape(Rectangle())
     }
-    .buttonStyle(.bordered)
+    .buttonStyle(ShareActionButtonStyle())
     .disabled(disabled)
   }
 
@@ -176,5 +194,22 @@ struct ShareServerSheet: View {
       guard !Task.isCancelled else { return }
       copyFeedback = .none
     }
+  }
+}
+
+/// 保留原生 Button 的键盘与辅助功能，悬停时绘制系统菜单式行底色。
+private struct ShareActionButtonStyle: ButtonStyle {
+  @Environment(\.isEnabled) private var isEnabled
+  @State private var isHovering = false
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .background {
+        RoundedRectangle(cornerRadius: 6)
+          .fill(
+            Color.primary.opacity(isEnabled && (isHovering || configuration.isPressed) ? 0.1 : 0))
+      }
+      .opacity(isEnabled ? 1 : 0.4)
+      .onHover { isHovering = $0 }
   }
 }
