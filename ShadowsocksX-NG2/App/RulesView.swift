@@ -99,7 +99,14 @@ struct RulesView: View {
   }
 
   private var filters: some View {
-    HStack {
+    VStack(spacing: 6) {
+      HStack {
+        actionFilter
+          .fixedSize()
+        enabledFilter
+          .fixedSize()
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
       TextField(
         RulesCopy.text("搜索规则"),
         text: Binding(
@@ -107,27 +114,37 @@ struct RulesView: View {
           set: { value in updateQuery { $0.search = value } })
       )
       .textFieldStyle(.roundedBorder)
-      Picker(
-        RulesCopy.text("行动"),
-        selection: Binding(
-          get: { workflow.snapshot.query.action },
-          set: { value in updateQuery { $0.action = value } })
-      ) {
-        Text(RulesCopy.text("全部行动")).tag(Optional<RuleAction>.none)
-        Text(RulesCopy.text("直连")).tag(Optional(RuleAction.direct))
-        Text(RulesCopy.text("代理")).tag(Optional(RuleAction.proxy))
-      }.labelsHidden().fixedSize()
-      Picker(
-        RulesCopy.text("启用"),
-        selection: Binding(
-          get: { workflow.snapshot.query.enabled },
-          set: { value in updateQuery { $0.enabled = value } })
-      ) {
-        Text(RulesCopy.text("全部")).tag(Optional<Bool>.none)
-        Text(RulesCopy.text("已启用")).tag(Optional(true))
-        Text(RulesCopy.text("已禁用")).tag(Optional(false))
-      }.labelsHidden().fixedSize()
     }
+  }
+
+  private var actionFilter: some View {
+    Picker(
+      RulesCopy.text("行动"),
+      selection: Binding(
+        get: { workflow.snapshot.query.action },
+        set: { value in updateQuery { $0.action = value } })
+    ) {
+      Text(RulesCopy.text("全部行动")).tag(Optional<RuleAction>.none)
+      Text(RulesCopy.text("直连")).tag(Optional(RuleAction.direct))
+      Text(RulesCopy.text("代理")).tag(Optional(RuleAction.proxy))
+    }
+    .pickerStyle(.segmented)
+    .labelsHidden()
+  }
+
+  private var enabledFilter: some View {
+    Picker(
+      RulesCopy.text("启用"),
+      selection: Binding(
+        get: { workflow.snapshot.query.enabled },
+        set: { value in updateQuery { $0.enabled = value } })
+    ) {
+      Text(RulesCopy.text("全部")).tag(Optional<Bool>.none)
+      Text(RulesCopy.text("已启用")).tag(Optional(true))
+      Text(RulesCopy.text("已禁用")).tag(Optional(false))
+    }
+    .pickerStyle(.segmented)
+    .labelsHidden()
   }
 
   private var ruleTable: some View {
