@@ -1,3 +1,4 @@
+import Testing
 import XCTest
 
 @testable import ShadowsocksX_NG2
@@ -267,5 +268,111 @@ final class ConfigurationGroupExportTests: XCTestCase {
     let result = await workflow.importServers(from: [.clipboardText(uri)], into: parent)
     XCTAssertEqual(result.sources.first?.result.importedCount, 1)
     return try XCTUnwrap(workflow.tree.node(withID: parent)?.childNodes.last?.id)
+  }
+}
+
+@Suite("Configuration group sharing")
+@MainActor
+struct ConfigurationGroupSharingTests {
+  @Test func nestedURIListPreservesOrderAndCompleteConnectionData() throws {
+    let fixture = try Fixture()
+    defer { fixture.cleanUp() }
+    let draft = try fixture.workflow.configurationGroupShareDraft(for: fixture.root)
+    let uris = try draft.uriText.split(separator: "\n").map { try SsUri.decode(String($0)) }
+    #expect(uris.map(\.host) == ["203.0.113.1", "2001:db8::2", "203.0.113.3"])
+    #expect(uris.map(\.password) == ["first", "nested", "last"])
+    #expect(uris[1].pluginProgram == "missing-plugin")
+    #expect(uris[1].pluginOptions == "mode=websocket;host=example.com")
+    #expect(uris[1].remark == "嵌套服务器")
+    #expect(draft.uriList.data == Data(draft.uriText.utf8))
+    #expect(draft.uriList.suggestedFileName == "组 根.txt")
+    #expect(draft.uriList.format == .uriList)
+    let node = try #require(fixture.workflow.tree.node(withID: fixture.root))
+    #expect(node.serverConfigurationCount == 3)
+    let document = try #require(
+      JSONSerialization.jsonObject(with: draft.json.data) as? [String: Any])
+    let servers = try #require(document["servers"] as? [[String: Any]])
+    #expect(servers.compactMap { $0["server"] as? String } == uris.map(\.host))
+    #expect(draft.json.format == .json)
+  }
+
+  @Test func missingNestedCredentialRejectsWholeShareAndSnapshotRemainsStable() throws {
+    let fixture = try Fixture()
+    defer { fixture.cleanUp() }
+    let snapshot = try fixture.workflow.configurationGroupShareDraft(for: fixture.root)
+    try fixture.credentials.delete(fixture.nestedPassword)
+    #expect(
+      throws: ConfigurationGroupExportFailure.invalidServer(fixture.nestedServer, .missingPassword)
+    ) {
+      try fixture.workflow.configurationGroupShareDraft(for: fixture.root)
+    }
+    #expect(
+      try SsUri.decode(String(snapshot.uriText.split(separator: "\n")[1])).password == "nested")
+  }
+
+  @Test func emptyGroupCannotPrepareShare() throws {
+    let fixture = try Fixture()
+    defer { fixture.cleanUp() }
+    #expect(throws: ConfigurationGroupExportFailure.noServers) {
+      try fixture.workflow.configurationGroupShareDraft(for: fixture.empty)
+    }
+    #expect(fixture.workflow.tree.node(withID: fixture.empty)?.serverConfigurationCount == 0)
+  }
+
+  @MainActor
+  private struct Fixture {
+    let directory: URL
+    let credentials = InMemoryCredentialStore()
+    let root = NodeID.fresh()
+    let empty = NodeID.fresh()
+    let nestedServer = NodeID.fresh()
+    let nestedPassword = CredentialReference.fresh()
+    let workflow: CatalogWorkflow
+
+    init() throws {
+      directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "group-share-\(UUID())")
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      var catalog = ConfigurationCatalog()
+      try catalog.addGroup("组/根", id: root)
+      try catalog.addGroup("空组", id: empty)
+      let firstPassword = CredentialReference.fresh()
+      let lastPassword = CredentialReference.fresh()
+      let options = CredentialReference.fresh()
+      try credentials.save("first", for: firstPassword)
+      try credentials.save("nested", for: nestedPassword)
+      try credentials.save("last", for: lastPassword)
+      try credentials.save("mode=websocket;host=example.com", for: options)
+      try catalog.addServer(
+        ServerFields(
+          address: "203.0.113.1", port: 8388,
+          encryptionMethod: "aes-256-gcm", passwordRef: firstPassword, remark: "First"),
+        id: .fresh(), to: root)
+      let nested = NodeID.fresh()
+      try catalog.addGroup("嵌套", id: nested, to: root)
+      try catalog.addServer(
+        ServerFields(
+          address: "2001:db8::2", port: 8389,
+          encryptionMethod: "aes-256-gcm", passwordRef: nestedPassword, remark: "嵌套服务器",
+          pluginProgram: "missing-plugin", pluginOptionsRef: options), id: nestedServer, to: nested)
+      try catalog.addServer(
+        ServerFields(
+          address: "203.0.113.3", port: 8390,
+          encryptionMethod: "aes-256-gcm", passwordRef: lastPassword, remark: "Last"),
+        id: .fresh(), to: root)
+      // 外部服务器不得混入所选子树。
+      try catalog.addServer(
+        ServerFields(
+          address: "203.0.113.99", port: 8388,
+          encryptionMethod: "aes-256-gcm", passwordRef: firstPassword), id: .fresh())
+      let store = CatalogFileStore(fileURL: directory.appendingPathComponent("catalog.json"))
+      try store.save(CatalogDocument(catalog: catalog))
+      workflow = makeCatalogWorkflow(
+        coordinator: CatalogCommitCoordinator(fileStore: store, runtime: FakeCatalogRuntime()),
+        credentials: credentials,
+        subscriptionFetcher: FakeSubscriptionFetcher(behavior: .success(Data())))
+    }
+
+    func cleanUp() { try? FileManager.default.removeItem(at: directory) }
   }
 }

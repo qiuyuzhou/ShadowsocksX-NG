@@ -2,31 +2,55 @@ import SwiftUI
 
 /// 服务器分享由工具栏按钮旁的 popover 呈现；打开时冻结已保存资料和载荷。
 extension ServersView {
-  /// 打开 popover 即冻结的分享载荷、资料与保存面板建议名。
-  struct ShareContext: Identifiable {
+  enum ShareContext: Identifiable {
+    case server(ServerShareContext)
+    case group(GroupShareContext)
+
+    var id: NodeID {
+      switch self {
+      case .server(let context): context.id
+      case .group(let context): context.id
+      }
+    }
+  }
+
+  struct ServerShareContext {
+    let id: NodeID
     let payload: String
     let presentation: ServerSharePresentation
     let suggestedFileName: String
-    var id: String { payload }
   }
 
-  /// 分享载荷：仅服务器叶子可产生（分组与未知节点被 seam 点名拒绝）；
-  /// nil 即分享按钮不可用的统一判据。
-  func sharePayload() -> String? {
-    guard let selection else { return nil }
-    return try? workflow.shareURI(for: selection)
+  struct GroupShareContext {
+    let id: NodeID
+    let name: String
+    let serverCount: Int
+    let draft: Result<ConfigurationGroupShareDraft, Error>
+  }
+
+  var canShareSelection: Bool {
+    guard let selection, let node = workflow.tree.node(withID: selection) else { return false }
+    if node.isGroup { return node.containsServerConfiguration }
+    return (try? workflow.shareURI(for: selection)) != nil
   }
 
   func presentShare() {
-    guard let selection,
-      let presentation = workflow.serverSharePresentation(for: selection),
-      let payload = try? workflow.shareURI(for: selection)
-    else { return }
-    shareContext = ShareContext(
-      payload: payload,
-      presentation: presentation,
-      suggestedFileName: QrImageSaveDraft.suggestedFileName(
-        from: presentation.name))
+    guard let selection, let node = workflow.tree.node(withID: selection) else { return }
+    if node.isGroup {
+      guard node.containsServerConfiguration else { return }
+      shareContext = .group(
+        GroupShareContext(
+          id: selection, name: node.name, serverCount: node.serverConfigurationCount,
+          draft: Result { try workflow.configurationGroupShareDraft(for: selection) }))
+    } else {
+      guard let presentation = workflow.serverSharePresentation(for: selection),
+        let payload = try? workflow.shareURI(for: selection)
+      else { return }
+      shareContext = .server(
+        ServerShareContext(
+          id: selection, payload: payload, presentation: presentation,
+          suggestedFileName: QrImageSaveDraft.suggestedFileName(from: presentation.name)))
+    }
   }
 }
 
@@ -198,7 +222,7 @@ struct ShareServerPopover: View {
 }
 
 /// 保留原生 Button 的键盘与辅助功能，悬停时绘制系统菜单式行底色。
-private struct ShareActionButtonStyle: ButtonStyle {
+struct ShareActionButtonStyle: ButtonStyle {
   @Environment(\.isEnabled) private var isEnabled
   @State private var isHovering = false
 
@@ -211,5 +235,90 @@ private struct ShareActionButtonStyle: ButtonStyle {
       }
       .opacity(isEnabled ? 1 : 0.4)
       .onHover { isHovering = $0 }
+  }
+}
+
+/// 配置组使用同款操作行，分享内容固定为打开时的已保存快照。
+struct ShareGroupPopover: View {
+  let context: ServersView.GroupShareContext
+  let exporter: any ConfigurationGroupFileExporter
+  let clipboard: any TextClipboard
+  let errors: ErrorAlertPresenter
+
+  @State private var copied = false
+  @State private var feedbackResetTask: Task<Void, Never>?
+
+  var body: some View {
+    VStack(spacing: 12) {
+      VStack(alignment: .leading, spacing: 6) {
+        Text(verbatim: context.name)
+          .font(.headline)
+          .lineLimit(1)
+          .truncationMode(.tail)
+        Text("\(context.serverCount) 个服务器")
+          .foregroundStyle(.secondary)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, 8)
+      Divider()
+      VStack(spacing: 2) {
+        action("保存 SIP008 JSON 文件", symbol: "square.and.arrow.down") {
+          save(.json)
+        }
+        action("保存 URI 链接列表文本文件", symbol: "doc.text") {
+          save(.uriList)
+        }
+        action(
+          copied ? "已复制" : "拷贝 URI 链接列表文本",
+          symbol: copied ? "checkmark" : "doc.on.doc"
+        ) {
+          copyURIList()
+        }
+      }
+    }
+    .padding(12)
+    .frame(width: 324)
+    .onDisappear { feedbackResetTask?.cancel() }
+  }
+
+  private func action(_ title: String, symbol: String, perform: @escaping () -> Void) -> some View {
+    Button(action: perform) {
+      HStack(spacing: 12) {
+        Image(systemName: symbol).frame(width: 20)
+        Text(title)
+        Spacer(minLength: 0)
+      }
+      .padding(.horizontal, 8)
+      .padding(.vertical, 7)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(ShareActionButtonStyle())
+  }
+
+  private func save(_ format: ConfigurationGroupExportDraft.Format) {
+    do {
+      let draft = try context.draft.get()
+      switch exporter.export(draft: format == .json ? draft.json : draft.uriList) {
+      case .cancelled, .saved: break
+      case .failed(let failure): errors.present(failure)
+      }
+    } catch {
+      errors.present(error)
+    }
+  }
+
+  private func copyURIList() {
+    do {
+      try clipboard.write(context.draft.get().uriText)
+      copied = true
+      feedbackResetTask?.cancel()
+      feedbackResetTask = Task {
+        try? await Task.sleep(for: .seconds(2))
+        guard !Task.isCancelled else { return }
+        copied = false
+      }
+    } catch {
+      errors.present(error)
+    }
   }
 }

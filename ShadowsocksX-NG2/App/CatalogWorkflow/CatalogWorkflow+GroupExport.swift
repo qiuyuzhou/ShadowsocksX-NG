@@ -4,6 +4,18 @@ import Foundation
 struct ConfigurationGroupExportDraft: Equatable {
   let data: Data
   let suggestedFileName: String
+  var format: Format = .json
+
+  enum Format: Equatable {
+    case json
+    case uriList
+  }
+}
+
+struct ConfigurationGroupShareDraft {
+  let json: ConfigurationGroupExportDraft
+  let uriList: ConfigurationGroupExportDraft
+  let uriText: String
 }
 
 enum ConfigurationGroupExportFailure: Equatable, Error {
@@ -29,6 +41,29 @@ enum ConfigurationGroupExportFailure: Equatable, Error {
 }
 
 extension CatalogWorkflow {
+  /// 两种分享格式从同一完整校验结果准备，任何服务器失败都不产生部分输出。
+  func configurationGroupShareDraft(for groupID: NodeID) throws -> ConfigurationGroupShareDraft {
+    let catalog = dependencies.coordinator.committedCatalog
+    guard let root = catalog.entry(for: groupID) else {
+      throw ConfigurationGroupExportFailure.groupNotFound
+    }
+    guard case .group(let fields) = root.kind else {
+      throw ConfigurationGroupExportFailure.targetIsNotGroup
+    }
+    var builder = SIP008GroupExportDocumentBuilder(
+      catalog: catalog, credentials: dependencies.credentials)
+    let json = try builder.encode(rootID: groupID)
+    let text = builder.uriListText
+    let name = fields.name.replacingOccurrences(of: "/", with: " ")
+      .replacingOccurrences(of: ":", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    let base = name.isEmpty ? "ss-servers" : name
+    return ConfigurationGroupShareDraft(
+      json: ConfigurationGroupExportDraft(data: json, suggestedFileName: "\(base).json"),
+      uriList: ConfigurationGroupExportDraft(
+        data: Data(text.utf8), suggestedFileName: "\(base).txt", format: .uriList),
+      uriText: text)
+  }
+
   /// Prepares a complete SIP-008 v1 snapshot for one group. Credentials are resolved
   /// here so the returned draft is the only secret-bearing value passed to the exporter.
   func configurationGroupExportDraft(for groupID: NodeID) throws -> ConfigurationGroupExportDraft {
@@ -54,6 +89,16 @@ private struct SIP008GroupExportDocumentBuilder {
   private var servers: [SIP008ServerDTO] = []
   private var groups: [SIP008GroupDTO] = []
   private let identities = SIP008ExportIdentity()
+
+  var uriListText: String {
+    servers.map {
+      SsUri(
+        method: $0.method, password: $0.password, host: $0.server, port: $0.serverPort,
+        pluginProgram: $0.plugin, pluginOptions: $0.pluginOptions,
+        remark: $0.remarks.isEmpty ? nil : $0.remarks
+      ).encode()
+    }.joined(separator: "\n")
+  }
 
   init(catalog: ConfigurationCatalog, credentials: CredentialStoring) {
     self.catalog = catalog

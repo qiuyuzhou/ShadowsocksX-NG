@@ -31,6 +31,11 @@ struct CatalogTreeNode: Identifiable, Equatable {
   /// 子树快照；服务器叶子为空（与 `children` 的 nil 区分叶子语义并存）。
   var childNodes: [CatalogTreeNode] { children ?? [] }
 
+  /// 子树服务器配置数，包含存在已知激活阻塞的服务器。
+  var serverConfigurationCount: Int {
+    isGroup ? childNodes.reduce(0) { $0 + $1.serverConfigurationCount } : 1
+  }
+
   /// 是否包含服务器配置（含当前节点本身）；激活资格与结构性可导出性分离。
   var containsServerConfiguration: Bool {
     if !isGroup { return true }

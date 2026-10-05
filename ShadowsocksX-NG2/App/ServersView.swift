@@ -289,8 +289,7 @@ extension ServersView {
       .help("删除")
       .disabled(!canDeleteSelection)
     }
-    // 分享（分享/导出术语见 GLOSSARY.md）：作用于选中的服务器叶子，popover 内
-    // 提供二维码、复制/保存图片与复制 ss:// 链接；无有效载荷即不可用。
+    // 分享选中的服务器或非空配置组，分别显示二维码或文件/URI 列表操作。
     ToolbarItem(placement: .primaryAction) {
       Button {
         presentShare()
@@ -298,16 +297,23 @@ extension ServersView {
         Label("分享", systemImage: "square.and.arrow.up")
       }
       .help("分享")
-      .disabled(sharePayload() == nil)
+      .disabled(!canShareSelection)
       .popover(item: $shareContext, arrowEdge: .top) { context in
-        ShareServerPopover(
-          payload: context.payload,
-          presentation: context.presentation,
-          suggestedFileName: context.suggestedFileName,
-          imageClipboard: imageClipboard,
-          textClipboard: clipboard,
-          saver: qrImageSaver,
-          errors: errors)
+        switch context {
+        case .server(let server):
+          ShareServerPopover(
+            payload: server.payload,
+            presentation: server.presentation,
+            suggestedFileName: server.suggestedFileName,
+            imageClipboard: imageClipboard,
+            textClipboard: clipboard,
+            saver: qrImageSaver,
+            errors: errors)
+        case .group(let group):
+          ShareGroupPopover(
+            context: group, exporter: configurationGroupFileExporter,
+            clipboard: clipboard, errors: errors)
+        }
       }
     }
   }

@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
-/// SIP-008 草稿的用户选择与文件写入边界；内容准备由 CatalogWorkflow 拥有。
+/// 配置组 JSON / URI 列表草稿的文件写入边界；内容准备由 CatalogWorkflow 拥有。
 @MainActor
 protocol ConfigurationGroupFileExporter {
   func export(draft: ConfigurationGroupExportDraft) -> ConfigurationGroupFileExportResult
@@ -10,6 +10,7 @@ protocol ConfigurationGroupFileExporter {
 
 enum ConfigurationGroupFileExportFailure: Equatable, Error {
   case writeFailed
+  case uriListWriteFailed
 }
 
 enum ConfigurationGroupFileExportResult: Equatable {
@@ -52,12 +53,12 @@ struct ConfigurationGroupExportAction {
   }
 }
 
-/// 生产文件边界：JSON 保存面板与原子文件写入集中在 AppKit adapter。
+/// 生产文件边界：JSON / UTF-8 文本保存面板与原子文件写入集中在 AppKit adapter。
 @MainActor
 final class AppKitConfigurationGroupFileExporter: ConfigurationGroupFileExporter {
   func export(draft: ConfigurationGroupExportDraft) -> ConfigurationGroupFileExportResult {
     let panel = NSSavePanel()
-    panel.allowedContentTypes = [.json]
+    panel.allowedContentTypes = draft.format == .json ? [.json] : [.plainText]
     panel.nameFieldStringValue = draft.suggestedFileName
     guard panel.runModal() == .OK, let url = panel.url else {
       return .cancelled
@@ -67,7 +68,7 @@ final class AppKitConfigurationGroupFileExporter: ConfigurationGroupFileExporter
       try draft.data.write(to: url, options: .atomic)
       return .saved(url)
     } catch {
-      return .failed(.writeFailed)
+      return .failed(draft.format == .json ? .writeFailed : .uriListWriteFailed)
     }
   }
 }

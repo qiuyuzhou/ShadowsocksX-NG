@@ -77,8 +77,8 @@ extension AppPresentation {
       return diagnosticReportExport(error)
     case let error as ConfigurationGroupExportFailure:
       return configurationGroupExport(error)
-    case is ConfigurationGroupFileExportFailure:
-      return "SIP-008 文件写入失败"
+    case let error as ConfigurationGroupFileExportFailure:
+      return error == .writeFailed ? "SIP-008 文件写入失败" : "URI 链接列表文本文件写入失败"
     default:
       return unknownError
     }
