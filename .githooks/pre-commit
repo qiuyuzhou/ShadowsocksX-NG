@@ -6,7 +6,8 @@
 #      格式化结果直接写回暂存区（只改暂存区、不动工作区，部分暂存安全）；
 #   2. 再用 SwiftLint 检查暂存内容：error 级违规拒绝提交，warning 仅提示。
 # 其余文件（含冻结的 Legacy/）一律跳过；没有 NG2 的 Swift 文件时立即放行。
-# 工具缺失且确有 NG2 Swift 文件待查时，失败而不是放行。
+# 工具缺失且确有 NG2 Swift 文件待查时，失败而不是放行。两关都把「工具没能
+# 执行」与「查出问题」分开报告，不把工具错误说成代码违规。
 
 set -u
 
@@ -71,14 +72,39 @@ while IFS= read -r path; do
 done < "$STAGED_LIST"
 
 # 第 2 关：SwiftLint 静态检查暂存内容（error 拒绝提交，warning 提示但放行）
+#
+# --no-cache：SwiftLint 默认要把缓存 plist 写进 ~/Library/Caches。写不进去时
+# 它自己以非零退出，若只看「是否非零」就会把「工具没跑起来」误报成「发现
+# error 级违规」（实测：受限环境下每次提交都这样失败）。本关只需要检查几十个
+# 暂存文件，省掉缓存的代价可以忽略。
+#
+# 退出码（swiftlint 0.65.x 实测）区分两类失败；注意不能改用解析输出文本来
+# 判断——工具错误信息里同样含 "error:"（配置读不了时输出
+# "error: Could not read file at path ..."）：
+#   0 = 无 error 级违规（可能含 warning）；2 = 发现 error 级违规；
+#   其余（1 = 内部错误如缓存写失败；134 = 配置读不了等） = 工具执行失败。
 LINT_LOG="${TMP_DIR}/swiftlint.log"
-if ! swiftlint lint --config "${NG2_DIR}/.swiftlint.yml" --quiet "${TMP_DIR}" >"${LINT_LOG}" 2>&1; then
-	echo "pre-commit: SwiftLint 发现 error 级违规，提交被拒绝" >&2
-	echo "pre-commit: 报告中的 0001_xxx.swift 是暂存内容的临时副本，序号_ 后为原文件名：" >&2
-	cat "${LINT_LOG}" >&2
-	echo "pre-commit: 请修复后重新提交；手动检查方式见 ShadowsocksX-NG2/README.md" >&2
-	exit 1
-fi
+swiftlint lint --config "${NG2_DIR}/.swiftlint.yml" --no-cache --quiet "${TMP_DIR}" \
+	>"${LINT_LOG}" 2>&1
+lint_status=$?
+
+case "$lint_status" in
+	0) ;;
+	2)
+		echo "pre-commit: SwiftLint 发现 error 级违规，提交被拒绝" >&2
+		echo "pre-commit: 报告中的 0001_xxx.swift 是暂存内容的临时副本，序号_ 后为原文件名：" >&2
+		cat "${LINT_LOG}" >&2
+		echo "pre-commit: 请修复后重新提交；手动检查方式见 ShadowsocksX-NG2/README.md" >&2
+		exit 1
+		;;
+	*)
+		echo "pre-commit: SwiftLint 执行失败（退出码 ${lint_status}），提交被拒绝" >&2
+		echo "pre-commit: 这是工具错误而非代码违规，请检查配置与工具安装" >&2
+		echo "pre-commit:（基线版本见 ShadowsocksX-NG2/README.md）：" >&2
+		cat "${LINT_LOG}" >&2
+		exit 1
+		;;
+esac
 
 if [ -s "${LINT_LOG}" ]; then
 	echo "pre-commit: SwiftLint warning（不拦截提交）：" >&2
