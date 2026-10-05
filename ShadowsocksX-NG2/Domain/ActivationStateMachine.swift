@@ -38,7 +38,7 @@ struct ActivationStateMachine: Equatable, Sendable {
     _ target: NodeID,
     in catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
-    plugins: ManagedPluginProviding,
+    plugins: PluginExecutableResolving,
     options: RuntimeDocumentOptions
   ) throws -> RuntimeConfiguration {
     let outcome = derive(
@@ -60,7 +60,7 @@ struct ActivationStateMachine: Equatable, Sendable {
   mutating func catalogDidCommit(
     _ catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
-    plugins: ManagedPluginProviding,
+    plugins: PluginExecutableResolving,
     options: RuntimeDocumentOptions
   ) -> ActivationEffect? {
     guard let target = activeTargetID else { return nil }
@@ -84,10 +84,11 @@ struct ActivationStateMachine: Equatable, Sendable {
     target: NodeID,
     in catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
-    plugins: ManagedPluginProviding,
+    plugins: PluginExecutableResolving,
     options: RuntimeDocumentOptions
   ) -> Result<RuntimeConfiguration, ActivationFailure> {
     guard catalog.contains(target) else { return .failure(.targetNotFound(target)) }
+    let plugins = plugins.catalogSnapshot()
     let isGroup = isGroupTarget(target, in: catalog)
     var leaves: [NodeID] = []
     if isGroup {
@@ -142,7 +143,7 @@ struct ActivationStateMachine: Equatable, Sendable {
     _ leafID: NodeID,
     in catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
-    plugins: ManagedPluginProviding
+    plugins: PluginExecutableResolving
   ) -> LeafDerival {
     guard let entry = catalog.entry(for: leafID), case .server(let fields) = entry.kind else {
       preconditionFailure("展开结果只含服务器叶子")
@@ -190,7 +191,7 @@ struct ActivationStateMachine: Equatable, Sendable {
     _ leafID: NodeID,
     in catalog: ConfigurationCatalog,
     credentials: CredentialStoring,
-    plugins: ManagedPluginProviding
+    plugins: PluginExecutableResolving
   ) -> Result<SslocalServerDocument, ActivationFailure> {
     guard let entry = catalog.entry(for: leafID), case .server(let fields) = entry.kind else {
       preconditionFailure("展开结果只含服务器叶子")

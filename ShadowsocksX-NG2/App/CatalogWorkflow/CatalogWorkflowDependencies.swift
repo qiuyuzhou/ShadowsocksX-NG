@@ -13,7 +13,7 @@ struct CatalogWorkflowDependencies {
   /// 凭据存储（story 11）：只在 module 内出现，UI 不持有。
   let credentials: CredentialStoring
   /// 受管插件提供缝（编辑面集内事实与可执行文件存在性）。
-  let plugins: ManagedPluginProviding
+  let plugins: PluginExecutableResolving
   /// 订阅获取缝。
   let subscriptionFetcher: SubscriptionFetching
   /// Legacy 导入服务（快照发现、完成标记与原子导入）。

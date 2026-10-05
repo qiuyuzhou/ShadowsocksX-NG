@@ -28,7 +28,7 @@ struct ServerValidation: Equatable, Sendable {
   static func evaluate(
     _ fields: ServerFields,
     credentials: CredentialStoring,
-    plugins: ManagedPluginProviding
+    plugins: PluginExecutableResolving
   ) -> ServerValidation {
     var issues: [LeafInvalidationReason] = []
     appendAddressIssue(fields.address, to: &issues)
@@ -77,7 +77,7 @@ struct ServerValidation: Equatable, Sendable {
   private static func appendPluginIssues(
     _ fields: ServerFields,
     credentials: CredentialStoring,
-    plugins: ManagedPluginProviding,
+    plugins: PluginExecutableResolving,
     to issues: inout [LeafInvalidationReason]
   ) {
     guard let program = fields.pluginProgram else { return }

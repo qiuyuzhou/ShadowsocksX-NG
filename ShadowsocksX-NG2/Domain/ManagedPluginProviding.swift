@@ -1,10 +1,22 @@
 import Foundation
 
-/// 受管插件提供缝（spec #21 D10，GLOSSARY.md「Managed plugin」）：给定服务器
-/// 持有的插件程序引用，返回本版本提供的 bundle 内绝对路径；返回 nil 即
-/// 「本版本未提供」，该引用使叶子成为无效激活候选（激活点名拒绝）。
-protocol ManagedPluginProviding {
+/// 插件解析 seam：当前路径查询与一次派生使用的只读目录快照。
+/// nil 表示本地不可用；托管与用户映射共用这一激活语义。
+protocol PluginExecutableResolving {
   func executablePath(forProgram program: String) -> String?
+  func catalogSnapshot() -> PluginCatalogSnapshot
+}
+
+extension PluginExecutableResolving {
+  func catalogSnapshot() -> PluginCatalogSnapshot {
+    PluginCatalogSnapshot(
+      entries: ManagedPluginCatalog.plugins.map { info in
+        let path = executablePath(forProgram: info.program)
+        return PluginCatalogSnapshot.Entry(
+          program: info.program, path: path, source: .managed,
+          availability: path == nil ? .missing : .available, managedInfo: info)
+      })
+  }
 }
 
 /// 受管插件静态事实（#38）：来源项目、许可证、固定版本与重签标识，供编辑器
@@ -25,8 +37,7 @@ struct ManagedPluginInfo: Equatable, Sendable {
 }
 
 /// 本版本受管集（D10）：首版仅 v2ray-plugin v1.3.2；shadow-tls、Cloak 暂缓，
-/// simple-obfs、kcptun、GoQuiet、simple-tls 明确不支持（「不支持某插件」是
-/// 显式产品状态，不是可扩展的用户自备通道）。
+/// 此目录只描述随 app 发布的程序；用户自备程序由 PluginCatalog 的本机映射提供。
 enum ManagedPluginCatalog {
   static let plugins: [ManagedPluginInfo] = [
     ManagedPluginInfo(
@@ -47,7 +58,7 @@ enum ManagedPluginCatalog {
 /// 仅在生成配置时检查可执行文件存在，运行时不逐次哈希复验（bundle 签名 +
 /// 公证即信任边界）；受管集外引用一律视为「本版本未提供」，路径只从静态表
 /// 派生，不拼接任何用户输入。
-struct BundleManagedPluginProvider: ManagedPluginProviding {
+struct BundleManagedPluginProvider: PluginExecutableResolving {
   /// 插件宿主 bundle 根；生产为应用 bundle，测试注入临时目录。
   var bundleURL: URL = Bundle.main.bundleURL
   var fileManager: FileManager = .default
@@ -65,6 +76,6 @@ struct BundleManagedPluginProvider: ManagedPluginProviding {
 
 /// 显式「本版本什么都不提供」的实现（测试与不涉插件的场景注入用）：任何插件
 /// 引用都是无效激活候选（点名原因），不是静默失败。
-struct NoManagedPluginProvider: ManagedPluginProviding {
+struct NoManagedPluginProvider: PluginExecutableResolving {
   func executablePath(forProgram program: String) -> String? { nil }
 }

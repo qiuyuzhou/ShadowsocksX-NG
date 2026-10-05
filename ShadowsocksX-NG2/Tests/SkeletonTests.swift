@@ -89,7 +89,7 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
       "CatalogWorkflowDependencies", "CatalogCommitCoordinator", "CatalogFileStore",
       "ConfigurationCatalog", "CatalogEntry", "CommittedCatalogSnapshot",
       "CredentialStoring", "KeychainCredentialStore", "CredentialWriteJournal",
-      "CredentialReference", "ManagedPluginProviding", "BundleManagedPluginProvider",
+      "CredentialReference", "PluginExecutableResolving", "BundleManagedPluginProvider",
       "SubscriptionFetching", "HTTPSSubscriptionFetcher", "SubscriptionRecord",
       "LegacyImportService", "LegacySnapshot", "Activating", "ServerFields",
     ]

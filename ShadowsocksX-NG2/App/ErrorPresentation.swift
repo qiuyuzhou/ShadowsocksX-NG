@@ -196,7 +196,7 @@ extension AppPresentation {
     case .unsupportedEncryptionMethod: return "当前 sslocal 不支持该加密方法"
     case .invalidPassword: return "密码不能为空"
     case .emptyName: return "名称不能为空"
-    case .pluginNotManaged: return "本版本未提供所选插件"
+    case .pluginUnknown: return "本版本未提供所选插件"
     }
   }
 

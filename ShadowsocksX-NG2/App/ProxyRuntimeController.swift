@@ -50,7 +50,8 @@ final class ProxyRuntimeController {
   let activationFileStore: ActivationStateFileStore
   let runtimeFileStore: RuntimeFileStore
   let credentials: CredentialStoring
-  let plugins: ManagedPluginProviding
+  let plugins: PluginExecutableResolving
+  let refreshPluginSecurityFacts: @MainActor () -> Void
   let settingsStore: ProxySettingsStoring
   /// 自定义规则持久化（issue #66）：规则模式 ACL 合并的用户入口。
   var isUpdatingRules = false
@@ -123,7 +124,8 @@ final class ProxyRuntimeController {
       fileURL: ActivationStateFileStore.defaultFileURL()),
     runtimeFileStore: RuntimeFileStore = RuntimeFileStore(),
     credentials: CredentialStoring = KeychainCredentialStore(),
-    plugins: ManagedPluginProviding = BundleManagedPluginProvider(),
+    plugins: PluginExecutableResolving = BundleManagedPluginProvider(),
+    refreshPluginSecurityFacts: @escaping @MainActor () -> Void = {},
     listenRestore: RestoredListenSettings = ListenSettingsFileStore.restored(),
     settingsStore: ProxySettingsStoring = ProxySettingsFileStore(),
     customRuleStore: CustomRuleStore = CustomRuleStore(),
@@ -157,6 +159,7 @@ final class ProxyRuntimeController {
     self.runtimeFileStore = runtimeFileStore
     self.credentials = credentials
     self.plugins = plugins
+    self.refreshPluginSecurityFacts = refreshPluginSecurityFacts
     self.settingsStore = settingsStore
     self.customRuleStore = customRuleStore
     self.ruleDocuments = RuleDocumentSession(store: customRuleStore)

@@ -341,6 +341,61 @@
           }
         }
       }
+    },
+    "未找到插件“%@”。引用和已保存参数将保留；可添加同名用户插件，或改选其他插件或“无”。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugin “%@” was not found. Its reference and saved options will be preserved. Add a user plugin with the same name, select another plugin, or select None."
+          }
+        }
+      }
+    },
+    "插件文件不存在，请检查用户插件路径或应用安装。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plugin file is missing. Check the user plugin path or the app installation."
+          }
+        }
+      }
+    },
+    "插件文件不可执行，请检查文件类型和执行权限。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plugin file is not executable. Check its file type and execute permissions."
+          }
+        }
+      }
+    },
+    "无法读取插件文件信息，请检查路径和访问权限。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugin file information could not be read. Check the path and access permissions."
+          }
+        }
+      }
+    },
+    "无法读取用户插件映射，插件暂不可用。请修复映射后重试。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "User plugin mappings could not be read. Plugins are unavailable until the mappings are repaired."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -3,6 +3,11 @@ import Foundation
 // MARK: - 设置变更与目录提交同步
 
 extension ProxyRuntimeController {
+  /// A published mapping invalidates prepared documents before asynchronous convergence.
+  func pluginMappingsDidPublish() {
+    runtimePreparationGeneration += 1
+  }
+
   /// 目录提交协调器的生产适配入口（issue #40）：以刚提交的内存快照重展开，
   /// 不回读磁盘（磁盘仍是重启与跨进程恢复的权威来源）。agent 意图开启时
   /// 原子更新运行时；目标失效 → 清除目标但 agent 继续监听。返回结构化收敛

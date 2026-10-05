@@ -126,7 +126,7 @@ struct ServerFormLoadingTests {
       let id = try await workflow.createServer(
         ServerEditDraft(
           address: "203.0.113.1", port: 8388, encryptionMethod: "aes-256-gcm",
-          password: "pw", remark: "服务器", plugin: .managed(program: program),
+          password: "pw", remark: "服务器", plugin: .named(program: program),
           pluginOptions: "mode=websocket"), into: nil)
       credentials.reads = 0
       credentials.failReads = true
@@ -209,7 +209,7 @@ struct ServerFormLoadingTests {
       address: "203.0.113.1", port: 8388, encryptionMethod: "aes-256-gcm",
       password: password, remark: "服务器",
       plugin: PluginSectionState(
-        selection: .none, managed: ManagedPluginCatalog.plugins, provided: false,
+        selection: .none, programs: [], mappingsUnreadable: false,
         optionsPresent: false, options: ""), isEditable: isEditable)
   }
 }

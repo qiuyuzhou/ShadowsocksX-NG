@@ -6,7 +6,7 @@ import XCTest
 /// 激活与重展开的便捷调用、原子失败断言。
 enum ActivationFixture {
   /// 受管插件测试集：只提供表内程序，值即写入文档的 bundle 内路径。
-  struct TestManagedPlugins: ManagedPluginProviding {
+  struct TestManagedPlugins: PluginExecutableResolving {
     let pathsByProgram: [String: String]
 
     func executablePath(forProgram program: String) -> String? {
