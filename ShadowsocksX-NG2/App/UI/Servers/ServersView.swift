@@ -12,7 +12,7 @@ struct ServersView: View {
   /// 激活命令都经它发出。
   let activation: ActivationFeedbackState
   /// 活动目标标记：父视图传入的运行时事实，不进目录 projection（与
-  /// SidebarRow/ServerDetailView 的传参先例同法）。
+  /// ServerSidebarRow/ServerDetailView 的传参先例同法）。
   let activeTargetID: NodeID?
   @Binding var selection: NodeID?
   /// 分组折叠状态：组合根持有的共享对象（与首页目标树同源），跨 destination
@@ -154,7 +154,7 @@ struct ServersView: View {
           .help(expansion.isCollapsed(node.id) ? "展开" : "收起")
         }
       }
-      SidebarRow(
+      ServerSidebarRow(
         node: node,
         workflow: workflow,
         activation: activation,
