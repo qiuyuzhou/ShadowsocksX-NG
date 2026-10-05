@@ -361,8 +361,10 @@ struct ServerFormFieldsGrid: View {
           Group {
             if fields.showPassword {
               TextField("密码", text: $fields.password)
+                .background(PasswordAutofillOptOut())
             } else {
               SecureField("密码", text: $fields.password)
+                .background(PasswordAutofillOptOut())
             }
           }
           .textFieldStyle(.roundedBorder)
