@@ -20,14 +20,18 @@ final class SkeletonTests: XCTestCase {
 }
 
 /// 架构 deletion check（issue #49）：UI 源文件不得引用目录工作流的实现
-/// 协作者或原始目录/凭据存储类型。组合根（MainApp）与各 workflow module
-/// 目录豁免；新增视图文件自动纳入扫描，新增运行时/系统适配器需显式登记
-/// 豁免名单。规则只点名实现缝，不锁定实现内部的文件划分或私有 helper。
+/// 协作者或原始目录/凭据存储类型。
+///
+/// 扫描范围由目录正面圈定：只扫 `App/UI/`（视图层）。分层因此是目录声明而非
+/// 豁免登记——把文件移出 `UI/` 是显式的架构动作；组合根放 `App/Composition/`、
+/// 运行时与系统适配器放 `App/Application/`、平台效应 seam 放
+/// `App/PlatformEffects/`，天然落在扫描范围之外，新增时无需登记豁免。
+/// 规则只点名实现缝，不锁定实现内部的文件划分或私有 helper。
 final class CatalogWorkflowArchitectureTests: XCTestCase {
   func testUISourceFilesDoNotReferenceCatalogWorkflowImplementation() throws {
-    let appDirectory = Self.testTargetRoot.appendingPathComponent("App")
-    let uiFiles = try Self.uiSourceFiles(in: appDirectory)
-    XCTAssertFalse(uiFiles.isEmpty, "UI 源文件集合不应为空（App 目录缺失？）")
+    let uiDirectory = Self.testTargetRoot.appendingPathComponent("App/UI")
+    let uiFiles = try Self.swiftSourceFiles(in: uiDirectory)
+    XCTAssertFalse(uiFiles.isEmpty, "UI 源文件集合不应为空（App/UI 目录缺失？）")
 
     var violations: [String] = []
     for file in uiFiles {
@@ -55,30 +59,6 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
 
   private static let testTargetRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent().deletingLastPathComponent()
-
-  /// 豁免文件：组合根（生产 adapter 唯一装配点）与运行时/系统适配器（合法
-  /// 接触原始目录与凭据类型）。
-  private static let exemptedFiles: Set<String> = [
-    "MainApp.swift",
-    "CatalogCommitCoordinator.swift",
-    // 运行时 facts 投影：适配器侧把控制器状态映射为 typed facts，非 UI 表面。
-    "ProxyRuntimeFacts.swift",
-    "SystemProxyHelperService.swift",
-    "LaunchAgentService.swift",
-    "LoginAtLoginService.swift",
-    "FirewallStatusChecker.swift",
-  ]
-
-  /// 豁免前缀：控制器家族（本体与按命令面/收敛脊柱/系统代理门禁等分的各文件）
-  /// 同属运行时适配器，合法接触代理控制器类型。
-  private static let exemptedFilePrefixes: Set<String> = [
-    "ProxyRuntimeController"
-  ]
-
-  /// 豁免目录：workflow module 实现（含被测的目录工作流自身）。
-  private static let exemptedDirectories: Set<String> = [
-    "CatalogWorkflow", "ProxyControlWorkflow", "SettingsWorkflow", "DiagnosticsWorkflow",
-  ]
 
   /// 禁令：实现协作者类型、原始目录/凭据存储类型与 workflow 内部成员缝。
   private static let forbiddenPatterns = makeForbiddenPatterns()
@@ -109,28 +89,18 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
     }
   }
 
-  /// UI 源文件 = App 下全部 Swift 文件，除豁免名单与 workflow module 目录。
-  private static func uiSourceFiles(in directory: URL) throws -> [URL] {
+  /// 视图层源文件 = `App/UI/` 下全部 Swift 文件（递归含各子视图目录）。
+  private static func swiftSourceFiles(in directory: URL) throws -> [URL] {
     guard
       let enumerator = FileManager.default.enumerator(
         at: directory, includingPropertiesForKeys: nil)
     else {
-      XCTFail("无法枚举 App 源码目录：\(directory.path)")
+      XCTFail("无法枚举 UI 源码目录：\(directory.path)")
       return []
     }
-    var result: [URL] = []
-    for case let url as URL in enumerator {
-      let name = url.lastPathComponent
-      guard
-        name.hasSuffix(".swift"),
-        !exemptedFiles.contains(name),
-        !exemptedFilePrefixes.contains(where: { name.hasPrefix($0) })
-      else { continue }
-      let relativePath = url.path.replacingOccurrences(of: directory.path + "/", with: "")
-      guard !exemptedDirectories.contains(where: { relativePath.hasPrefix("\($0)/") })
-      else { continue }
-      result.append(url)
+    return enumerator.compactMap { item in
+      guard let url = item as? URL, url.pathExtension == "swift" else { return nil }
+      return url
     }
-    return result
   }
 }

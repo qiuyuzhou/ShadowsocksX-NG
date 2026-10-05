@@ -8,8 +8,16 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
 
 ## 工程结构
 
-- `project.yml` — XcodeGen 工程定义，唯一事实来源。`.xcodeproj` 与 `App/Info.plist`、`*.entitlements`、`Tests/Info.plist` 都是生成物（已 gitignore），改工程结构一律改 `project.yml` 后重新生成。
-- `App/` — app target 源码（SwiftUI 菜单栏 app，LSUIElement）。
+- `project.yml` — XcodeGen 工程定义，唯一事实来源。`.xcodeproj` 与 `App/Resources/Info.plist`、`*.entitlements`、`Tests/Info.plist` 都是生成物（已 gitignore），改工程结构一律改 `project.yml` 后重新生成。
+- `App/` — app target 源码（SwiftUI 菜单栏 app，LSUIElement）。目录即分层，层内按功能分组：
+  - `Composition/` — 组合根与进程生命周期：`@main`、依赖装配、应用形态与窗口激活策略。
+  - `Application/` — 应用层（无 SwiftUI 视图）：`*Workflow/` 工作流 module（UI-facing interface 与实现协作者）、`ProxyRuntime/` 运行时控制器家族与事实投影、`Services/` LaunchAgent/登录项/helper/防火墙。
+  - `Presentation/` — 跨功能表现层：错误呈现、被多个界面面共用的状态模型。
+  - `UI/` — 视图层，按子视图分目录（`Workspace/`、`Home/`、`Servers/`、`Subscriptions/`、`Rules/`、`Settings/`、`Diagnostics/`、`StatusMenu/`，`Servers/Plugin/` 为插件管理子视图）。
+  - `PlatformEffects/` — 平台效应 seam（协议 + InMemory 替身 + AppKit adapter），系统框架访问集中于此。
+  - `Resources/` — `Info.plist`、`entitlements`（生成物）与 `Assets.xcassets`、`*.xcstrings`（入库）。
+
+  分层边界由 `Tests/SkeletonTests.swift` 的正向圈定守卫断言：只扫描 `App/UI/`，视图层不得引用运行时控制器、工作流实现协作者或原始目录/凭据存储类型；新增运行时适配器放进 `Application/` 即自动落在扫描范围外，无需登记豁免。注意 `App/` 下任何非源码文件都会被 XcodeGen 收进 Resources 阶段并封进签名后的 bundle，因此文档不放 `App/`（`project.yml` 已排除 `**/*.md`）。
 - `Agent/` — 代理运行时 wrapper（独立可执行文件，装入 `Contents/MacOS/`，由 LaunchAgent 常驻）：读 `sslocal-active.json` 契约，以绝对路径启动和监管 sslocal（SIGTERM 链式停止、SIGUSR1 热重载/结构重启、崩溃时非零退出交 KeepAlive 重放，spec #21 D2/D5/D7）。PAC HTTP endpoint 已随 issue #67 移除。
 - `LaunchAgent/` — `SMAppService.agent(plistName:)` 的注册清单，装入 `Contents/Library/LaunchAgents/`；`ProgramArguments` 用 bundle 相对路径，由 launchd 按注册 app 的 bundle 位置解析。
 - `Domain/` — 领域核心（配置目录树、凭据引用与持久化，spec #21 D3/D5），与 UI 无关；其中 `RuntimePaths`、`SslocalRuntimeDocument`、`RuntimeLog` 同时编入 wrapper 目标，保证跨进程契约单一来源。

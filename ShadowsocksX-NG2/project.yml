@@ -24,7 +24,15 @@ targets:
     type: application
     platform: macOS
     sources:
+      # 目录即分层：Composition（组合根）/ Application（工作流与运行时适配）/
+      # Presentation（跨功能表现层）/ UI（视图，按子视图分目录）/
+      # PlatformEffects（平台效应 seam）/ Resources（plist、entitlements、资源）。
+      # 分层边界由 Tests/SkeletonTests.swift 的 UI 圈定守卫断言。
       - path: App
+        excludes:
+          # 文档不属于 target 源码：App/ 下任何非源码文件都会被 XcodeGen 收进
+          # Resources 阶段并封进签名后的 app bundle（实测），因此显式排除。
+          - "**/*.md"
       # 领域核心：配置目录树、凭据引用与持久化（spec #21 D3/D5）
       - path: Domain
       # LaunchAgent 注册清单：SMAppService.agent(plistName:) 从 bundle 内
@@ -99,7 +107,7 @@ targets:
         # 必须 > 旧版 1.x 已发布构建的 CFBundleVersion（始终为 1），保证 build 号严格递增。
         CURRENT_PROJECT_VERSION: 2
     info:
-      path: App/Info.plist
+      path: App/Resources/Info.plist
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
@@ -108,7 +116,7 @@ targets:
         NSPrincipalClass: NSApplication
         LSApplicationCategoryType: public.app-category.utilities
     entitlements:
-      path: App/ShadowsocksX-NG2.entitlements
+      path: App/Resources/ShadowsocksX-NG2.entitlements
       properties: {}
     scheme:
       testTargets:
@@ -142,10 +150,12 @@ targets:
     sources:
       - path: App
         excludes:
-          - "MainApp.swift"
-          - "Info.plist"
-          - "ShadowsocksX-NG2.entitlements"
-          - "Assets.xcassets"
+          # 递归 glob（`**/`）而非裸文件名：XcodeGen 的 exclude 不跨 `/`，裸名只
+          # 匹配 App 根层。文件下移后裸名会静默失效，把 @main 组合根编进测试镜像。
+          - "**/MainApp.swift"
+          - "**/Info.plist"
+          - "**/ShadowsocksX-NG2.entitlements"
+          - "**/Assets.xcassets"
       - path: Domain
     settings:
       base:

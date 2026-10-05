@@ -96,8 +96,8 @@ ShadowsocksX-NG2/DerivedData/
 ####
 # NG2 generated build files (project.yml is the source of truth; run `xcodegen generate`)
 ShadowsocksX-NG2/*.xcodeproj
-ShadowsocksX-NG2/App/Info.plist
-ShadowsocksX-NG2/App/ShadowsocksX-NG2.entitlements
+ShadowsocksX-NG2/App/Resources/Info.plist
+ShadowsocksX-NG2/App/Resources/ShadowsocksX-NG2.entitlements
 ShadowsocksX-NG2/Tests/Info.plist
 ShadowsocksX-NG2/Tests/Smoke/Info.plist
 
