@@ -17,7 +17,7 @@ struct CustomRuleEditorSheet: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
       Text(RulesCopy.text(draft.editingID == nil ? "新增规则" : "编辑规则"))
-        .font(.headline)
+        .font(.title2)
       Form {
         VStack(alignment: .leading, spacing: 10) {
           Picker(RulesCopy.text("类型"), selection: $draft.kind) {
@@ -71,7 +71,10 @@ struct CustomRuleEditorSheet: View {
             if let nextStep = saveFailure.nextStep { Text(RulesCopy.text(nextStep)) }
           }
         }.frame(maxWidth: .infinity, alignment: .leading)
-      }.frame(height: 210)
+      }
+      // 预览区随内容伸缩，上限封顶，避免初始 ProgressView 阶段撑出大片空白、
+      // 长预览把 sheet 无限拉高。
+      .frame(maxHeight: 210)
       HStack {
         if isSaving || workflow.snapshot.isCommitting {
           ProgressView().controlSize(.small)
@@ -87,6 +90,10 @@ struct CustomRuleEditorSheet: View {
       }
     }
     .onChange(of: draft) { _, _ in saveFailure = nil }
+    // 预览内容高度天然波动（失败提示一两行，合法预览可达上限），尺寸变化
+    // 只发生在合法↔失败、关系行增减这类语义边界；平缓过渡避免 sheet 跳动。
+    .animation(.snappy(duration: 0.2), value: preview)
+    .animation(.snappy(duration: 0.2), value: saveFailure)
     .padding(20)
     .frame(width: 530)
     .interactiveDismissDisabled(isSaving || workflow.snapshot.isCommitting)
@@ -94,7 +101,8 @@ struct CustomRuleEditorSheet: View {
       id: PreviewRequest(
         draft: draft, version: workflow.snapshot.version, isComplete: workflow.snapshot.isComplete)
     ) {
-      preview = nil
+      // 重算期间保留上一次预览：清空会让预览区塌缩成进度条，sheet 随
+      // 每个按键先缩后胀；新结果就绪后原位替换（旧任务由 task(id:) 取消）。
       let result = await workflow.previewCustomRule(draft)
       guard !Task.isCancelled else { return }
       preview = result
