@@ -330,6 +330,644 @@
           }
         }
       }
+    },
+    "插件": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugins"
+          }
+        }
+      }
+    },
+    "新增插件…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Plugin…"
+          }
+        }
+      }
+    },
+    "编辑…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit…"
+          }
+        }
+      }
+    },
+    "覆盖…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Override…"
+          }
+        }
+      }
+    },
+    "删除…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete…"
+          }
+        }
+      }
+    },
+    "恢复内置…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore Built-in…"
+          }
+        }
+      }
+    },
+    "恢复内置": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore Built-in"
+          }
+        }
+      }
+    },
+    "重试读取": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        }
+      }
+    },
+    "刷新": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Refresh"
+          }
+        }
+      }
+    },
+    "插件名称": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugin name"
+          }
+        }
+      }
+    },
+    "可执行文件路径": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Executable path"
+          }
+        }
+      }
+    },
+    "选择文件…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose File…"
+          }
+        }
+      }
+    },
+    "取消": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        }
+      }
+    },
+    "保存": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        }
+      }
+    },
+    "确定": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
+          }
+        }
+      }
+    },
+    "新增插件": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add Plugin"
+          }
+        }
+      }
+    },
+    "编辑插件": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit Plugin"
+          }
+        }
+      }
+    },
+    "覆盖内置插件": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Override Built-in Plugin"
+          }
+        }
+      }
+    },
+    "内置": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Built-in"
+          }
+        }
+      }
+    },
+    "用户添加": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "User-added"
+          }
+        }
+      }
+    },
+    "用户覆盖": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "User override"
+          }
+        }
+      }
+    },
+    "恢复内置插件？": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore Built-in Plugin?"
+          }
+        }
+      }
+    },
+    "删除用户插件？": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete User Plugin?"
+          }
+        }
+      }
+    },
+    "服务器配置将保留，后续连接使用同名内置插件。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server configurations will be kept. Future connections will use the built-in plugin with this name."
+          }
+        }
+      }
+    },
+    "服务器配置将保留，使用此名称的服务器可能无法连接。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server configurations will be kept. Servers using this name may be unable to connect."
+          }
+        }
+      }
+    },
+    "插件配置操作失败": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugin Configuration Failed"
+          }
+        }
+      }
+    },
+    "无法保存插件配置，请检查配置文件的访问权限后重试。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to save plugin configuration. Check access permissions for the configuration file and try again."
+          }
+        }
+      }
+    },
+    "无法读取插件配置。请修复配置文件后重试读取。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to read plugin configuration. Repair the configuration file and retry."
+          }
+        }
+      }
+    },
+    "请输入插件名称；已保存的名称不能修改。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a plugin name. Saved names cannot be changed."
+          }
+        }
+      }
+    },
+    "已有同名用户插件，请编辑现有条目或使用其他名称。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A user plugin already has this name. Edit the existing entry or choose another name."
+          }
+        }
+      }
+    },
+    "请输入可执行文件的绝对路径。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter an absolute path to the executable file."
+          }
+        }
+      }
+    },
+    "文件不存在或不可执行，请选择可执行文件。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file is missing or is not executable. Choose an executable file."
+          }
+        }
+      }
+    },
+    "该用户插件已不存在，请关闭表单后重试。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This user plugin no longer exists. Close the form and try again."
+          }
+        }
+      }
+    },
+    "插件文件不存在。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plugin file is missing."
+          }
+        }
+      }
+    },
+    "插件文件不可执行。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plugin file is not executable."
+          }
+        }
+      }
+    },
+    "无法读取插件文件。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to read the plugin file."
+          }
+        }
+      }
+    },
+    "macOS 安全策略检查未通过，运行可能受到限制。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The macOS security policy assessment failed. Execution may be restricted."
+          }
+        }
+      }
+    },
+    "文件带有下载隔离标记，运行时可能需要 macOS 授权。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file has a download quarantine flag. Execution may require macOS approval."
+          }
+        }
+      }
+    },
+    "文件签名无效，运行可能受到 macOS 限制。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file signature is invalid. macOS may restrict execution."
+          }
+        }
+      }
+    },
+    "文件未签名，运行可能受到 macOS 限制。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file is unsigned. macOS may restrict execution."
+          }
+        }
+      }
+    },
+    "无法完成安全检查。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to complete the security check."
+          }
+        }
+      }
+    },
+    "隔离标记：存在": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quarantine flag: present"
+          }
+        }
+      }
+    },
+    "隔离标记：无": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quarantine flag: absent"
+          }
+        }
+      }
+    },
+    "隔离标记：无法判断": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quarantine flag: unknown"
+          }
+        }
+      }
+    },
+    "签名：有效": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signature: valid"
+          }
+        }
+      }
+    },
+    "签名：未签名": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signature: unsigned"
+          }
+        }
+      }
+    },
+    "签名：无效": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signature: invalid"
+          }
+        }
+      }
+    },
+    "签名：不适用": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signature: not applicable"
+          }
+        }
+      }
+    },
+    "签名：无法判断": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signature: unknown"
+          }
+        }
+      }
+    },
+    "安全策略：检查通过": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Security policy: assessment passed"
+          }
+        }
+      }
+    },
+    "安全策略：检查未通过": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Security policy: assessment failed"
+          }
+        }
+      }
+    },
+    "安全策略：不适用": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Security policy: not applicable"
+          }
+        }
+      }
+    },
+    "安全策略：无法判断": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Security policy: unknown"
+          }
+        }
+      }
+    },
+    "安全检查详情": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Security Check Details"
+          }
+        }
+      }
+    },
+    "检查结果仅供参考，不能保证 macOS 允许或禁止运行。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These results are advisory and do not guarantee whether macOS will allow or block execution."
+          }
+        }
+      }
+    },
+    "正在检查安全信息…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking security information…"
+          }
+        }
+      }
+    },
+    "保存后将覆盖同名内置插件。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saving will override the built-in plugin with this name."
+          }
+        }
+      }
+    },
+    "无法选择文件，请重试。": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to choose a file. Try again."
+          }
+        }
+      }
     }
   },
   "version": "1.0"
