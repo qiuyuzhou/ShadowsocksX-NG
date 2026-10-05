@@ -14,6 +14,8 @@ tasks:
 
   build:
     desc: Build the ShadowsocksX-NG2 macOS application
+    deps:
+      - gen:prj
     cmds:
       - >-
         xcodebuild
@@ -41,6 +43,8 @@ tasks:
   
   test:
     desc: 'Run conversion and unit tests'
+    deps:
+      - gen:prj
     cmds:
       - task: test:rules
       - >-
@@ -59,6 +63,8 @@ tasks:
 
   test:smoke:
     desc: 'Run real-process smoke tests (real sslocal; release gate)'
+    deps:
+      - gen:prj
     cmds:
       - >-
         xcodebuild
