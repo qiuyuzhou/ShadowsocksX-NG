@@ -26,6 +26,7 @@ struct MainWindowView: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
   let diagnostics: DiagnosticsWorkflow
+  let plugins: PluginManagementModel
   let settingsWorkflow: SettingsWorkflow
   let loginController: LaunchAtLoginController
   let silentLaunch: SilentLaunchController
@@ -134,7 +135,7 @@ struct MainWindowView: View {
       RulesView(workflow: rulesWorkflow)
     case .settings:
       SettingsView(
-        workflow: settingsWorkflow, loginController: loginController,
+        plugins: plugins, workflow: settingsWorkflow, loginController: loginController,
         silentLaunch: silentLaunch
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)

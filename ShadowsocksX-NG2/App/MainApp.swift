@@ -194,6 +194,7 @@ private struct AppComposition {
       workflow: catalogWorkflow,
       control: proxyControl,
       diagnostics: diagnosticsWorkflow,
+      plugins: PluginManagementModel(catalog: plugins),
       settingsWorkflow: settingsWorkflow,
       loginController: loginController,
       silentLaunch: silentLaunch,

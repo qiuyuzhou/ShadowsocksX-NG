@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// 设置分区（issue #33/#44，地图 #52 票 #57）：常规、后台代理客户端和系统代理三张
+/// 设置分区：常规、后台代理客户端、系统代理与插件管理，采用
 /// 分组卡，行式呈现（主文案 + 次说明 + 行尾控件）。设置项由各自编辑器独立保存；
 /// 登录项与静默启动开关绑定独立控制器。
 struct SettingsView: View {
+  let plugins: PluginManagementModel
   @ObservedObject var workflow: SettingsWorkflow
   @ObservedObject var loginController: LaunchAtLoginController
   @ObservedObject var silentLaunch: SilentLaunchController
@@ -14,6 +15,7 @@ struct SettingsView: View {
       generalSection
       endpointSection
       systemProxySection
+      PluginManagementSection(model: plugins)
     }
     .formStyle(.grouped)
     .sheet(item: $presentedEditor) { editor in

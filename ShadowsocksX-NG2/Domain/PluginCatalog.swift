@@ -121,6 +121,19 @@ final class PluginCatalog: ObservableObject, PluginExecutableResolving {
   @MainActor
   private func publishAfterSaving(_ proposed: [String: String]) throws {
     try store.save(proposed)
+    publish(proposed)
+  }
+
+  /// Retry a failed initial read without replacing or writing user intent.
+  @MainActor
+  func retryReadingMappings() throws {
+    guard lock.withLock({ state.unreadable }) else { return }
+    let mappings = try store.load()
+    publish(mappings)
+  }
+
+  @MainActor
+  private func publish(_ proposed: [String: String]) {
     objectWillChange.send()
     let generation = lock.withLock {
       state.mappings = proposed
