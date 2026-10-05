@@ -19,21 +19,21 @@
 
 Legacy 的 PAC 是“规则编译 + 本机 HTTP 托管 + 特权系统代理写入”的组合，不是一个可以直接复制到 2.0 的静态文件。
 
-- PAC 状态目录是 ~/.ShadowsocksX-NG/；输出为 gfwlist.js，输入为 gfwlist.txt 和 user-rule.txt。首次运行从 bundle 复制规则资源，同时迁移旧的 ~/.ShadowsocksX-NE/ 目录。[PACUtils.swift](../../Legacy/ShadowsocksX-NG/PACUtils.swift#L12-L17) [PACUtils.swift](../../Legacy/ShadowsocksX-NG/PACUtils.swift#L51-L73)
-- GeneratePACFile() 对 Base64 GFWList 解码，把用户规则置前并去重，过滤空行/注释，再把规则和 SOCKS 地址/端口替换进 abp.js；结果用临时文件加 rename 原子替换 gfwlist.js。[PACUtils.swift](../../Legacy/ShadowsocksX-NG/PACUtils.swift#L79-L150)
-- abp.js 的 FindProxyForURL 命中规则时返回 SOCKS5/SOCKS/DIRECT，否则返回 DIRECT。[abp.js](../../Legacy/ShadowsocksX-NG/abp.js#L1-L6) [abp.js](../../Legacy/ShadowsocksX-NG/abp.js#L768-L777)
-- 本地 PAC URL 固定为 http://localhost:<port>/proxy.pac；GCDWebServer 在启动时把文件读入 originalPACData，只注册 GET /proxy.pac，并返回 application/x-ns-proxy-autoconfig。[ProxyConfHelper.m](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L136-L153) [ProxyConfHelper.m](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L206-L253)
-- 默认监听 localhost:1089，端口和绑定范围来自 UserDefaults；PAC 文件变更由 vnode 监视器触发 disableProxy 后 enablePACProxy。[AppDelegate.swift](../../Legacy/ShadowsocksX-NG/AppDelegate.swift#L91-L115) [ProxyConfHelper.m](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L262-L294)
-- 系统代理由 /Library/Application Support/ShadowsocksX-NG/proxy_conf_helper 写入。安装脚本把 helper 设为 root:admin、a+rx 并加 setuid；helper 使用 AuthorizationCreate 和 SCPreferencesCreateWithAuthorization，处理 auto/global/off 以及网络服务、例外项。[install_helper.sh](../../Legacy/ShadowsocksX-NG/install_helper.sh#L10-L14) [proxy_conf_helper/main.m](../../Legacy/proxy_conf_helper/main.m#L105-L216)
-- 外部 PAC 直接把 ExternalPACURL 传给相同的 helper；PACURLFormatter 接受 file/http/https，但没有看到内容、可达性或来源完整性校验。[PACURLFormatter.swift](../../Legacy/ShadowsocksX-NG/PACURLFormatter.swift#L26-L52) [ProxyConfHelper.m](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L195-L221)
+- PAC 状态目录是 ~/.ShadowsocksX-NG/；输出为 gfwlist.js，输入为 gfwlist.txt 和 user-rule.txt。首次运行从 bundle 复制规则资源，同时迁移旧的 ~/.ShadowsocksX-NE/ 目录。[PACUtils.swift](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/PACUtils.swift#L12-L17) [PACUtils.swift](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/PACUtils.swift#L51-L73)
+- GeneratePACFile() 对 Base64 GFWList 解码，把用户规则置前并去重，过滤空行/注释，再把规则和 SOCKS 地址/端口替换进 abp.js；结果用临时文件加 rename 原子替换 gfwlist.js。[PACUtils.swift](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/PACUtils.swift#L79-L150)
+- abp.js 的 FindProxyForURL 命中规则时返回 SOCKS5/SOCKS/DIRECT，否则返回 DIRECT。[abp.js](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/abp.js#L1-L6) [abp.js](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/abp.js#L768-L777)
+- 本地 PAC URL 固定为 http://localhost:<port>/proxy.pac；GCDWebServer 在启动时把文件读入 originalPACData，只注册 GET /proxy.pac，并返回 application/x-ns-proxy-autoconfig。[ProxyConfHelper.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L136-L153) [ProxyConfHelper.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L206-L253)
+- 默认监听 localhost:1089，端口和绑定范围来自 UserDefaults；PAC 文件变更由 vnode 监视器触发 disableProxy 后 enablePACProxy。[AppDelegate.swift](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/AppDelegate.swift#L91-L115) [ProxyConfHelper.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L262-L294)
+- 系统代理由 /Library/Application Support/ShadowsocksX-NG/proxy_conf_helper 写入。安装脚本把 helper 设为 root:admin、a+rx 并加 setuid；helper 使用 AuthorizationCreate 和 SCPreferencesCreateWithAuthorization，处理 auto/global/off 以及网络服务、例外项。[install_helper.sh](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/install_helper.sh#L10-L14) [proxy_conf_helper/main.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/proxy_conf_helper/main.m#L105-L216)
+- 外部 PAC 直接把 ExternalPACURL 传给相同的 helper；PACURLFormatter 接受 file/http/https，但没有看到内容、可达性或来源完整性校验。[PACURLFormatter.swift](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/PACURLFormatter.swift#L26-L52) [ProxyConfHelper.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L195-L221)
 
 源码盘点发现的具体风险边界：
 
-- PAC 服务失败的布尔结果未向上层传播，之后仍可能把不可用 URL 写入系统代理；用户端口允许 128–65535，但 URL/监听路径有 short 窄化，32768–65535 存在表示范围不一致。[ProxyConfHelper.m](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L206-L215) [ProxyConfHelper.m](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L244-L252)
-- 原子替换会产生 vnode DELETE；监视器在 DELETE 事件中取消自身，而源码没有持续重装路径。后续规则更新并不保证仍会被观察到。[PACUtils.swift](../../Legacy/ShadowsocksX-NG/PACUtils.swift#L146-L150) [ProxyConfHelper.m](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L273-L293)
-- helper 的 auto/global 路径从部分 key 新建 Proxies 字典，关闭时只在 PAC URL 或 SOCKS 值恰好匹配调用方参数时清除；它没有保存并恢复用户原有的完整代理字典。[proxy_conf_helper/main.m](../../Legacy/proxy_conf_helper/main.m#L126-L216)
-- 外部 PAC 启用时传入外部 URL，但 disableProxy 始终传本地 getHttpPACUrl；外部 PAC 进入 manual/off 或退出的清理路径因此存在状态不对称。[ProxyConfHelper.m](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L178-L203)
-- PAC 模板头部标注由 gfwlist2pac 生成并带 GPLv3 声明。2.0 若继续重用该模板，要把许可和生成器来源作为独立发布检查项；本票据不假定其上游维护状态。[abp.js](../../Legacy/ShadowsocksX-NG/abp.js#L1-L22)
+- PAC 服务失败的布尔结果未向上层传播，之后仍可能把不可用 URL 写入系统代理；用户端口允许 128–65535，但 URL/监听路径有 short 窄化，32768–65535 存在表示范围不一致。[ProxyConfHelper.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L206-L215) [ProxyConfHelper.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L244-L252)
+- 原子替换会产生 vnode DELETE；监视器在 DELETE 事件中取消自身，而源码没有持续重装路径。后续规则更新并不保证仍会被观察到。[PACUtils.swift](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/PACUtils.swift#L146-L150) [ProxyConfHelper.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L273-L293)
+- helper 的 auto/global 路径从部分 key 新建 Proxies 字典，关闭时只在 PAC URL 或 SOCKS 值恰好匹配调用方参数时清除；它没有保存并恢复用户原有的完整代理字典。[proxy_conf_helper/main.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/proxy_conf_helper/main.m#L126-L216)
+- 外部 PAC 启用时传入外部 URL，但 disableProxy 始终传本地 getHttpPACUrl；外部 PAC 进入 manual/off 或退出的清理路径因此存在状态不对称。[ProxyConfHelper.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L178-L203)
+- PAC 模板头部标注由 gfwlist2pac 生成并带 GPLv3 声明。2.0 若继续重用该模板，要把许可和生成器来源作为独立发布检查项；本票据不假定其上游维护状态。[abp.js](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/abp.js#L1-L22)
 
 ## 2. Apple 当前的 PAC 和系统代理边界
 

@@ -4,7 +4,7 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
 
 依赖的二进制工具（sslocal、v2ray-plugin 等）不再以子模块方式在仓库内构建，而是直接复制外部项目发布好的可执行文件。HTTP 入站由 shadowsocks-rust 直接提供，2.0 不再携带 Legacy Privoxy。
 
-旧版工程源码位于仓库根目录的 [`Legacy/`](../Legacy) 下，仅供参考，不保证可构建。
+旧版工程源码已从本仓库移除，归档在 [shadowsocks/ShadowsocksX-NG](https://github.com/shadowsocks/ShadowsocksX-NG) 的 [`legacy-v1`](https://github.com/shadowsocks/ShadowsocksX-NG/tree/legacy-v1) 分支下，仅供参考，不保证可构建。
 
 ## 工程结构
 

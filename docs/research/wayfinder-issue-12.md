@@ -21,10 +21,10 @@
 
 Legacy 对 GCDWebServer 的使用确实只有一件事：在本地回环上交付 `/proxy.pac`。
 
-- 依赖来自 CocoaPods：`pod "GCDWebServer", "~> 3.0"`，Podfile.lock 锁定 3.5.4（GCDWebServer/Core）。[Podfile](../../Legacy/Podfile#L11) [Podfile.lock](../../Legacy/Podfile.lock#L4-L6)
-- 本地 PAC URL 固定拼为 `http://localhost:<port>/proxy.pac`，端口来自 `PacServer.ListenPort`，short 窄化。[ProxyConfHelper.m](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L206-L215)
-- 启动服务时把 PAC 文件一次性读入内存 `originalPACData`，只注册 `GET /proxy.pac` 一个 handler，返回 `application/x-ns-proxy-autoconfig`；再以 `GCDWebServerOption_BindToLocalhost` + `GCDWebServerOption_Port` 启动——`PacServer.BindToLocalhost` 是 Legacy 已有的回环/主机两态开关，即“把 PAC URL 给局域网其他机器用”的场景在 Legacy 就被支持。[ProxyConfHelper.m](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L223-L253)
-- 停止服务只是 `stop`，无错误传播；启动失败的 `error:nil` 也被丢弃——这正是 #11 已判定要重写的生命周期与失败语义。[ProxyConfHelper.m](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L255-L260)
+- 依赖来自 CocoaPods：`pod "GCDWebServer", "~> 3.0"`，Podfile.lock 锁定 3.5.4（GCDWebServer/Core）。[Podfile](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/Podfile#L11) [Podfile.lock](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/Podfile.lock#L4-L6)
+- 本地 PAC URL 固定拼为 `http://localhost:<port>/proxy.pac`，端口来自 `PacServer.ListenPort`，short 窄化。[ProxyConfHelper.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L206-L215)
+- 启动服务时把 PAC 文件一次性读入内存 `originalPACData`，只注册 `GET /proxy.pac` 一个 handler，返回 `application/x-ns-proxy-autoconfig`；再以 `GCDWebServerOption_BindToLocalhost` + `GCDWebServerOption_Port` 启动——`PacServer.BindToLocalhost` 是 Legacy 已有的回环/主机两态开关，即“把 PAC URL 给局域网其他机器用”的场景在 Legacy 就被支持。[ProxyConfHelper.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L223-L253)
+- 停止服务只是 `stop`，无错误传播；启动失败的 `error:nil` 也被丢弃——这正是 #11 已判定要重写的生命周期与失败语义。[ProxyConfHelper.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L255-L260)
 
 结论：2.0 对这个组件的需求与 Legacy 完全同构（loopback + 单端点 + 固定 MIME），但生命周期、失败传播和版本化缓存（#11 §4.2）要求整体重写。GCDWebServer 在 Legacy 中的使用没有隐藏功能，替换它没有迁移负债。
 

@@ -18,22 +18,22 @@
 
 ## 1. Legacy 运行时产物的精确清单（正向识别的基底）
 
-两个 launchd job 的全部标识字符串在冻结源码中硬编码，[LaunchAgentUtils.swift](../../Legacy/ShadowsocksX-NG/LaunchAgentUtils.swift#L11-L16)：
+两个 launchd job 的全部标识字符串在冻结源码中硬编码，[LaunchAgentUtils.swift](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/LaunchAgentUtils.swift#L11-L16)：
 
 | 产物 | 精确值 | 源码位置 |
 | --- | --- | --- |
-| ss-local job label | `com.qiuyuzhou.shadowsocksX-NG.local` | [LaunchAgentUtils.swift L66](../../Legacy/ShadowsocksX-NG/LaunchAgentUtils.swift#L66) |
-| ss-local plist 路径 | `~/Library/LaunchAgents/com.qiuyuzhou.shadowsocksX-NG.local.plist` | [LaunchAgentUtils.swift L14/L34-36](../../Legacy/ShadowsocksX-NG/LaunchAgentUtils.swift#L14) |
-| Privoxy job label | `com.qiuyuzhou.shadowsocksX-NG.http` | [LaunchAgentUtils.swift L303](../../Legacy/ShadowsocksX-NG/LaunchAgentUtils.swift#L303) |
-| Privoxy plist 路径 | `~/Library/LaunchAgents/com.qiuyuzhou.shadowsocksX-NG.http.plist` | [LaunchAgentUtils.swift L15/L287-289](../../Legacy/ShadowsocksX-NG/LaunchAgentUtils.swift#L15) |
-| 登录项 helper bundle ID | `com.qiuyuzhou.ShadowsocksX-NG.LaunchHelper`（注意大小写与 job label 不同） | [LaunchAtLoginController.m L69](../../Legacy/ShadowsocksX-NG/LaunchAtLoginController.m#L67-L81) |
-| 登录项 helper 安装位置 | `<Legacy app>/Contents/Library/LoginItems/LaunchHelper.app` | [project.pbxproj L131](../../Legacy/ShadowsocksX-NG.xcodeproj/project.pbxproj#L131)（`dstPath = Contents/Library/LoginItems`） |
+| ss-local job label | `com.qiuyuzhou.shadowsocksX-NG.local` | [LaunchAgentUtils.swift L66](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/LaunchAgentUtils.swift#L66) |
+| ss-local plist 路径 | `~/Library/LaunchAgents/com.qiuyuzhou.shadowsocksX-NG.local.plist` | [LaunchAgentUtils.swift L14/L34-36](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/LaunchAgentUtils.swift#L14) |
+| Privoxy job label | `com.qiuyuzhou.shadowsocksX-NG.http` | [LaunchAgentUtils.swift L303](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/LaunchAgentUtils.swift#L303) |
+| Privoxy plist 路径 | `~/Library/LaunchAgents/com.qiuyuzhou.shadowsocksX-NG.http.plist` | [LaunchAgentUtils.swift L15/L287-289](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/LaunchAgentUtils.swift#L15) |
+| 登录项 helper bundle ID | `com.qiuyuzhou.ShadowsocksX-NG.LaunchHelper`（注意大小写与 job label 不同） | [LaunchAtLoginController.m L69](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/LaunchAtLoginController.m#L67-L81) |
+| 登录项 helper 安装位置 | `<Legacy app>/Contents/Library/LoginItems/LaunchHelper.app` | [project.pbxproj L131](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG.xcodeproj/project.pbxproj#L131)（`dstPath = Contents/Library/LoginItems`） |
 
 **跨版本稳定性（git 全历史查证）**：对全部 619 个提交做 `git grep` 扫描，出现过的 label 字符串只有 `.local`、`.http`、`.kcptun` 三种，无任何改名、变体或大小写漂移。2.0 可以安全地把这些字符串当作常量。
 
 **历史第三 job（识别面要覆盖、处置面要区分）**：`com.qiuyuzhou.shadowsocksX-NG.kcptun` job 连同 `generateKcptunLauchAgentPlist()` 存活到 2018-09-16（提交 `db81543` "Remove feature over kcptune."）。用过 2018 年前 Legacy 版本的用户机器上可能残留该 plist 甚至已加载 job。#7 决议只授权停止/卸载 `.local` 与 `.http` 两个 job；kcptun 残留应走「检测 + 提示用户处理」路线（识别序列仍按精确 label 检查它），其处置是否扩入停止名单需要一个小裁决（遗留裁决项，见 §9）。
 
-**两个 job 的 plist 关键形态**（现行冻结版）：只有 `Label`、`WorkingDirectory`、`StandardOutPath/StandardErrorPath`、`ProgramArguments`、`EnvironmentVariables`（ss-local），无 `RunAtLoad`、无 `KeepAlive`、无 Socket 定义——即登录时 launchd 只注册 job 不启动实例；ss-local 由 Legacy app 经脚本 `launchctl load -wF` + `launchctl start` 显式拉起（[start_ss_local.sh](../../Legacy/ShadowsocksX-NG/ss-local/start_ss_local.sh)、[stop_ss_local.sh](../../Legacy/ShadowsocksX-NG/ss-local/stop_ss_local.sh)，用旧式 `load/unload`）。ss-local 的 `ProgramArguments` 含 `--reuse-port`（[LaunchAgentUtils.swift L57](../../Legacy/ShadowsocksX-NG/LaunchAgentUtils.swift#L50-L58)），这对端口释放探测有直接约束（§2.3）。
+**两个 job 的 plist 关键形态**（现行冻结版）：只有 `Label`、`WorkingDirectory`、`StandardOutPath/StandardErrorPath`、`ProgramArguments`、`EnvironmentVariables`（ss-local），无 `RunAtLoad`、无 `KeepAlive`、无 Socket 定义——即登录时 launchd 只注册 job 不启动实例；ss-local 由 Legacy app 经脚本 `launchctl load -wF` + `launchctl start` 显式拉起（[start_ss_local.sh](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ss-local/start_ss_local.sh)、[stop_ss_local.sh](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ss-local/stop_ss_local.sh)，用旧式 `load/unload`）。ss-local 的 `ProgramArguments` 含 `--reuse-port`（[LaunchAgentUtils.swift L57](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/LaunchAgentUtils.swift#L50-L58)），这对端口释放探测有直接约束（§2.3）。
 
 **端口归属映射（交接检查的对象清单）**：
 
@@ -41,7 +41,7 @@
 | --- | --- | --- | --- |
 | 1086 SOCKS5 | ss-local job（`.local`） | plist `ProgramArguments` | bootout `.local` |
 | 1087 HTTP | Privoxy job（`.http`） | plist `ProgramArguments` | bootout `.http` |
-| 1089 PAC | **Legacy GUI 进程内 GCDWebServer**，非 launchd job | [ProxyConfHelper.m L16/L223-236](../../Legacy/ShadowsocksX-NG/ProxyConfHelper.m#L223-L236)（进程内全局对象） | **Legacy app 退出**；bootout 两个 job 不影响它 |
+| 1089 PAC | **Legacy GUI 进程内 GCDWebServer**，非 launchd job | [ProxyConfHelper.m L16/L223-236](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/ProxyConfHelper.m#L223-L236)（进程内全局对象） | **Legacy app 退出**；bootout 两个 job 不影响它 |
 
 注意 Legacy 的 LaunchAgent plist 内**没有端口字段**：端口写在 `~/Library/Application Support/ShadowsocksX-NG/ss-local-config.json`（`local_port`/`local_address`）与 `privoxy.config` 中，源头是 Legacy defaults `LocalSocks5.ListenPort`/`LocalHTTP.ListenPort`/`PacServer.ListenPort`（inventory §1）。因此端口释放检查不能从 LaunchAgent plist 读端口，而应：从 defaults 域 `com.qiuyuzhou.ShadowsocksX-NG` 与上述生成文件读取配置端口，再对每个具体端口探测。
 
@@ -116,11 +116,11 @@
 
 ### 4.2 识别途径与诚实边界
 
-- 可正向识别的静态事实：Legacy app bundle 是否存在于常见安装位置（`/Applications/ShadowsocksX-NG.app` 等，LaunchHelper 的启动逻辑本身也按这些位置找主 app，[AppDelegate.m](../../Legacy/LaunchHelper/LaunchHelper/AppDelegate.m)）；bundle 内 `Contents/Library/LoginItems/LaunchHelper.app` 是否存在；defaults 域 `com.qiuyuzhou.ShadowsocksX-NG` 的 `LaunchAtLogin` 布尔（[LaunchAtLoginController.m L76](../../Legacy/ShadowsocksX-NG/LaunchAtLoginController.m#L75-L77) 在 SMLoginItemSetEnabled 成功后写入，可作意图信号，但不是系统登记的真值）。
+- 可正向识别的静态事实：Legacy app bundle 是否存在于常见安装位置（`/Applications/ShadowsocksX-NG.app` 等，LaunchHelper 的启动逻辑本身也按这些位置找主 app，[AppDelegate.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/LaunchHelper/LaunchHelper/AppDelegate.m)）；bundle 内 `Contents/Library/LoginItems/LaunchHelper.app` 是否存在；defaults 域 `com.qiuyuzhou.ShadowsocksX-NG` 的 `LaunchAtLogin` 布尔（[LaunchAtLoginController.m L76](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/LaunchAtLoginController.m#L75-L77) 在 SMLoginItemSetEnabled 成功后写入，可作意图信号，但不是系统登记的真值）。
 - BTM 数据库（macOS 13+ 登录项统一存储）：`sfltool dumpbtm` 可列出记录（记录含 `Identifier`、`URL`、`Type`、`Disposition` 字段，第三方登录项按 bundle ID 可辨）。但本机实测该命令**触发了面向用户的系统管理员授权弹窗**（协调者确认），且 `man sfltool` 只把它描述为「tool for testing and debugging SharedFileList」，`dumpbtm` 子命令本身未文档化。**结论：sfltool 不能作为 2.0 应用内的无提示检测手段**——它需要管理员授权、输出格式无 API 承诺、子命令未文档化。
 - 因此 2.0 对旧登录项的编程能力边界是：只能做**静态正向识别**（Legacy bundle/helper 文件存在性 + defaults 意图信号），无法可靠地以编程方式读取或改变系统登记状态。停用动作走人工路径：
   1. **首选（状态真值在系统设置）**：指引文案指向 系统设置 → 通用 → 登录项与扩展，在「登录时打开」/「允许在后台」中找到 ShadowsocksX-NG（或其 helper）条目并移除；可用 `openSystemSettingsLoginItems` 直达。
-  2. **替代（若 Legacy app 仍在）**：启动 Legacy app 并在其偏好中关闭「登录时启动」——它会以弃用 API 把自己登记为 false（[LaunchAtLoginController.m](../../Legacy/ShadowsocksX-NG/LaunchAtLoginController.m#L67-L82)）。语义上这是让「旧代码撤销旧登记」，最不容易误伤。
+  2. **替代（若 Legacy app 仍在）**：启动 Legacy app 并在其偏好中关闭「登录时启动」——它会以弃用 API 把自己登记为 false（[LaunchAtLoginController.m](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/ShadowsocksX-NG/LaunchAtLoginController.m#L67-L82)）。语义上这是让「旧代码撤销旧登记」，最不容易误伤。
 - 不采用：从 2.0 调用 `SMLoginItemSetEnabled(helperID, false)` 的跨 app 摸底——弃用 API 对「非本 app LoginItems 目录中的 identifier」的行为未文档化，且无法在本机构造已登记环境验证（Legacy 已不在本机登记，见 §7）。若未来要试，必须先在装有 Legacy 且已开登录项的机器上验证（§9）。
 
 ## 5. 系统代理：确认、改写与失败路径

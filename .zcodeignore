@@ -71,24 +71,6 @@ Carthage/Build
 IDEWorkspaceChecks.plist
 
 ####
-# Legacy project build artifacts
-Legacy/build/
-Legacy/DerivedData/
-
-####
-# Dependencies (legacy in-repo builds)
-Legacy/deps/dist
-Legacy/deps/pcre*
-Legacy/deps/libev*
-Legacy/deps/privoxy*
-
-Legacy/ShadowsocksX-NG/kcptun/client
-Legacy/ShadowsocksX-NG/privoxy/privoxy
-Legacy/ShadowsocksX-NG/simple-obfs/obfs-local
-Legacy/ShadowsocksX-NG/ss-local/ss-local
-Legacy/ShadowsocksX-NG/v2ray-plugin/v2ray-plugin
-
-####
 # New project build artifacts
 ShadowsocksX-NG2/.build/
 ShadowsocksX-NG2/DerivedData/

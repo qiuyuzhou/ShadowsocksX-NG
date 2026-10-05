@@ -8,11 +8,10 @@
 
 ```
 .
-├── ShadowsocksX-NG2/   # 新工程：现代化重写版本（开发中）
-└── Legacy/             # 旧版工程完整源码，仅供参考，不保证可构建
+└── ShadowsocksX-NG2/   # 新工程：现代化重写版本（开发中）
 ```
 
-旧版工程的功能说明与使用文档见 [Legacy/README.md](Legacy/README.md)。
+旧版工程源码已从本仓库移除，归档在 [shadowsocks/ShadowsocksX-NG](https://github.com/shadowsocks/ShadowsocksX-NG) 的 [`legacy-v1`](https://github.com/shadowsocks/ShadowsocksX-NG/tree/legacy-v1) 分支，仅供参考，不保证可构建；其功能说明与使用文档见 [legacy-v1 的 README](https://github.com/shadowsocks/ShadowsocksX-NG/blob/legacy-v1/README.md)。
 
 ## 开发钩子
 
@@ -22,7 +21,7 @@
 git config core.hooksPath .githooks
 ```
 
-启用后，`pre-commit` 只检查暂存区中 `ShadowsocksX-NG2/` 下的 `.swift` 文件：`swift format` 的结果写回暂存区、不修改工作区；SwiftLint 的 error 级违规拒绝提交，warning 仅提示。`Legacy/` 和其他文件跳过；没有 NG2 Swift 文件时直接放行。含有 NG2 Swift 文件但缺少工具时，提交检查失败。两关都把「工具没能执行」与「查出问题」分开报告：看到「执行失败」应查工具与配置环境，而不是去改代码。工具安装与版本见 [`ShadowsocksX-NG2/README.md`](ShadowsocksX-NG2/README.md)。
+启用后，`pre-commit` 只检查暂存区中 `ShadowsocksX-NG2/` 下的 `.swift` 文件：`swift format` 的结果写回暂存区、不修改工作区；SwiftLint 的 error 级违规拒绝提交，warning 仅提示。其他文件跳过；没有 NG2 Swift 文件时直接放行。含有 NG2 Swift 文件但缺少工具时，提交检查失败。两关都把「工具没能执行」与「查出问题」分开报告：看到「执行失败」应查工具与配置环境，而不是去改代码。工具安装与版本见 [`ShadowsocksX-NG2/README.md`](ShadowsocksX-NG2/README.md)。
 
 ## 领域文档语言
 

@@ -8,9 +8,6 @@ excluded:
   - DerivedData
   - .build
   - build
-  # 冻结目录：Legacy/ 只读，不 format / lint（本配置位于 ShadowsocksX-NG2/ 内，
-  # 常规调用天然扫不到它；此条保证带 --config 从仓库根调用时也明确排除）
-  - ../Legacy
 disabled_rules:
   # 与 .swift-format 基线冲突：SwiftFormat 的多元素集合尾逗号和
   # 多行条件/签名的换行规则会被 SwiftLint 的自动修正规则改回去。

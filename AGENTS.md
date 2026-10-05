@@ -1,6 +1,6 @@
 # ShadowsocksX-NG
 
-macOS Shadowsocks 客户端。`Legacy/` 是已冻结的旧版实现,仅作只读参考(见 Legacy/AGENTS.md);新实现位于 `ShadowsocksX-NG2/`。
+macOS Shadowsocks 客户端。旧版实现已从本仓库移除,归档在 [shadowsocks/ShadowsocksX-NG](https://github.com/shadowsocks/ShadowsocksX-NG) 的 [`legacy-v1`](https://github.com/shadowsocks/ShadowsocksX-NG/tree/legacy-v1) 分支,仅作只读参考;新实现位于 `ShadowsocksX-NG2/`。文档与注释中引用旧版源码的链接都指向该分支。
 
 ## Agent skills
 
