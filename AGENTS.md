@@ -6,7 +6,7 @@ macOS Shadowsocks 客户端。旧版实现已从本仓库移除,归档在 [shado
 
 ### Issue tracker
 
-Issue 跟踪在本仓库的 GitHub Issues(qiuyuzhou/ShadowsocksX-NG),统一用 `gh` CLI 操作。见 `docs/agents/issue-tracker.md`。
+Issue 跟踪在本仓库的 GitHub Issues,统一用 `gh` CLI 操作,并在每条命令上显式指定本仓库。见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
