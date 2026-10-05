@@ -17,7 +17,7 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
   - `PlatformEffects/` — 平台效应 seam（协议 + InMemory 替身 + AppKit adapter），系统框架访问集中于此。
   - `Resources/` — `Info.plist`、`entitlements`（生成物）与 `Assets.xcassets`、`*.xcstrings`（入库）。
 
-  分层边界由 `Tests/SkeletonTests.swift` 的正向圈定守卫断言：只扫描 `App/UI/`，视图层不得引用运行时控制器、工作流实现协作者或原始目录/凭据存储类型；新增运行时适配器放进 `Application/` 即自动落在扫描范围外，无需登记豁免。注意 `App/` 下任何非源码文件都会被 XcodeGen 收进 Resources 阶段并封进签名后的 bundle，因此文档不放 `App/`（`project.yml` 已排除 `**/*.md`）。
+  分层边界由 `Tests/SkeletonTests.swift` 的正向圈定守卫断言：只扫描 `App/UI/`，视图层不得引用运行时控制器、工作流实现协作者或原始目录/凭据存储类型；新增运行时适配器放进 `Application/` 即自动落在扫描范围外，无需登记豁免。注意 `App/` 下任何非源码文件都会被 XcodeGen 收进 Resources 阶段并封进签名后的 bundle，因此文档不放 `App/`（`project.yml` 已排除 `**/*.md`）。分层与主题的组织方式、守卫为何取正面圈定、以及 XcodeGen 的上述约束见 [ADR-0029](../docs/adr/0029-source-layout-declares-layer-and-theme.md)。
 - `Agent/` — 代理运行时 wrapper（独立可执行文件，装入 `Contents/MacOS/`，由 LaunchAgent 常驻）：读 `sslocal-active.json` 契约，以绝对路径启动和监管 sslocal（SIGTERM 链式停止、SIGUSR1 热重载/结构重启、崩溃时非零退出交 KeepAlive 重放，spec #21 D2/D5/D7）。PAC HTTP endpoint 已随 issue #67 移除。
 - `LaunchAgent/` — `SMAppService.agent(plistName:)` 的注册清单，装入 `Contents/Library/LaunchAgents/`；`ProgramArguments` 用 bundle 相对路径，由 launchd 按注册 app 的 bundle 位置解析。
 - `Domain/` — 领域核心（配置目录树、凭据引用与持久化，spec #21 D3/D5），与 UI 无关。目录即主题，根下不留平铺文件，子目录口径取自 `GLOSSARY.md` 的章节划分：
