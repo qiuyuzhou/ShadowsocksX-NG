@@ -14,10 +14,7 @@ final class ManagedPluginCatalogTests: XCTestCase {
     var signIdentifier: String
   }
 
-  private static let vendorRoot = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent()  // Tests/
-    .deletingLastPathComponent()  // ShadowsocksX-NG2/
-    .appendingPathComponent("Vendor")
+  private static let vendorRoot = TestSourceTree.ng2Root().appendingPathComponent("Vendor")
 
   /// Vendor 下所有插件类清单（bundleSubpath 落在 Helpers/Plugins 的目录）。
   private static var vendorPluginManifests: [(directory: String, manifest: Manifest)] {

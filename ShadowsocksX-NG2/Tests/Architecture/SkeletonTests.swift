@@ -57,8 +57,7 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
 
   // MARK: - 扫描范围与禁令表
 
-  private static let testTargetRoot = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent().deletingLastPathComponent()
+  private static let testTargetRoot = TestSourceTree.ng2Root()
 
   /// 禁令：实现协作者类型、原始目录/凭据存储类型与 workflow 内部成员缝。
   private static let forbiddenPatterns = makeForbiddenPatterns()
@@ -108,11 +107,10 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
 /// Domain 布局守卫：`Domain/` 是「目录即主题」——根下只放主题子目录，不放平铺
 /// 文件，主题口径见 `project.yml` 的 Domain 注释与 GLOSSARY.md 的章节划分。
 ///
-/// 无此守卫时，新增领域文件会默认堆回根下（整理前 62 个文件即如此），主题
-/// 划分靠人工记忆维持；守卫把该约定固定为可执行的断言。
+/// 无此守卫时，新增领域文件会默认堆回根下，主题划分靠人工记忆维持；守卫把
+/// 该约定固定为可执行的断言。
 final class DomainLayoutTests: XCTestCase {
-  private static let domainDirectory = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent().deletingLastPathComponent()
+  private static let domainDirectory = TestSourceTree.ng2Root()
     .appendingPathComponent("Domain")
 
   func testDomainRootHasNoLooseSwiftFiles() throws {
@@ -160,6 +158,38 @@ final class DomainLayoutTests: XCTestCase {
       """
       Domain/ 树下只允许 .swift 文件，否则会被收进 app bundle 的 Resources 阶段：
       \(unexpectedFiles.sorted().joined(separator: "\n"))
+      """)
+  }
+}
+
+/// Tests 布局守卫：`Tests/` 同样是目录即主题——根下只放主题子目录，不放平铺
+/// 测试文件，主题口径对齐 `Domain/` 的主题与 `App/` 的 `*Workflow`。
+///
+/// 比 `DomainLayoutTests` 弱一档，只断言根层没有平铺 `.swift`：`Tests/` 树下的
+/// 非 Swift 文件是必需的——`Fixtures/RuleSnapshots/*.json` 是随测试 bundle 发布
+/// 的 folder resource，根层还有作为 `info.path` 生成的 `Info.plist`，两者都不能
+/// 用「树下只有 .swift」那条不变量覆盖。
+final class TestsLayoutTests: XCTestCase {
+  private static let testsDirectory = TestSourceTree.ng2Root()
+    .appendingPathComponent("Tests")
+
+  func testTestsRootHasNoLooseSwiftFiles() throws {
+    let rootEntries = try FileManager.default.contentsOfDirectory(
+      at: Self.testsDirectory, includingPropertiesForKeys: nil)
+    let looseSwiftFiles =
+      rootEntries
+      .filter { $0.pathExtension == "swift" }
+      .map(\.lastPathComponent)
+      .sorted()
+
+    XCTAssertTrue(
+      looseSwiftFiles.isEmpty,
+      """
+      Tests/ 根下不得平铺测试文件，应按主题归入子目录（Architecture / Support /
+      Agent / Activation / Catalog（含 Workflow）/ Subscription / Rules（含 Custom）/
+      ProxyRuntime / ProxyControl / Runtime / Settings / SystemProxy / Plugin /
+      Diagnostics / Credentials / Workspace / Servers / Smoke）：
+      \(looseSwiftFiles.joined(separator: "\n"))
       """)
   }
 }

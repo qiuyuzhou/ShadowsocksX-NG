@@ -169,8 +169,7 @@ final class PlatformEffectsArchitectureTests: XCTestCase {
       "文件写入必须集中在对应的 AppKit exporter/saver adapter")
   }
 
-  private static let testTargetRoot = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent().deletingLastPathComponent()
+  private static let testTargetRoot = TestSourceTree.ng2Root()
 
   private static func swiftSourceFiles(in directory: URL) throws -> [URL] {
     guard

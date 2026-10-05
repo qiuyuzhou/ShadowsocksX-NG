@@ -59,9 +59,7 @@ final class BuiltinRuleCatalogTests: XCTestCase {
     do {
       snapshot = try BuiltinRuleCatalog.loadGeolocationCN()
     } catch {
-      let sourceURL = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()  // Tests/
-        .deletingLastPathComponent()  // ShadowsocksX-NG2/
+      let sourceURL = TestSourceTree.ng2Root()
         .appendingPathComponent("Vendor/rules/geolocation-cn/snapshot.json")
       snapshot = try RuleSnapshotStore(fileURL: sourceURL).load()
     }
@@ -99,9 +97,7 @@ final class BuiltinRuleCatalogTests: XCTestCase {
     do {
       snapshot = try BuiltinRuleCatalog.loadChinaIPv4()
     } catch {
-      let sourceURL = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()  // Tests/
-        .deletingLastPathComponent()  // ShadowsocksX-NG2/
+      let sourceURL = TestSourceTree.ng2Root()
         .appendingPathComponent("Vendor/rules/china-ipv4/snapshot.json")
       snapshot = try RuleSnapshotStore(fileURL: sourceURL).load()
     }
@@ -176,10 +172,7 @@ final class BuiltinRuleCatalogTests: XCTestCase {
   }
 
   private func loadSourceTreeSnapshot(path: String) throws -> RuleSnapshot {
-    let sourceURL = URL(fileURLWithPath: #filePath)
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
-      .appendingPathComponent(path)
+    let sourceURL = TestSourceTree.ng2Root().appendingPathComponent(path)
     return try RuleSnapshotStore(fileURL: sourceURL).load()
   }
 

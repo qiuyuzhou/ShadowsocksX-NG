@@ -31,8 +31,15 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
   - `Plugin/` — 托管插件、用户插件映射与插件安全校验。
   - `Credentials/`、`LegacyImport/`、`Diagnostics/` — 凭据存储与写入日志、旧版导入、诊断报告。
 
-  跨进程契约按**文件**编入其它 target：`Runtime/` 的 9 个文件同时编入 wrapper（`RuntimePaths`、`SslocalRuntimeDocument`、`RuntimeLog` 等），`SystemProxy/` 全部 6 个文件编入特权 helper。`project.yml` 里这 15 条是显式路径，在 `Domain/` 内移动文件必须同步，漏改会让 `xcodegen generate` 以缺文件直接失败。布局守卫（`Tests/SkeletonTests.swift` 的 `DomainLayoutTests`）断言根下无平铺 `.swift`、树下只有 `.swift`（非源码文件会被 XcodeGen 收进 Resources 阶段并封进签名后的 bundle）。
-- `Tests/` — 单元测试 target，随 `ShadowsocksX-NG2` scheme 运行。
+  跨进程契约按**文件**编入其它 target：`Runtime/` 的 9 个文件同时编入 wrapper（`RuntimePaths`、`SslocalRuntimeDocument`、`RuntimeLog` 等），`SystemProxy/` 全部 6 个文件编入特权 helper。`project.yml` 里这 15 条是显式路径，在 `Domain/` 内移动文件必须同步，漏改会让 `xcodegen generate` 以缺文件直接失败。布局守卫（`Tests/Architecture/SkeletonTests.swift` 的 `DomainLayoutTests`）断言根下无平铺 `.swift`、树下只有 `.swift`（非源码文件会被 XcodeGen 收进 Resources 阶段并封进签名后的 bundle）。
+- `Tests/` — 单元测试 target，随 `ShadowsocksX-NG2` scheme 运行。目录即主题，根下不留平铺测试文件：
+  - `Architecture/` — 跨切面工程约束守卫（分层与布局、平台效应 seam、开窗落点、清单完整性），扫源码或构建产物而不驱动行为。
+  - `Support/` — 夹具、替身与 helper，不含用例（`CatalogFixtures`、`ProxyRuntimeFixture`、`SystemProxyFakes`、`AppArtifact`、`TestSourceTree` 等）。
+  - `Agent/`、`Activation/`、`Catalog/`（工作流用例在 `Catalog/Workflow/`）、`Subscription/`、`Rules/`（自定义规则在 `Rules/Custom/`）、`ProxyRuntime/`、`ProxyControl/`、`Runtime/`、`Settings/`、`SystemProxy/`、`Plugin/`、`Diagnostics/`、`Credentials/`、`Workspace/`、`Servers/` — 按功能领域的用例，与生产代码的领域主题和 `*Workflow` 同名同界。
+  - `Smoke/` — 真实进程冒烟，独立 target 与 scheme（`task test:smoke`）。
+  - `Fixtures/RuleSnapshots/` — 生成的内置规则快照夹具，作为 folder resource 随测试 bundle 发布（`GeneratedRuleSnapshotTests` 按 `subdirectory:` 读）。
+
+  断言需要读源码树（`Vendor/` 清单、`App/`、`Domain/`）时一律经 `Support/TestSourceTree.swift` 从 `#filePath` 沿父目录上溯定位 `ShadowsocksX-NG2/`，不写死父目录层数——测试文件处于不同深度，写死层数会在文件移动后静默指错。布局守卫 `TestsLayoutTests` 只断言根层无平铺 `.swift`（比 `Domain/` 那条弱一档：根层的 `Info.plist` 与 `Fixtures/` 下的 JSON 都必须在）。`Tests/Support/AppArtifact.swift` 同时编入 Smoke target，是 `project.yml` 里的显式文件路径，移动需同步。
 - `Vendor/<name>/manifest.json` — 外部二进制的固定供应链清单（tag + 资产 URL + 归档 SHA-256 + bundle 内位置 + 签名 identifier）；二进制本体与 `.fetched.sha256` 戳是构建缓存，不入库。
 - `Vendor/rules/geolocation-cn/` — 内置中国域名规则快照（issue #63）：`snapshot.json`（规范化规则 + 元数据 + 损失报告）、`manifest.json`（上游版本与快照 SHA-256）、`NOTICE`（许可证与归属）。普通构建只读本地快照，绝不抓取或转换。
 - `Vendor/rules/china-ipv4/` — 内置中国 IPv4 CIDR 直连候选快照（issue #64）：同上三件套，来源为 [gaoyifan/china-operator-ip](https://github.com/gaoyifan/china-operator-ip) `china.txt` 固定 commit。规则模式的 `proxy_all` ACL 同时编入中国域名与 IPv4 CIDR 直连候选。

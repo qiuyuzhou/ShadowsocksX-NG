@@ -17,10 +17,7 @@ final class ExternalBinaryManifestTests: XCTestCase {
   }
 
   private static let bundleID = "com.qiuyuzhou.ShadowsocksX-NG2"
-  private static let vendorRoot = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent()  // Tests/
-    .deletingLastPathComponent()  // ShadowsocksX-NG2/
-    .appendingPathComponent("Vendor")
+  private static let vendorRoot = TestSourceTree.ng2Root().appendingPathComponent("Vendor")
 
   private func manifest(_ name: String) throws -> Manifest {
     let file = Self.vendorRoot.appendingPathComponent(name).appendingPathComponent("manifest.json")

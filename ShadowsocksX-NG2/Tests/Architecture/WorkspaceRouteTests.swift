@@ -53,10 +53,8 @@ final class WorkspaceRouteTests: XCTestCase {
   /// 主窗口重开只由状态菜单发起，规则页只可打开转换报告；启动呈现由
   /// 场景 defaultLaunchBehavior 负责。workspace id 保持在 route 中定义。
   func testWindowOpeningStaysInSanctionedSurfaces() throws {
-    let appDirectory = URL(fileURLWithPath: #filePath)
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
-      .appendingPathComponent("App", isDirectory: true)
+    let appDirectory = TestSourceTree.ng2Root().appendingPathComponent(
+      "App", isDirectory: true)
     let openWindowAllowed = Set(["ProxyStatusMenu.swift", "RulesView.swift"])
     let sceneIDLiteralAllowed = Set(["WorkspaceRoute.swift"])
     let fileManager = FileManager.default
