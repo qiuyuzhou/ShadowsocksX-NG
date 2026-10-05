@@ -13,12 +13,22 @@ settings:
     # 自动抽取会在 IDE 构建时膨胀文件（2026-10-04 #81 验收时实测）。
     LOCALIZED_STRING_SWIFTUI_SUPPORT: NO
     CODE_SIGN_STYLE: Manual
-    DEVELOPMENT_TEAM: S878RH3PA8
     ENABLE_HARDENED_RUNTIME: YES
   configs:
     Release:
       # 发布基线：签名 entitlements 必须只来自项目 entitlements 文件（保持最小）。
       CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+# 签名身份注入：证书与 Team 都不入库（开源仓库；写死会让 fork 与贡献者的构建去
+# 找维护者的证书）。Debug 基线是 ad-hoc，无证书即可构建并跑单测；Release 基线是
+# Developer ID，发布产物必须真签名。两者的本机 Team / 身份都来自 gitignore 的
+# Configs/Signing.local.xcconfig，见 Configs/Signing-Debug.xcconfig 与
+# Configs/Signing-Release.xcconfig。
+# 所有 target 一律不设置 CODE_SIGN_IDENTITY：pbxproj 构建设置优先于 project
+# xcconfig，写在 target 上会静默盖掉两个基线（实测）。该约束由
+# Tests/Architecture/SigningConfigurationTests.swift 守卫。
+configFiles:
+  Debug: Configs/Signing-Debug.xcconfig
+  Release: Configs/Signing-Release.xcconfig
 targets:
   ShadowsocksX-NG2:
     type: application
@@ -110,7 +120,6 @@ targets:
         # 共享 Products 目录，重名会互相覆盖；app 可执行自身不 import 任何
         # 消费方，改名零影响。
         PRODUCT_MODULE_NAME: ShadowsocksX_NG2App
-        CODE_SIGN_IDENTITY: "Developer ID Application"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "2.0.0"
         # 必须 > 旧版 1.x 已发布构建的 CFBundleVersion（始终为 1），保证 build 号严格递增。
@@ -194,7 +203,6 @@ targets:
       base:
         PRODUCT_NAME: ShadowsocksX-NG2Agent
         PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.agent
-        CODE_SIGN_IDENTITY: "Developer ID Application"
   ShadowsocksX-NG2SystemProxyHelper:
     type: tool
     platform: macOS
@@ -213,7 +221,6 @@ targets:
       base:
         PRODUCT_NAME: ShadowsocksX-NG2SystemProxyHelper
         PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.systemproxy.helper
-        CODE_SIGN_IDENTITY: "Developer ID Application"
   ShadowsocksX-NG2Tests:
     type: bundle.unit-test
     platform: macOS
@@ -229,9 +236,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.Tests
-        # 必须与宿主 app 同 Team 签名：Hardened Runtime 的 library validation 拒绝
-        # 加载不同 Team ID 的非平台库，ad-hoc（"-"）签名的 xctest 包无法注入。
-        CODE_SIGN_IDENTITY: "Apple Development"
+        # 身份随 config 基线走（Debug ad-hoc / Release DevID，见 configFiles）：
+        # 去宿主化（ADR 0021）后 xctest 包不再注入宿主 app，ad-hoc 可加载执行
+        # （实测），因此测试不再需要证书，CI 无需签名密钥。
     info:
       path: Tests/Info.plist
       properties: {}
@@ -250,8 +257,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qiuyuzhou.ShadowsocksX-NG2.SmokeTests
-        # 同 Team 签名理由同 ShadowsocksX-NG2Tests。
-        CODE_SIGN_IDENTITY: "Apple Development"
+        # 身份理由同 ShadowsocksX-NG2Tests：随 config 基线，Debug 无证书可跑。
     info:
       path: Tests/Smoke/Info.plist
       properties: {}

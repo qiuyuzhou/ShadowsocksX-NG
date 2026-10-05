@@ -59,8 +59,22 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
 ## 签名与运行形态基线
 
 - bundle id `com.qiuyuzhou.ShadowsocksX-NG2`，与 Legacy（`com.qiuyuzhou.ShadowsocksX-NG`）区分；运行时数据落 `~/Library/Application Support/ShadowsocksX-NG2/`。macOS 15+ / arm64。
-- Hardened Runtime + Developer ID 签名（`DEVELOPMENT_TEAM` / 证书见 `project.yml`）；不启用 App Sandbox，entitlements 为空 dict。
-- 测试 target 用 Apple Development 证书签名：宿主 app 开启 Hardened Runtime 后 library validation 要求被注入的 xctest 包同 Team 签名。
+- Hardened Runtime（DevID 发布路径；免证书的 ad-hoc Debug 例外，见下）；不启用 App Sandbox，entitlements 为空 dict；签名样式固定 `Manual`。
+- **证书与 Team 都不入库**（开源仓库）：`project.yml` 不含 `CODE_SIGN_IDENTITY` / `DEVELOPMENT_TEAM`，两个键由 project xcconfig 按 config 在构建期注入：
+  - `Configs/Signing-Debug.xcconfig`（入库）基线是 **ad-hoc（`-`）**：新 clone 与 CI 不需要任何证书就能 `task build` / `task test`。arm64 要求代码至少有 ad-hoc 签名才会被加载，所以「免证书」不是「不签名」。ad-hoc 产物不带 Hardened Runtime（Xcode 对 ad-hoc 签名不传 `-o runtime`，实测；`Scripts/sign-embedded-helpers.sh` 的 ad-hoc 分支同样不加），Hardened Runtime 由 DevID 发布路径与打包门槛断言。
+  - `Configs/Signing-Release.xcconfig`（入库）基线是 **Developer ID Application**：发布产物必须真签名，这里不给免证书路径。
+  - 两者都可选包含 `Configs/Signing.local.xcconfig`（gitignore）。有证书的人（含维护者）用它升级本机身份，例如让 Debug 也走 Developer ID：
+
+    ```bash
+    cat > Configs/Signing.local.xcconfig <<'EOF'
+    DEVELOPMENT_TEAM = YOUR_TEAM_ID
+    CODE_SIGN_IDENTITY = Developer ID Application
+    EOF
+    ```
+
+  - 该文件缺失时 Debug 构建为 ad-hoc（可跑单测），Release 构建以 Xcode 的「Signing for … requires selecting either a development team or a provisioning profile」明确失败，不静默降级。
+  - 测试 target（单测与冒烟）身份随同一基线：去宿主化（ADR-0021）后 xctest 包不再注入宿主 app，ad-hoc 也能加载执行（实测），因此测试无需证书。
+  - 注意 `project.yml` 一旦重新设置这两个键，pbxproj 构建设置会盖掉 xcconfig（`Tests/Architecture/SigningConfigurationTests.swift` 守卫该约束）。
 - Release 配置关闭 `CODE_SIGN_INJECT_BASE_ENTITLEMENTS`，保证发布产物 entitlements 只来自项目文件。
 
 ## 开发、构建与测试
@@ -86,6 +100,8 @@ Scripts/fetch-external-binaries.sh
 task gen:prj
 ```
 
+无证书也能构建与跑单测：Debug 基线是 ad-hoc，不需要 `Configs/Signing.local.xcconfig`。只有要做 Developer ID 签名（发布，或让本机 Debug 产物过打包门槛）时才写该文件，内容见上节「签名与运行形态基线」。
+
 `Tests/Smoke/` 是真实进程冒烟（经 wrapper 拉起真实 sslocal 验证启动、握手、
 ACL 路由与插件监管），不在默认 `task test` 内，由独立 scheme 按需运行。
 
@@ -97,6 +113,8 @@ task test:smoke
 Scripts/packaging-gate.sh \
   .build/derivedData/Build/Products/Debug/ShadowsocksX-NG2.app
 ```
+
+打包门槛只接受 Developer ID 签名的产物：Team 期望值取自 `Configs/Signing.local.xcconfig`（可用 `EXPECTED_TEAM_ID=<Team ID>` 显式覆盖），两者都没有时该断言直接失败，不静默跳过。无证书的 ad-hoc Debug 产物会在此明确失败（`gate: hint` 会说明原因），这是预期行为。
 
 ## 代码风格工具
 

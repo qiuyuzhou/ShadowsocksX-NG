@@ -2,11 +2,17 @@
 # Re-sign every embedded helper binary with the Developer ID identity before
 # Xcode signs the app itself (spec #21 D6/D10).
 #
-# Upstream ships these binaries ad-hoc signed; they must carry our Developer ID
-# signature with Hardened Runtime and a stable code-signing identifier so the
-# outer app seal, notarization and Gatekeeper cover them. Xcode runs this as a
-# post-build script phase and applies the app's own signature afterwards, so
-# the outer signature embeds the re-signed nested code.
+# Upstream ships these binaries ad-hoc signed; they must carry a signature with
+# Hardened Runtime and a stable code-signing identifier so the outer app seal,
+# notarization and Gatekeeper cover them. Xcode runs this as a post-build script
+# phase and applies the app's own signature afterwards, so the outer signature
+# embeds the re-signed nested code.
+#
+# The identity comes from the build configuration: Developer ID on a release
+# build, ad-hoc ("-") on the certificate-less Debug baseline. Ad-hoc mirrors
+# Xcode's own ad-hoc signing: no secure timestamp and no Hardened Runtime (Xcode
+# omits -o runtime for ad-hoc; hardened runtime with an untrusted identity would
+# only get in the way of local debugging). The release path is unchanged.
 #
 # The identifier scheme is pinned in the manifests: <bundle-id>.<name> for
 # sslocal, <bundle-id>.plugin.<name> for SIP003 plugins.
@@ -45,7 +51,11 @@ for manifest in $manifests; do
         exit 1
     }
 
-    codesign --force --sign "$IDENTITY" --timestamp --options runtime \
-        --identifier "$identifier" "$target"
+    if [ "$IDENTITY" = "-" ]; then
+        codesign --force --sign - --identifier "$identifier" "$target"
+    else
+        codesign --force --sign "$IDENTITY" --timestamp --options runtime \
+            --identifier "$identifier" "$target"
+    fi
     echo "sign($binary): $identifier"
 done

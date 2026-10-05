@@ -12,7 +12,7 @@
 #   4. The manifest set exactly covers every Mach-O under Contents/Helpers.
 #
 # Usage: Scripts/packaging-gate.sh path/to/ShadowsocksX-NG2.app
-#        EXPECTED_TEAM_ID overrides the pinned Team ID check.
+#        EXPECTED_TEAM_ID overrides the Team ID read from the local signing config.
 
 set -u
 
@@ -21,8 +21,20 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 NG2_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 VENDOR_DIR="$NG2_ROOT/Vendor"
-# Mirrors DEVELOPMENT_TEAM in project.yml.
-EXPECTED_TEAM_ID=${EXPECTED_TEAM_ID:-S878RH3PA8}
+
+# Expected Team ID is injected, not pinned in the repo (open source). The same
+# file the build reads supplies it here: Configs/Signing.local.xcconfig
+# (gitignored). An explicit EXPECTED_TEAM_ID wins. Knowing no expected team is a
+# hard failure: an unsigned or wrong-team bundle must not pass just because
+# there is nothing to compare against.
+LOCAL_SIGNING_CONFIG="$NG2_ROOT/Configs/Signing.local.xcconfig"
+EXPECTED_TEAM_ID=${EXPECTED_TEAM_ID:-}
+if [ -z "$EXPECTED_TEAM_ID" ] && [ -f "$LOCAL_SIGNING_CONFIG" ]; then
+    EXPECTED_TEAM_ID=$(
+        sed -n 's/^[[:space:]]*DEVELOPMENT_TEAM[[:space:]]*=[[:space:]]*\([^[:space:]]*\).*/\1/p' \
+            "$LOCAL_SIGNING_CONFIG" | tail -1
+    )
+fi
 
 APP=${1:-}
 [ -n "$APP" ] || {
@@ -81,9 +93,19 @@ app_team=$(dv_value "$app_dv" TeamIdentifier)
 app_authority=$(dv_value "$app_dv" Authority)
 app_flags=$(dv_value "$app_dv" flags)
 
-[ "$app_team" = "$EXPECTED_TEAM_ID" ] ||
-    fail "main app TeamIdentifier is $EXPECTED_TEAM_ID (got: ${app_team:-none})"
+if [ -z "$EXPECTED_TEAM_ID" ]; then
+    fail "expected Team ID is known (set EXPECTED_TEAM_ID or write DEVELOPMENT_TEAM in Configs/Signing.local.xcconfig)"
+else
+    [ "$app_team" = "$EXPECTED_TEAM_ID" ] ||
+        fail "main app TeamIdentifier is $EXPECTED_TEAM_ID (got: ${app_team:-none})"
+fi
 check_devid_and_runtime "main app" "$app_dv"
+case "$app_authority" in
+    "Developer ID Application:"*) ;;
+    *)
+        echo "gate: hint  ad-hoc / non-Developer-ID artifacts come from the certificate-less Debug baseline; only a Developer ID signed release artifact can pass"
+        ;;
+esac
 
 app_entitlements=$(codesign -d --entitlements - --xml "$APP" 2>/dev/null || true)
 for forbidden in com.apple.security.app-sandbox com.apple.security.network.server; do
