@@ -34,8 +34,10 @@ struct MainWindowView: View {
   /// 侧栏使用（见 CatalogExpansionState）；首页独立保存浏览状态。
   let expansion: CatalogExpansionState
   let clipboard: any TextClipboard
+  let imageClipboard: any ImageClipboard
   let diagnosticReportExporter: any DiagnosticReportExporter
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
+  let qrImageSaver: any QrImageSaver
 
   @StateObject private var homeServerList = HomeServerListState()
   /// 激活反馈共享状态：首页目标树、侧栏右键与分组详情三个激活入口共用。
@@ -126,7 +128,9 @@ struct MainWindowView: View {
         selection: $selection,
         expansion: expansion,
         clipboard: clipboard,
-        configurationGroupFileExporter: configurationGroupFileExporter)
+        imageClipboard: imageClipboard,
+        configurationGroupFileExporter: configurationGroupFileExporter,
+        qrImageSaver: qrImageSaver)
     case .subscriptions:
       SubscriptionsView(
         workflow: workflow,

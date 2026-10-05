@@ -131,6 +131,7 @@ private struct AppComposition {
   let silentLaunch: SilentLaunchController
   let expansion: CatalogExpansionState
   let textClipboard: any TextClipboard
+  let imageClipboard: any ImageClipboard
   let rulesWorkflow: RulesWorkflow
   let workspaceContent: MainWindowView
 
@@ -200,8 +201,10 @@ private struct AppComposition {
       silentLaunch: silentLaunch,
       expansion: expansion,
       clipboard: textClipboard,
+      imageClipboard: dependencies.imageClipboard,
       diagnosticReportExporter: dependencies.diagnosticReportExporter,
-      configurationGroupFileExporter: dependencies.configurationGroupFileExporter)
+      configurationGroupFileExporter: dependencies.configurationGroupFileExporter,
+      qrImageSaver: dependencies.qrImageSaver)
     return AppComposition(
       controller: controller,
       catalogWorkflow: catalogWorkflow,
@@ -213,6 +216,7 @@ private struct AppComposition {
       silentLaunch: silentLaunch,
       expansion: expansion,
       textClipboard: textClipboard,
+      imageClipboard: dependencies.imageClipboard,
       rulesWorkflow: rulesWorkflow,
       workspaceContent: workspaceContent)
   }
@@ -280,8 +284,10 @@ private struct ApplicationDependencies {
   let loginService: LaunchAtLoginControlling
   let silentLaunchStore: SilentLaunchStore
   let textClipboard: any TextClipboard
+  let imageClipboard: any ImageClipboard
   let diagnosticReportExporter: any DiagnosticReportExporter
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
+  let qrImageSaver: any QrImageSaver
 
   static func make() -> ApplicationDependencies {
     // ADR 0017 初版文件形态的迁移（发布链从未包含，仅存量开发机）：文件不存在
@@ -308,8 +314,10 @@ private struct ApplicationDependencies {
       loginService: SMAppLaunchAtLoginService(),
       silentLaunchStore: SilentLaunchStore(),
       textClipboard: AppKitTextClipboard(),
+      imageClipboard: AppKitImageClipboard(),
       diagnosticReportExporter: AppKitDiagnosticReportExporter(),
-      configurationGroupFileExporter: AppKitConfigurationGroupFileExporter())
+      configurationGroupFileExporter: AppKitConfigurationGroupFileExporter(),
+      qrImageSaver: AppKitQrImageSaver())
   }
 
 }

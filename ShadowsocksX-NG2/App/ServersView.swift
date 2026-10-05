@@ -19,7 +19,9 @@ struct ServersView: View {
   /// 切换存续；OutlineGroup 的内建展开态会随分区切换丢失，侧栏因此自管折叠。
   @ObservedObject var expansion: CatalogExpansionState
   let clipboard: any TextClipboard
+  let imageClipboard: any ImageClipboard
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
+  let qrImageSaver: any QrImageSaver
 
   /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
   /// 非 private：ServersView+Share.swift 扩展经它呈现分享失败。
@@ -36,10 +38,10 @@ struct ServersView: View {
   @State private var moveTarget: NodeID?
   @State private var rootDropHovering = false
   @FocusState private var treeFocused: Bool
-  // 分享/二维码状态：由 ServersView+Share.swift 扩展驱动，弹窗锚在工具栏
-  // 分享按钮上（原详情区底部分享区已于 2026-10-04 上收至此）。
-  @State var showQR = false
-  @State var qrImage: NSImage?
+  // 分享 sheet 状态：由 ServersView+Share.swift 扩展驱动；2026-10-05 自工具
+  // 栏 popover 升级为 sheet（docs/design/server-share-sheet.md），打开时冻结
+  // 载荷与建议文件名。
+  @State var shareContext: ShareContext?
 
   var body: some View {
     // 主窗口外壳（票 #53）已提供分栏框架；本分区用扁平双栏承载目录与详情
@@ -91,6 +93,19 @@ struct ServersView: View {
       NewServerSheet(
         workflow: workflow, errors: errors,
         parent: newServerParent, onCreated: selectCreatedNode)
+    }
+    .sheet(item: $shareContext) { context in
+      ShareServerSheet(
+        payload: context.payload,
+        suggestedFileName: context.suggestedFileName,
+        imageClipboard: imageClipboard,
+        textClipboard: clipboard,
+        saver: qrImageSaver,
+        errors: errors)
+    }
+    // 分享 sheet 开着时切换选中项：立即收起，避免内容滞留为旧服务器。
+    .onChange(of: selection) {
+      shareContext = nil
     }
   }
 
@@ -285,23 +300,16 @@ extension ServersView {
       .help("删除")
       .disabled(!canDeleteSelection)
     }
-    // 分享（分享/导出术语见 GLOSSARY.md）：作用于选中的服务器叶子，弹窗内
-    // 提供二维码与复制 ss:// 链接两条通路；无有效载荷即不可用。
+    // 分享（分享/导出术语见 GLOSSARY.md）：作用于选中的服务器叶子，sheet 内
+    // 提供二维码、复制/保存图片与复制 ss:// 链接；无有效载荷即不可用。
     ToolbarItem(placement: .primaryAction) {
       Button {
-        generateQR()
+        presentShare()
       } label: {
         Label("分享", systemImage: "square.and.arrow.up")
       }
       .help("分享")
       .disabled(sharePayload() == nil)
-      .popover(isPresented: $showQR) {
-        qrPopover
-      }
-      // 弹窗开着时切换选中项：立即收起，避免内容滞留为旧服务器。
-      .onChange(of: selection) {
-        showQR = false
-      }
     }
   }
 

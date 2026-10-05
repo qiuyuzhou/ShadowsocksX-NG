@@ -28,6 +28,53 @@ final class TextClipboardTests: XCTestCase {
 }
 
 @MainActor
+final class ImageClipboardTests: XCTestCase {
+  func testWrittenPNGIsStored() throws {
+    let clipboard = InMemoryImageClipboard()
+
+    try clipboard.write(Data([0x89, 0x50]))
+
+    XCTAssertEqual(clipboard.pngData, Data([0x89, 0x50]))
+  }
+
+  func testWriteFailureIsTypedAndDoesNotExposePlatformDetails() {
+    let clipboard = InMemoryImageClipboard(writeFailure: .writeFailed)
+
+    XCTAssertThrowsError(try clipboard.write(Data())) { error in
+      XCTAssertEqual(error as? ImageClipboardFailure, .writeFailed)
+    }
+  }
+}
+
+@MainActor
+final class QrImageSaverTests: XCTestCase {
+  func testDraftIsPassedThroughToSaver() {
+    let saver = InMemoryQrImageSaver()
+    let draft = QrImageSaveDraft(data: Data([0x01]), suggestedFileName: "机房.png")
+
+    let outcome = saver.save(draft)
+
+    XCTAssertEqual(outcome, .cancelled)
+    XCTAssertEqual(saver.drafts, [draft])
+  }
+
+  func testSuggestedFileNameReplacesPathReservedCharacters() {
+    XCTAssertEqual(
+      QrImageSaveDraft.suggestedFileName(from: "机房/一号:备用"),
+      "机房 一号 备用.png")
+  }
+
+  func testSuggestedFileNameFallsBackWhenCleaningLeavesNothing() {
+    XCTAssertEqual(QrImageSaveDraft.suggestedFileName(from: " /: "), "ss-qrcode.png")
+    XCTAssertEqual(QrImageSaveDraft.suggestedFileName(from: ""), "ss-qrcode.png")
+  }
+
+  func testSuggestedFileNameKeepsCleanNameAndAppendsPNGExtension() {
+    XCTAssertEqual(QrImageSaveDraft.suggestedFileName(from: "  家里  "), "家里.png")
+  }
+}
+
+@MainActor
 final class DiagnosticReportExportActionTests: DiagnosticsWorkflowTestCase {
   func testCancelledExportDoesNotRecordCompletion() {
     let workflow = makeWorkflow(catalog: { DiagnosticCatalogFacts() })
@@ -99,20 +146,27 @@ final class PlatformEffectsArchitectureTests: XCTestCase {
 
     let pasteboardUsers = try Self.files(containing: "NSPasteboard", in: sourceFiles)
     XCTAssertEqual(
-      pasteboardUsers.map(\.lastPathComponent), ["AppKitTextClipboard.swift"],
-      "纯文本 pasteboard 访问必须集中在 AppKitTextClipboard adapter")
+      pasteboardUsers.map(\.lastPathComponent).sorted(),
+      ["AppKitImageClipboard.swift", "AppKitTextClipboard.swift"],
+      "pasteboard 访问必须集中在 clipboard adapter（文本与图片各一）")
 
     let savePanelUsers = try Self.files(containing: "NSSavePanel", in: sourceFiles)
     XCTAssertEqual(
       Set(savePanelUsers.map(\.lastPathComponent)),
-      Set(["AppKitDiagnosticReportExporter.swift", "ConfigurationGroupFileExporter.swift"]),
-      "保存面板访问必须集中在对应的 AppKit exporter adapter")
+      Set([
+        "AppKitDiagnosticReportExporter.swift", "ConfigurationGroupFileExporter.swift",
+        "QrImageSaver.swift",
+      ]),
+      "保存面板访问必须集中在对应的 AppKit exporter/saver adapter")
 
     let reportWriterUsers = try Self.files(containing: ".data.write(to:", in: sourceFiles)
     XCTAssertEqual(
       Set(reportWriterUsers.map(\.lastPathComponent)),
-      Set(["AppKitDiagnosticReportExporter.swift", "ConfigurationGroupFileExporter.swift"]),
-      "文件写入必须集中在对应的 AppKit exporter adapter")
+      Set([
+        "AppKitDiagnosticReportExporter.swift", "ConfigurationGroupFileExporter.swift",
+        "QrImageSaver.swift",
+      ]),
+      "文件写入必须集中在对应的 AppKit exporter/saver adapter")
   }
 
   private static let testTargetRoot = URL(fileURLWithPath: #filePath)

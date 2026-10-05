@@ -67,6 +67,10 @@ extension AppPresentation {
       return systemProxy(SystemProxyOperationFailure(error))
     case let error as TextClipboardFailure:
       return textClipboard(error)
+    case let error as ImageClipboardFailure:
+      return imageClipboard(error)
+    case let error as QrImageSaveFailure:
+      return qrImageSave(error)
     case let error as DiagnosticReportFailure:
       return diagnosticReport(error)
     case let error as DiagnosticReportExportFailure:
@@ -324,6 +328,18 @@ extension AppPresentation {
   private static func textClipboard(_ error: TextClipboardFailure) -> String {
     switch error {
     case .writeFailed: return "剪贴板写入失败，请重试"
+    }
+  }
+
+  private static func imageClipboard(_ error: ImageClipboardFailure) -> String {
+    switch error {
+    case .writeFailed: return "剪贴板写入失败，请重试"
+    }
+  }
+
+  private static func qrImageSave(_ error: QrImageSaveFailure) -> String {
+    switch error {
+    case .writeFailed: return "二维码图片写入失败，请选择其他位置或重试"
     }
   }
 
