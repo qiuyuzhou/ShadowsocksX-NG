@@ -20,7 +20,18 @@ ShadowsocksX-NG 的现代化重写版本。新工程的全部源码与构建配�
   分层边界由 `Tests/SkeletonTests.swift` 的正向圈定守卫断言：只扫描 `App/UI/`，视图层不得引用运行时控制器、工作流实现协作者或原始目录/凭据存储类型；新增运行时适配器放进 `Application/` 即自动落在扫描范围外，无需登记豁免。注意 `App/` 下任何非源码文件都会被 XcodeGen 收进 Resources 阶段并封进签名后的 bundle，因此文档不放 `App/`（`project.yml` 已排除 `**/*.md`）。
 - `Agent/` — 代理运行时 wrapper（独立可执行文件，装入 `Contents/MacOS/`，由 LaunchAgent 常驻）：读 `sslocal-active.json` 契约，以绝对路径启动和监管 sslocal（SIGTERM 链式停止、SIGUSR1 热重载/结构重启、崩溃时非零退出交 KeepAlive 重放，spec #21 D2/D5/D7）。PAC HTTP endpoint 已随 issue #67 移除。
 - `LaunchAgent/` — `SMAppService.agent(plistName:)` 的注册清单，装入 `Contents/Library/LaunchAgents/`；`ProgramArguments` 用 bundle 相对路径，由 launchd 按注册 app 的 bundle 位置解析。
-- `Domain/` — 领域核心（配置目录树、凭据引用与持久化，spec #21 D3/D5），与 UI 无关；其中 `RuntimePaths`、`SslocalRuntimeDocument`、`RuntimeLog` 同时编入 wrapper 目标，保证跨进程契约单一来源。
+- `Domain/` — 领域核心（配置目录树、凭据引用与持久化，spec #21 D3/D5），与 UI 无关。目录即主题，根下不留平铺文件，子目录口径取自 `GLOSSARY.md` 的章节划分：
+  - `Catalog/` — 配置目录树、结构不变量错误、目录文件存储、节点与凭据身份，以及 `ss://` 编解码 `SsUri`。
+  - `Subscription/` — 订阅文档解析、抓取、订阅记录与刷新失败。
+  - `Rules/` — 代理模式、规则身份与匹配、内置规则快照、规则集合/浏览/分析、离线规则测试；`Rules/Custom/` 为用户自定义规则的编辑草稿、校验与存储。
+  - `Runtime/` — 代理运行服务：运行时文档与监听设置、ACL 与部署收据、路径、原子写入、文件存储、日志与事件、端点/端口/socket 探针。
+  - `Activation/` — 激活候选校验、激活状态机与 `RuntimeConfiguration`。
+  - `Settings/` — 用户设置的持久化：代理设置、监听设置、静默启动。
+  - `SystemProxy/` — 系统代理 typed 配置、property list 映射、计划器与特权 helper 的 XPC 契约/请求引擎。
+  - `Plugin/` — 托管插件、用户插件映射与插件安全校验。
+  - `Credentials/`、`LegacyImport/`、`Diagnostics/` — 凭据存储与写入日志、旧版导入、诊断报告。
+
+  跨进程契约按**文件**编入其它 target：`Runtime/` 的 9 个文件同时编入 wrapper（`RuntimePaths`、`SslocalRuntimeDocument`、`RuntimeLog` 等），`SystemProxy/` 全部 6 个文件编入特权 helper。`project.yml` 里这 15 条是显式路径，在 `Domain/` 内移动文件必须同步，漏改会让 `xcodegen generate` 以缺文件直接失败。布局守卫（`Tests/SkeletonTests.swift` 的 `DomainLayoutTests`）断言根下无平铺 `.swift`、树下只有 `.swift`（非源码文件会被 XcodeGen 收进 Resources 阶段并封进签名后的 bundle）。
 - `Tests/` — 单元测试 target，随 `ShadowsocksX-NG2` scheme 运行。
 - `Vendor/<name>/manifest.json` — 外部二进制的固定供应链清单（tag + 资产 URL + 归档 SHA-256 + bundle 内位置 + 签名 identifier）；二进制本体与 `.fetched.sha256` 戳是构建缓存，不入库。
 - `Vendor/rules/geolocation-cn/` — 内置中国域名规则快照（issue #63）：`snapshot.json`（规范化规则 + 元数据 + 损失报告）、`manifest.json`（上游版本与快照 SHA-256）、`NOTICE`（许可证与归属）。普通构建只读本地快照，绝不抓取或转换。

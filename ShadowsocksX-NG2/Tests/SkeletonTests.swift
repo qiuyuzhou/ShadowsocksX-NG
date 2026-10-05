@@ -104,3 +104,62 @@ final class CatalogWorkflowArchitectureTests: XCTestCase {
     }
   }
 }
+
+/// Domain 布局守卫：`Domain/` 是「目录即主题」——根下只放主题子目录，不放平铺
+/// 文件，主题口径见 `project.yml` 的 Domain 注释与 GLOSSARY.md 的章节划分。
+///
+/// 无此守卫时，新增领域文件会默认堆回根下（整理前 62 个文件即如此），主题
+/// 划分靠人工记忆维持；守卫把该约定固定为可执行的断言。
+final class DomainLayoutTests: XCTestCase {
+  private static let domainDirectory = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent().deletingLastPathComponent()
+    .appendingPathComponent("Domain")
+
+  func testDomainRootHasNoLooseSwiftFiles() throws {
+    let rootEntries = try FileManager.default.contentsOfDirectory(
+      at: Self.domainDirectory, includingPropertiesForKeys: nil)
+    let looseSwiftFiles =
+      rootEntries
+      .filter { $0.pathExtension == "swift" }
+      .map(\.lastPathComponent)
+      .sorted()
+
+    XCTAssertTrue(
+      looseSwiftFiles.isEmpty,
+      """
+      Domain/ 根下不得平铺 Swift 文件，应按主题归入子目录（Catalog / Subscription /
+      Rules / Rules/Custom / Runtime / Activation / Settings / SystemProxy / Plugin /
+      Credentials / LegacyImport / Diagnostics）：
+      \(looseSwiftFiles.joined(separator: "\n"))
+      """)
+  }
+
+  /// `Domain/` 整目录是 app 与 Core target 的 source path：任何非 Swift 文件都会被
+  /// XcodeGen 收进 Resources 阶段、封进签名后的 app bundle（同 App/ 的已知行为），
+  /// 因此树下不允许出现这类文件——确需随包发布应改走 Vendor/ 并显式声明 buildPhase。
+  func testDomainTreeContainsOnlySwiftFiles() throws {
+    let domainDirectory = Self.domainDirectory
+    let enumerator = try XCTUnwrap(
+      FileManager.default.enumerator(at: domainDirectory, includingPropertiesForKeys: nil),
+      "无法枚举 Domain 目录：\(domainDirectory.path)")
+
+    var unexpectedFiles: [String] = []
+    for case let url as URL in enumerator {
+      let isRegularFile =
+        try url.resourceValues(forKeys: [.isRegularFileKey])
+        .isRegularFile == true
+      guard isRegularFile else { continue }
+      if url.pathExtension != "swift" {
+        unexpectedFiles.append(
+          url.path.replacingOccurrences(of: domainDirectory.path + "/", with: ""))
+      }
+    }
+
+    XCTAssertTrue(
+      unexpectedFiles.isEmpty,
+      """
+      Domain/ 树下只允许 .swift 文件，否则会被收进 app bundle 的 Resources 阶段：
+      \(unexpectedFiles.sorted().joined(separator: "\n"))
+      """)
+  }
+}

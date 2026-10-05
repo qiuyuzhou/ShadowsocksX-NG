@@ -33,7 +33,14 @@ targets:
           # 文档不属于 target 源码：App/ 下任何非源码文件都会被 XcodeGen 收进
           # Resources 阶段并封进签名后的 app bundle（实测），因此显式排除。
           - "**/*.md"
-      # 领域核心：配置目录树、凭据引用与持久化（spec #21 D3/D5）
+      # 领域核心（spec #21 D3/D5）。目录即主题，根下不留平铺文件，子目录按
+      # GLOSSARY.md 的章节口径命名：Catalog（配置目录树与身份）/
+      # Subscription（订阅）/ Rules（代理规则，自定义规则在 Rules/Custom）/
+      # Runtime（代理运行服务：运行时文档、路径、日志、端点与探针）/
+      # Activation（激活候选与状态机）/ Settings（用户设置持久化）/
+      # SystemProxy（系统代理 typed 配置与特权 helper 契约）/
+      # Plugin（托管插件与用户映射）/ Credentials / LegacyImport / Diagnostics。
+      # 该约定由 Tests/SkeletonTests.swift 的 Domain 布局守卫断言。
       - path: Domain
       # LaunchAgent 注册清单：SMAppService.agent(plistName:) 从 bundle 内
       # Contents/Library/LaunchAgents/ 读取；ProgramArguments 用 bundle 相对路径
@@ -170,15 +177,17 @@ targets:
       - path: Agent
       # wrapper 与 GUI 共享的跨进程契约：路径常量、运行时文档（含读取侧校验）
       # 与日志事件基线（spec #21 D5）；监听建立判定复用端点探测（issue #38）。
-      - path: Domain/RuntimePaths.swift
-      - path: Domain/AtomicFileWriter.swift
-      - path: Domain/ProxyACL.swift
-      - path: Domain/ProxyRule.swift
-      - path: Domain/SslocalRuntimeDocument.swift
-      - path: Domain/SslocalListenSettings.swift
-      - path: Domain/RuntimeLog.swift
-      - path: Domain/EndpointHealthProbe.swift
-      - path: Domain/RuntimeSocketOwnershipProbe.swift
+      # 注意：以下 9 条是显式文件路径，Domain/ 内移动文件必须同步此处，否则
+      # xcodegen 以 "missing source directory" 使生成失败（实测，不会静默）。
+      - path: Domain/Runtime/RuntimePaths.swift
+      - path: Domain/Runtime/AtomicFileWriter.swift
+      - path: Domain/Runtime/ProxyACL.swift
+      - path: Domain/Rules/ProxyRule.swift
+      - path: Domain/Runtime/SslocalRuntimeDocument.swift
+      - path: Domain/Runtime/SslocalListenSettings.swift
+      - path: Domain/Runtime/RuntimeLog.swift
+      - path: Domain/Runtime/EndpointHealthProbe.swift
+      - path: Domain/Runtime/RuntimeSocketOwnershipProbe.swift
     settings:
       base:
         PRODUCT_NAME: ShadowsocksX-NG2Agent
@@ -191,13 +200,13 @@ targets:
       - path: SystemProxyHelper
       # helper 与 GUI 共享的 typed 契约与纯逻辑：closed typed 配置、property
       # list 映射、计划器、XPC 协议与请求引擎（issue #71）。helper 不含产品
-      # 策略：不在这些文件之外做任何域判断。
-      - path: Domain/SystemProxyConfiguration.swift
-      - path: Domain/SystemProxyPlan.swift
-      - path: Domain/SystemProxyPropertyList.swift
-      - path: Domain/SystemProxyHelperContract.swift
-      - path: Domain/SystemProxyHelperEngine.swift
-      - path: Domain/SystemProxyHelperListenerDelegate.swift
+      # 策略：不在这些文件之外做任何域判断。以下 6 条同为显式路径，移动需同步。
+      - path: Domain/SystemProxy/SystemProxyConfiguration.swift
+      - path: Domain/SystemProxy/SystemProxyPlan.swift
+      - path: Domain/SystemProxy/SystemProxyPropertyList.swift
+      - path: Domain/SystemProxy/SystemProxyHelperContract.swift
+      - path: Domain/SystemProxy/SystemProxyHelperEngine.swift
+      - path: Domain/SystemProxy/SystemProxyHelperListenerDelegate.swift
     settings:
       base:
         PRODUCT_NAME: ShadowsocksX-NG2SystemProxyHelper
