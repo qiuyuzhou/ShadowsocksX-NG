@@ -127,6 +127,28 @@ struct CatalogWorkflowDuplicateTests {
     #expect(fixture.runtime.convergeSnapshots.last?.catalog.rootChildren == [original, copy])
   }
 
+  @Test(arguments: ["副本", "Copy"])
+  func copyingCopiesUsesOneSuffixAndSiblingNumbers(suffix: String) async throws {
+    let fixture = try DuplicateFixture()
+    let workflow = fixture.workflow
+    let original = try await workflow.createGroup(named: "websocket", into: nil)
+    let first = try await workflow.duplicate(original, nameSuffix: suffix)
+    let second = try await workflow.duplicate(first, nameSuffix: suffix)
+    let third = try await workflow.duplicate(second, nameSuffix: suffix)
+    #expect(workflow.displayName(for: first) == "websocket \(suffix)")
+    #expect(workflow.displayName(for: second) == "websocket \(suffix) 2")
+    #expect(workflow.displayName(for: third) == "websocket \(suffix) 3")
+    let otherSuffix = suffix == "Copy" ? "副本" : "Copy"
+    let fourth = try await workflow.duplicate(third, nameSuffix: otherSuffix)
+    #expect(workflow.displayName(for: fourth) == "websocket \(suffix) 4")
+    let detached = try await workflow.createGroup(named: "Detached \(suffix) 2", into: nil)
+    let detachedCopy = try await workflow.duplicate(detached, nameSuffix: suffix)
+    #expect(workflow.displayName(for: detachedCopy) == "Detached \(suffix) 3")
+    let interior = try await workflow.createGroup(named: "websocket \(suffix) backup", into: nil)
+    let interiorCopy = try await workflow.duplicate(interior, nameSuffix: suffix)
+    #expect(workflow.displayName(for: interiorCopy) == "websocket \(suffix) backup \(suffix)")
+  }
+
   @Test func serverCopyIsAdjacentAndIndependent() async throws {
     let fixture = try DuplicateFixture()
     let workflow = fixture.workflow

@@ -17,9 +17,18 @@ extension CatalogWorkflow {
     let siblings = try source.children(of: parent)
     guard let position = siblings.firstIndex(of: id) else { throw CatalogError.nodeNotFound(id) }
     let names = Set(siblings.compactMap { source.entry(for: $0)?.displayName })
-    let base = "\(entry.displayName) \(nameSuffix)"
+    var base = "\(entry.displayName) \(nameSuffix)"
     var name = base
     var number = 2
+    // 两种语言的已保存后缀都识别，切换语言后仍沿用原名称的复制序列。
+    if let suffixRange = entry.displayName.range(
+      of: #" (?:副本|Copy)(?: [0-9]+)?$"#, options: .regularExpression)
+    {
+      let suffix = entry.displayName[suffixRange].split(separator: " ")[0]
+      base = "\(entry.displayName[..<suffixRange.lowerBound]) \(suffix)"
+      name = "\(base) 2"
+      number = 3
+    }
     while names.contains(name) {
       name = "\(base) \(number)"
       number += 1
