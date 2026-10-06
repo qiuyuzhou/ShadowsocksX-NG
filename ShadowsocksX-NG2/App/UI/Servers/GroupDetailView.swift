@@ -1,16 +1,15 @@
 import SwiftUI
 
-/// 分组详情（issue #32/#41）：名称编辑（手动组）、直接子节点数与激活入口。
-/// 数据来自目录工作流 module 的树 projection 与激活资格查询；订阅固定分组
-/// 名称由远端管理，只读。空组保留可编辑（可先搭结构再填内容）。
+/// 分组详情（issue #32/#41）：直接子节点数与激活入口；名称只读展示，
+/// 重命名经侧栏右键菜单。数据来自目录工作流 module 的树 projection 与
+/// 激活资格查询；订阅固定分组名称由远端管理，只读。
 struct GroupDetailView: View {
-  let workflow: CatalogWorkflow
+  /// 观察目录 projection：侧栏发起的变更（如右键重命名）需同步本详情面。
+  @ObservedObject var workflow: CatalogWorkflow
   let groupID: NodeID
   /// 激活反馈共享状态：命令经它发出；pending 与最近反馈呈现在本详情面。
   @ObservedObject var activation: ActivationFeedbackState
   let errors: ErrorAlertPresenter
-
-  @State private var name = ""
 
   private var node: CatalogTreeNode? { workflow.tree.node(withID: groupID) }
   private var isManual: Bool { node?.isManual ?? false }
@@ -47,13 +46,6 @@ struct GroupDetailView: View {
       .padding(.bottom, 16)
       Divider()
       Form {
-        Section("分组") {
-          TextField("名称", text: $name)
-            .disabled(!isManual)
-          if isManual {
-            Button("保存名称") { saveName() }
-          }
-        }
         Section {
           LabeledContent("直接子节点", value: "\(directChildCount)")
           if let eligibility, eligibility.skippedInvalidCount > 0 {
@@ -76,7 +68,7 @@ struct GroupDetailView: View {
           .disabled(!(eligibility?.canActivate ?? false) || activation.isPending)
           activationFeedback
           if directChildCount == 0 {
-            Text("空分组保留可编辑，但不能激活。")
+            Text("空分组，暂无子节点，不能激活。")
               .font(.footnote)
               .foregroundStyle(.secondary)
           } else if eligibility?.canActivate == false {
@@ -94,8 +86,6 @@ struct GroupDetailView: View {
       .padding(.leading, 20)
       .padding(.trailing, 24)
     }
-    .onAppear(perform: loadName)
-    .onChange(of: groupID) { _, _ in loadName() }
   }
 
   private var directChildCount: Int { node?.childCount ?? 0 }
@@ -120,20 +110,6 @@ struct GroupDetailView: View {
           .foregroundStyle(.secondary)
       case .activated:
         EmptyView()
-      }
-    }
-  }
-
-  private func loadName() {
-    name = workflow.displayName(for: groupID)
-  }
-
-  private func saveName() {
-    Task {
-      do {
-        try await workflow.renameGroup(groupID, to: name)
-      } catch {
-        errors.present(error)
       }
     }
   }
