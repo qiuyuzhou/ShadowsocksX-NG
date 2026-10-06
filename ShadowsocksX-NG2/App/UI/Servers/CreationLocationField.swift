@@ -16,15 +16,14 @@ struct CreationLocationField: View {
   }
 
   var body: some View {
-    let nodes = ancestors
     Picker("位置", selection: $parent) {
-      ForEach(Array(nodes.enumerated()), id: \.element.id) { depth, node in
-        Text(verbatim: String(repeating: "  ", count: depth) + node.name)
+      ForEach(ancestors) { node in
+        Text(verbatim: node.name)
           .lineLimit(1)
           .truncationMode(.tail)
           .tag(Optional(node.id))
       }
-      (Text(verbatim: String(repeating: "  ", count: nodes.count)) + Text("所有服务器"))
+      Text("所有服务器")
         .tag(nil as NodeID?)
     }
     .pickerStyle(.menu)
