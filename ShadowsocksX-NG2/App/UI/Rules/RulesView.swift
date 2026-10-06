@@ -7,6 +7,8 @@ struct RulesView: View {
   /// 规则编辑草稿与编辑 sheet 由本页自持：@State 生命周期绑定在 rules
   /// destination 分支上，离开分区即丢弃（与壳级清稿等价）。
   @State private var ruleDraft: CustomRuleDraft?
+  /// 删除确认由本页自持，工具栏按钮与右键菜单共用同一确认弹窗。
+  @State private var deletionConfirmation: CustomRuleDeletion?
 
   var body: some View {
     VStack(spacing: 0) {
@@ -27,14 +29,8 @@ struct RulesView: View {
           }
         }.frame(width: 180)
         Divider()
-        VStack(spacing: 0) {
-          VStack(spacing: 6) {
-            filters
-            HStack {
-              RulesDeletionButton(workflow: workflow)
-              RulesOperationStatusView(workflow: workflow)
-            }
-          }.padding()
+        VStack(spacing: 8) {
+          filters
           ruleTable.overlay { emptyState }
           if let row = workflow.selectedRelationshipRow {
             Divider()
@@ -54,9 +50,29 @@ struct RulesView: View {
         }
         .disabled(!workflow.snapshot.isComplete)
       }
+      ToolbarItem(placement: .primaryAction) {
+        Button(RulesCopy.text("删除规则"), systemImage: "trash") {
+          deletionConfirmation = workflow.prepareCustomRuleDeletion()
+        }
+        .disabled(!canDeleteSelection)
+      }
     }
     .sheet(item: $ruleDraft) { draft in
       CustomRuleEditorSheet(workflow: workflow, draft: draft)
+    }
+    .alert(
+      countText("删除 %lld 条自定义规则？", deletionConfirmation?.customIDs.count ?? 0),
+      isPresented: Binding(
+        get: { deletionConfirmation != nil }, set: { if !$0 { deletionConfirmation = nil } }),
+      presenting: deletionConfirmation
+    ) { captured in
+      Button(RulesCopy.text("删除"), role: .destructive) {
+        deletionConfirmation = nil
+        Task { await workflow.deleteCustomRules(captured) }
+      }
+      Button(RulesCopy.text("取消"), role: .cancel) { deletionConfirmation = nil }
+    } message: { _ in
+      Text(RulesCopy.text("只删除所选自定义条目。其他来源的规则和已有禁用记录将保留。"))
     }
   }
 
@@ -99,12 +115,13 @@ struct RulesView: View {
   }
 
   private var filters: some View {
-    VStack(spacing: 6) {
+    VStack(spacing: 8) {
       HStack {
         actionFilter
           .fixedSize()
         enabledFilter
           .fixedSize()
+        RulesOperationStatusView(workflow: workflow)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       TextField(
@@ -115,6 +132,7 @@ struct RulesView: View {
       )
       .textFieldStyle(.roundedBorder)
     }
+    .padding(8)
   }
 
   private var actionFilter: some View {
@@ -202,6 +220,17 @@ struct RulesView: View {
             workflow.actionableSelection.isEmpty || !workflow.snapshot.isComplete
               || workflow.snapshot.isCommitting)
         }
+        if workflow.snapshot.query.source == .custom {
+          Divider()
+          Button(role: .destructive) {
+            deletionConfirmation = workflow.prepareCustomRuleDeletion()
+          } label: {
+            Text(
+              RulesCopy.text("删除") + " ("
+                + String(workflow.deletableSelection.count) + ")")
+          }
+          .disabled(!canDeleteSelection)
+        }
       }
   }
 
@@ -216,6 +245,16 @@ struct RulesView: View {
           if case .source(let source) = choice { $0.source = source } else { $0.source = nil }
         }
       })
+  }
+
+  /// 删除只针对自定义条目：左侧须选“自定义规则”，且所选行含自定义规则、页完整。
+  private var canDeleteSelection: Bool {
+    workflow.snapshot.query.source == .custom && workflow.snapshot.isComplete
+      && !workflow.deletableSelection.isEmpty
+  }
+
+  private func countText(_ key: String, _ count: Int) -> String {
+    String.localizedStringWithFormat(RulesCopy.text(key), Int64(count))
   }
 
   // Native controls can write their bindings during a SwiftUI update. Publish

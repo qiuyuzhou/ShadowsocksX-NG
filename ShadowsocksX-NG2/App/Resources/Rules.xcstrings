@@ -1203,17 +1203,6 @@
         }
       }
     },
-    "删除 %lld 条自定义规则…": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Delete %lld Custom Rules…"
-          }
-        }
-      }
-    },
     "删除 %lld 条自定义规则？": {
       "extractionState": "manual",
       "localizations": {
@@ -1243,6 +1232,17 @@
           "stringUnit": {
             "state": "translated",
             "value": "Delete"
+          }
+        }
+      }
+    },
+    "删除规则": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Rules"
           }
         }
       }
