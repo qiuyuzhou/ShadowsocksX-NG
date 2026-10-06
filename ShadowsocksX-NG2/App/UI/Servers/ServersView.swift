@@ -154,6 +154,7 @@ struct ServersView: View {
           presentNewGroup(in: parent)
         },
         onMove: { moveTarget = $0 },
+        onDuplicate: duplicateNode,
         onDelete: { deleteTarget = $0 },
         onExport: exportConfigurationGroup
       )
@@ -274,6 +275,15 @@ extension ServersView {
       .help("编辑服务器")
       .disabled(selection.flatMap { workflow.serverFormPresentation(for: $0) }?.isEditable != true)
     }
+    ToolbarItem(placement: .primaryAction) {
+      Button {
+        if let selection { duplicateNode(selection) }
+      } label: {
+        Label("复制", systemImage: "plus.square.on.square")
+      }
+      .help("复制")
+      .disabled(selection.map(workflow.canDuplicate) != true)
+    }
     // 删除：作用于当前选中的服务器叶子或手动分组，确认弹窗与右键菜单共用
     // deleteTarget 流（档位见 deleteFacts）；无选中或选中项不可删（订阅节点
     // 结构只读，GLOSSARY.md）即禁用，资格判定归政策 seam。
@@ -339,6 +349,17 @@ extension ServersView {
   private func selectCreatedNode(_ id: NodeID) {
     expansion.reveal(id, in: workflow.tree)
     selection = id
+  }
+
+  private func duplicateNode(_ id: NodeID) {
+    Task {
+      do {
+        let copy = try await workflow.duplicate(id, nameSuffix: String(localized: "副本"))
+        selectCreatedNode(copy)
+      } catch {
+        errors.present(error)
+      }
+    }
   }
 
   private func commitRename() {
