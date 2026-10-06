@@ -9,12 +9,7 @@ struct TargetTreeCard: View {
   @ObservedObject var activation: ActivationFeedbackState
   let onManageServers: () -> Void
 
-  @FocusState private var listFocused: Bool
-
   private var activeID: NodeID? { control.snapshot.activeTarget?.id }
-  private static let navigationKeys: Set<KeyEquivalent> = [
-    .upArrow, .downArrow, .leftArrow, .rightArrow,
-  ]
 
   var body: some View {
     HomeCard(
@@ -36,7 +31,6 @@ struct TargetTreeCard: View {
             currentTarget {
               guard let activeID else { return }
               serverList.locate(activeID)
-              listFocused = true
               // 展开后的行需要在下一轮布局中存在，才能滚动定位。
               Task { @MainActor in
                 await Task.yield()
@@ -133,10 +127,7 @@ struct TargetTreeCard: View {
             isCollapsed: serverList.collapsedGroupIDs.contains(row.id),
             isActivationPending: activation.pendingTargetID == row.id,
             activationBlocked: activation.isPending,
-            onSelect: {
-              serverList.select(row.id)
-              listFocused = true
-            },
+            onSelect: { serverList.select(row.id) },
             onToggle: { serverList.toggleGroup(row.id) },
             onActivate: { activate(row.id) }
           )
@@ -146,23 +137,8 @@ struct TargetTreeCard: View {
       .padding(.vertical, 2)
     }
     .frame(height: 340)
-    .focusable(interactions: .edit)
-    .focused($listFocused)
+    .focusable(false)
     .accessibilityLabel("服务器列表")
-    .onKeyPress(keys: Self.navigationKeys, phases: [.down, .repeat]) { press in
-      switch press.key {
-      case .upArrow: serverList.navigate(.upward)
-      case .downArrow: serverList.navigate(.downward)
-      case .leftArrow: serverList.navigate(.left)
-      case .rightArrow: serverList.navigate(.right)
-      default: return .ignored
-      }
-      return .handled
-    }
-    .onKeyPress(.return, phases: .down) { _ in
-      if let selection = serverList.selection { activate(selection) }
-      return .handled
-    }
   }
 
   private func activate(_ id: NodeID) {
@@ -258,6 +234,7 @@ private struct HomeServerListRow: View {
         Group {
           Button(isActivationPending ? "激活中…" : "激活", action: onActivate)
             .buttonStyle(SelectionActivationButtonStyle(foreground: selectionTextColor))
+            .focusable(false)
             .controlSize(.small)
             .disabled(activationBlocked || eligibility?.canActivate != true)
             .help(ineligibilityReason ?? "激活此项")
