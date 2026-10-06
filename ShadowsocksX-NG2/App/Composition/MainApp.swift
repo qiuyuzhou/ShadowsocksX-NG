@@ -55,7 +55,7 @@ struct ShadowsocksXNG2App: App {
     } label: {
       StatusMenuLabel(control: proxyControl)
     }
-    .menuBarExtraStyle(.window)
+    //    .menuBarExtraStyle(.window)
 
     // 主 workspace 窗口（ADR 0016/0017）：SwiftUI `Window` scene。启动呈现由
     // defaultLaunchBehavior 决定：静默启动关闭（默认）时 presented 启动即呈现

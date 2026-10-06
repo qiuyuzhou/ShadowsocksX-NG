@@ -27,16 +27,6 @@ struct ProxyStatusMenu: View {
 
       Divider()
       StatusCardView(control: control)
-
-      if control.snapshot.skippedInvalidServerCount > 0 {
-        Text("已跳过 \(control.snapshot.skippedInvalidServerCount) 个无效服务器")
-          .font(.caption)
-          .foregroundStyle(.orange)
-          .help("激活时跳过了存在已知本地阻塞问题的服务器")
-          .padding(.horizontal, 12)
-          .padding(.bottom, 12)
-      }
-
       Divider()
       Button("退出 ShadowsocksX-NG2（代理仍在后台运行）") {
         NSApp.terminate(nil)
