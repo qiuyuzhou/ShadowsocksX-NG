@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 侧栏底部代理状态卡（issue #60）：只做 tone→语义色映射与排版，行结构、
+/// 菜单栏面板代理状态卡（issue #60）：只做 tone→语义色映射与排版，行结构、
 /// 回退文案与色调政策全部来自 StatusCardModel（与状态菜单同用一份文本映射，
 /// issue #47 的整体 snapshot 口径）。
 struct StatusCardView: View {
