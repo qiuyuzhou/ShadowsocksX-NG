@@ -26,7 +26,6 @@ struct ServersView: View {
 
   // 纯窗口状态（issue #41）：selection/sheet/alert 不进目录 module。
   @State private var renameTarget: NodeID?
-  @State private var renameText = ""
   @State private var newGroupParent: NodeID?
   @State private var isPresentingNewGroup = false
   @State private var serverFormOperation: ServerFormSheet.Operation?
@@ -45,15 +44,12 @@ struct ServersView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     .frame(minHeight: 420)
-    .alert(
-      "重命名分组",
-      isPresented: Binding(
-        get: { renameTarget != nil },
-        set: { if !$0 { renameTarget = nil } })
-    ) {
-      TextField("名称", text: $renameText)
-      Button("确定") { commitRename() }
-      Button("取消", role: .cancel) { renameTarget = nil }
+    .sheet(
+      item: Binding(
+        get: { renameTarget.map(NodeContext.init) },
+        set: { renameTarget = $0?.nodeID })
+    ) { context in
+      RenameGroupSheet(workflow: workflow, errors: errors, nodeID: context.nodeID)
     }
     .sheet(isPresented: $isPresentingNewGroup) {
       NewGroupSheet(
@@ -75,7 +71,7 @@ struct ServersView: View {
     }
     .sheet(
       item: Binding(
-        get: { moveTarget.map(MoveContext.init) },
+        get: { moveTarget.map(NodeContext.init) },
         set: { moveTarget = $0?.nodeID })
     ) { context in
       MoveNodeSheet(workflow: workflow, errors: errors, nodeID: context.nodeID)
@@ -146,10 +142,7 @@ struct ServersView: View {
         activeTargetID: activeTargetID,
         errors: errors,
         onEdit: presentEditServer,
-        onRename: { id in
-          renameTarget = id
-          renameText = workflow.displayName(for: id)
-        },
+        onRename: { renameTarget = $0 },
         onNewGroup: { parent in
           presentNewGroup(in: parent)
         },
@@ -362,18 +355,6 @@ extension ServersView {
     }
   }
 
-  private func commitRename() {
-    guard let id = renameTarget else { return }
-    renameTarget = nil
-    Task {
-      do {
-        try await workflow.renameGroup(id, to: renameText)
-      } catch {
-        errors.present(error)
-      }
-    }
-  }
-
   /// 删除确认文案：档位与规模事实来自 seam；句子由 UI 拼（Q3-A）。
   private var deleteTitle: String {
     guard let id = deleteTarget else { return "" }
@@ -413,8 +394,8 @@ extension ServersView {
   }
 }
 
-/// moveTarget 的 sheet(item:) 适配壳。
-private struct MoveContext: Identifiable {
+/// moveTarget/renameTarget 的 sheet(item:) 适配壳。
+private struct NodeContext: Identifiable {
   let nodeID: NodeID
   var id: NodeID { nodeID }
 }
