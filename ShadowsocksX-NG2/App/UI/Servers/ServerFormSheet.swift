@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 新建与编辑共用表单生命周期；编辑身份与新建落点均在打开时固定。
+/// 新建与编辑共用表单生命周期；编辑身份固定，新建位置可逐级上移。
 struct ServerFormSheet: View {
   enum Operation: Identifiable {
     case create(parent: NodeID?)
@@ -20,6 +20,7 @@ struct ServerFormSheet: View {
   let onCreated: (NodeID) -> Void
   @Environment(\.dismiss) private var dismiss
   @StateObject private var fields: ServerFormFields
+  @State private var parent: NodeID?
   @State private var isSubmitting = false
   @State private var isConfirmingDiscard = false
   @FocusState private var fieldFocus: ServerFormField?
@@ -31,10 +32,14 @@ struct ServerFormSheet: View {
     self.workflow = workflow
     self.operation = operation
     self.onCreated = onCreated
-    // 独立草稿只在 sheet 打开时初始化，父视图更新不重建。
+    // 独立草稿和位置只在 sheet 打开时初始化，父视图更新不重建。
     switch operation {
-    case .create: _fields = StateObject(wrappedValue: ServerFormFields.newForm())
-    case .edit: _fields = StateObject(wrappedValue: ServerFormFields())
+    case .create(let parent):
+      _fields = StateObject(wrappedValue: ServerFormFields.newForm())
+      _parent = State(initialValue: parent)
+    case .edit:
+      _fields = StateObject(wrappedValue: ServerFormFields())
+      _parent = State(initialValue: nil)
     }
   }
 
@@ -68,7 +73,9 @@ struct ServerFormSheet: View {
           if editID == nil || fields.hasLoadedServer {
             ServerFormFieldsGrid(
               fields: fields, plugin: plugin, isEditable: true,
-              fieldFocus: $fieldFocus)
+              fieldFocus: $fieldFocus,
+              location: editID == nil
+                ? CreationLocationField(tree: workflow.tree, parent: $parent) : nil)
           }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -142,7 +149,7 @@ struct ServerFormSheet: View {
       defer { isSubmitting = false }
       do {
         switch operation {
-        case .create(let parent):
+        case .create:
           onCreated(try await workflow.createServer(draft, into: parent))
         case .edit(let id):
           try await workflow.updateServer(id, draft: draft)

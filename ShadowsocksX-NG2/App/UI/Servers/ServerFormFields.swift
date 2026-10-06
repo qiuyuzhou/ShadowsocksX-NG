@@ -329,6 +329,7 @@ struct ServerFormFieldsGrid: View {
   let plugin: PluginSectionState?
   let isEditable: Bool
   let fieldFocus: FocusState<ServerFormField?>.Binding
+  var location: CreationLocationField?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
@@ -339,6 +340,7 @@ struct ServerFormFieldsGrid: View {
           .disabled(!isEditable)
         fieldErrorLabel(.name)
       }
+      if let location { location }
       ServerEndpointLayout {
         row("服务器地址") {
           TextField("服务器地址", text: $fields.address)
