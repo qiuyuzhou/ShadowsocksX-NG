@@ -23,7 +23,9 @@ struct ServerPluginSection: View {
       Picker("插件", selection: $selection) {
         Text("无").tag(PluginSelection.none)
         ForEach(plugin.programs.map(\.program), id: \.self) { program in
-          Text(program).tag(PluginSelection.named(program: program))
+          Text(program).tag(
+            selection == .unknown(program: program)
+              ? selection : PluginSelection.named(program: program))
         }
         if let program = plugin.unresolvedProgram(for: selection) {
           Text(program).tag(selection)
@@ -96,19 +98,8 @@ struct ServerPluginSection: View {
 
   @ViewBuilder
   private func availabilityNotice(program: String, plugin: PluginSectionState) -> some View {
-    if plugin.mappingsUnreadable {
-      warning(Text("无法读取用户插件映射，插件暂不可用。请修复映射后重试。"))
-    } else if let facts = plugin.programs.first(where: { $0.program == program }) {
-      switch facts.availability {
-      case .available:
-        EmptyView()
-      case .missing:
-        warning(Text("插件文件不存在，请检查用户插件路径或应用安装。"))
-      case .notExecutable:
-        warning(Text("插件文件不可执行，请检查文件类型和执行权限。"))
-      case .unreadable:
-        warning(Text("无法读取插件文件信息，请检查路径和访问权限。"))
-      }
+    if let message = plugin.availabilityWarning(for: program) {
+      warning(Text(message))
     }
   }
 
@@ -335,7 +326,7 @@ private struct PluginOptionsEditor: View {
 
 /// 订阅节点的参数只读呈现（issue #81）：Table 控件的表格展现与原始文本
 /// 只读，可切换查看模式，无任何编辑入口。
-private struct PluginOptionsReadOnlyEditor: View {
+struct PluginOptionsReadOnlyEditor: View {
   @ObservedObject var draft: PluginOptionsDraft
 
   private var visibleRows: [PluginOptionsDraft.Row] {

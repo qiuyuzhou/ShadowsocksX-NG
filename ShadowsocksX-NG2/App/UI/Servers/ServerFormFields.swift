@@ -30,7 +30,7 @@ enum ServerFormFieldError: Equatable {
 /// 服务器表单草稿（UI 持有）：连接字段草稿状态与「字段 ↔ ServerEditForm/
 /// ServerEditDraft 命令」的映射只在此写一次；新建与编辑两个表单面各自
 /// `@StateObject` 持有一份，经 `load(from:)` 装载、`draft` 提交，第三个表单
-/// 面接入只需学这一对方法。栅格渲染见 `ServerFormFieldsGrid`；订阅只读禁用
+/// 面接入只需学这一对方法。栅格渲染见 `ServerFormFieldsGrid`；编辑资格
 /// 与插件区 facts 由 caller 注入。
 @MainActor
 final class ServerFormFields: ObservableObject {
@@ -136,6 +136,7 @@ final class ServerFormFields: ObservableObject {
     let fields = ServerFormFields()
     fields.portText = "8388"
     fields.encryptionMethod = "aes-256-gcm"
+    fields.savedDraft = fields.draft
     return fields
   }
 
@@ -192,8 +193,14 @@ final class ServerFormFields: ObservableObject {
 
   func updatePresentation(
     _ facts: ServerFormPresentation?,
+    preservingDraft: Bool = false,
     load: ((NodeID) throws -> ServerEditForm?)? = nil
   ) {
+    // Sheet 更新资格和可用性事实，保持打开时的草稿与基线。
+    if preservingDraft {
+      if presentation != facts { presentation = facts }
+      return
+    }
     if let selection = facts?.plugin.selection,
       presentation?.plugin.selection != selection
     {

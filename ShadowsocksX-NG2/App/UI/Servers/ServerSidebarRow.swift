@@ -11,6 +11,7 @@ struct ServerSidebarRow: View {
   let activation: ActivationFeedbackState
   let activeTargetID: NodeID?
   let errors: ErrorAlertPresenter
+  let onEdit: (NodeID) -> Void
   let onRename: (NodeID) -> Void
   let onNewGroup: (NodeID?) -> Void
   let onMove: (NodeID) -> Void
@@ -85,6 +86,8 @@ struct ServerSidebarRow: View {
       Divider()
       if node.isGroup {
         Button("重命名…") { onRename(node.id) }
+      } else {
+        Button("编辑…") { onEdit(node.id) }
       }
       Button("新建分组…") {
         onNewGroup(node.isGroup ? node.id : node.parentID)

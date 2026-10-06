@@ -214,6 +214,159 @@ struct ServerFormLoadingTests {
   }
 }
 
+extension ServerFormLoadingTests {
+  @Test
+  func newFormStartsUnchangedAndReturningToDefaultsClearsChanges() {
+    let fields = ServerFormFields.newForm()
+    #expect(!fields.hasChanges)
+    fields.remark = "未保存"
+    #expect(fields.hasChanges)
+    fields.remark = ""
+    #expect(!fields.hasChanges)
+    fields.portText = "bad"
+    #expect(fields.hasChanges)
+  }
+
+  @Test
+  func detailFactsAndOptionsRemainReadableWithoutPassword() async throws {
+    let credentials = FormCredentialStore()
+    try await Self.withWorkflow(credentials: credentials) { workflow in
+      let program = ManagedPluginCatalog.plugins[0].program
+      let id = try await workflow.createServer(
+        ServerEditDraft(
+          address: "203.0.113.1", port: 8388, encryptionMethod: "aes-256-gcm",
+          password: "pw", remark: "服务器", plugin: .named(program: program),
+          pluginOptions: "tls;host=example.com;host=other.example;empty="), into: nil)
+      let passwordRef = try #require(
+        credentials.storage.storageSnapshot.first(where: { $0.value == "pw" })?.key)
+      var changedServers: [Set<NodeID>] = []
+      let observation = workflow.serverDetailChanges.sink { changedServers.append($0) }
+      defer { observation.cancel() }
+      let saved = try #require(try workflow.serverEditForm(for: id))
+      try await workflow.updateServer(
+        id,
+        draft: ServerEditDraft(
+          address: saved.address, port: saved.port, encryptionMethod: saved.encryptionMethod,
+          password: "pw", remark: saved.remark, plugin: saved.plugin.selection,
+          pluginOptions: "tls;host=example.com;host=other.example;empty="))
+      #expect(changedServers == [[id]])
+      try credentials.delete(CredentialReference(rawValue: passwordRef))
+      credentials.reads = 0
+      let facts = try #require(workflow.serverDetailPresentation(for: id))
+      #expect(facts.name == "服务器")
+      #expect(facts.address == "203.0.113.1")
+      #expect(facts.plugin.options.isEmpty)
+      #expect(credentials.reads == 0)
+      #expect(
+        try workflow.serverDetailPluginOptions(for: id)
+          == "tls;host=example.com;host=other.example;empty=")
+      #expect(credentials.reads == 1)
+      #expect(throws: ServerFormLoadError.credentialsUnavailable) {
+        _ = try workflow.serverEditForm(for: id)
+      }
+      credentials.failReads = true
+      #expect(throws: ServerFormLoadError.credentialsUnavailable) {
+        _ = try workflow.serverDetailPluginOptions(for: id)
+      }
+      #expect(workflow.serverDetailPresentation(for: id)?.address == "203.0.113.1")
+    }
+  }
+
+  @Test
+  func unknownPluginDetailReadsOptionsWithoutLoadingPassword() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = CatalogFileStore(fileURL: directory.appendingPathComponent("catalog.json"))
+    let credentials = FormCredentialStore()
+    let optionsRef = CredentialReference.fresh()
+    try credentials.save("opaque=one;opaque=two", for: optionsRef)
+    var catalog = ConfigurationCatalog()
+    let id = try catalog.addServer(
+      ServerFields(
+        address: "203.0.113.1", port: 8388, encryptionMethod: "aes-256-gcm",
+        passwordRef: .fresh(), remark: "未知插件服务器",
+        pluginProgram: "unknown-test-plugin", pluginOptionsRef: optionsRef))
+    try store.save(CatalogDocument(catalog: catalog))
+    let workflow = makeCatalogWorkflow(
+      coordinator: CatalogCommitCoordinator(fileStore: store, runtime: FakeCatalogRuntime()),
+      credentials: credentials)
+    credentials.reads = 0
+    #expect(
+      workflow.serverDetailPresentation(for: id)?.plugin.selection
+        == .unknown(program: "unknown-test-plugin"))
+    #expect(credentials.reads == 0)
+    #expect(try workflow.serverDetailPluginOptions(for: id) == "opaque=one;opaque=two")
+    #expect(credentials.reads == 1)
+  }
+
+  @Test
+  func parameterSessionSwitchesIdentityAndOnlyReloadsAffectedRefreshes() {
+    let parameters = ServerDetailParameters()
+    let first = NodeID(rawValue: "first")
+    let second = NodeID(rawValue: "second")
+    var reads = 0
+    parameters.showServer(first) { _ in
+      reads += 1
+      return "tls;host=one;host=two;empty="
+    }
+    #expect(parameters.options.rows.filter { !$0.isBlank }.count == 4)
+    parameters.showServer(first) { _ in
+      reads += 1
+      return "tls;host=one;host=two;empty="
+    }
+    parameters.didRefresh(affectedServers: [second]) { _ in
+      Issue.record("不相关刷新不应重载")
+      return ""
+    }
+    parameters.didRefresh(affectedServers: [first]) { _ in
+      reads += 1
+      return "host=new"
+    }
+    #expect(reads == 3)
+    #expect(parameters.options.composedString == "host=new")
+    parameters.showServer(second) { _ in throw ServerFormLoadError.credentialsUnavailable }
+    #expect(parameters.options.composedString == "")
+    #expect(parameters.failure == .credentialsUnavailable)
+    parameters.reload { _ in "trailing\\" }
+    #expect(parameters.failure == nil)
+    #expect(parameters.options.mode == .rawText)
+    #expect(parameters.options.rawText == "trailing\\")
+    parameters.didRefresh(affectedServers: [second]) { _ in
+      throw ServerFormLoadError.credentialsUnavailable
+    }
+    #expect(parameters.options.rawText.isEmpty)
+    #expect(parameters.failure == .credentialsUnavailable)
+  }
+
+  @Test
+  func editingPresentationChangesNeverReplaceDraftAndDeletionBlocksSaving() {
+    let fields = ServerFormFields()
+    let id = NodeID(rawValue: "manual")
+    let form = ServerEditForm(
+      address: "203.0.113.1", port: 8388, encryptionMethod: "aes-256-gcm",
+      password: "pw", remark: "服务器",
+      plugin: PluginSectionState(
+        selection: .unknown(program: "plugin"), programs: [], mappingsUnreadable: false,
+        optionsPresent: true, options: ""), isEditable: true)
+    fields.showServer(id) { _ in form }
+    fields.remark = "未保存名称"
+    let updatedPlugin = PluginSectionState(
+      selection: .named(program: "plugin"), programs: [], mappingsUnreadable: false,
+      optionsPresent: true, options: "")
+    fields.updatePresentation(
+      ServerFormPresentation(isEditable: true, plugin: updatedPlugin), preservingDraft: true)
+    #expect(fields.pluginChoice == .unknown(program: "plugin"))
+    #expect(fields.remark == "未保存名称")
+    #expect(fields.canSaveServer)
+    fields.updatePresentation(nil, preservingDraft: true)
+    #expect(!fields.canSaveServer)
+    #expect(fields.hasLoadedServer)
+    #expect(fields.password == "pw")
+    #expect(fields.remark == "未保存名称")
+  }
+
+}
+
 private final class FormCredentialStore: CredentialStoring {
   let storage = InMemoryCredentialStore()
   var reads = 0

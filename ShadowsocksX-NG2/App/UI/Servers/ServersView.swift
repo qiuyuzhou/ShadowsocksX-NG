@@ -1,10 +1,7 @@
 import SwiftUI
 
-/// 服务器 destination（spec #21 D11，issue #32/#34/#35/#41）：承载服务器目录树、
-/// 详情编辑与分组命令。workspace destination 由外层主窗口壳持有（新壳在
-/// MainWindowView.swift，票 #53）；全局导入表单由窗口壳呈现，本视图持有服务器
-/// 功能的 sheet、alert、确认弹窗与编辑草稿边界；selection 由外层绑定，以便订阅
-/// 删除仍能清除失效的服务器选择。
+/// 服务器目录、只读详情与分组命令；本视图持有新建／编辑 sheet 和确认弹窗。
+/// selection 由主窗口绑定，订阅删除可清除失效选择。
 struct ServersView: View {
 
   @ObservedObject var workflow: CatalogWorkflow
@@ -31,9 +28,8 @@ struct ServersView: View {
   @State private var renameTarget: NodeID?
   @State private var renameText = ""
   @State private var newGroupParent: NodeID?
-  @State private var newServerParent: NodeID?
   @State private var isPresentingNewGroup = false
-  @State private var isPresentingNewServer = false
+  @State private var serverFormOperation: ServerFormSheet.Operation?
   @State private var deleteTarget: NodeID?
   @State private var moveTarget: NodeID?
   @State private var rootDropHovering = false
@@ -41,8 +37,6 @@ struct ServersView: View {
   @State var shareContext: ShareContext?
 
   var body: some View {
-    // 主窗口外壳（票 #53）已提供分栏框架；本分区用扁平双栏承载目录与详情
-    // （票 #55 再按原型重排）。
     HStack(alignment: .top, spacing: 0) {
       serverSidebar
         .frame(minWidth: 240, idealWidth: 280, maxWidth: 340)
@@ -86,10 +80,10 @@ struct ServersView: View {
     ) { context in
       MoveNodeSheet(workflow: workflow, errors: errors, nodeID: context.nodeID)
     }
-    .sheet(isPresented: $isPresentingNewServer) {
-      NewServerSheet(
-        workflow: workflow, errors: errors,
-        parent: newServerParent, onCreated: selectCreatedNode)
+    .sheet(item: $serverFormOperation) { operation in
+      ServerFormSheet(
+        workflow: workflow, operation: operation,
+        onCreated: selectCreatedNode)
     }
     // 切换选中项时立即收起分享，避免显示旧服务器。
     .onChange(of: selection) {
@@ -151,6 +145,7 @@ struct ServersView: View {
         activation: activation,
         activeTargetID: activeTargetID,
         errors: errors,
+        onEdit: presentEditServer,
         onRename: { id in
           renameTarget = id
           renameText = workflow.displayName(for: id)
@@ -238,13 +233,14 @@ extension ServersView {
           errors: errors)
       } else {
         ServerDetailView(
-          workflow: workflow, serverID: id, isActiveTarget: activeTargetID == id,
-          errors: errors)
+          workflow: workflow, serverID: id, isActiveTarget: activeTargetID == id
+        )
+        .id(id)
       }
     } else {
       ContentUnavailableView(
         "未选择节点", systemImage: "sidebar.left",
-        description: Text("在左侧选择服务器或分组查看与编辑详情"))
+        description: Text("在左侧选择服务器或分组查看详情"))
     }
   }
 
@@ -267,6 +263,16 @@ extension ServersView {
         Label("新建分组", systemImage: "folder.badge.plus")
       }
       .help("新建分组")
+    }
+    ToolbarItem(placement: .primaryAction) {
+      Button {
+        if let selection { presentEditServer(selection) }
+      } label: {
+        Label("编辑服务器", systemImage: "pencil")
+      }
+      .labelStyle(.iconOnly)
+      .help("编辑服务器")
+      .disabled(selection.flatMap { workflow.serverFormPresentation(for: $0) }?.isEditable != true)
     }
     // 删除：作用于当前选中的服务器叶子或手动分组，确认弹窗与右键菜单共用
     // deleteTarget 流（档位见 deleteFacts）；无选中或选中项不可删（订阅节点
@@ -322,8 +328,12 @@ extension ServersView {
   }
 
   private func presentNewServer(in parent: NodeID?) {
-    newServerParent = parent
-    isPresentingNewServer = true
+    serverFormOperation = .create(parent: parent)
+  }
+
+  private func presentEditServer(_ id: NodeID) {
+    guard workflow.serverFormPresentation(for: id)?.isEditable == true else { return }
+    serverFormOperation = .edit(id)
   }
 
   private func selectCreatedNode(_ id: NodeID) {

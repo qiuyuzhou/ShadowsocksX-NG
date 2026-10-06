@@ -69,6 +69,13 @@ final class CatalogWorkflow: ObservableObject {
     subscriptionServerRefreshSubject.eraseToAnyPublisher()
   }
 
+  private let serverUpdateSubject = PassthroughSubject<Set<NodeID>, Never>()
+
+  /// 成功保存或订阅刷新后装载详情参数，包括只改变凭据而树值不变的提交。
+  var serverDetailChanges: AnyPublisher<Set<NodeID>, Never> {
+    subscriptionServerRefreshSubject.merge(with: serverUpdateSubject).eraseToAnyPublisher()
+  }
+
   func publishSubscriptionServerRefresh(_ id: NodeID) {
     guard let summary = subscriptions.first(where: { $0.id == id }),
       let group = tree.node(withID: summary.groupID)
@@ -95,6 +102,25 @@ final class CatalogWorkflow: ObservableObject {
     else { return nil }
     return ServerFormPresentation(
       isEditable: entry.source == .manual, plugin: pluginPresentation(for: fields))
+  }
+
+  /// 已保存详情事实；普通渲染不读取密码或参数。
+  func serverDetailPresentation(for id: NodeID) -> ServerDetailPresentation? {
+    guard let entry = dependencies.coordinator.committedCatalog.entry(for: id),
+      case .server(let fields) = entry.kind
+    else { return nil }
+    return ServerDetailPresentation(
+      name: entry.displayName, address: fields.address, port: fields.port,
+      encryptionMethod: fields.encryptionMethod, plugin: pluginPresentation(for: fields))
+  }
+
+  /// 详情参数装载独立于密码和插件可用性；未知插件仍可核对原文。
+  func serverDetailPluginOptions(for id: NodeID) throws -> String {
+    guard let entry = dependencies.coordinator.committedCatalog.entry(for: id),
+      case .server(let fields) = entry.kind
+    else { throw ServerFormLoadError.notFound }
+    guard let reference = fields.pluginOptionsRef else { return "" }
+    return try requiredServerSecret(reference)
   }
 
   /// 服务器编辑面（显式命令，story 11）：解析密码与目录中的具名插件参数明文。
@@ -273,6 +299,7 @@ final class CatalogWorkflow: ObservableObject {
           credentials: dependencies.credentials, journal: &journal)
         try catalog.updateServer(id, with: fields)
       }
+      serverUpdateSubject.send([id])
     } catch {
       throw CommitError(underlying: error, credentialRollback: journal.rollback())
     }
