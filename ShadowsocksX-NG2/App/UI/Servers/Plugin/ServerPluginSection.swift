@@ -36,11 +36,11 @@ struct ServerPluginSection: View {
           Text(program).tag(plugin.selection)
         }
       }
-      .labelsHidden()
-      .accessibilityLabel("插件")
       .disabled(!isEditable)
     } else {
-      Text("不可用").foregroundStyle(.secondary)
+      LabeledContent("插件") {
+        Text("不可用").foregroundStyle(.secondary)
+      }
     }
   }
 

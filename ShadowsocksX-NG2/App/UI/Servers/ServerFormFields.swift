@@ -332,7 +332,7 @@ struct ServerFormFieldsGrid: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
-      column("名称") {
+      row("名称") {
         TextField("名称", text: $fields.remark, prompt: Text("例如：香港服务器"))
           .textFieldStyle(.roundedBorder)
           .focused(fieldFocus, equals: .name)
@@ -340,14 +340,14 @@ struct ServerFormFieldsGrid: View {
         fieldErrorLabel(.name)
       }
       ServerEndpointLayout {
-        column("服务器地址") {
+        row("服务器地址") {
           TextField("服务器地址", text: $fields.address)
             .textFieldStyle(.roundedBorder)
             .focused(fieldFocus, equals: .address)
             .disabled(!isEditable)
           fieldErrorLabel(.address)
         }
-        column("端口") {
+        row("端口") {
           TextField("端口", text: $fields.portText)
             .textFieldStyle(.roundedBorder)
             .focused(fieldFocus, equals: .port)
@@ -355,15 +355,11 @@ struct ServerFormFieldsGrid: View {
           fieldErrorLabel(.port)
         }
       }
-      column("加密方式") {
-        Picker("加密方式", selection: $fields.encryptionMethod) {
-          ForEach(fields.methodChoices, id: \.self) { Text($0).tag($0) }
-        }
-        .labelsHidden()
-        .accessibilityLabel("加密方式")
-        .disabled(!isEditable)
+      Picker("加密方式", selection: $fields.encryptionMethod) {
+        ForEach(fields.methodChoices, id: \.self) { Text($0).tag($0) }
       }
-      column("密码") {
+      .disabled(!isEditable)
+      row("密码") {
         HStack(spacing: 8) {
           Group {
             if fields.showPassword {
@@ -390,28 +386,27 @@ struct ServerFormFieldsGrid: View {
         }
         fieldErrorLabel(.password)
       }
-      column("插件") {
-        ServerPluginSection(
-          selection: $fields.pluginChoice,
-          options: fields.pluginOptions,
-          plugin: plugin,
-          isEditable: isEditable,
-          optionsError: fields.fieldErrors[.pluginOptions],
-          optionsFocus: fieldFocus)
-      }
+      ServerPluginSection(
+        selection: $fields.pluginChoice,
+        options: fields.pluginOptions,
+        plugin: plugin,
+        isEditable: isEditable,
+        optionsError: fields.fieldErrors[.pluginOptions],
+        optionsFocus: fieldFocus)
     }
   }
 
-  private func column<Content: View>(
+  private func row<Content: View>(
     _ label: LocalizedStringKey, @ViewBuilder content: () -> Content
   ) -> some View {
-    VStack(alignment: .leading, spacing: 6) {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
       Text(label)
-        .font(.callout.weight(.medium))
-        .foregroundStyle(.secondary)
-      content()
+        .fixedSize()
+      VStack(alignment: .leading, spacing: 6) {
+        content()
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   /// 字段行内错误：只呈现字段、原因与上限，不回显字段内容（issue #81）。
