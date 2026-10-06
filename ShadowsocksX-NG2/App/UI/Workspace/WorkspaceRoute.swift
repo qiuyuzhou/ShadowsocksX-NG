@@ -8,7 +8,6 @@ enum WorkspaceDestination: String, CaseIterable, Hashable, Identifiable, Sendabl
   case subscriptions
   case rules
   case settings
-  case diagnostics
 
   var id: Self { self }
 }

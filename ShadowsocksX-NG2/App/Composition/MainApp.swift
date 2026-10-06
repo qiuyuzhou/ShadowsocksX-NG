@@ -16,6 +16,8 @@ struct ShadowsocksXNG2App: App {
   @StateObject private var rulesWorkflow: RulesWorkflow
   @StateObject private var windowActivation: WindowActivationPolicyCoordinator
   private let textClipboard: any TextClipboard
+  private let diagnosticReportExporter: any DiagnosticReportExporter
+  @StateObject private var diagnosticsWindow = DiagnosticsWindowState()
   private let workspaceContent: MainWindowView
   /// 窗口工具栏标签风格默认「图标和文本」。绑定版修饰符让用户仍可经工具栏
   /// 右键改选，选择回写本 AppStorage 键持久化，下次启动延续。
@@ -38,9 +40,10 @@ struct ShadowsocksXNG2App: App {
     _windowActivation = StateObject(
       wrappedValue: WindowActivationPolicyCoordinator(applying: NSAppWindowActivationApplier()))
     textClipboard = composition.textClipboard
+    diagnosticReportExporter = composition.diagnosticReportExporter
     workspaceContent = composition.workspaceContent
     launchPresentation = composition.silentLaunch.isEnabled ? .suppressed : .presented
-    // GUI 事件接入内存环形缓冲（spec #21 D5，issue #34）：主窗口日志查看器与
+    // GUI 事件接入内存环形缓冲（spec #21 D5，issue #34）：独立诊断窗口日志查看器与
     // 诊断导出的来源；wrapper 侧不注册，仍走 stderr → agent.log 收敛。
     RuntimeLog.setSink(RuntimeEventStore.shared)
   }
@@ -72,6 +75,24 @@ struct ShadowsocksXNG2App: App {
     .windowToolbarLabelStyle($toolbarLabelStyle)
 
     rulesReportScene
+    diagnosticsScene
+  }
+
+  private var diagnosticsScene: some Scene {
+    Window("诊断", id: DiagnosticsWindowState.sceneID) {
+      DiagnosticsView(
+        diagnostics: diagnosticsWorkflow,
+        windowState: diagnosticsWindow,
+        clipboard: textClipboard,
+        exporter: diagnosticReportExporter
+      )
+      .modifier(WindowActivationPolicy(coordinator: windowActivation))
+    }
+    .defaultLaunchBehavior(.suppressed)
+    .restorationBehavior(.disabled)
+    .commandsRemoved()
+    .defaultSize(width: 800, height: 600)
+    .windowToolbarLabelStyle($toolbarLabelStyle)
   }
 
   private var rulesReportScene: some Scene {
@@ -130,6 +151,7 @@ private struct AppComposition {
   let silentLaunch: SilentLaunchController
   let expansion: CatalogExpansionState
   let textClipboard: any TextClipboard
+  let diagnosticReportExporter: any DiagnosticReportExporter
   let imageClipboard: any ImageClipboard
   let rulesWorkflow: RulesWorkflow
   let workspaceContent: MainWindowView
@@ -169,8 +191,8 @@ private struct AppComposition {
     // 设置工作流 module（Candidate 02）：设置窗口的唯一 seam，组合根接线一次；
     // 写入侧经窄缝 SettingsCommitting（issue #44），运行时控制器薄扩展即生产实现。
     let settingsWorkflow = SettingsWorkflow(committing: controller)
-    // 诊断工作流 module（issue #43）：诊断区唯一 seam，组合根接线一次；共享
-    // 实例供诊断侧栏与详情共同使用。
+    // 诊断工作流 module（issue #43）：诊断区唯一 seam，组合根接线一次；进程期
+    // 实例供独立诊断窗口使用。
     let diagnosticsWorkflow = DiagnosticsWorkflow(
       runtimeFacts: controller,
       catalogFacts: { catalogWorkflow.diagnosticCatalogFacts },
@@ -193,7 +215,6 @@ private struct AppComposition {
       route: workspaceRoute,
       workflow: catalogWorkflow,
       control: proxyControl,
-      diagnostics: diagnosticsWorkflow,
       plugins: PluginManagementModel(catalog: plugins),
       settingsWorkflow: settingsWorkflow,
       loginController: loginController,
@@ -201,7 +222,6 @@ private struct AppComposition {
       expansion: expansion,
       clipboard: textClipboard,
       imageClipboard: dependencies.imageClipboard,
-      diagnosticReportExporter: dependencies.diagnosticReportExporter,
       configurationGroupFileExporter: dependencies.configurationGroupFileExporter,
       qrImageSaver: dependencies.qrImageSaver)
     return AppComposition(
@@ -215,6 +235,7 @@ private struct AppComposition {
       silentLaunch: silentLaunch,
       expansion: expansion,
       textClipboard: textClipboard,
+      diagnosticReportExporter: dependencies.diagnosticReportExporter,
       imageClipboard: dependencies.imageClipboard,
       rulesWorkflow: rulesWorkflow,
       workspaceContent: workspaceContent)

@@ -18,6 +18,13 @@ struct ProxyStatusMenu: View {
       }
       .padding(12)
 
+      Button("诊断…") {
+        windowAnchor.window?.orderOut(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        openWindow(id: DiagnosticsWindowState.sceneID)
+      }
+      .padding(12)
+
       Divider()
       StatusCardView(control: control)
 

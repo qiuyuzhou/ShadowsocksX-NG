@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 主窗口诊断区（spec #21 D11，issue #34/#43，地图 #52 票 #58）：按原型重排
+/// 独立窗口诊断区（spec #21 D11，issue #34/#43，地图 #52 票 #58）：按原型重排
 /// 为状态摘要卡（代理状态、活动目标）+ 日志卡（GUI 事件流实时呈现 + wrapper
 /// 收敛日志尾部，来源切换 segmented、可复制）+ 底部脱敏说明行。导出诊断由
 /// 本页自挂工具栏（呈现于窗口工具栏右端），沿用 DiagnosticReportExportAction
@@ -9,8 +9,7 @@ import SwiftUI
 /// 只负责生命周期触发、呈现与复制动作。
 struct DiagnosticsView: View {
   @ObservedObject var diagnostics: DiagnosticsWorkflow
-  /// 共享错误弹窗呈现（UI 持有；typed error → 本地化文案的呈现边缘）。
-  @StateObject private var errors = ErrorAlertPresenter()
+  @ObservedObject var windowState: DiagnosticsWindowState
   let clipboard: any TextClipboard
   let exporter: any DiagnosticReportExporter
 
@@ -29,9 +28,6 @@ struct DiagnosticsView: View {
       }
     }
   }
-
-  @State private var source: LogSource = .guiEvents
-  @State private var exportedDiagnosticsPath: String?
 
   var body: some View {
     ScrollView {
@@ -52,8 +48,12 @@ struct DiagnosticsView: View {
       .padding(.top, 24)
       .padding(.bottom, 36)
     }
-    .task { await diagnostics.readWhileActive() }
-    .presentingErrors(errors)
+    .frame(minWidth: 640, minHeight: 520)
+    .background(DiagnosticsWindowAnchor(state: windowState).frame(width: 0, height: 0))
+    .task(id: windowState.isOpen) {
+      if windowState.isOpen { await diagnostics.readWhileActive() }
+    }
+    .presentingErrors(windowState.errors)
     .toolbar {
       ToolbarItem(placement: .primaryAction) {
         Button("导出诊断…", systemImage: "square.and.arrow.up") {
@@ -64,12 +64,12 @@ struct DiagnosticsView: View {
     .alert(
       "诊断已导出",
       isPresented: Binding(
-        get: { exportedDiagnosticsPath != nil },
-        set: { if !$0 { exportedDiagnosticsPath = nil } })
+        get: { windowState.exportedDiagnosticsPath != nil },
+        set: { if !$0 { windowState.exportedDiagnosticsPath = nil } })
     ) {
       Button("好", role: .cancel) {}
     } message: {
-      Text(exportedDiagnosticsPath ?? "")
+      Text(windowState.exportedDiagnosticsPath ?? "")
     }
   }
 
@@ -81,14 +81,14 @@ struct DiagnosticsView: View {
     ).perform()
     {
     case .preparationFailed(let failure):
-      errors.present(failure)
+      windowState.errors.present(failure)
     case .cancelled:
       break
     case .saved(let url):
       diagnostics.noteExportCompleted()
-      exportedDiagnosticsPath = url.path
+      windowState.exportedDiagnosticsPath = url.path
     case .exportFailed(let failure):
-      errors.present(failure)
+      windowState.errors.present(failure)
     }
   }
 
@@ -129,7 +129,7 @@ struct DiagnosticsView: View {
   private var logCard: some View {
     VStack(alignment: .leading, spacing: 0) {
       HStack(spacing: 12) {
-        Picker("日志来源", selection: $source) {
+        Picker("日志来源", selection: $windowState.source) {
           ForEach(LogSource.allCases) { source in
             Text(source.label).tag(source)
           }
@@ -163,7 +163,7 @@ struct DiagnosticsView: View {
 
   /// 当前日志来源的文本与空态提示（呈现与复制共用同一来源，story 21）。
   private var activeLog: (text: String, emptyMessage: String) {
-    switch source {
+    switch windowState.source {
     case .guiEvents:
       return (
         diagnostics.logView.guiEventLines.joined(separator: "\n"),
@@ -207,7 +207,7 @@ struct DiagnosticsView: View {
     do {
       try clipboard.write(text)
     } catch {
-      errors.present(error)
+      windowState.errors.present(error)
     }
   }
 }

@@ -18,7 +18,6 @@ struct MainWindowView: View {
   @ObservedObject var route: WorkspaceRoute
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
-  let diagnostics: DiagnosticsWorkflow
   let plugins: PluginManagementModel
   let settingsWorkflow: SettingsWorkflow
   let loginController: LaunchAtLoginController
@@ -28,7 +27,6 @@ struct MainWindowView: View {
   let expansion: CatalogExpansionState
   let clipboard: any TextClipboard
   let imageClipboard: any ImageClipboard
-  let diagnosticReportExporter: any DiagnosticReportExporter
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
   let qrImageSaver: any QrImageSaver
 
@@ -132,11 +130,6 @@ struct MainWindowView: View {
         silentLaunch: silentLaunch
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-    case .diagnostics:
-      DiagnosticsView(
-        diagnostics: diagnostics,
-        clipboard: clipboard,
-        exporter: diagnosticReportExporter)
     }
   }
 
@@ -155,7 +148,6 @@ extension WorkspaceDestination {
     case .subscriptions: "订阅"
     case .rules: RulesCopy.text("代理规则")
     case .settings: "设置"
-    case .diagnostics: "诊断"
     }
   }
 
@@ -166,7 +158,6 @@ extension WorkspaceDestination {
     case .subscriptions: "arrow.triangle.2.circlepath"
     case .rules: "list.bullet.rectangle"
     case .settings: "gearshape"
-    case .diagnostics: "chart.bar"
     }
   }
 }

@@ -1078,6 +1078,28 @@
           }
         }
       }
+    },
+    "诊断": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnostics"
+          }
+        }
+      }
+    },
+    "诊断…": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnostics…"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
