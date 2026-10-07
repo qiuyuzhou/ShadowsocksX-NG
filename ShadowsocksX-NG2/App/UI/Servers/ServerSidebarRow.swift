@@ -24,17 +24,9 @@ struct ServerSidebarRow: View {
   var body: some View {
     HStack(spacing: 6) {
       Image(systemName: node.isGroup ? "folder" : "server.rack")
-        .foregroundStyle(.secondary)
-      VStack(alignment: .leading, spacing: 1) {
-        Text(node.name)
-          .foregroundStyle(node.isInvalid ? .secondary : .primary)
-        if node.isGroup {
-          // 分组行尾数量说明（票 #55）：原型「手动分组 · N 项」口径。
-          Text("\(node.isManual ? "手动分组" : "订阅分组") · \(node.childCount) 项")
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-        }
-      }
+      Text(node.name)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .foregroundStyle(node.isInvalid ? .secondary : .primary)
       if node.isInvalid {
         Image(systemName: "exclamationmark.triangle.fill")
           .foregroundStyle(.orange)
@@ -48,17 +40,13 @@ struct ServerSidebarRow: View {
           .foregroundStyle(.orange)
           .help("包含 \(node.invalidDescendantCount) 个存在已知阻塞问题的服务器")
       }
-      if isSubscription {
-        Image(systemName: "arrow.triangle.2.circlepath")
-          .foregroundStyle(.tertiary)
-          .help("订阅节点：由远端管理")
-      }
       if activeTargetID == node.id {
         Image(systemName: "bolt.fill")
           .foregroundStyle(.orange)
           .help("活动目标")
       }
     }
+    .frame(minHeight: 28)
     .contextMenu { contextMenu }
   }
 
