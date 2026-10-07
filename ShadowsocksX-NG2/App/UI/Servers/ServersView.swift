@@ -36,12 +36,13 @@ struct ServersView: View {
   @State var shareContext: ShareContext?
 
   var body: some View {
-    HStack(alignment: .top, spacing: 0) {
+    // 分隔位置不持久：HSplitView 无位置 API，切标签（destination 挂载制）
+    // 与重启都会回到 idealWidth，属接受的取舍。
+    HSplitView {
       serverSidebar
-        .frame(minWidth: 240, idealWidth: 280, maxWidth: 340)
-      Divider()
+        .frame(minWidth: 240, idealWidth: 280, maxWidth: 320)
       serverDetailPane
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
     }
     .frame(minHeight: 420)
     .sheet(
@@ -93,7 +94,6 @@ struct ServersView: View {
         treeRow(row)
       }
     }
-    .listStyle(.sidebar)
     .onKeyPress(.escape) {
       guard selection != nil else { return .ignored }
       selection = nil
