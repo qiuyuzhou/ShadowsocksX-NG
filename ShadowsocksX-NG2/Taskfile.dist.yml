@@ -13,7 +13,7 @@ tasks:
       - xcodegen generate
 
   build:
-    desc: Build the ShadowsocksX-NG2 macOS application
+    desc: Build the ShadowsocksX-NG2 macOS application with Debug Config
     deps:
       - gen:prj
     cmds:
@@ -22,6 +22,20 @@ tasks:
         -project ShadowsocksX-NG2.xcodeproj
         -scheme ShadowsocksX-NG2
         -configuration Debug
+        -destination 'platform=macOS,arch=arm64'
+        -derivedDataPath {{ .DERIVED_DATA_DIR }}
+        build
+
+  build:release:
+    desc: Build the ShadowsocksX-NG2 macOS application with Release Config
+    deps:
+      - gen:prj
+    cmds:
+      - >-
+        xcodebuild
+        -project ShadowsocksX-NG2.xcodeproj
+        -scheme ShadowsocksX-NG2
+        -configuration Release
         -destination 'platform=macOS,arch=arm64'
         -derivedDataPath {{ .DERIVED_DATA_DIR }}
         build
