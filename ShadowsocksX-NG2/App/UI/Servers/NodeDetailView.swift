@@ -42,8 +42,8 @@ struct NodeDetailView<Actions: View>: View {
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.horizontal, 28)
-      .padding(.vertical, 24)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 16)
     }
   }
 }
