@@ -248,17 +248,11 @@ extension ServersView {
   @ViewBuilder
   private var serverDetailPane: some View {
     if let id = selection, let node = workflow.tree.node(withID: id) {
-      if node.isGroup {
-        GroupDetailView(
-          workflow: workflow, groupID: id,
-          activation: activation,
-          errors: errors)
-      } else {
-        ServerDetailView(
-          workflow: workflow, serverID: id, isActiveTarget: activeTargetID == id
-        )
-        .id(id)
-      }
+      CatalogNodeDetailView(
+        workflow: workflow, activation: activation, nodeID: node.id,
+        isActiveTarget: activeTargetID == id, errors: errors
+      )
+      .id(id)
     } else {
       ContentUnavailableView(
         "未选择节点", systemImage: "sidebar.left",

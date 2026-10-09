@@ -19,6 +19,7 @@ final class ActivationFeedbackState: ObservableObject {
 
   @Published private(set) var pendingTargetID: NodeID?
   @Published private(set) var feedback: Feedback?
+  @Published private(set) var feedbackTargetID: NodeID?
 
   var isPending: Bool { pendingTargetID != nil }
 
@@ -30,6 +31,7 @@ final class ActivationFeedbackState: ObservableObject {
   ) async throws -> ActivationCommandOutcome? {
     guard pendingTargetID == nil else { return nil }
     pendingTargetID = id
+    feedbackTargetID = id
     feedback = nil
     defer { pendingTargetID = nil }
     do {
