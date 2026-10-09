@@ -138,3 +138,57 @@ struct ServerTableOrderingTests {
         == ["unknown", "newer", "equal-first", "equal-second"])
   }
 }
+
+@MainActor
+struct ServerTableInsertionTests {
+  @Test
+  func insertionLinesUseTheDestinationRowsParent() throws {
+    var catalog = ConfigurationCatalog()
+    let outer = try catalog.addGroup("外层")
+    let inner = try catalog.addGroup("内层", to: outer)
+    let leaf = try catalog.addGroup("内层成员", to: inner)
+    let sibling = try catalog.addGroup("外层成员", to: outer)
+    let root = try catalog.addGroup("根层")
+    let tree = CatalogTreeSnapshot.build(
+      from: catalog, credentials: InMemoryCredentialStore(), plugins: NoManagedPluginProvider())
+    let rows = tree.visibleRows(collapsed: [])
+    #expect(rows.map(\.id) == [outer, inner, leaf, sibling, root])
+
+    #expect(ServerTableDropState.insertionParent(at: 0, in: rows) == nil)
+    #expect(ServerTableDropState.insertionParent(at: 1, in: rows) == outer)
+    #expect(ServerTableDropState.insertionParent(at: 2, in: rows) == inner)
+    #expect(ServerTableDropState.insertionParent(at: 3, in: rows) == outer)
+    #expect(ServerTableDropState.insertionParent(at: 4, in: rows) == nil)
+    #expect(ServerTableDropState.insertionParent(at: rows.count, in: rows) == nil)
+
+    let collapsed = tree.visibleRows(collapsed: [inner])
+    #expect(ServerTableDropState.insertionParent(at: 2, in: collapsed) == outer)
+    #expect(ServerTableDropState.insertionParent(at: 0, in: []) == nil)
+  }
+}
+
+@MainActor
+struct ServerTableRowDropTests {
+  @Test
+  func serverRowMovesAnOutsideNodeIntoItsContainingGroup() throws {
+    var catalog = ConfigurationCatalog()
+    let outer = try catalog.addGroup("外层")
+    let inner = try catalog.addGroup("内层", to: outer)
+    let member = try catalog.addTestServer("组内服务器", to: inner)
+    let outside = try catalog.addTestServer("组外服务器")
+    let tree = CatalogTreeSnapshot.build(
+      from: catalog, credentials: InMemoryCredentialStore(), plugins: NoManagedPluginProvider())
+    let memberNode = try #require(tree.node(withID: member))
+    let parent = ServerTableDropState.rowParent(for: memberNode)
+    #expect(parent == inner)
+    #expect(ServerTableDropState.rowParent(for: try #require(tree.node(withID: inner))) == inner)
+    #expect(ServerTableDropState.rowParent(for: try #require(tree.node(withID: outside))) == nil)
+
+    try catalog.move(outside, to: parent)
+    let movedTree = CatalogTreeSnapshot.build(
+      from: catalog, credentials: InMemoryCredentialStore(), plugins: NoManagedPluginProvider())
+    #expect(movedTree.node(withID: outside)?.parentID == inner)
+    #expect(movedTree.node(withID: member)?.parentID == inner)
+    #expect(movedTree.node(withID: inner)?.childNodes.map(\.id) == [member, outside])
+  }
+}

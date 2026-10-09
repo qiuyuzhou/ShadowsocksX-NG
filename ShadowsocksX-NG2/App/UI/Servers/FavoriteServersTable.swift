@@ -49,7 +49,7 @@ struct FavoriteServersTable<MenuContent: View>: View {
       ForEach(rows) { node in
         TableRow(node)
           .itemProvider {
-            dropState.provider(for: node.id, payload: node.id.rawValue, type: .plainText)
+            dropState.provider(for: node.id, payload: node.id.rawValue)
           }
       }
       .onInsert(of: [.plainText]) { index, providers in

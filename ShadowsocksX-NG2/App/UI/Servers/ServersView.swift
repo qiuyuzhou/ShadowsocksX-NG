@@ -175,6 +175,14 @@ struct ServersView: View {
             guard let payload = workflow.dragPayload(for: row.id) else { return nil }
             return dropState.provider(for: row.id, payload: payload)
           }
+          .dropDestination(for: String.self) { payload in
+            _ = handleDrop(payload, onto: ServerTableDropState.rowParent(for: row.node))
+          }
+      }
+      .onInsert(of: [.plainText]) { index, providers in
+        guard section == .manual, (0...rows.count).contains(index) else { return }
+        let parent = ServerTableDropState.insertionParent(at: index, in: rows)
+        dropState.loadPayload(providers) { _ = handleDrop($0, onto: parent) }
       }
     }
     .focused($isServerTableFocused)
@@ -198,13 +206,6 @@ struct ServersView: View {
         .allowsHitTesting(false)
       }
     }
-    .background { ServerTableDropReader(state: dropState) }
-    .onDrop(
-      of: [.serverCatalogNode],
-      delegate: ServerTableDropDelegate(
-        state: dropState, rows: rows, source: section.source ?? .manual, workflow: workflow,
-        onDrop: handleDrop)
-    )
   }
 
   @ViewBuilder
@@ -245,12 +246,15 @@ struct ServersView: View {
     }
   }
 
-  /// 落点语义：拖到分组行 = 移入该组（仅手动组接受），拖到列表空白/根 = 移到根。
+  /// 落点语义：分组行接收到自身，服务器行接收到所属组；行间接收到下一行所属组。
+  /// 顶部/表尾空白接收到根。
   /// 资格事实由 seam 提供；跨来源/成环仍由领域拒绝（不变量防线）。
   private func handleDrop(_ payload: [String], onto target: NodeID?) -> Bool {
-    guard payload.count == 1, let raw = payload.first else { return false }
-    let dragged = NodeID(rawValue: raw)
-    guard workflow.canMove(dragged, to: target) else { return false }
+    guard section == .manual, payload.count == 1, let raw = payload.first,
+      let dragged = dropState.draggedID, raw == dragged.rawValue,
+      workflow.canMove(dragged, to: target)
+    else { return false }
+    dropState.finishDrop()
     Task {
       do {
         try await workflow.move(dragged, to: target)
