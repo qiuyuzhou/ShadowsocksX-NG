@@ -40,7 +40,8 @@ struct ServersView: View {
     HSplitView {
       sourceSidebar
         .frame(minWidth: 120, idealWidth: 150, maxWidth: 200)
-      Group {
+      // 保持分栏容器身份稳定，切换来源时只替换内部表格。
+      ZStack(alignment: .topLeading) {
         if section == .favorites {
           FavoriteServersTable(
             workflow: workflow, activeTargetID: activeTargetID,
