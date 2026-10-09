@@ -173,7 +173,7 @@ final class CatalogFileStoreTests: XCTestCase {
 
     try store.save(loaded)
     let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
-    XCTAssertTrue(raw.contains("\"version\" : 5"))
+    XCTAssertTrue(raw.contains("\"version\" : 6"))
     XCTAssertFalse(raw.contains("\"reason\""))
     XCTAssertFalse(raw.contains("provider.example"))
   }
@@ -203,7 +203,7 @@ final class CatalogFileStoreTests: XCTestCase {
     try store.save(loaded)
 
     let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
-    XCTAssertTrue(raw.contains("\"version\" : 5"))
+    XCTAssertTrue(raw.contains("\"version\" : 6"))
     XCTAssertFalse(raw.contains("\"enabled\""), "v3 起不再写出节点级 enabled")
   }
 

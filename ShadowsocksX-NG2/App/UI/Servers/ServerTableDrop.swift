@@ -12,18 +12,24 @@ final class ServerTableDropState {
   weak var reader: ServerTableDropReaderView?
   private(set) var draggedID: NodeID?
 
-  func provider(for id: NodeID, payload: String) -> NSItemProvider {
+  func provider(for id: NodeID, payload: String, type: UTType = .serverCatalogNode)
+    -> NSItemProvider
+  {
     draggedID = id
+    // 原生 Table 行间插入使用系统字符串表示；接收方仍校验本表拖动的节点身份。
+    if type == .plainText { return NSItemProvider(object: payload as NSString) }
     let provider = NSItemProvider()
     let data = Data(payload.utf8)
     provider.registerDataRepresentation(
-      forTypeIdentifier: UTType.serverCatalogNode.identifier, visibility: .ownProcess
+      forTypeIdentifier: type.identifier, visibility: .ownProcess
     ) { completion in
       completion(data, nil)
       return nil
     }
     return provider
   }
+
+  func finishDrop() { draggedID = nil }
 }
 
 /// SwiftUI TableRowContent 的 dropDestination 不能返回拒绝结果。

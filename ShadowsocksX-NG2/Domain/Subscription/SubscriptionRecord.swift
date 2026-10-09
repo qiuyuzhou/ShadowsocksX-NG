@@ -76,18 +76,21 @@ enum SubscriptionRefreshStatus: Codable, Equatable, Sendable {
   }
 }
 
-/// 配置目录持久化文档的完整形态：结构树 + 订阅源记录。两者一次原子落盘，
+/// 配置目录持久化文档：结构树、订阅源记录与有序收藏一次原子落盘，
 /// 保证「订阅记录 ↔ 固定分组子树」跨文档一致。
 struct CatalogDocument: Equatable, Sendable {
   var catalog: ConfigurationCatalog
   var subscriptions: [SubscriptionRecord]
+  var favoriteIDs: [NodeID]
 
   init(
     catalog: ConfigurationCatalog = ConfigurationCatalog(),
-    subscriptions: [SubscriptionRecord] = []
+    subscriptions: [SubscriptionRecord] = [],
+    favoriteIDs: [NodeID] = []
   ) {
     self.catalog = catalog
     self.subscriptions = subscriptions
+    self.favoriteIDs = favoriteIDs
   }
 }
 

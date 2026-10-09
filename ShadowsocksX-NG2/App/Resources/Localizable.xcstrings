@@ -1188,6 +1188,28 @@
           }
         }
       }
+    },
+    "收藏": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorites"
+          }
+        }
+      }
+    },
+    "路径": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Path"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

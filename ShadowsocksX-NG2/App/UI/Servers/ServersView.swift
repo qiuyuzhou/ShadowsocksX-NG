@@ -12,7 +12,7 @@ struct ServersView: View {
   /// ServerTableNameCell/ServerDetailView 的传参先例同法）。
   let activeTargetID: NodeID?
   @Binding var selection: NodeID?
-  @Binding var source: NodeSource
+  @Binding var section: ServerListSection
   @Binding var sortOrder: [ServerTableSort]
   /// 服务器管理的展开状态跨工作区页面切换保留，不落盘。
   @ObservedObject var expansion: CatalogExpansionState
@@ -40,8 +40,17 @@ struct ServersView: View {
     HSplitView {
       sourceSidebar
         .frame(minWidth: 120, idealWidth: 150, maxWidth: 200)
-      serverTable
-        .frame(minWidth: 380, idealWidth: 520, maxWidth: .infinity)
+      Group {
+        if section == .favorites {
+          FavoriteServersTable(
+            workflow: workflow, activeTargetID: activeTargetID,
+            selection: $selection, errors: errors, contextMenu: nodeContextMenu)
+        } else {
+          serverTable
+        }
+      }
+      .toolbar { toolbarContent }
+      .frame(minWidth: 380, idealWidth: 520, maxWidth: .infinity)
       // 分栏身份必须稳定；节点身份只重建内部详情会话，保留用户拖动后的宽度。
       ZStack(alignment: .topLeading) {
         serverDetailPane
@@ -83,27 +92,39 @@ struct ServersView: View {
     .onChange(of: selection) {
       shareContext = nil
     }
+    .onChange(of: workflow.favoriteIDs) {
+      if section == .favorites, let selection, !workflow.isFavorite(selection) {
+        self.selection = nil
+      }
+    }
+    .onChange(of: workflow.tree) {
+      if let selection, !workflow.tree.containsNode(selection) {
+        self.selection = nil
+      }
+    }
   }
 
   private var sourceSidebar: some View {
     List(
-      selection: Binding<NodeSource?>(
-        get: { source },
+      selection: Binding<ServerListSection?>(
+        get: { section },
         set: { value in
-          guard let value, value != source else { return }
+          guard let value, value != section else { return }
           selection = nil
-          source = value
+          section = value
         })
     ) {
-      Label("本地", systemImage: "internaldrive").tag(NodeSource.manual)
-      Label("订阅", systemImage: "arrow.triangle.2.circlepath").tag(NodeSource.subscription)
+      Label("收藏", systemImage: "star").tag(ServerListSection.favorites)
+      Label("本地", systemImage: "internaldrive").tag(ServerListSection.manual)
+      Label("订阅", systemImage: "arrow.triangle.2.circlepath").tag(ServerListSection.subscription)
     }
     .listStyle(.sidebar)
   }
 
   private var serverTable: some View {
     let rows = workflow.tree.visibleRows(
-      source: source, sortedBy: sortOrder, collapsed: expansion.collapsedGroupIDs)
+      source: section.source ?? .manual, sortedBy: sortOrder, collapsed: expansion.collapsedGroupIDs
+    )
     let depths = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.depth) })
     return Table(
       of: CatalogTreeNode.self, selection: $selection,
@@ -132,6 +153,12 @@ struct ServersView: View {
         .padding(.leading, CGFloat(depths[node.id] ?? 0) * 14)
       }
       .width(min: 160, ideal: 240)
+      TableColumn("收藏") { node in
+        Image(systemName: workflow.isFavorite(node.id) ? "star.fill" : "star")
+          .accessibilityLabel(Text("收藏"))
+          .accessibilityValue(Text(workflow.isFavorite(node.id) ? "收藏" : "—"))
+      }
+      .width(44)
       TableColumn("创建时间", sortUsing: ServerTableSort(.createdAt)) { node in
         timestampCell(node.createdAt)
       }
@@ -155,15 +182,7 @@ struct ServersView: View {
         if !isServerTableFocused { isServerTableFocused = true }
       }
     )
-    .contextMenu(forSelectionType: NodeID.self) { ids in
-      if let id = ids.first, let node = workflow.tree.node(withID: id) {
-        ServerNodeContextMenu(
-          node: node, workflow: workflow, activation: activation, errors: errors,
-          onEdit: presentEditServer, onRename: { renameTarget = $0 },
-          onNewGroup: presentNewGroup, onDuplicate: duplicateNode,
-          onDelete: { deleteTarget = $0 }, onExport: exportConfigurationGroup)
-      }
-    }
+    .contextMenu(forSelectionType: NodeID.self, menu: nodeContextMenu)
     .onKeyPress(.escape) {
       guard selection != nil else { return .ignored }
       selection = nil
@@ -182,9 +201,20 @@ struct ServersView: View {
     .onDrop(
       of: [.serverCatalogNode],
       delegate: ServerTableDropDelegate(
-        state: dropState, rows: rows, source: source, workflow: workflow, onDrop: handleDrop)
+        state: dropState, rows: rows, source: section.source ?? .manual, workflow: workflow,
+        onDrop: handleDrop)
     )
-    .toolbar { toolbarContent }
+  }
+
+  @ViewBuilder
+  private func nodeContextMenu(_ ids: Set<NodeID>) -> some View {
+    if let id = ids.first, let node = workflow.tree.node(withID: id) {
+      ServerNodeContextMenu(
+        node: node, workflow: workflow, activation: activation, errors: errors,
+        onEdit: presentEditServer, onRename: { renameTarget = $0 },
+        onNewGroup: presentNewGroup, onDuplicate: duplicateNode,
+        onDelete: { deleteTarget = $0 }, onExport: exportConfigurationGroup)
+    }
   }
 
   private func timestampCell(_ date: Date?) -> some View {
@@ -267,41 +297,43 @@ extension ServersView {
 
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
-    ToolbarItem(placement: .primaryAction) {
-      Menu {
-        Picker(
-          "排序",
-          selection: Binding<ServerTableSort.Field?>(
-            get: { sortOrder.first?.field },
-            set: { field in sortOrder = field.map { [ServerTableSort($0)] } ?? [] })
-        ) {
-          Text("无").tag(nil as ServerTableSort.Field?)
-          Text("名称").tag(ServerTableSort.Field.name as ServerTableSort.Field?)
-          Text("创建时间").tag(ServerTableSort.Field.createdAt as ServerTableSort.Field?)
-          Text("修改时间").tag(ServerTableSort.Field.updatedAt as ServerTableSort.Field?)
+    if section != .favorites {
+      ToolbarItem(placement: .primaryAction) {
+        Menu {
+          Picker(
+            "排序",
+            selection: Binding<ServerTableSort.Field?>(
+              get: { sortOrder.first?.field },
+              set: { field in sortOrder = field.map { [ServerTableSort($0)] } ?? [] })
+          ) {
+            Text("无").tag(nil as ServerTableSort.Field?)
+            Text("名称").tag(ServerTableSort.Field.name as ServerTableSort.Field?)
+            Text("创建时间").tag(ServerTableSort.Field.createdAt as ServerTableSort.Field?)
+            Text("修改时间").tag(ServerTableSort.Field.updatedAt as ServerTableSort.Field?)
+          }
+          .pickerStyle(.inline)
+        } label: {
+          Label("排序", systemImage: "arrow.up.arrow.down")
         }
-        .pickerStyle(.inline)
-      } label: {
-        Label("排序", systemImage: "arrow.up.arrow.down")
+        .labelStyle(.iconOnly)
+        .help("排序")
       }
-      .labelStyle(.iconOnly)
-      .help("排序")
-    }
-    ToolbarItem(placement: .primaryAction) {
-      Button {
-        presentNewServer(in: workflow.importTargetParent(for: selection))
-      } label: {
-        Label("新建服务器", systemImage: "plus")
+      ToolbarItem(placement: .primaryAction) {
+        Button {
+          presentNewServer(in: workflow.importTargetParent(for: selection))
+        } label: {
+          Label("新建服务器", systemImage: "plus")
+        }
+        .help("新建服务器")
       }
-      .help("新建服务器")
-    }
-    ToolbarItem(placement: .primaryAction) {
-      Button {
-        presentNewGroup(in: workflow.importTargetParent(for: selection))
-      } label: {
-        Label("新建分组", systemImage: "folder.badge.plus")
+      ToolbarItem(placement: .primaryAction) {
+        Button {
+          presentNewGroup(in: workflow.importTargetParent(for: selection))
+        } label: {
+          Label("新建分组", systemImage: "folder.badge.plus")
+        }
+        .help("新建分组")
       }
-      .help("新建分组")
     }
     ToolbarItem(placement: .primaryAction) {
       Button {
@@ -385,7 +417,7 @@ extension ServersView {
   }
 
   private func selectCreatedNode(_ id: NodeID) {
-    source = .manual
+    section = .manual
     expansion.reveal(id, in: workflow.tree)
     selection = id
   }

@@ -9,6 +9,7 @@ struct ImportServersSheet: View {
   let workflow: CatalogWorkflow
   let clipboard: any TextClipboard
   @Binding var selection: NodeID?
+  var selectNewNodes = false
   @Environment(\.dismiss) private var dismiss
 
   @State private var resultRows: [ImportResultRow] = []
@@ -159,7 +160,9 @@ struct ImportServersSheet: View {
           ImportOutcomePresentation.row(
             for: sourceOutcome, targetName: targetDisplayName(for: sourceOutcome.result))
         })
-      if let candidate = outcome.selectionCandidate {
+      if let candidate = selectNewNodes
+        ? outcome.newNodeSelectionCandidate : outcome.selectionCandidate
+      {
         selection = candidate
       }
       isImporting = false

@@ -14,9 +14,9 @@ struct CatalogFileStore {
 
   /// v2 起携带订阅记录；v1（无订阅字段）仍可读取。v3 移除节点级 enabled
   /// 语义；v4 把订阅失败字符串替换为 typed facts；v5 增加节点创建/修改时间
-  /// （v1–v4 读取为 nil 未知，不回填）。读取兼容 v1–v5，写入始终使用 v5。
-  private static let supportedVersions: Set<Int> = [1, 2, 3, 4, 5]
-  private static let currentVersion = 5
+  /// （v1–v4 读取为 nil 未知，不回填）；v6 增加有序收藏。读取兼容 v1–v6。
+  private static let supportedVersions: Set<Int> = [1, 2, 3, 4, 5, 6]
+  private static let currentVersion = 6
   private static let jsonEncoder: JSONEncoder = {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -46,11 +46,12 @@ struct CatalogFileStore {
 
   /// 整体重写并原子替换；失败时保留原文件。目录按 D5 基线强制 0700（含自愈）。
   func save(_ document: CatalogDocument) throws {
+    try validateFavorites(document.favoriteIDs, in: document.catalog)
     let payload = CatalogFilePayload(
       version: Self.currentVersion,
       rootChildren: document.catalog.rootChildren,
       entries: document.catalog.entries.values.sorted { $0.id.rawValue < $1.id.rawValue },
-      subscriptions: document.subscriptions)
+      subscriptions: document.subscriptions, favoriteIDs: document.favoriteIDs)
     let data: Data
     do {
       data = try Self.jsonEncoder.encode(payload)
@@ -105,17 +106,31 @@ struct CatalogFileStore {
           detail: "subscription group missing \(record.groupID.rawValue)")
       }
     }
-    return CatalogDocument(catalog: catalog, subscriptions: subscriptions)
+    let favoriteIDs = payload.favoriteIDs ?? []
+    try validateFavorites(favoriteIDs, in: catalog)
+    return CatalogDocument(
+      catalog: catalog, subscriptions: subscriptions, favoriteIDs: favoriteIDs)
   }
+
+  private func validateFavorites(_ ids: [NodeID], in catalog: ConfigurationCatalog) throws {
+    var seen = Set<NodeID>()
+    for id in ids {
+      guard seen.insert(id).inserted, catalog.entry(for: id) != nil else {
+        throw PersistenceError.corrupt(detail: "duplicate or missing favorite node \(id.rawValue)")
+      }
+    }
+  }
+
 }
 
 /// 落盘文档形态：版本号 + 根子序 + 全量节点表（顺序语义在根序与分组显子序中）
 /// + 订阅记录（v2 起携带；v1 缺省为空）。v3 节点条目不再写出 `enabled`；
 /// v4 的失败状态只写 typed facts，不再写旧 `reason` 字段；v5 节点条目携带
-/// 创建/修改时间，未知（历史文档迁移节点）省略键。
+/// 创建/修改时间，未知（历史文档迁移节点）省略键；v6 保存独立的收藏序列。
 private struct CatalogFilePayload: Codable {
   var version: Int
   var rootChildren: [NodeID]
   var entries: [CatalogEntry]
   var subscriptions: [SubscriptionRecord]?
+  var favoriteIDs: [NodeID]?
 }

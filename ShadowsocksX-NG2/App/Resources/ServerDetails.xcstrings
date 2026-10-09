@@ -319,6 +319,28 @@
           }
         }
       }
+    },
+    "收藏": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorite"
+          }
+        }
+      }
+    },
+    "取消收藏": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unfavorite"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

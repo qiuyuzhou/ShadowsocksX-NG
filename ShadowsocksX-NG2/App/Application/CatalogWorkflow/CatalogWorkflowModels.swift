@@ -98,13 +98,18 @@ struct CatalogTreeSnapshot: Equatable {
   /// 活动目标的显示名路径（根 → 节点，" / " 连接）；目标不在树中为 nil。
   /// 代理控制窄缝经此取安全路径摘要（issue #47），树结构不出目录 module。
   func pathSummary(for id: NodeID) -> String? {
+    pathComponents(for: id)?.joined(separator: " / ")
+  }
+
+  /// 节点的名称路径；分隔符与来源标签由呈现层决定。
+  func pathComponents(for id: NodeID) -> [String]? {
     guard var node = self.node(withID: id) else { return nil }
     var names = [node.name]
     while let parentID = node.parentID, let parent = self.node(withID: parentID) {
       names.insert(parent.name, at: 0)
       node = parent
     }
-    return names.joined(separator: " / ")
+    return names
   }
 
   /// 全树已知无效服务器总数（诊断计数）。

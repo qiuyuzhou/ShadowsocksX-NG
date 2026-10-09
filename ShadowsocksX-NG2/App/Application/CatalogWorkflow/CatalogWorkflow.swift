@@ -19,6 +19,7 @@ import Foundation
 final class CatalogWorkflow: ObservableObject {
   /// 目录树 projection（侧栏、级联、移动目的地、删除确认共用）。
   @Published private(set) var tree: CatalogTreeSnapshot
+  @Published private(set) var favoriteIDs: [NodeID]
   /// 订阅卡片 projection（非敏感）。
   @Published private(set) var subscriptions: [SubscriptionSummary] = []
   /// 正在刷新的订阅身份（并发守卫的只读观察面）。
@@ -53,6 +54,7 @@ final class CatalogWorkflow: ObservableObject {
   init(dependencies: CatalogWorkflowDependencies) {
     self.dependencies = dependencies
     let coordinator = dependencies.coordinator
+    favoriteIDs = coordinator.committedFavoriteIDs
     tree = .build(
       from: coordinator.committedCatalog,
       credentials: dependencies.credentials, plugins: dependencies.plugins)
@@ -88,6 +90,37 @@ final class CatalogWorkflow: ObservableObject {
   /// 行显示名（导航标题、重命名预填等）；节点不存在为空串。
   func displayName(for id: NodeID) -> String {
     dependencies.coordinator.committedCatalog.entry(for: id)?.displayName ?? ""
+  }
+
+  /// 有序平面收藏；配置组只返回自身，详情仍使用同一个节点身份。
+  var favorites: [CatalogTreeNode] {
+    favoriteIDs.compactMap { tree.node(withID: $0) }
+  }
+
+  func isFavorite(_ id: NodeID) -> Bool { favoriteIDs.contains(id) }
+
+  func setFavorite(_ id: NodeID, isFavorite: Bool) throws {
+    guard tree.containsNode(id) else { throw CatalogError.nodeNotFound(id) }
+    var updated = favoriteIDs
+    if isFavorite {
+      if !updated.contains(id) { updated.append(id) }
+    } else {
+      updated.removeAll { $0 == id }
+    }
+    try dependencies.coordinator.commitFavorites(updated)
+    favoriteIDs = dependencies.coordinator.committedFavoriteIDs
+  }
+
+  /// 将收藏移至指定收藏前；nil 表示末尾，不接受未收藏的节点。
+  func moveFavorite(_ id: NodeID, before target: NodeID?) throws {
+    guard favoriteIDs.contains(id) else { throw CatalogError.nodeNotFound(id) }
+    if let target, !favoriteIDs.contains(target) { throw CatalogError.nodeNotFound(target) }
+    guard id != target else { return }
+    var updated = favoriteIDs.filter { $0 != id }
+    let index = target.flatMap { updated.firstIndex(of: $0) } ?? updated.endIndex
+    updated.insert(id, at: index)
+    try dependencies.coordinator.commitFavorites(updated)
+    favoriteIDs = dependencies.coordinator.committedFavoriteIDs
   }
 
   /// 服务器叶子的已知阻塞原因（typed；编辑面「激活状态」区）。
@@ -361,6 +394,7 @@ final class CatalogWorkflow: ObservableObject {
   /// 提交成功后的 projection 重建（树 + 订阅卡片）。
   func republishCommittedState() {
     let coordinator = dependencies.coordinator
+    favoriteIDs = coordinator.committedFavoriteIDs
     tree = .build(
       from: coordinator.committedCatalog,
       credentials: dependencies.credentials, plugins: dependencies.plugins)

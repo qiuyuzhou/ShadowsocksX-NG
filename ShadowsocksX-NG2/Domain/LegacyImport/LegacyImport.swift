@@ -198,7 +198,9 @@ struct LegacyImportPlanner {
       regeneratedIdentityCount: serverImport.regeneratedIdentityCount)
     return LegacyImportPlan(
       groupID: groupID,
-      document: CatalogDocument(catalog: catalog, subscriptions: existingDocument.subscriptions),
+      document: CatalogDocument(
+        catalog: catalog, subscriptions: existingDocument.subscriptions,
+        favoriteIDs: existingDocument.favoriteIDs),
       credentials: serverImport.credentials,
       report: report)
   }

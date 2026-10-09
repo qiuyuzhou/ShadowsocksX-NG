@@ -38,12 +38,14 @@ struct CatalogCommitBootstrap {
   let catalogSnapshotReader: RuntimeCatalogSnapshotReading
   fileprivate let committedCatalogState: CommittedCatalogState
   fileprivate let subscriptions: [SubscriptionRecord]
+  fileprivate let favoriteIDs: [NodeID]
 
   fileprivate init(document: CatalogDocument) {
     let state = CommittedCatalogState(catalog: document.catalog)
     catalogSnapshotReader = state
     committedCatalogState = state
     subscriptions = document.subscriptions
+    favoriteIDs = document.favoriteIDs
   }
 }
 
@@ -106,6 +108,7 @@ final class CatalogCommitCoordinator {
   /// 目录在共享来源中只有一份；订阅状态仍由协调器持有。
   var committedCatalog: ConfigurationCatalog { catalogState.catalogSnapshot }
   private(set) var committedSubscriptions: [SubscriptionRecord]
+  private(set) var committedFavoriteIDs: [NodeID]
 
   init(
     fileStore: CatalogFileStore,
@@ -116,6 +119,7 @@ final class CatalogCommitCoordinator {
     self.runtime = runtime
     catalogState = bootstrap.committedCatalogState
     committedSubscriptions = bootstrap.subscriptions
+    committedFavoriteIDs = bootstrap.favoriteIDs
   }
 
   /// Test and isolated-module convenience: still performs exactly one document
@@ -140,13 +144,27 @@ final class CatalogCommitCoordinator {
     var workingCatalog = committedCatalog
     var workingSubscriptions = committedSubscriptions
     let result = try mutate(&workingCatalog, &workingSubscriptions)
+    let workingFavorites = committedFavoriteIDs.filter { workingCatalog.entry(for: $0) != nil }
     try fileStore.save(
-      CatalogDocument(catalog: workingCatalog, subscriptions: workingSubscriptions))
+      CatalogDocument(
+        catalog: workingCatalog, subscriptions: workingSubscriptions,
+        favoriteIDs: workingFavorites))
     catalogState.publish(workingCatalog)
     committedSubscriptions = workingSubscriptions
+    committedFavoriteIDs = workingFavorites
     scheduleRuntimeSync(
       CommittedCatalogSnapshot(catalog: workingCatalog, subscriptions: workingSubscriptions))
     return result
+  }
+
+  /// 收藏只改变用户选择，不调度运行时收敛，也不修改目录节点时间戳。
+  func commitFavorites(_ favoriteIDs: [NodeID]) throws {
+    guard favoriteIDs != committedFavoriteIDs else { return }
+    try fileStore.save(
+      CatalogDocument(
+        catalog: committedCatalog, subscriptions: committedSubscriptions,
+        favoriteIDs: favoriteIDs))
+    committedFavoriteIDs = favoriteIDs
   }
 
   /// Legacy 导入等独立路径直接落盘后对齐已提交状态；不触发运行时收敛
@@ -155,6 +173,7 @@ final class CatalogCommitCoordinator {
     let document = Self.loadCommitted(from: fileStore)
     catalogState.publish(document.catalog)
     committedSubscriptions = document.subscriptions
+    committedFavoriteIDs = document.favoriteIDs
   }
 
   /// 异步收敛调度：无活动目标不调用运行时；同步开始前与结束后都以代次

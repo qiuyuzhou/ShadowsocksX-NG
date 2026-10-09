@@ -14,7 +14,9 @@ extension CatalogWorkflow {
     -> ImportRunOutcome
   {
     var outcomes: [ImportSourceOutcome] = []
+    var newSelection: NodeID?
     for source in sources {
+      let previousIDs = Set(importChildren(of: parent).map(\.id))
       let result: ImportSourceResult
       switch source {
       case .clipboardText(let text):
@@ -25,8 +27,16 @@ extension CatalogWorkflow {
           name: name, data: data, into: parent, credentials: dependencies.credentials)
       }
       outcomes.append(ImportSourceOutcome(source: source, result: result))
+      if let created = importChildren(of: parent).last(where: { !previousIDs.contains($0.id) }) {
+        newSelection = created.id
+      }
     }
-    return ImportRunOutcome(sources: outcomes)
+    return ImportRunOutcome(sources: outcomes, newNodeSelectionCandidate: newSelection)
+  }
+
+  private func importChildren(of parent: NodeID?) -> [CatalogTreeNode] {
+    if let parent { return tree.node(withID: parent)?.childNodes ?? [] }
+    return tree.roots
   }
 
   /// 单文件分派：内容优先嗅探。可解码位图（ImageIO 事实）走二维码；内容为

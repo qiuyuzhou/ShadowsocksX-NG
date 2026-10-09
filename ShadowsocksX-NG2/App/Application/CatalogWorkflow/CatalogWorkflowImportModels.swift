@@ -18,6 +18,8 @@ enum ImportSource: Equatable, Sendable {
 /// 主 actor，无跨域传递）。
 struct ImportRunOutcome {
   let sources: [ImportSourceOutcome]
+  /// 最后一个成功来源创建的节点；供收藏页导入后进入本地列表。
+  var newNodeSelectionCandidate: NodeID?
 
   /// 成功来源中的落点/新建分组（最后一个），供导入后选中；nil 表示无可
   /// 选中目标（全部失败，或只导入了目录根层的文本来源）。
