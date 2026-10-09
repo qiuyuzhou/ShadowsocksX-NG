@@ -36,17 +36,14 @@ struct ServersView: View {
   @State var shareContext: ShareContext?
 
   var body: some View {
-    NavigationSplitView {
+    HSplitView {
       sourceSidebar
-        .navigationSplitViewColumnWidth(min: 120, ideal: 150, max: 200)
-    } content: {
+        .frame(minWidth: 120, idealWidth: 150, maxWidth: 200)
       serverTable
-        .navigationSplitViewColumnWidth(min: 380, ideal: 520)
-    } detail: {
+        .frame(minWidth: 380, idealWidth: 520, maxWidth: .infinity)
       serverDetailPane
         .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
     }
-    .navigationSplitViewStyle(.balanced)
     .frame(minHeight: 420)
     .sheet(
       item: Binding(
