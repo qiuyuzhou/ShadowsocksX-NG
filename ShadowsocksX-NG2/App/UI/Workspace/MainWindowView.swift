@@ -10,7 +10,7 @@ private enum WorkspaceSheet: String, Identifiable {
 
 /// 主窗口标签页外壳：WorkspaceRoute 持有导航位置；各分区持有页级动作。
 /// 仅当前 destination 挂载内容，延续切页清理草稿与取消页面任务的生命周期；
-/// 浏览状态与激活反馈仍由窗口壳或组合根持有，跨标签切换存续。
+/// 激活反馈仍由窗口壳持有，跨标签切换存续。
 struct MainWindowView: View {
   /// 纯转发的分区工作流与控制器：壳 body 不读它们（分区视图自行观察），
   /// 用 let 转发，壳不重复订阅它们的发布。
@@ -23,15 +23,14 @@ struct MainWindowView: View {
   let loginController: LaunchAtLoginController
   let silentLaunch: SilentLaunchController
   /// 目录树折叠状态：组合根持有的长寿命对象，跨 destination 切换存续；服务器
-  /// 侧栏使用（见 CatalogExpansionState）；首页独立保存浏览状态。
+  /// 侧栏使用（见 CatalogExpansionState）。
   let expansion: CatalogExpansionState
   let clipboard: any TextClipboard
   let imageClipboard: any ImageClipboard
   let configurationGroupFileExporter: any ConfigurationGroupFileExporter
   let qrImageSaver: any QrImageSaver
 
-  @StateObject private var homeServerList = HomeServerListState()
-  /// 激活反馈共享状态：首页目标树、侧栏右键与分组详情三个激活入口共用。
+  /// 激活反馈共享状态：侧栏右键与分组详情两个激活入口共用。
   @StateObject private var activationFeedback = ActivationFeedbackState()
   /// 系统标签选择先落在 SwiftUI 自管状态，再同步到 route，避免在视图
   /// 更新期间发布；外部导航反向同步，route 仍是导航位置的唯一来源。
@@ -63,9 +62,6 @@ struct MainWindowView: View {
       if tabSelection != destination {
         tabSelection = destination
       }
-    }
-    .onChange(of: workflow.tree, initial: true) {
-      homeServerList.update(tree: workflow.tree, activeTargetID: control.snapshot.activeTarget?.id)
     }
     .navigationTitle(route.destination.label)
     .frame(minWidth: 920, minHeight: 580)
@@ -103,10 +99,7 @@ struct MainWindowView: View {
       WorkspaceHomeView(
         workflow: workflow,
         control: control,
-        serverList: homeServerList,
-        activation: activationFeedback,
-        clipboard: clipboard,
-        onManageServers: { route.navigate(to: .servers) })
+        clipboard: clipboard)
     case .servers:
       ServersView(
         workflow: workflow,
@@ -170,20 +163,14 @@ extension WorkspaceDestination {
 private struct WorkspaceHomeView: View {
   @ObservedObject var workflow: CatalogWorkflow
   @ObservedObject var control: ProxyControlWorkflow
-  let serverList: HomeServerListState
-  let activation: ActivationFeedbackState
   let clipboard: any TextClipboard
-  let onManageServers: () -> Void
   @StateObject private var errors = ErrorAlertPresenter()
 
   var body: some View {
     HomeView(
       workflow: workflow,
       control: control,
-      serverList: serverList,
-      activation: activation,
       clipboard: clipboard,
-      onManageServers: onManageServers,
       errors: errors
     )
     .presentingErrors(errors)
