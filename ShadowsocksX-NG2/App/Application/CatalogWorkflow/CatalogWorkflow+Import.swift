@@ -83,8 +83,9 @@ extension CatalogWorkflow {
     }
     do {
       try commit { catalog in
+        let now = Date()
         for fields in prepared {
-          try catalog.addServer(fields, to: parent)
+          try catalog.addServer(fields, to: parent, now: now)
         }
       }
     } catch {
@@ -137,9 +138,14 @@ extension CatalogWorkflow {
     var journal = CredentialWriteJournal(credentials: credentials)
     do {
       let rootID = try commit { catalog in
-        try Self.mountImportSnapshot(
-          snapshot, fileNameFallback: Self.fileNameBase(fileName),
-          into: &catalog, parent: parent, journal: &journal)
+        // 一次导入一个写入时刻：根分组与全部后代节点共用（ADR-0031）。
+        let now = Date()
+        let base = snapshot.root.name.isEmpty ? Self.fileNameBase(fileName) : snapshot.root.name
+        let rootID = try catalog.addGroup(
+          Self.uniqueGroupName(base, in: catalog), to: parent, now: now)
+        try Self.mountSnapshotChildren(
+          of: snapshot.root, into: rootID, catalog: &catalog, journal: &journal, now: now)
+        return rootID
       }
       return .imported(count: Self.snapshotServerCount(snapshot.root), groupID: rootID)
     } catch {
@@ -148,38 +154,25 @@ extension CatalogWorkflow {
     }
   }
 
-  /// 快照 → 手动子树：根分组整棵挂入选中落点，嵌套分组与服务器按快照顺序
-  /// 重建。根组名取扩展根组名，缺失（扁平回退）时以文件名兜底，重名加序号。
-  private static func mountImportSnapshot(
-    _ snapshot: SubscriptionSnapshot,
-    fileNameFallback: String,
-    into catalog: inout ConfigurationCatalog,
-    parent: NodeID?,
-    journal: inout CredentialWriteJournal
-  ) throws -> NodeID {
-    let base = snapshot.root.name.isEmpty ? fileNameFallback : snapshot.root.name
-    let rootID = try catalog.addGroup(uniqueGroupName(base, in: catalog), to: parent)
-    try mountSnapshotChildren(
-      of: snapshot.root, into: rootID, catalog: &catalog, journal: &journal)
-    return rootID
-  }
-
+  /// 快照后代 → 手动子树：嵌套分组与服务器按快照顺序重建（根分组由调用方
+  /// 挂载）。嵌套组缺名以占位名兜底。
   private static func mountSnapshotChildren(
     of group: SubscriptionSnapshot.Group,
     into groupID: NodeID,
     catalog: inout ConfigurationCatalog,
-    journal: inout CredentialWriteJournal
+    journal: inout CredentialWriteJournal,
+    now: Date
   ) throws {
     for child in group.children {
       switch child {
       case .group(let nested):
         let nestedID = try catalog.addGroup(
-          nested.name.isEmpty ? "未命名分组" : nested.name, to: groupID)
+          nested.name.isEmpty ? "未命名分组" : nested.name, to: groupID, now: now)
         try mountSnapshotChildren(
-          of: nested, into: nestedID, catalog: &catalog, journal: &journal)
+          of: nested, into: nestedID, catalog: &catalog, journal: &journal, now: now)
       case .server(let leaf):
         try catalog.addServer(
-          importServerFields(from: leaf.record, journal: &journal), to: groupID)
+          importServerFields(from: leaf.record, journal: &journal), to: groupID, now: now)
       }
     }
   }

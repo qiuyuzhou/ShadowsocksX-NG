@@ -78,10 +78,12 @@ extension ConfigurationCatalog {
     source: NodeSource = .manual,
     id: NodeID? = nil,
     to parent: NodeID? = nil,
-    index: Int? = nil
+    index: Int? = nil,
+    now: Date = Date()
   ) throws -> NodeID {
     try addServer(
-      CatalogFixtures.serverFields(remark: remark), source: source, id: id, to: parent, index: index
+      CatalogFixtures.serverFields(remark: remark), source: source, id: id, to: parent,
+      index: index, now: now
     )
   }
 }

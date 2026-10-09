@@ -140,7 +140,7 @@ final class CatalogFileStoreTests: XCTestCase {
       "订阅 URL 明文不得落盘（D5：只存凭据引用）")
   }
 
-  func testV3FailureReasonMigratesToLegacyAndV4SaveRemovesReason() throws {
+  func testV3FailureReasonMigratesToLegacyAndNextSaveRemovesReason() throws {
     let fixture = try CatalogFixtures.makeSubscriptionFixture(prefix: "migration")
     let record = SubscriptionRecord(
       id: NodeID(rawValue: "migration:source"),
@@ -173,7 +173,7 @@ final class CatalogFileStoreTests: XCTestCase {
 
     try store.save(loaded)
     let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
-    XCTAssertTrue(raw.contains("\"version\" : 4"))
+    XCTAssertTrue(raw.contains("\"version\" : 5"))
     XCTAssertFalse(raw.contains("\"reason\""))
     XCTAssertFalse(raw.contains("provider.example"))
   }
@@ -190,7 +190,7 @@ final class CatalogFileStoreTests: XCTestCase {
     XCTAssertTrue(loaded.catalog.isEmpty)
   }
 
-  func testLegacyEnabledFieldIsIgnoredAndNextSaveWritesV4WithoutIt() throws {
+  func testLegacyEnabledFieldIsIgnoredAndNextSaveWritesCurrentVersionWithoutIt() throws {
     let payload = """
       {"version": 1, "rootChildren": ["g"], "entries": [
         {"id": "g", "source": "manual", "enabled": false,
@@ -203,8 +203,49 @@ final class CatalogFileStoreTests: XCTestCase {
     try store.save(loaded)
 
     let raw = try String(contentsOf: store.fileURL, encoding: .utf8)
-    XCTAssertTrue(raw.contains("\"version\" : 4"))
-    XCTAssertFalse(raw.contains("\"enabled\""), "v4 不再写出节点级 enabled")
+    XCTAssertTrue(raw.contains("\"version\" : 5"))
+    XCTAssertFalse(raw.contains("\"enabled\""), "v3 起不再写出节点级 enabled")
+  }
+
+  // MARK: 节点时间戳（v5，ADR-0031）
+
+  func testNodeTimestampsRoundTripLosslessly() throws {
+    var catalog = ConfigurationCatalog()
+    let created = Date(timeIntervalSince1970: 1_700_000_000)
+    let id = try catalog.addServer(
+      ServerFields(
+        address: "198.51.100.9",
+        port: 8388,
+        encryptionMethod: "aes-256-gcm",
+        passwordRef: CredentialReference(rawValue: "ref-timestamps"),
+        remark: "时间戳"
+      ),
+      id: NodeID(rawValue: "manual:timestamped"),
+      now: created
+    )
+
+    try store.save(CatalogDocument(catalog: catalog))
+    let loaded = try store.load()
+
+    let entry = try XCTUnwrap(loaded.catalog.entry(for: id))
+    XCTAssertEqual(entry.createdAt, created, "创建时间无损")
+    XCTAssertEqual(entry.updatedAt, created)
+  }
+
+  func testLegacyEntriesLoadWithUnknownTimestampsInsteadOfBackfill() throws {
+    let payload = """
+      {"version": 4, "rootChildren": ["g"], "entries": [
+        {"id": "g", "source": "manual",
+         "kind": {"group": {"_0": {"name": "G", "children": []}}}}
+      ]}
+      """
+    try payload.write(to: store.fileURL, atomically: true, encoding: .utf8)
+
+    let loaded = try store.load()
+
+    let group = try XCTUnwrap(loaded.catalog.entry(for: NodeID(rawValue: "g")))
+    XCTAssertNil(group.createdAt, "历史文档缺时间戳读取为未知，不回填")
+    XCTAssertNil(group.updatedAt)
   }
 
   /// 订阅记录 JSON 用真编码器生成：枚举 Codable 形状是实现细节，不在测试里手写。

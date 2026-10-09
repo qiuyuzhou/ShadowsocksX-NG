@@ -27,7 +27,7 @@ extension CatalogWorkflow {
       try commitSubscriptionDocument { catalog, subscriptions in
         // 固定分组挂在目录根（GLOSSARY.md「Subscription group」）；名称以 host
         // 兜底，首次成功刷新后跟随远端。
-        try catalog.addGroup(url.host ?? "", source: .subscription, id: record.groupID)
+        try catalog.addGroup(url.host ?? "", source: .subscription, id: record.groupID, now: Date())
         subscriptions.append(record)
       }
     } catch {
@@ -139,6 +139,7 @@ extension CatalogWorkflow {
     var credentialJournal = CredentialWriteJournal(credentials: dependencies.credentials)
     do {
       try commitSubscriptionDocument { catalog, subscriptions in
+        let now = Date()
         // 凭据引用按节点身份复用：延续节点覆盖写秘密，不新增孤儿引用；
         // journal 保证快照提交失败时恢复旧秘密（story 29）。
         var reusedRefs: [NodeID: ServerCredentialRefs] = [:]
@@ -154,17 +155,17 @@ extension CatalogWorkflow {
         try Task.checkCancellation()
         let name = snapshot.root.name.isEmpty ? fallbackName : snapshot.root.name
         let document = CatalogSubscriptionSnapshot(name: name, root: resolved)
-        let replacedServers = try catalog.applySubscriptionSnapshot(document, into: summary.groupID)
+        let replacedServers = try catalog.applySubscriptionSnapshot(
+          document, into: summary.groupID, now: now)
         // 快照应用返回整个旧树；延续节点仍复用引用，不能按旧树直接删除秘密。
         let retainedRefs = Set(Self.credentialRefs(of: Array(catalog.entries.values)))
         obsoleteCredentialRefs = Set(Self.credentialRefs(of: replacedServers))
           .subtracting(retainedRefs)
         if let index = subscriptions.firstIndex(where: { $0.id == summary.id }) {
-          let succeededAt = Date()
-          subscriptions[index].status = .succeeded(at: succeededAt)
+          subscriptions[index].status = .succeeded(at: now)
           subscriptions[index].information =
             snapshot.information.isEmpty ? nil : snapshot.information
-          subscriptions[index].lastSucceededAt = succeededAt
+          subscriptions[index].lastSucceededAt = now
         }
       }
     } catch {

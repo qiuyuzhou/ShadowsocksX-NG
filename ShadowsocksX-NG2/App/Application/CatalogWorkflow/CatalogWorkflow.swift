@@ -222,6 +222,7 @@ final class CatalogWorkflow: ObservableObject {
     var journal = CredentialWriteJournal(credentials: dependencies.credentials)
     do {
       return try commit { [self] catalog in
+        let now = Date()
         let passwordRef = CredentialReference.fresh()
         try journal.save(draft.password, for: passwordRef)
         var fields = ServerFields(
@@ -231,7 +232,7 @@ final class CatalogWorkflow: ObservableObject {
         try Self.applyPluginSelection(
           draft.plugin, options: draft.pluginOptions, to: &fields,
           credentials: dependencies.credentials, journal: &journal)
-        return try catalog.addServer(fields, to: parent)
+        return try catalog.addServer(fields, to: parent, now: now)
       }
     } catch {
       throw CommitError(underlying: error, credentialRollback: journal.rollback())
@@ -244,7 +245,7 @@ final class CatalogWorkflow: ObservableObject {
     let trimmed = name.trimmingCharacters(in: .whitespaces)
     guard !trimmed.isEmpty else { throw ServerFormError.emptyName }
     return try commit { catalog in
-      try catalog.addGroup(trimmed, to: parent)
+      try catalog.addGroup(trimmed, to: parent, now: Date())
     }
   }
 
@@ -253,7 +254,7 @@ final class CatalogWorkflow: ObservableObject {
     let trimmed = name.trimmingCharacters(in: .whitespaces)
     guard !trimmed.isEmpty else { throw ServerFormError.emptyName }
     try commit { catalog in
-      try catalog.renameGroup(id, to: trimmed)
+      try catalog.renameGroup(id, to: trimmed, now: Date())
     }
   }
 
@@ -261,7 +262,7 @@ final class CatalogWorkflow: ObservableObject {
   /// typed error 原样上抛。
   func move(_ id: NodeID, to parent: NodeID?) async throws {
     try commit { catalog in
-      try catalog.move(id, to: parent)
+      try catalog.move(id, to: parent, now: Date())
     }
   }
 
@@ -269,7 +270,7 @@ final class CatalogWorkflow: ObservableObject {
   /// Keychain 秘密；返回被删身份集合供 UI 清除失效选择（story 18）。
   func remove(_ id: NodeID) async throws -> RemovalOutcome {
     let removed: [CatalogEntry] = try commit { catalog in
-      try catalog.remove(id)
+      try catalog.remove(id, now: Date())
     }
     for ref in Self.credentialRefs(of: removed) {
       try? dependencies.credentials.delete(ref)
@@ -297,7 +298,7 @@ final class CatalogWorkflow: ObservableObject {
         try Self.applyPluginSelection(
           draft.plugin, options: draft.pluginOptions, to: &fields,
           credentials: dependencies.credentials, journal: &journal)
-        try catalog.updateServer(id, with: fields)
+        try catalog.updateServer(id, with: fields, now: Date())
       }
       serverUpdateSubject.send([id])
     } catch {

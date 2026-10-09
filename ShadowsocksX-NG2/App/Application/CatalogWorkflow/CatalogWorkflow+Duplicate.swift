@@ -38,17 +38,19 @@ extension CatalogWorkflow {
       return try commit { catalog in
         try copyEntry(
           entry, from: source, into: &catalog, parent: parent,
-          index: position + 1, name: name, journal: &journal)
+          index: position + 1, name: name, journal: &journal, now: Date())
       }
     } catch {
       throw CommitError(underlying: error, credentialRollback: journal.rollback())
     }
   }
 
+  /// 副本节点获得全新身份与全新时间戳（创建时间 = 复制时刻，ADR-0031）；
+  /// 每个新建节点的落点分组按结构敏感语义更新修改时间。
   private func copyEntry(
     _ entry: CatalogEntry, from source: ConfigurationCatalog,
     into catalog: inout ConfigurationCatalog, parent: NodeID?, index: Int? = nil,
-    name: String, journal: inout CredentialWriteJournal
+    name: String, journal: inout CredentialWriteJournal, now: Date
   ) throws -> NodeID {
     switch entry.kind {
     case .server(var fields):
@@ -57,16 +59,16 @@ extension CatalogWorkflow {
       if let reference = fields.pluginOptionsRef {
         fields.pluginOptionsRef = try copyCredential(reference, journal: &journal)
       }
-      return try catalog.addServer(fields, to: parent, index: index)
+      return try catalog.addServer(fields, to: parent, index: index, now: now)
     case .group(let fields):
-      let copy = try catalog.addGroup(name, to: parent, index: index)
+      let copy = try catalog.addGroup(name, to: parent, index: index, now: now)
       for child in fields.children {
         guard let childEntry = source.entry(for: child) else {
           throw CatalogError.nodeNotFound(child)
         }
         _ = try copyEntry(
           childEntry, from: source, into: &catalog, parent: copy,
-          name: childEntry.displayName, journal: &journal)
+          name: childEntry.displayName, journal: &journal, now: now)
       }
       return copy
     }

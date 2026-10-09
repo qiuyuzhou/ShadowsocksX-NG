@@ -186,9 +186,11 @@ struct LegacyImportPlanner {
     existingDocument: CatalogDocument
   ) throws -> LegacyImportPlan {
     var catalog = existingDocument.catalog
+    let now = Date()
     let groupName = nextGroupName(in: catalog)
-    let groupID = try catalog.addGroup(groupName)
-    let serverImport = try importServers(snapshot.profiles, into: &catalog, groupID: groupID)
+    let groupID = try catalog.addGroup(groupName, now: now)
+    let serverImport = try importServers(
+      snapshot.profiles, into: &catalog, groupID: groupID, now: now)
     let report = LegacyImportReport(
       groupName: groupName,
       importedServerCount: serverImport.importedServerCount,
@@ -227,7 +229,8 @@ extension LegacyImportPlanner {
   private static func importServers(
     _ profiles: [LegacyServerSnapshot],
     into catalog: inout ConfigurationCatalog,
-    groupID: NodeID
+    groupID: NodeID,
+    now: Date
   ) throws -> ServerImportResult {
     var credentials: [CredentialReference: String] = [:]
     var skippedRecords: [LegacySkippedRecord] = []
@@ -260,7 +263,7 @@ extension LegacyImportPlanner {
           remark: profile.remark ?? "",
           pluginProgram: profile.plugin?.isEmpty == false ? profile.plugin : nil,
           pluginOptionsRef: pluginOptionsRef)
-        try catalog.addServer(fields, id: nodeID, to: groupID)
+        try catalog.addServer(fields, id: nodeID, to: groupID, now: now)
         importedServerCount += 1
       }
     }

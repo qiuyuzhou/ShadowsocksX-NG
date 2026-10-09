@@ -1,3 +1,5 @@
+import Foundation
+
 /// 配置目录：不可见的配置树根（GLOSSARY.md「Configuration catalog」）。有序顶层
 /// 子节点为服务器配置或配置组。存储形态：全量节点表 + 根序 + 各分组显子序；
 /// 单父由「一个身份只出现在一条子序里」构造保证，无环与来源分离由操作校验。
@@ -92,13 +94,16 @@ extension ConfigurationCatalog {
 // MARK: - 变更
 
 extension ConfigurationCatalog {
+  /// 新建节点：创建时间与修改时间都是写入时刻（ADR-0031）；落点分组的
+  /// 直接子节点集合变化，按结构敏感语义更新该分组的修改时间。
   @discardableResult
   mutating func addServer(
     _ fields: ServerFields,
     source: NodeSource = .manual,
     id proposedID: NodeID? = nil,
     to parent: NodeID? = nil,
-    index: Int? = nil
+    index: Int? = nil,
+    now: Date = Date()
   ) throws -> NodeID {
     let id = proposedID ?? .fresh()
     guard entries[id] == nil else { throw CatalogError.duplicateID(id) }
@@ -106,7 +111,9 @@ extension ConfigurationCatalog {
       throw CatalogError.subscriptionServerAtRoot(id)
     }
     try place(id, source: source, parent: parent, index: index, excluding: nil)
-    entries[id] = CatalogEntry(id: id, source: source, kind: .server(fields))
+    entries[id] = CatalogEntry(
+      id: id, source: source, kind: .server(fields), createdAt: now, updatedAt: now)
+    touchParent(of: id, at: now)
     return id
   }
 
@@ -116,47 +123,66 @@ extension ConfigurationCatalog {
     source: NodeSource = .manual,
     id proposedID: NodeID? = nil,
     to parent: NodeID? = nil,
-    index: Int? = nil
+    index: Int? = nil,
+    now: Date = Date()
   ) throws -> NodeID {
     let id = proposedID ?? .fresh()
     guard entries[id] == nil else { throw CatalogError.duplicateID(id) }
     try place(id, source: source, parent: parent, index: index, excluding: nil)
-    entries[id] = CatalogEntry(id: id, source: source, kind: .group(GroupFields(name: name)))
+    entries[id] = CatalogEntry(
+      id: id, source: source, kind: .group(GroupFields(name: name)),
+      createdAt: now, updatedAt: now)
+    touchParent(of: id, at: now)
     return id
   }
 
-  mutating func renameGroup(_ id: NodeID, to name: String) throws {
+  /// 重命名分组：内容未变（同名）不更新修改时间。
+  mutating func renameGroup(_ id: NodeID, to name: String, now: Date = Date()) throws {
     guard var entry = entries[id] else { throw CatalogError.nodeNotFound(id) }
     guard entry.source == .manual else { throw CatalogError.subscriptionNodeImmutable(id) }
     guard case .group(var fields) = entry.kind else { throw CatalogError.notAGroup(id) }
+    guard fields.name != name else { return }
     fields.name = name
     entry.kind = .group(fields)
+    entry.updatedAt = now
     entries[id] = entry
   }
 
-  mutating func updateServer(_ id: NodeID, with fields: ServerFields) throws {
+  /// 更新服务器连接字段：内容未变不更新修改时间。
+  mutating func updateServer(_ id: NodeID, with fields: ServerFields, now: Date = Date()) throws {
     guard var entry = entries[id] else { throw CatalogError.nodeNotFound(id) }
     guard entry.source == .manual else { throw CatalogError.subscriptionNodeImmutable(id) }
     guard case .server = entry.kind else { throw CatalogError.notAServer(id) }
-    entry.kind = .server(fields)
+    let kind = CatalogEntry.Kind.server(fields)
+    guard entry.kind != kind else { return }
+    entry.kind = kind
+    entry.updatedAt = now
     entries[id] = entry
   }
 
   /// 移动节点（携带整棵子树）：目录根与手动组之间、手动组相互之间。
-  /// 同父移动即重排。跨来源、共享父、成环一律拒绝。
-  mutating func move(_ id: NodeID, to parent: NodeID?, index: Int? = nil) throws {
+  /// 同父移动即重排。跨来源、共享父、成环一律拒绝。被移动节点自身内容不变、
+  /// 修改时间不动；新旧落点分组的子节点集合/顺序变化，按结构敏感语义更新
+  /// （根层无分组，静默）。
+  mutating func move(_ id: NodeID, to parent: NodeID?, index: Int? = nil, now: Date = Date())
+    throws
+  {
     guard let entry = entries[id] else { throw CatalogError.nodeNotFound(id) }
     guard entry.source == .manual else { throw CatalogError.subscriptionNodeImmutable(id) }
     if let parent, parent == id || ancestors(of: parent).contains(id) {
       throw CatalogError.cycleDetected(id)
     }
+    let oldParent = parentIndex()[id]
     try place(id, source: entry.source, parent: parent, index: index, excluding: id)
+    if oldParent != parent { touch(oldParent, at: now) }
+    touch(parent, at: now)
   }
 
   /// 删除节点；手动分组递归删除整棵子树。返回被删除的节点（含其凭据引用，
   /// 供调用方清理 Keychain 秘密）。空组允许显式删除；空组本身持久保留。
+  /// 原落点分组失去子节点，按结构敏感语义更新其修改时间。
   @discardableResult
-  mutating func remove(_ id: NodeID) throws -> [CatalogEntry] {
+  mutating func remove(_ id: NodeID, now: Date = Date()) throws -> [CatalogEntry] {
     guard let root = entries[id] else { throw CatalogError.nodeNotFound(id) }
     guard root.source == .manual else { throw CatalogError.subscriptionNodeImmutable(id) }
 
@@ -168,7 +194,9 @@ extension ConfigurationCatalog {
       removed.append(entry)
       entries[current] = nil
     }
+    let oldParent = parentIndex()[id]
     removeFromSiblings(id)
+    touch(oldParent, at: now)
     return removed
   }
 
@@ -254,10 +282,12 @@ extension ConfigurationCatalog {
 
   /// 订阅快照原子应用（GLOSSARY.md 刷新契约）：以快照整体重建固定分组子树；
   /// 名称、结构、顺序和连接字段全部跟随远端（扩展缺失时由调用方给 URL host
-  /// 兜底）。返回被移除的旧服务器叶子（供调用方清理凭据）。
+  /// 兜底）。返回被移除的旧服务器叶子（供调用方清理凭据）。延续节点按内容
+  /// 比较决定时间戳：内容未变保留双时间戳，变化保留创建时间、更新修改时间；
+  /// 新节点两个时间戳都是写入时刻（ADR-0031）。
   @discardableResult
   mutating func applySubscriptionSnapshot(
-    _ snapshot: CatalogSubscriptionSnapshot, into groupID: NodeID
+    _ snapshot: CatalogSubscriptionSnapshot, into groupID: NodeID, now: Date = Date()
   ) throws -> [CatalogEntry] {
     guard let fixed = entries[groupID], case .group = fixed.kind else {
       throw CatalogError.notAGroup(groupID)
@@ -266,9 +296,11 @@ extension ConfigurationCatalog {
       throw CatalogError.crossSourcePlacement(node: .subscription, container: fixed.source)
     }
 
-    // 先整树摘除旧成员（固定分组本身保留），收集被移除的服务器。
+    // 先整树摘除旧成员（固定分组本身保留），收集被移除的服务器；旧时间戳
+    // 以条目载荷整体留底，重建时逐节点比较。
     var removedServers: [CatalogEntry] = []
     let oldSubtree = try subscriptionSubtree(of: groupID)
+    let previous = Dictionary(uniqueKeysWithValues: oldSubtree.map { ($0.id, $0) })
     for entry in oldSubtree {
       if case .server = entry.kind { removedServers.append(entry) }
     }
@@ -279,8 +311,10 @@ extension ConfigurationCatalog {
 
     // 远端权威重建：名称、结构、顺序、字段全按快照。
     var fixedFields = GroupFields(name: snapshot.name, children: [])
-    try insertSnapshotChildren(of: snapshot.root, into: &fixedFields)
-    entries[groupID]?.kind = .group(fixedFields)
+    try insertSnapshotChildren(of: snapshot.root, into: &fixedFields, previous: previous, now: now)
+    entries[groupID] = Self.stampedEntry(
+      id: groupID, source: .subscription, kind: .group(fixedFields),
+      previous: previous, now: now)
     return removedServers
   }
 
@@ -288,22 +322,27 @@ extension ConfigurationCatalog {
   /// 分组的显子序。身份已由解析器按订阅作用域限定，与既有节点冲突即程序错误。
   private mutating func insertSnapshotChildren(
     of group: CatalogSubscriptionSnapshot.Group,
-    into fields: inout GroupFields
+    into fields: inout GroupFields,
+    previous: [NodeID: CatalogEntry],
+    now: Date
   ) throws {
     var childIDs: [NodeID] = []
     for child in group.children {
       switch child {
       case .server(let leaf):
         guard entries[leaf.id] == nil else { throw CatalogError.duplicateID(leaf.id) }
-        entries[leaf.id] = CatalogEntry(
-          id: leaf.id, source: .subscription, kind: .server(leaf.fields))
+        entries[leaf.id] = Self.stampedEntry(
+          id: leaf.id, source: .subscription, kind: .server(leaf.fields),
+          previous: previous, now: now)
         childIDs.append(leaf.id)
       case .group(let nested):
         guard entries[nested.id] == nil else { throw CatalogError.duplicateID(nested.id) }
         var nestedFields = GroupFields(name: nested.name, children: [])
-        try insertSnapshotChildren(of: nested, into: &nestedFields)
-        entries[nested.id] = CatalogEntry(
-          id: nested.id, source: .subscription, kind: .group(nestedFields))
+        try insertSnapshotChildren(
+          of: nested, into: &nestedFields, previous: previous, now: now)
+        entries[nested.id] = Self.stampedEntry(
+          id: nested.id, source: .subscription, kind: .group(nestedFields),
+          previous: previous, now: now)
         childIDs.append(nested.id)
       }
     }
@@ -312,6 +351,7 @@ extension ConfigurationCatalog {
 
   /// 删除订阅：固定分组整棵子树连同固定分组本身一并移除（递归清除，不留
   /// 墓碑）。返回被删条目（含凭据引用，供调用方清理 Keychain 秘密）。
+  /// 固定分组的原落点（目录根）无分组形态，无修改时间可更新。
   @discardableResult
   mutating func removeSubscriptionSubtree(of groupID: NodeID) throws -> [CatalogEntry] {
     let subtree = try subscriptionSubtree(of: groupID)
@@ -320,5 +360,37 @@ extension ConfigurationCatalog {
     }
     removeFromSiblings(groupID)
     return subtree
+  }
+
+  /// 按内容比较决定时间戳的条目构造（ADR-0031）：延续节点内容未变保留双
+  /// 时间戳，变化保留创建时间、更新修改时间；新节点双时间戳为写入时刻。
+  private static func stampedEntry(
+    id: NodeID,
+    source: NodeSource,
+    kind: CatalogEntry.Kind,
+    previous: [NodeID: CatalogEntry],
+    now: Date
+  ) -> CatalogEntry {
+    guard let old = previous[id] else {
+      return CatalogEntry(id: id, source: source, kind: kind, createdAt: now, updatedAt: now)
+    }
+    let updatedAt = old.kind == kind ? old.updatedAt : now
+    return CatalogEntry(
+      id: id, source: source, kind: kind, createdAt: old.createdAt, updatedAt: updatedAt)
+  }
+}
+
+// MARK: - 节点时间戳（ADR-0031）
+
+extension ConfigurationCatalog {
+  /// 更新节点修改时间；节点不存在或根层（nil）静默无操作。
+  private mutating func touch(_ id: NodeID?, at now: Date) {
+    guard let id, entries[id] != nil else { return }
+    entries[id]?.updatedAt = now
+  }
+
+  /// 子节点集合或顺序变化后更新其所在分组（类目录修改时间语义）；根层无分组。
+  private mutating func touchParent(of child: NodeID, at now: Date) {
+    touch(parentIndex()[child], at: now)
   }
 }
