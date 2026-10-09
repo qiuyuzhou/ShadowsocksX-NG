@@ -42,8 +42,11 @@ struct ServersView: View {
         .frame(minWidth: 120, idealWidth: 150, maxWidth: 200)
       serverTable
         .frame(minWidth: 380, idealWidth: 520, maxWidth: .infinity)
-      serverDetailPane
-        .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+      // 分栏身份必须稳定；节点身份只重建内部详情会话，保留用户拖动后的宽度。
+      ZStack(alignment: .topLeading) {
+        serverDetailPane
+      }
+      .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
     }
     .frame(minHeight: 420)
     .sheet(
