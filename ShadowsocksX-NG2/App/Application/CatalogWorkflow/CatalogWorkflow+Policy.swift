@@ -1,6 +1,6 @@
 import Foundation
 
-/// 目录政策查询与激活命令（issue #41）：删除确认档位、移动目的地、拖放资格
+/// 目录政策查询与激活命令（issue #41）：删除确认档位、拖放资格
 /// 与激活资格/命令的唯一 UI-facing 出口。视图不得重推 ownership、删除确认或
 /// ADR-0001 激活预检；领域拒绝仍是不变量防线。
 extension CatalogWorkflow {
@@ -30,29 +30,13 @@ extension CatalogWorkflow {
     return node.childNodes.contains { subtreeHasServers($0) }
   }
 
-  // MARK: - 移动目的地与拖放资格
-
-  /// 「移动到」目的地：目录根 + 除自身子树外的全部手动组（depth 供展示缩进）。
-  func moveDestinations(for id: NodeID) -> [MoveDestination] {
-    var result = [MoveDestination(id: nil, name: "目录根", depth: 0)]
-    let excluded = tree.node(withID: id)?.subtreeIDs ?? [id]
-    func walk(_ nodes: [CatalogTreeNode], depth: Int) {
-      for node in nodes {
-        guard node.isGroup, node.isManual else { continue }
-        guard !excluded.contains(node.id) else { continue }
-        result.append(MoveDestination(id: node.id, name: node.name, depth: depth))
-        walk(node.childNodes, depth: depth + 1)
-      }
-    }
-    walk(tree.roots, depth: 0)
-    return result
-  }
+  // MARK: - 拖放资格
 
   /// 移动/落点资格：存在性、非自身、被拖节点可拖、目标为根或不在被拖子树内
-  /// 的手动组。跨来源与成环仍由领域拒绝（不变量防线，不在此复制）。
+  /// 的手动组；同父落点不提供重排。跨来源与成环仍由领域拒绝。
   func canMove(_ id: NodeID, to parent: NodeID?) -> Bool {
     guard let node = tree.node(withID: id) else { return false }
-    guard id != parent else { return false }
+    guard id != parent, node.parentID != parent else { return false }
     guard node.isManual else { return false }
     guard let parent else { return true }
     guard let parentNode = tree.node(withID: parent), parentNode.isGroup, parentNode.isManual else {

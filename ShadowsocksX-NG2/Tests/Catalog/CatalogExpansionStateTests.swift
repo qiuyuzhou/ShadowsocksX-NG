@@ -45,6 +45,27 @@ final class CatalogExpansionStateTests: XCTestCase {
 @MainActor
 struct CatalogCreationExpansionTests {
   @Test
+  func collapsingAncestorSelectsThatGroupAndPreservesOtherExpansionState() throws {
+    var catalog = ConfigurationCatalog()
+    let outer = try catalog.addGroup("外层")
+    let inner = try catalog.addGroup("内层", to: outer)
+    let selected = try catalog.addGroup("选中项", to: inner)
+    let other = try catalog.addGroup("其他")
+    let tree = CatalogTreeSnapshot.build(
+      from: catalog, credentials: InMemoryCredentialStore(), plugins: NoManagedPluginProvider())
+    let node = try #require(tree.node(withID: outer))
+    let expansion = CatalogExpansionState()
+    expansion.toggleCollapsed(other)
+
+    let selection = expansion.setExpanded(false, for: node, selection: selected)
+
+    #expect(selection == outer)
+    #expect(expansion.collapsedGroupIDs == [outer, other])
+    #expect(expansion.setExpanded(true, for: node, selection: outer) == outer)
+    #expect(expansion.collapsedGroupIDs == [other])
+  }
+
+  @Test
   func revealingCreatedNodeExpandsAncestorsAndPreservesOtherCollapsedGroups() throws {
     var catalog = ConfigurationCatalog()
     let outer = try catalog.addGroup("工作")

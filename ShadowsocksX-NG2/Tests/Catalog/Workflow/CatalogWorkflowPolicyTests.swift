@@ -2,7 +2,7 @@ import XCTest
 
 @testable import ShadowsocksX_NG2
 
-/// 目录政策 seam 的 interface 测试（issue #41）：删除确认档位、移动目的地、
+/// 目录政策 seam 的 interface 测试（issue #41）：删除确认档位、
 /// 拖放/移动资格、激活资格与激活命令经假 adapter 的目标传递。只观察结构化
 /// fact 与 typed command outcome，不锁定 SwiftUI。
 @MainActor
@@ -98,24 +98,6 @@ final class CatalogWorkflowPolicyTests: XCTestCase {
     XCTAssertFalse(workflow.canDelete(NodeID(rawValue: "ghost")), "节点不存在")
   }
 
-  // MARK: - 移动目的地
-
-  func testMoveDestinationsAreRootAndManualGroupsExcludingOwnSubtree() async throws {
-    let outer = try await workflow.createGroup(named: "外层", into: nil)
-    let inner = try await workflow.createGroup(named: "内层", into: outer)
-    let sibling = try await workflow.createGroup(named: "兄弟", into: nil)
-    let serverID = try await importServer()
-
-    let destinations = workflow.moveDestinations(for: outer)
-    XCTAssertEqual(destinations.map(\.id), [nil, sibling], "排除自身子树（内层）")
-    XCTAssertEqual(destinations.map(\.depth), [0, 0])
-    XCTAssertEqual(destinations.map(\.name), ["目录根", "兄弟"])
-
-    let forServer = workflow.moveDestinations(for: serverID)
-    XCTAssertTrue(forServer.map(\.id).contains(outer), "服务器可移入手动组")
-    XCTAssertTrue(forServer.map(\.id).contains(inner), "含嵌套手动组")
-  }
-
   // MARK: - 移动/拖放资格
 
   func testCanMoveRejectsSelfCycleAndSubscriptionTarget() async throws {
@@ -124,11 +106,12 @@ final class CatalogWorkflowPolicyTests: XCTestCase {
     let serverID = try await importServer(into: groupID)
 
     XCTAssertFalse(workflow.canMove(groupID, to: groupID), "非自身")
-    XCTAssertTrue(workflow.canMove(groupID, to: nil), "可回根")
+    XCTAssertFalse(workflow.canMove(groupID, to: nil), "根层节点不得同父重排")
     XCTAssertFalse(workflow.canMove(groupID, to: nestedID), "目标在被拖子树内")
     XCTAssertTrue(workflow.canMove(nestedID, to: nil))
     XCTAssertFalse(workflow.canMove(nestedID, to: nestedID))
     XCTAssertTrue(workflow.canMove(serverID, to: nestedID))
+    XCTAssertFalse(workflow.canMove(serverID, to: groupID), "已有父组不得同父重排")
 
     let fixture = try CatalogFixtures.makeSubscriptionFixture()
     try CatalogFileStore(fileURL: fileURL).save(CatalogDocument(catalog: fixture.catalog))

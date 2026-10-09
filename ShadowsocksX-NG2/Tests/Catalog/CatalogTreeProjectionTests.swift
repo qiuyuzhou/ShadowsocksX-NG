@@ -1,3 +1,4 @@
+import Testing
 import XCTest
 
 @testable import ShadowsocksX_NG2
@@ -8,6 +9,7 @@ final class CatalogTreeProjectionTests: XCTestCase {
   private func server(_ id: String) -> CatalogTreeNode {
     CatalogTreeNode(
       id: NodeID(rawValue: id), name: id, isGroup: false, source: .manual, parentID: nil,
+      createdAt: nil, updatedAt: nil,
       invalidReasons: [], childCount: 0, subtreeNodeCount: 0, invalidDescendantCount: 0,
       children: nil)
   }
@@ -15,6 +17,7 @@ final class CatalogTreeProjectionTests: XCTestCase {
   private func group(_ id: String, children: [CatalogTreeNode]) -> CatalogTreeNode {
     CatalogTreeNode(
       id: NodeID(rawValue: id), name: id, isGroup: true, source: .manual, parentID: nil,
+      createdAt: nil, updatedAt: nil,
       invalidReasons: [], childCount: children.count,
       subtreeNodeCount: children.reduce(0) { $0 + 1 + $1.subtreeNodeCount },
       invalidDescendantCount: 0, children: children)
@@ -67,5 +70,71 @@ final class CatalogTreeProjectionTests: XCTestCase {
   func testServerLeafCountCountsLeavesAcrossNesting() {
     XCTAssertEqual(nestedTree().serverLeafCount, 3)
     XCTAssertEqual(CatalogTreeSnapshot(roots: []).serverLeafCount, 0)
+  }
+}
+
+struct CatalogTreeTimestampProjectionTests {
+  @Test
+  func treeExposesCommittedCreationAndModificationTimes() throws {
+    var catalog = ConfigurationCatalog()
+    let created = Date(timeIntervalSince1970: 100)
+    let modified = Date(timeIntervalSince1970: 200)
+    let group = try catalog.addGroup("原名", now: created)
+    try catalog.renameGroup(group, to: "新名", now: modified)
+    let tree = CatalogTreeSnapshot.build(
+      from: catalog, credentials: InMemoryCredentialStore(), plugins: NoManagedPluginProvider())
+
+    #expect(tree.node(withID: group)?.createdAt == created)
+    #expect(tree.node(withID: group)?.updatedAt == modified)
+  }
+}
+
+struct ServerTableOrderingTests {
+  @Test
+  func hierarchySortsEachSiblingSetAndCollapseHidesOnlyThatSubtree() throws {
+    var catalog = ConfigurationCatalog()
+    let outer = try catalog.addGroup("Z 外层")
+    let root = try catalog.addGroup("A 根层")
+    let childZ = try catalog.addGroup("Z 子组", to: outer)
+    let childA = try catalog.addGroup("A 子组", to: outer)
+    let leaf = try catalog.addGroup("孙节点", to: childA)
+    let tree = CatalogTreeSnapshot.build(
+      from: catalog, credentials: InMemoryCredentialStore(), plugins: NoManagedPluginProvider())
+    let rows = tree.visibleRows(source: .manual, sortedBy: [ServerTableSort(.name)], collapsed: [])
+
+    #expect(rows.map(\.id) == [root, outer, childA, leaf, childZ])
+    #expect(rows.map(\.depth) == [0, 0, 1, 2, 1])
+    #expect(
+      tree.visibleRows(
+        source: .manual, sortedBy: [ServerTableSort(.name)], collapsed: [outer]
+      ).map(\.id) == [root, outer])
+    #expect(tree.roots.map(\.id) == [outer, root])
+    #expect(tree.node(withID: outer)?.childNodes.map(\.id) == [childZ, childA])
+  }
+
+  @Test(arguments: [SortOrder.forward, .reverse])
+  func sourceFilteringAndTimeSortingKeepUnknownLastAndEqualValuesStable(order: SortOrder) {
+    func node(_ id: String, source: NodeSource = .manual, date: Date?) -> CatalogTreeNode {
+      CatalogTreeNode(
+        id: NodeID(rawValue: id), name: id, isGroup: true, source: source, parentID: nil,
+        createdAt: date, updatedAt: date, invalidReasons: [], childCount: 0,
+        subtreeNodeCount: 0, invalidDescendantCount: 0, children: [])
+    }
+    let tree = CatalogTreeSnapshot(roots: [
+      node("unknown", date: nil),
+      node("newer", date: Date(timeIntervalSince1970: 200)),
+      node("equal-first", date: Date(timeIntervalSince1970: 100)),
+      node("equal-second", date: Date(timeIntervalSince1970: 100)),
+      node("subscription", source: .subscription, date: Date(timeIntervalSince1970: 50)),
+    ])
+    let sorted = tree.roots(for: .manual, sortedBy: [ServerTableSort(.createdAt, order: order)])
+    #expect(
+      sorted.map(\.id.rawValue)
+        == (order == .forward
+          ? ["equal-first", "equal-second", "newer", "unknown"]
+          : ["newer", "equal-first", "equal-second", "unknown"]))
+    #expect(
+      tree.roots(for: .manual, sortedBy: []).map(\.id.rawValue)
+        == ["unknown", "newer", "equal-first", "equal-second"])
   }
 }

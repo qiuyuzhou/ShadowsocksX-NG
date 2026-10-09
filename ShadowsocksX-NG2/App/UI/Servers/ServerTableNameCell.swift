@@ -1,25 +1,9 @@
 import SwiftUI
 
-/// 服务器子视图侧栏的树行（issue #41）：来源标识、有效性提示、活动目标标记
-/// 与右键菜单。数据来自目录工作流 module 的树 projection；激活经 seam 的
-/// typed command，活动目标标记由父视图传入（运行时事实，不进目录 projection）。
-/// 删除一律交父视图确认弹窗（空手动组单次、非空二次，GLOSSARY.md）。
-struct ServerSidebarRow: View {
+/// Table 名称列：名称占剩余宽度，活动目标在列尾。
+struct ServerTableNameCell: View {
   let node: CatalogTreeNode
-  let workflow: CatalogWorkflow
-  /// 激活反馈共享状态：命令经它发出（单飞互斥、结果记录在会话反馈里）。
-  let activation: ActivationFeedbackState
   let activeTargetID: NodeID?
-  let errors: ErrorAlertPresenter
-  let onEdit: (NodeID) -> Void
-  let onRename: (NodeID) -> Void
-  let onNewGroup: (NodeID?) -> Void
-  let onMove: (NodeID) -> Void
-  let onDuplicate: (NodeID) -> Void
-  let onDelete: (NodeID) -> Void
-  let onExport: (NodeID) -> Void
-
-  private var isSubscription: Bool { node.source == .subscription }
 
   var body: some View {
     HStack(spacing: 6) {
@@ -47,11 +31,28 @@ struct ServerSidebarRow: View {
       }
     }
     .frame(minHeight: 28)
-    .contextMenu { contextMenu }
   }
 
+}
+
+/// 行级右键菜单沿用目录工作流的命令与资格事实。
+struct ServerNodeContextMenu: View {
+  let node: CatalogTreeNode
+  let workflow: CatalogWorkflow
+  /// 激活反馈共享状态：命令经它发出（单飞互斥、结果记录在会话反馈里）。
+  let activation: ActivationFeedbackState
+  let errors: ErrorAlertPresenter
+  let onEdit: (NodeID) -> Void
+  let onRename: (NodeID) -> Void
+  let onNewGroup: (NodeID?) -> Void
+  let onDuplicate: (NodeID) -> Void
+  let onDelete: (NodeID) -> Void
+  let onExport: (NodeID) -> Void
+
+  private var isSubscription: Bool { node.source == .subscription }
+
   @ViewBuilder
-  private var contextMenu: some View {
+  var body: some View {
     Button("激活") {
       Task { @MainActor in
         do {
@@ -88,8 +89,6 @@ struct ServerSidebarRow: View {
       Button("新建分组…") {
         onNewGroup(node.isGroup ? node.id : node.parentID)
       }
-      Divider()
-      Button("移动到…") { onMove(node.id) }
       Divider()
       Button("删除…", role: .destructive) {
         onDelete(node.id)

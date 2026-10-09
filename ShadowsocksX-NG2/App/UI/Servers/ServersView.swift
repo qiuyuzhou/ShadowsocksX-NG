@@ -9,11 +9,12 @@ struct ServersView: View {
   /// 激活命令都经它发出。
   let activation: ActivationFeedbackState
   /// 活动目标标记：父视图传入的运行时事实，不进目录 projection（与
-  /// ServerSidebarRow/ServerDetailView 的传参先例同法）。
+  /// ServerTableNameCell/ServerDetailView 的传参先例同法）。
   let activeTargetID: NodeID?
   @Binding var selection: NodeID?
-  /// 分组折叠状态：组合根持有的共享对象（与首页目标树同源），跨 destination
-  /// 切换存续；OutlineGroup 的内建展开态会随分区切换丢失，侧栏因此自管折叠。
+  @Binding var source: NodeSource
+  @Binding var sortOrder: [ServerTableSort]
+  /// 服务器管理的展开状态跨工作区页面切换保留，不落盘。
   @ObservedObject var expansion: CatalogExpansionState
   let clipboard: any TextClipboard
   let imageClipboard: any ImageClipboard
@@ -30,20 +31,22 @@ struct ServersView: View {
   @State private var isPresentingNewGroup = false
   @State private var serverFormOperation: ServerFormSheet.Operation?
   @State private var deleteTarget: NodeID?
-  @State private var moveTarget: NodeID?
-  @State private var rootDropHovering = false
+  @State private var dropState = ServerTableDropState()
   // 分享 popover 打开时冻结载荷、顶部资料与建议文件名。
   @State var shareContext: ShareContext?
 
   var body: some View {
-    // 分隔位置不持久：HSplitView 无位置 API，切标签（destination 挂载制）
-    // 与重启都会回到 idealWidth，属接受的取舍。
-    HSplitView {
-      serverSidebar
-        .frame(minWidth: 240, idealWidth: 280, maxWidth: 320)
+    NavigationSplitView {
+      sourceSidebar
+        .navigationSplitViewColumnWidth(min: 120, ideal: 150, max: 200)
+    } content: {
+      serverTable
+        .navigationSplitViewColumnWidth(min: 380, ideal: 520)
+    } detail: {
       serverDetailPane
         .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
     }
+    .navigationSplitViewStyle(.balanced)
     .frame(minHeight: 420)
     .sheet(
       item: Binding(
@@ -70,13 +73,6 @@ struct ServersView: View {
     } message: {
       Text(deleteMessage)
     }
-    .sheet(
-      item: Binding(
-        get: { moveTarget.map(NodeContext.init) },
-        set: { moveTarget = $0?.nodeID })
-    ) { context in
-      MoveNodeSheet(workflow: workflow, errors: errors, nodeID: context.nodeID)
-    }
     .sheet(item: $serverFormOperation) { operation in
       ServerFormSheet(
         workflow: workflow, operation: operation,
@@ -88,10 +84,77 @@ struct ServersView: View {
     }
   }
 
-  private var serverSidebar: some View {
-    List(selection: $selection) {
-      ForEach(workflow.tree.visibleRows(collapsed: expansion.collapsedGroupIDs)) { row in
-        treeRow(row)
+  private var sourceSidebar: some View {
+    List(
+      selection: Binding<NodeSource?>(
+        get: { source },
+        set: { value in
+          guard let value, value != source else { return }
+          selection = nil
+          source = value
+        })
+    ) {
+      Label("本地", systemImage: "internaldrive").tag(NodeSource.manual)
+      Label("订阅", systemImage: "arrow.triangle.2.circlepath").tag(NodeSource.subscription)
+    }
+    .listStyle(.sidebar)
+  }
+
+  private var serverTable: some View {
+    let rows = workflow.tree.visibleRows(
+      source: source, sortedBy: sortOrder, collapsed: expansion.collapsedGroupIDs)
+    let depths = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.depth) })
+    return Table(
+      of: CatalogTreeNode.self, selection: $selection,
+      sortOrder: Binding(get: { sortOrder }, set: { sortOrder = Array($0.prefix(1)) })
+    ) {
+      TableColumn("名称", sortUsing: ServerTableSort(.name)) { node in
+        HStack(spacing: 4) {
+          if node.isGroup && !node.childNodes.isEmpty {
+            Button {
+              selection = expansion.setExpanded(
+                expansion.isCollapsed(node.id), for: node, selection: selection)
+            } label: {
+              Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .rotationEffect(.degrees(expansion.isCollapsed(node.id) ? 0 : 90))
+                .frame(minWidth: 24, minHeight: 28)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(expansion.isCollapsed(node.id) ? "展开" : "收起")
+          } else {
+            Color.clear.frame(width: 24, height: 28)
+          }
+          ServerTableNameCell(node: node, activeTargetID: activeTargetID)
+        }
+        .padding(.leading, CGFloat(depths[node.id] ?? 0) * 14)
+      }
+      .width(min: 160, ideal: 240)
+      TableColumn("创建时间", sortUsing: ServerTableSort(.createdAt)) { node in
+        timestampCell(node.createdAt)
+      }
+      .width(min: 100, ideal: timestampColumnWidth)
+      TableColumn("修改时间", sortUsing: ServerTableSort(.updatedAt)) { node in
+        timestampCell(node.updatedAt)
+      }
+      .width(min: 100, ideal: timestampColumnWidth)
+    } rows: {
+      ForEach(rows) { row in
+        TableRow(row.node)
+          .itemProvider {
+            guard let payload = workflow.dragPayload(for: row.id) else { return nil }
+            return dropState.provider(for: row.id, payload: payload)
+          }
+      }
+    }
+    .contextMenu(forSelectionType: NodeID.self) { ids in
+      if let id = ids.first, let node = workflow.tree.node(withID: id) {
+        ServerNodeContextMenu(
+          node: node, workflow: workflow, activation: activation, errors: errors,
+          onEdit: presentEditServer, onRename: { renameTarget = $0 },
+          onNewGroup: presentNewGroup, onDuplicate: duplicateNode,
+          onDelete: { deleteTarget = $0 }, onExport: exportConfigurationGroup)
       }
     }
     .onKeyPress(.escape) {
@@ -99,8 +162,8 @@ struct ServersView: View {
       selection = nil
       return .handled
     }
-    .overlay(alignment: .center) {
-      if workflow.tree.isEmpty {
+    .overlay {
+      if rows.isEmpty {
         ContentUnavailableView(
           "暂无服务器", systemImage: "server.rack",
           description: Text("用工具栏的「新建服务器」按钮手动录入，或用「导入」菜单导入")
@@ -108,72 +171,32 @@ struct ServersView: View {
         .allowsHitTesting(false)
       }
     }
-    .dropDestination(for: String.self) { payload, _ in
-      handleDrop(payload, onto: nil)
-    } isTargeted: { hovering in
-      rootDropHovering = hovering
-    }
+    .background { ServerTableDropReader(state: dropState) }
+    .onDrop(
+      of: [.serverCatalogNode],
+      delegate: ServerTableDropDelegate(
+        state: dropState, rows: rows, source: source, workflow: workflow, onDrop: handleDrop)
+    )
     .toolbar { toolbarContent }
   }
 
-  private func treeRow(_ row: CatalogTreeRow) -> some View {
-    let node = row.node
-    return HStack(spacing: 4) {
-      if node.isGroup {
-        if node.childNodes.isEmpty {
-          Color.clear.frame(width: 11, height: 11)
-        } else {
-          Button {
-            withAnimation { expansion.toggleCollapsed(node.id) }
-          } label: {
-            Image(systemName: "chevron.right")
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(.secondary)
-              .rotationEffect(.degrees(expansion.isCollapsed(node.id) ? 0 : 90))
-          }
-          .buttonStyle(.plain)
-          .help(expansion.isCollapsed(node.id) ? "展开" : "收起")
-        }
-      }
-      ServerSidebarRow(
-        node: node,
-        workflow: workflow,
-        activation: activation,
-        activeTargetID: activeTargetID,
-        errors: errors,
-        onEdit: presentEditServer,
-        onRename: { renameTarget = $0 },
-        onNewGroup: { parent in
-          presentNewGroup(in: parent)
-        },
-        onMove: { moveTarget = $0 },
-        onDuplicate: duplicateNode,
-        onDelete: { deleteTarget = $0 },
-        onExport: exportConfigurationGroup
-      )
-    }
-    .padding(.leading, leadingInset(for: row))
-    .tag(node.id)
-    .onDrag {
-      guard let payload = workflow.dragPayload(for: node.id) else {
-        return NSItemProvider()
-      }
-      return NSItemProvider(object: payload as NSString)
-    }
-    .dropDestination(for: String.self) { payload, _ in
-      handleDrop(payload, onto: node.id)
-    } isTargeted: { _ in
-    }
+  private func timestampCell(_ date: Date?) -> some View {
+    Text(date.map { Self.timestampFormatter.string(from: $0) } ?? "—")
+      .lineLimit(1)
+      .foregroundStyle(.secondary)
   }
 
-  /// 层级缩进：分组行按深度缩进；叶子行额外让出箭头槽位与分组文本对齐。
-  private func leadingInset(for row: CatalogTreeRow) -> CGFloat {
-    let depthStep: CGFloat = 14
-    let chevronSlot: CGFloat = 15
-    if row.node.isGroup {
-      return CGFloat(row.depth) * depthStep
-    }
-    return CGFloat(row.depth) * depthStep + chevronSlot
+  private static let timestampFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .short
+    formatter.timeStyle = .short
+    return formatter
+  }()
+
+  private var timestampColumnWidth: CGFloat {
+    let text = Self.timestampFormatter.string(from: Date())
+    return ceil(
+      (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 13)]).width) + 24
   }
 
   /// 删除结果 → selection invalidation（story 18）：仅清除失效选择，不自动
@@ -187,12 +210,13 @@ struct ServersView: View {
   /// 落点语义：拖到分组行 = 移入该组（仅手动组接受），拖到列表空白/根 = 移到根。
   /// 资格事实由 seam 提供；跨来源/成环仍由领域拒绝（不变量防线）。
   private func handleDrop(_ payload: [String], onto target: NodeID?) -> Bool {
-    guard let raw = payload.first else { return false }
+    guard payload.count == 1, let raw = payload.first else { return false }
     let dragged = NodeID(rawValue: raw)
     guard workflow.canMove(dragged, to: target) else { return false }
     Task {
       do {
         try await workflow.move(dragged, to: target)
+        selectCreatedNode(dragged)
       } catch {
         errors.present(error)
       }
@@ -242,6 +266,26 @@ extension ServersView {
 
   @ToolbarContentBuilder
   private var toolbarContent: some ToolbarContent {
+    ToolbarItem(placement: .primaryAction) {
+      Menu {
+        Picker(
+          "排序",
+          selection: Binding<ServerTableSort.Field?>(
+            get: { sortOrder.first?.field },
+            set: { field in sortOrder = field.map { [ServerTableSort($0)] } ?? [] })
+        ) {
+          Text("无").tag(nil as ServerTableSort.Field?)
+          Text("名称").tag(ServerTableSort.Field.name as ServerTableSort.Field?)
+          Text("创建时间").tag(ServerTableSort.Field.createdAt as ServerTableSort.Field?)
+          Text("修改时间").tag(ServerTableSort.Field.updatedAt as ServerTableSort.Field?)
+        }
+        .pickerStyle(.inline)
+      } label: {
+        Label("排序", systemImage: "arrow.up.arrow.down")
+      }
+      .labelStyle(.iconOnly)
+      .help("排序")
+    }
     ToolbarItem(placement: .primaryAction) {
       Button {
         presentNewServer(in: workflow.importTargetParent(for: selection))
@@ -340,6 +384,7 @@ extension ServersView {
   }
 
   private func selectCreatedNode(_ id: NodeID) {
+    source = .manual
     expansion.reveal(id, in: workflow.tree)
     selection = id
   }
@@ -394,7 +439,7 @@ extension ServersView {
   }
 }
 
-/// moveTarget/renameTarget 的 sheet(item:) 适配壳。
+/// renameTarget 的 sheet(item:) 适配壳。
 private struct NodeContext: Identifiable {
   let nodeID: NodeID
   var id: NodeID { nodeID }

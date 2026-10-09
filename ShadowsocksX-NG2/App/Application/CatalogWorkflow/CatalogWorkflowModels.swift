@@ -15,6 +15,8 @@ struct CatalogTreeNode: Identifiable, Equatable {
   let source: NodeSource
   /// 父节点身份；目录根层节点为 `nil`。
   let parentID: NodeID?
+  let createdAt: Date?
+  let updatedAt: Date?
   /// 服务器叶子的已知阻塞原因（typed，无成句文案）；分组为空。
   let invalidReasons: [LeafInvalidationReason]
   /// 直接子节点数（分组）。
@@ -159,6 +161,8 @@ extension CatalogTreeSnapshot {
           isGroup: true,
           source: entry.source,
           parentID: parentID,
+          createdAt: entry.createdAt,
+          updatedAt: entry.updatedAt,
           invalidReasons: [],
           childCount: children.count,
           subtreeNodeCount: children.reduce(0) { $0 + 1 + $1.subtreeNodeCount },
@@ -173,6 +177,8 @@ extension CatalogTreeSnapshot {
           isGroup: false,
           source: entry.source,
           parentID: parentID,
+          createdAt: entry.createdAt,
+          updatedAt: entry.updatedAt,
           invalidReasons: validation.issues,
           childCount: 0,
           subtreeNodeCount: 0,
@@ -198,15 +204,6 @@ enum DeleteConfirmKind: Equatable, Sendable {
   case emptyGroup
   /// 非空手动分组：二次确认，点名子树规模与凭据移除。
   case subtree(count: Int, includesCredentials: Bool)
-}
-
-/// 「移动到」目的地（目录根 + 除自身子树外的全部手动组）。
-struct MoveDestination: Identifiable, Equatable, Sendable {
-  /// `nil` = 目录根。
-  let id: NodeID?
-  let name: String
-  /// 展示缩进深度（根为 0）。
-  let depth: Int
 }
 
 /// 激活资格事实（点前门禁；与 `ActivationCommandOutcome` 的点后结果区分）。

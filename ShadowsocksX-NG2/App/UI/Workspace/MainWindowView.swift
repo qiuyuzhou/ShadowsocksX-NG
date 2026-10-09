@@ -36,6 +36,8 @@ struct MainWindowView: View {
   /// 更新期间发布；外部导航反向同步，route 仍是导航位置的唯一来源。
   @State private var tabSelection: WorkspaceDestination = WorkspaceRoute.initialDestination
   @State private var selection: NodeID?
+  @State private var serverSource: NodeSource = .manual
+  @State private var serverSortOrder: [ServerTableSort] = []
   /// 全局导入面板由窗口壳持有。
   @State private var presentedWorkspaceSheet: WorkspaceSheet?
 
@@ -62,6 +64,11 @@ struct MainWindowView: View {
       if tabSelection != destination {
         tabSelection = destination
       }
+    }
+    .onChange(of: selection) {
+      guard let selection, let node = workflow.tree.node(withID: selection) else { return }
+      serverSource = node.source
+      expansion.reveal(selection, in: workflow.tree)
     }
     .navigationTitle(route.destination.label)
     .frame(minWidth: 920, minHeight: 580)
@@ -106,6 +113,8 @@ struct MainWindowView: View {
         activation: activationFeedback,
         activeTargetID: control.snapshot.activeTarget?.id,
         selection: $selection,
+        source: $serverSource,
+        sortOrder: $serverSortOrder,
         expansion: expansion,
         clipboard: clipboard,
         imageClipboard: imageClipboard,

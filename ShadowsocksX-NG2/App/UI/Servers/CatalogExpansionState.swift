@@ -20,6 +20,19 @@ final class CatalogExpansionState: ObservableObject {
     }
   }
 
+  /// 收起包含选中节点的组时，选择该组，避免详情指向隐藏的后代。
+  func setExpanded(_ expanded: Bool, for group: CatalogTreeNode, selection: NodeID?) -> NodeID? {
+    if expanded {
+      collapsedGroupIDs.remove(group.id)
+    } else {
+      collapsedGroupIDs.insert(group.id)
+      if let selection, selection != group.id, group.find(selection) != nil {
+        return group.id
+      }
+    }
+    return selection
+  }
+
   /// 创建成功后仅展开祖先，保留其他分组的折叠状态。
   func reveal(_ id: NodeID, in tree: CatalogTreeSnapshot) {
     var parent = tree.node(withID: id)?.parentID
