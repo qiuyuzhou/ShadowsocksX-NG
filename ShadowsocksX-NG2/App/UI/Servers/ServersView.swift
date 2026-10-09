@@ -32,6 +32,7 @@ struct ServersView: View {
   @State private var serverFormOperation: ServerFormSheet.Operation?
   @State private var deleteTarget: NodeID?
   @State private var dropState = ServerTableDropState()
+  @FocusState private var isServerTableFocused: Bool
   // 分享 popover 打开时冻结载荷、顶部资料与建议文件名。
   @State var shareContext: ShareContext?
 
@@ -145,6 +146,12 @@ struct ServersView: View {
           }
       }
     }
+    .focused($isServerTableFocused)
+    .simultaneousGesture(
+      TapGesture().onEnded {
+        if !isServerTableFocused { isServerTableFocused = true }
+      }
+    )
     .contextMenu(forSelectionType: NodeID.self) { ids in
       if let id = ids.first, let node = workflow.tree.node(withID: id) {
         ServerNodeContextMenu(
